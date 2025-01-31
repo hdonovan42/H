@@ -8,24 +8,104 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; object-src 'none'; frame-ancestors 'none';">
     <title>H</title>
     <link rel="icon" type="image/png" href="images/H-favicon.png">
+    <style>
+        body {
+            background-color: #FFF1E5;
+        }
+
+        .ft-headline {
+            font-family: "Georgia", "Times New Roman", serif;
+            font-weight: 500;
+            font-size: 2.5rem;
+            line-height: 1.15;
+            letter-spacing: -0.02em;
+            color: #33302E;
+            margin-bottom: 1rem;
+        }
+        .container {
+            display: flex;
+            flex-direction: column; /* Align items vertically */
+            align-items: center;    /* Center content horizontally */
+        }
+
+        .header {
+            font-size: 1.8em;         /* Adjust font size as needed */
+            margin-bottom: 5px;   /* Space between header and buttons */
+            /*border-bottom: 2px solid black; /* Add border */
+            padding-bottom: 5px;
+            /*padding-left: 20px;*/
+            padding-top: 10px;            
+        }
+        .button-container {
+            display: flex;
+            align-items: center; /* Vertically align items */
+            justify-content: left; /* Adjust alignment as needed */
+        }
+
+        .button-container a {
+            text-decoration: none; /* Remove default link underline */
+            padding: 10px 20px;   /* Add some padding to the buttons */
+            padding-left: 0 -10px;
+            /*border: 1px solid #000; /* Add a border if you like */
+            margin: 0;             /* Remove default margin */
+        }
+
+        .button-container a:hover {
+            text-decoration: underline;
+            color: black;
+        }
+
+        .button-container .x-logo {
+            padding: 10px 10px; /* Adjust padding as needed */
+            display: flex;
+            align-items: center;
+        }
+
+        .button-container .x-logo svg {
+            height: 20px; /* Adjust height as needed */
+            width: 20px; /* Adjust width as needed */
+            fill: #000; /* Default fill color */
+        }
+
+        .button-container .x-logo:hover svg {
+            fill: #1DA1F2; /* Fill color on hover - adjust as needed */
+        }
+
+        .button-container .x-logo {
+          margin: 0 10px; /* Adjust negative margin as needed */
+        }
+
+        .bullet {
+            margin: 0 5px;
+            color: grey;
+        }
+    </style>
     <script>
-      function openX(e) {
-         e.preventDefault();
-         window.location.href = 'twitter://user?screen_name=fidybucks';
-         setTimeout(() => {
-             window.location.href = 'https://x.com/fidybucks';
-         }, 1000);
-      }
-      </script>  
+        function openX(e) {
+           e.preventDefault();
+           window.location.href = 'twitter://user?screen_name=fidybucks';
+           setTimeout(() => {
+               window.location.href = 'https://x.com/fidybucks';
+           }, 1000);
+        }
+    </script>  
 </head>
 <body>
-    <p>h</p>
-      <a href="https://x.com/fidybucks" class="inline-flex h-12 w-12 items-center justify-center rounded bg-white text-neutral-500 hover:text-neutral-800 disabled:pointer-events-none disabled:opacity-50 dark:text-neutral-500 dark:hover:text-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-900" onclick="openX(event)">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" width="24" height="24" stroke-width="2">
-          <path d="M4 4l11.733 16h4.267l-11.733 -16z"></path>
-          <path d="M4 20l6.768 -6.768m2.46 -2.46l6.772 -6.772"></path>
-        </svg>
-      </a>
+<div class="container">
+    <div class="header ft-headline">H</div>
+    <div class="button-container">
+        <a href="writings.html">writings</a>
+        <span class="bullet">&bull;</span>
+        <a href="https://x.com/fidybucks" class="x-logo" onclick="openX(event)">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+            </svg>
+        </a>
+        <span class="bullet">&bull;</span>
+        
+        <a href="github.com">projects</a>
+    </div>
+
 </body>
 </html>
 
