@@ -33,6 +33,13 @@
       background-color: black;
       transition: bottom 0.3s ease; /* Smooth transition for movement */
     }
+
+    #stockfish-output {
+      margin-top: 20px;
+      font-family: monospace;
+      white-space: pre-wrap;
+    }
+
     body, html {
         height: 100%;
         margin: 0;
@@ -49,14 +56,17 @@
     <div class="evaluation-bar">
       <div class="evaluation-indicator"></div>
     </div>
+    <div id="stockfish-output"></div>
   </div>
 
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
   <script src="js/chessboard-1.0.0.min.js"></script>
+  <script src="js/stockfish-16.1-lite-single.js"></script>
   <script>
     var board = null;
     var game = new Chess(); // Create a new chess game instance
+    var stockfish = new Worker('js/stockfish-16.1-lite-single.js');
 
     function onDragStart (source, piece, position, orientation) {
       // Do not pick up pieces if the game is over
@@ -79,6 +89,7 @@
 
       // Illegal move
       if (move === null) return 'snapback';
+      updateStockfish();
     }
 
     // Update the board position after the piece snap
@@ -97,6 +108,90 @@
       onSnapEnd: onSnapEnd
     };
     board = Chessboard('myBoard', config);
+
+    // Initialize Stockfish
+    stockfish.postMessage('uci'); // Initialize Stockfish
+
+    // Function to update Stockfish analysis
+    function updateStockfish() {
+      console.log(game.fen())
+      stockfish.postMessage(`position fen ${game.fen()}`);
+      stockfish.postMessage('go depth 15');
+    }
+
+    // Handle Stockfish output
+    stockfish.onmessage = function(event) {
+      console.log("Message from Stockfish:", event.data);
+      if (event.data === 'readyok') {
+        console.log("Stockfish is ready!");
+        updateStockfish();
+      } else if (event.data.startsWith('bestmove')) {
+        displayBestMove(event.data);
+      } else if (event.data.startsWith('info depth')) {
+        displayEngineEval(event.data);
+      }
+    };
+
+    function displayBestMove(data) {
+      const parts = data.split(' ');
+      const bestMove = parts[1];
+      const ponder = parts[3];
+
+      const output = `Best move: ${bestMove}\nPonder: ${ponder}`;
+      document.getElementById('stockfish-output').innerText = output;
+    }
+
+    function displayEngineEval(data) {
+      const lines = parseStockfishOutput(data);
+      displayTopLines(lines.slice(0, 3));
+    }
+
+    function parseStockfishOutput(output) {
+      const lines = [];
+      const parts = output.split(' ');
+      let depth = 0;
+      let score = 0;
+      let multipv = 0;
+      let line = '';
+
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        switch (part) {
+          case 'depth':
+            depth = parseInt(parts[i + 1]);
+            break;
+          case 'cp':
+            score = parseInt(parts[i + 1]) / 100; // Convert score to pawns
+            break;
+          case 'mate':
+            score = `#${parts[i + 1]}`; // Indicate checkmate
+            break;
+          case 'multipv':
+            multipv = parseInt(parts[i + 1]);
+            break;
+          case 'pv':
+            line = parts.slice(i + 1).join(' ');
+            lines.push({ depth, score, multipv, line });
+            return lines; // Exit after finding the first 'pv'
+        }
+      }
+
+      return lines;
+    }
+
+    function displayTopLines(lines) {
+      const outputDiv = document.getElementById('stockfish-output');
+      outputDiv.innerHTML = ''; // Clear previous output
+
+      lines.forEach((line, index) => {
+        const lineOutput = document.createElement('div');
+        lineOutput.textContent = `${index + 1}. Depth: ${line.depth}, Score: ${line.score}, Line: ${line.line}`;
+        outputDiv.appendChild(lineOutput);
+      });
+    }
+
+    // Send isready command and wait for readyok
+    stockfish.postMessage("isready");
 
   </script>
 </body>
