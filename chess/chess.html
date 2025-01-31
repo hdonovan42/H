@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Chessboard with Game Logic</title>
+  <link rel="stylesheet" href="css/chessboard-1.0.0.min.css">
+  <style>
+    /* Center the board and add evaluation bar */
+    .container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #myBoard {
+      width: 400px;
+    }
+
+    .evaluation-bar {
+      width: 30px;
+      height: 400px;
+      background-color: #f0f0f0;
+      margin-left: 20px;
+      position: relative; /* For absolute positioning of the indicator */
+    }
+
+    /* Placeholder for evaluation indicator */
+    .evaluation-indicator {
+      position: absolute;
+      bottom: 50%; /* Start in the middle */
+      left: 0;
+      width: 100%;
+      height: 5px; /* Adjust height as needed */
+      background-color: black;
+      transition: bottom 0.3s ease; /* Smooth transition for movement */
+    }
+    body, html {
+        height: 100%;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div id="myBoard"></div>
+    <div class="evaluation-bar">
+      <div class="evaluation-indicator"></div>
+    </div>
+  </div>
+
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+  <script src="js/chessboard-1.0.0.min.js"></script>
+  <script>
+    var board = null;
+    var game = new Chess(); // Create a new chess game instance
+
+    function onDragStart (source, piece, position, orientation) {
+      // Do not pick up pieces if the game is over
+      if (game.game_over()) return false;
+
+      // Only pick up pieces for the side to move
+      if ((game.turn() === 'w' && piece.search(/^b/) !== -1) ||
+          (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
+        return false;
+      }
+    }
+
+    function onDrop (source, target) {
+      // See if the move is legal
+      var move = game.move({
+        from: source,
+        to: target,
+        promotion: 'q' // NOTE: Always promote to a queen for example simplicity
+      });
+
+      // Illegal move
+      if (move === null) return 'snapback';
+    }
+
+    // Update the board position after the piece snap
+    // For castling, en passant, pawn promotion
+    function onSnapEnd () {
+      board.position(game.fen());
+    }
+
+    var config = {
+      draggable: true,
+      position: 'start',
+      dropOffBoard: 'snapback',
+      sparePieces: false,
+      onDragStart: onDragStart,
+      onDrop: onDrop,
+      onSnapEnd: onSnapEnd
+    };
+    board = Chessboard('myBoard', config);
+
+  </script>
+</body>
+</html>
