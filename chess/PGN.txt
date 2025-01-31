@@ -1,0 +1,33 @@
+[Event "Live Chess"]
+[Site "Chess.com"]
+[Date "2025.01.22"]
+[Round "-"]
+[White "harrydonovan"]
+[Black "emanuelrambo"]
+[Result "1-0"]
+[CurrentPosition "3r4/6Rp/2kP1p2/2B5/1P6/7P/5PP1/6K1 b - - 0 31"]
+[Timezone "UTC"]
+[ECO "B01"]
+[ECOUrl "https://www.chess.com/openings/Scandinavian-Defense-Mieses-Kotrc-Variation-3.Nc3-Qd8-4.Nf3"]
+[UTCDate "2025.01.22"]
+[UTCTime "19:44:34"]
+[WhiteElo "1206"]
+[BlackElo "1153"]
+[TimeControl "600"]
+[Termination "harrydonovan won by resignation"]
+[StartTime "19:44:34"]
+[EndDate "2025.01.22"]
+[EndTime "19:54:11"]
+[Link "https://www.chess.com/analysis/game/live/131314168023?tab=analysis&move=60"]
+[WhiteUrl "https://images.chesscomfiles.com/uploads/v1/user/161164635.98fde0d3.50x50o.3d441498fb83.jpg"]
+[WhiteCountry "164"]
+[WhiteTitle ""]
+[BlackUrl "https://images.chesscomfiles.com/uploads/v1/user/53248552.69b291a5.50x50o.e750f0cc46d8.jpeg"]
+[BlackCountry "115"]
+[BlackTitle ""]
+
+1. e4 d5 2. exd5 Qxd5 3. Nc3 Qd8 4. Nf3 Nf6 5. d4 Bg4 6. Be2 e6 7. h3 Bxf3 8.
+Bxf3 c6 9. Be3 Bb4 10. Qd2 O-O 11. a3 Bxc3 12. Qxc3 Na6 $6 13. O-O $6 Rc8 $6 14.
+Rfe1 $6 c5 $4 15. dxc5 $6 Qe7 $6 16. b4 b6 17. Qd3 Nc7 18. cxb6 axb6 19. Bxb6 Ncd5 $6
+20. Bxd5 Nxd5 21. Qxd5 Qxb4 22. axb4 exd5 23. Bc5 Rfe8 24. Rxe8+ Rxe8 25. Rd1
+Rd8 26. c4 f6 27. cxd5 Kf7 28. d6 Ke6 29. Re1+ Kd7 30. Re7+ Kc6 31. Rxg7 1-0
