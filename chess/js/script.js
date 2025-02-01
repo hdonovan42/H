@@ -76,8 +76,8 @@ var board = null;
 
       if (bestMoveInfo) {
         const bestMoveDiv = document.createElement('div');
-        bestMoveDiv.textContent = `Best Move: ${bestMoveInfo.bestMove}` +
-          (bestMoveInfo.ponder ? `, Ponder: ${bestMoveInfo.ponder}` : '');
+        bestMoveDiv.textContent = `Best Move: ${bestMoveInfo.bestMove} \n `
+          //+ (bestMoveInfo.ponder ? `, Ponder: ${bestMoveInfo.ponder}` : '');
         outputDiv.appendChild(bestMoveDiv);
       }
 
@@ -86,7 +86,8 @@ var board = null;
       sortedKeys.forEach(key => {
         const info = multipvResults[key];
         const lineDiv = document.createElement('div');
-        lineDiv.textContent = `${key}. Depth: ${info.depth}, Score: ${info.scoreDisplay}, Line: ${info.pv}`;
+        //lineDiv.textContent = `${key}. Depth: ${info.depth}, Score: ${info.scoreDisplay}, Line: ${info.pv} `;
+        lineDiv.textContent = `${key}. Score: ${info.scoreDisplay} \nLine: ${info.pv}, \n `;
         outputDiv.appendChild(lineDiv);
       });
       

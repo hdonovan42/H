@@ -34,12 +34,12 @@ body {
     width: 30px;
     height: 400px;
     background: linear-gradient(to top, black 50%, white 50%);
-    margin-left: 20px;
+    margin-right: 20px;
     border: 1px solid #888;
   }
   /* Stockfish analysis output container */
   #analysis-container {
-    margin-left: 25px;
+    margin-left: 20px;
     /*max-width: 250px;*/
     font-family: monospace;
     white-space: pre-wrap;
