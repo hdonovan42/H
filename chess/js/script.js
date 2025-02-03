@@ -95,6 +95,7 @@ function updateOutput() {
 }
 
 // --- Evaluation Bar Update ---
+// --- Evaluation Bar Update ---
 function updateEvaluationBar() {
   if (!multipvResults[1]) return;
 
@@ -115,15 +116,29 @@ function updateEvaluationBar() {
     effectiveEval = Math.max(-10, Math.min(10, effectiveEval));
   }
 
-  // Map effectiveEval to whitePercentage.
+  // Compute the percentage of the bar that should be white.
+  // For effectiveEval: -10 -> 0% white, 0 -> 50% white, +10 -> 100% white.
   const whitePercentage = ((effectiveEval + 10) / 20) * 100;
+
   const evalBar = document.getElementById('eval-bar');
-  if (whitePercentage <= 0) {
-    evalBar.style.background = "black";
-  } else if (whitePercentage >= 100) {
-    evalBar.style.background = "white";
+
+  // If board is flipped, reverse the gradient direction.
+  if (board.orientation() === 'black') {
+    if (whitePercentage <= 0) {
+      evalBar.style.background = "black";
+    } else if (whitePercentage >= 100) {
+      evalBar.style.background = "white";
+    } else {
+      evalBar.style.background = `linear-gradient(to bottom, white ${whitePercentage}%, black ${whitePercentage}%)`;
+    }
   } else {
-    evalBar.style.background = `linear-gradient(to top, white ${whitePercentage}%, black ${whitePercentage}%)`;
+    if (whitePercentage <= 0) {
+      evalBar.style.background = "black";
+    } else if (whitePercentage >= 100) {
+      evalBar.style.background = "white";
+    } else {
+      evalBar.style.background = `linear-gradient(to top, white ${whitePercentage}%, black ${whitePercentage}%)`;
+    }
   }
 }
 
@@ -195,12 +210,25 @@ function drawArrow(ctx, from, to, lineWidth, alpha) {
 }
 
 // Compute the center coordinates of a square on a 400x400 board with each square 50x50.
+// Updated getSquareCenter() function that accounts for board orientation.
 function getSquareCenter(square) {
   const file = square[0];
   const rank = parseInt(square[1], 10);
   const fileIndex = file.charCodeAt(0) - 'a'.charCodeAt(0);
-  const x = fileIndex * 50 + 25;
-  const y = (8 - rank) * 50 + 25;
+  let x, y;
+  
+  // If the board is flipped (black orientation), mirror the coordinates.
+  if (board.orientation() === 'black') {
+    // In a 400x400 board with 50px squares:
+    // - Files are reversed: a->h becomes (7 - fileIndex)
+    // - Ranks are reversed: 1->8 becomes (rank - 1) (since white orientation had y = (8 - rank)*50+25)
+    x = (7 - fileIndex) * 50 + 25;
+    y = (rank - 1) * 50 + 25;
+  } else {
+    // Standard white orientation.
+    x = fileIndex * 50 + 25;
+    y = (8 - rank) * 50 + 25;
+  }
   return { x, y };
 }
 
