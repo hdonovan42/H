@@ -1,0 +1,36 @@
+changes 
+
+- keyboard arrow functionality (right arrow = next move, left arrow = prev. move)
+
+-add a current game notation to the backend to add functionality to prev. move button in open play
+    - previous move currently doesn't work in open play as backend doesn't record open play notation
+    - frontend - notation in analysis box
+        - how to deal with sidelines?
+
+- Board flip button - how to get pgn to flip automatically for games as black? - one up on lichess
+
+- show legal moves???? - cleaner without and condescending - current thinking NO 
+
+- how to deal with checkmates?
+
+- eval score at the bottom of eval bar?
+    - eval score more prominent?
+
+- make board bigger?
+
+- mobile functionality  
+    - currently awful experience for mobile users
+        - how to fix?
+            - click piece you wish to move, then click where to move too?
+            - stop page scrolling as user drags piece?
+            - alternative option to move pieces?
+
+FEATURES TO BETTER LICHESS.ORG
+- auto board flip when analysing games as black
+
+
+PERSONALISED CHESS COACH - COMING
+-details private for now
+
+
+
