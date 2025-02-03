@@ -1,49 +1,41 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <title>Chess Analysis with Stockfish</title>
-  <link rel="stylesheet" href="css/chessboard-1.0.0.min.css">
-  <link rel="stylesheet" href="css/styles.css">
-</head>
-<body>
+  <head>
+    <title>Chess Analysis with Stockfish</title>
+    <link rel="stylesheet" href="css/chessboard-1.0.0.min.css">
+    <link rel="stylesheet" href="css/styles.css">
+  </head>
+  <body>
 
-  <!-- Main analysis layout -->
-  <div class="container">
-    <!-- Evaluation bar -->
-    <div class="evaluation-bar" id="eval-bar"></div>
-    <!-- Board and arrows -->
-    <div id="board-container">
-      <div id="myBoard"></div>
-      <svg id="arrows-overlay">
-        <defs>
-          <!-- Define an arrowhead marker -->
-          <marker id="arrowhead" markerWidth="10" markerHeight="7" 
-                  refX="0" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="black" />
-          </marker>
-        </defs>
-      </svg>
+    <!-- Main analysis layout -->
+    <div class="container">
+      <!-- Evaluation bar -->
+      <div class="evaluation-bar" id="eval-bar"></div>
+      <!-- Board and arrows -->
+      <div id="board-container">
+        <div id="myBoard"></div>
+        <!-- Canvas overlay for arrows (instead of using SVG marker elements) -->
+        <canvas id="arrows-overlay" width="400" height="400"></canvas>
+      </div>
+      <!-- Stockfish analysis output -->
+      <div id="analysis-container">
+        <div id="stockfish-output"></div>
+      </div>
     </div>
-    <!-- Stockfish analysis output -->
-    <div id="analysis-container">
-      <div id="stockfish-output"></div>
+
+    <!-- PGN controls and board reset -->
+    <div id="pgn-controls">
+      <textarea id="pgn-input" placeholder="Paste PGN here..." rows="4" cols="50"></textarea><br>
+      <button id="load-pgn">Load PGN</button>
+      <button id="prev-move">Previous Move</button>
+      <button id="next-move">Next Move</button>
+      <button id="reset-board">Reset Board</button>
     </div>
-  </div>
 
-  <!-- PGN controls and board reset -->
-  <div id="pgn-controls">
-    <textarea id="pgn-input" placeholder="Paste PGN here..." rows="4" cols="50"></textarea><br>
-    <button id="load-pgn">Load PGN</button>
-    <button id="prev-move">Previous Move</button>
-    <button id="next-move">Next Move</button>
-    <button id="reset-board">Reset Board</button>
-  </div>
-
-  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
-  <script src="js/chessboard-1.0.0.min.js"></script>
-  <script src="js/stockfish-16.1-single.js"></script>
-  <script src="js/script.js"></script>
-  
-</body>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <script src="js/chessboard-1.0.0.min.js"></script>
+    <script src="js/stockfish-16.1-single.js"></script>
+    <script src="js/script.js"></script>
+  </body>
 </html>

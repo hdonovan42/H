@@ -1,69 +1,76 @@
 body {
-  background-color: #FFF1E5;;
+  background-color: #FFF1E5;
 }
 
 /* Overall layout using flex */
 .container {
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    margin-top: 20px;
-  }
-  /* Board container: relative for SVG overlay positioning */
-  #board-container {
-    position: relative;
-    width: 400px;
-    height: 400px;
-  }
-  #myBoard {
-    width: 400px;
-    height: 400px;
-  }
-  /* SVG overlay for arrows */
-  #arrows-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 400px;
-    height: 400px;
-    pointer-events: none;
-    overflow: visible;
-  }
-  /* Evaluation bar – its background will be dynamically updated */
-  .evaluation-bar {
-    width: 30px;
-    height: 400px;
-    background: linear-gradient(to top, black 50%, white 50%);
-    margin-right: 20px;
-    border: 1px solid #888;
-  }
-  /* Stockfish analysis output container */
-  #analysis-container {
-    margin-left: 20px;
-    /*max-width: 250px;*/
-    font-family: monospace;
-    white-space: pre-wrap;
-    top: 20px;    /* Distance from top of viewport */
-    width: 250px;
-    height: 400px;
-    background-color: white;    
-  }
-  /* PGN Controls */
-  #pgn-controls {
-    margin-top: 20px;
-    text-align: center;
-  }
-  #pgn-controls textarea {
-    width: 400px;
-    font-family: monospace;
-  }
-  #pgn-controls button {
-    margin: 5px;
-  }
-  body, html {
-    height: 100%;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+/* Board container: relative for canvas overlay positioning */
+#board-container {
+  position: relative;
+  width: 400px;
+  height: 400px;
+}
+
+#myBoard {
+  width: 400px;
+  height: 400px;
+}
+
+/* Canvas overlay for arrows */
+#arrows-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 400px;
+  height: 400px;
+  pointer-events: none;
+}
+
+/* Evaluation bar – its background will be dynamically updated */
+.evaluation-bar {
+  width: 30px;
+  height: 400px;
+  background: linear-gradient(to top, black 50%, white 50%);
+  margin-right: 20px;
+  border: 1px solid #888;
+}
+
+/* Stockfish analysis output container */
+#analysis-container {
+  margin-left: 20px;
+  font-family: monospace;
+  white-space: pre-wrap;
+  top: 20px;  /* Distance from top of viewport */
+  width: 250px;
+  height: 400px;
+  background-color: white;    
+}
+
+/* PGN Controls */
+#pgn-controls {
+  margin-top: 20px;
+  text-align: center;
+}
+
+#pgn-controls textarea {
+  width: 400px;
+  font-family: monospace;
+}
+
+#pgn-controls button {
+  margin: 5px;
+}
+
+body, html {
+  height: 100%;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
