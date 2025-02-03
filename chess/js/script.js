@@ -321,7 +321,7 @@ function goToPreviousMove() {
   currentMoveIndex--;
   board.position(game.fen());
   updateStockfish();
-}
+};
 
 function goToNextMove() {
   if (currentMoveIndex >= pgnMoves.length) return;
@@ -329,12 +329,12 @@ function goToNextMove() {
   currentMoveIndex++;
   board.position(game.fen());
   updateStockfish();
-}
+};
 
 // prev move called by button press or left arrow key -
 document.getElementById('prev-move').addEventListener('click', function() {
   goToPreviousMove();
-})
+});
 
 document.addEventListener('keydown', function(event) {
   if (event.key === 'ArrowLeft') {
@@ -345,13 +345,13 @@ document.addEventListener('keydown', function(event) {
 // next move called by button press or right arrow key
 document.getElementById('next-move').addEventListener('click', function() {
   goToNextMove()
-})
+});
 
 document.addEventListener('keydown', function(event) {
   if (event.key === 'ArrowRight') {
     goToNextMove();
   }
-})
+});
 
 document.getElementById('reset-board').addEventListener('click', function() {
   game.reset();
