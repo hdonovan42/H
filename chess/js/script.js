@@ -313,21 +313,45 @@ document.getElementById('load-pgn').addEventListener('click', function() {
   updateStockfish();
 });
 
-document.getElementById('next-move').addEventListener('click', function() {
-  if (currentMoveIndex >= pgnMoves.length) return;
-  game.move(pgnMoves[currentMoveIndex]);
-  currentMoveIndex++;
-  board.position(game.fen());
-  updateStockfish();
-});
+// standalone functions for prev move and next move logic as they are called twice
 
-document.getElementById('prev-move').addEventListener('click', function() {
+function goToPreviousMove() {
   if (currentMoveIndex <= 0) return;
   game.undo();
   currentMoveIndex--;
   board.position(game.fen());
   updateStockfish();
-});
+}
+
+function goToNextMove() {
+  if (currentMoveIndex >= pgnMoves.length) return;
+  game.move(pgnMoves[currentMoveIndex]);
+  currentMoveIndex++;
+  board.position(game.fen());
+  updateStockfish();
+}
+
+// prev move called by button press or left arrow key -
+document.getElementById('prev-move').addEventListener('click', function() {
+  goToPreviousMove();
+})
+
+document.addEventListener('keydown', function(event) {
+  if (event.key === 'ArrowLeft') {
+    goToPreviousMove();
+  }
+})
+
+// next move called by button press or right arrow key
+document.getElementById('next-move').addEventListener('click', function() {
+  goToNextMove()
+})
+
+document.addEventListener('keydown', function(event) {
+  if (event.key === 'ArrowRight') {
+    goToNextMove();
+  }
+})
 
 document.getElementById('reset-board').addEventListener('click', function() {
   game.reset();
