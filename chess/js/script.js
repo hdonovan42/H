@@ -394,5 +394,10 @@ function flipBoard() {
   board.orientation(board.orientation() === 'white' ? 'black' : 'white');
 }
 
-document.getElementById('flip-board').addEventListener('click', flipBoard);
+document.getElementById('flip-board').addEventListener('click', function() {
+  flipBoard();
+  clearArrows();
+  updateBoardArrows();
+  updateEvaluationBar();
+});
 
