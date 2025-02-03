@@ -2,6 +2,8 @@ changes
 
 - keyboard arrow functionality (right arrow = next move, left arrow = prev. move)
 
+- arrows ON/OFF button
+
 -add a current game notation to the backend to add functionality to prev. move button in open play
     - previous move currently doesn't work in open play as backend doesn't record open play notation
     - frontend - notation in analysis box
