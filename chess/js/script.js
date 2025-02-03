@@ -361,3 +361,10 @@ document.getElementById('reset-board').addEventListener('click', function() {
   updateStockfish();
   document.getElementById('pgn-input').value = "";
 });
+
+function flipBoard() {
+  board.orientation(board.orientation() === 'white' ? 'black' : 'white');
+}
+
+document.getElementById('flip-board').addEventListener('click', flipBoard);
+
