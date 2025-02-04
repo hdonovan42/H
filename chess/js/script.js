@@ -349,7 +349,8 @@ stockfish.onmessage = function(event) {
 // Tell Stockfish we're ready.
 stockfish.postMessage("isready");
 
-document.getElementById('load-pgn').addEventListener('click', function() {
+// make loadPGN standalone function as it can be called two different ways 
+function loadPGN () {
   const pgnText = document.getElementById('pgn-input').value;
   if (!pgnText.trim()) {
     alert("Please enter a PGN.");
@@ -370,6 +371,18 @@ document.getElementById('load-pgn').addEventListener('click', function() {
   board.start();
   updateStockfish();
   updateOutput();
+};
+
+// call loadpgn by pressing button
+document.getElementById('load-pgn').addEventListener('click', function() {
+  loadPGN();
+});
+
+// call loadpgn by pressing 'enter' on keyboard
+document.addEventListener('keydown', function(event) {
+  if (event.key === 'Enter') {
+    loadPGN();
+  }
 });
 
 function rebuildGameFromUserMoves() {
