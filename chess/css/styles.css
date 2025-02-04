@@ -48,7 +48,7 @@ body {
   font-family: monospace;
   white-space: pre-wrap;
   top: 20px;  /* Distance from top of viewport */
-  width: 250px;
+  width: 275px;
   height: 500px;
   background-color: white;    
 }

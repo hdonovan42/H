@@ -108,7 +108,7 @@ function updateOutput() {
   const notationDiv = document.createElement('div');
 notationDiv.style.marginTop = "20px";
 notationDiv.style.fontFamily = "monospace";
-let notationHTML = "<strong>Current Game Notation:</strong><br>";
+let notationHTML = "<strong>Notation:</strong><br>";
 for (let i = 0; i < userMoves.length; i++) {
   // Compare to PGN mainline, if available.
   if (pgnMainlineMoves.length > i) {
@@ -171,9 +171,27 @@ function updateEvaluationBar() {
       evalBar.style.background = `linear-gradient(to top, white ${whitePercentage}%, black ${whitePercentage}%)`;
     }
   }
-  // --- Add overlay text for line 1's eval score ---
-  let evalText = (entry.mate !== undefined) ? ("Mate in " + entry.mate) : entry.score;
-  
+
+  // --- Overlay the eval score at the bottom of the eval bar ---
+// eval score should be absolute
+// positive = white advantage, negative = black advantage
+let evalText = "";
+if (entry.mate !== undefined) {
+  // For mate scores, flip the value if it's black's turn.
+  let mateVal = entry.mate;
+  if (game.turn() === 'b') {
+    mateVal = -mateVal;
+  }
+  evalText = "M" + mateVal;
+} else {
+  // For centipawn scores, flip the score if it's black's turn.
+  let score = parseFloat(entry.score);
+  if (game.turn() === 'b') {
+    score = -score;
+  }
+  // Format to two decimals (or adjust as desired).
+  evalText = score.toFixed(2);
+}
   // Try to get an existing overlay element; if none exists, create one.
   let overlay = document.getElementById('eval-overlay');
   if (!overlay) {
@@ -189,7 +207,7 @@ function updateEvaluationBar() {
     overlay.style.fontSize = "10px";
     evalBar.appendChild(overlay);
   }
-  // Set the text color (black in both orientations as requested)
+  // set text colour to opposite of orientation, for readability
   if (board.orientation() === 'white') {
     overlay.style.color = "black";
   } else {
@@ -198,8 +216,7 @@ function updateEvaluationBar() {
   overlay.textContent = evalText;
 }
 
-// --- Arrow Drawing on Canvas (Lichess.org style) ---
-
+// Arrow Drawing on Canvas
 // Clear the arrows by clearing the canvas.
 function clearArrows() {
   const canvas = document.getElementById('arrows-overlay');
@@ -412,6 +429,7 @@ document.addEventListener('keydown', function(event) {
   }
 });
 
+// rebuilds notation for sidelines
 function rebuildGameFromUserMoves() {
   game.reset();
   for (let i = 0; i < currentIndex; i++) {
@@ -420,9 +438,7 @@ function rebuildGameFromUserMoves() {
   board.position(game.fen());
 }
 
-
 // standalone functions for prev move and next move logic as they are called twice
-
 function goToPreviousMove() {
   if (currentIndex <= 0) return;
   currentIndex--;
@@ -486,14 +502,9 @@ document.getElementById('reset-board').addEventListener('click', function() {
   updateOutput();
 });
 
-function flipBoard() {
-  board.orientation(board.orientation() === 'white' ? 'black' : 'white');
-}
-
 document.getElementById('flip-board').addEventListener('click', function() {
-  flipBoard();
+  board.orientation(board.orientation() === 'white' ? 'black' : 'white');
   clearArrows();
   updateBoardArrows();
   updateEvaluationBar();
 });
-

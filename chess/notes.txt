@@ -1,6 +1,14 @@
 changes 
 
+-add favicon
+
 -load bar 
+
+- disable arrow key scrolling
+
+- widen analysis container?
+
+- bring chess.js and jquery local - for futureproofing and to help with loading times
 
 - REMOVE ALL BUTTONS???, REPLACE WITH INTUITIVE KEYS - CLEANER
         - FLIP? 
@@ -22,7 +30,6 @@ changes
             - stop page scrolling as user drags piece?
             - alternative option to move pieces?
 
-    - on mobile functionality - need to make page unscrollable or other suitable method to deal with half screen arrow presses
 
 FEATURES TO BETTER LICHESS.ORG
 - auto board flip when analysing games as black
@@ -41,14 +48,5 @@ PERSONALISED CHESS COACH - COMING
 -build profile of common mistakes
 -personalised coaching
 
-
-
-BUGS 
-
-- found potential bug 
-in PGN:
-1. e4 d6 2. d4 Nf6 { B00 Pirc Defense } 3. Nc3 e5 4. dxe5 dxe5 5. Qxd8+ Kxd8 6. Nf3 Bd6 7. Be3 Be6 8. O-O-O a6 9. Kb1 h6 10. Nxe5 Ke7 11. Nf3 Bg4 12. Be2 Bxf3 13. Bxf3 Nc6 14. a3 Ne5 15. Be2 Nfg4 16. Nd5+ Kd7 17. Bd4 c6 18. Nb6+ { Black resigns. } 1-0
-
-When opportunity to fork with pawn is missed the eval score goes from ~+4 to ~ -2, when it should of gone from +4 to +2, weird?
-
-NEED TO TEST NOTATION STUFF
+BUGS/TESTING
+- NEED TO TEST NOTATION STUFF
