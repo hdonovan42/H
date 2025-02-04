@@ -1,7 +1,5 @@
 changes 
 
-- allow enter button to *replace* load pgn button - allow both for now 
-
 -load bar 
 
 - REMOVE ALL BUTTONS???, REPLACE WITH INTUITIVE KEYS - CLEANER
@@ -9,25 +7,13 @@ changes
 
 - arrows ON/OFF button
 
--add a current game notation to the backend to add functionality to prev. move button in open play
-    - previous move currently doesn't work in open play as backend doesn't record open play notation
-    - frontend - notation in analysis box
-        - how to deal with sidelines?
-
 - Board flip button - how to get pgn to flip automatically for games as black? - one up on lichess
 
 - how to deal with checkmates?
 
-- show whos up in pieces on the board (up a queen, shows +9 )
+- show whos up in pieces on the board (e.g. if up a queen, shows +9 )
 
 - currently only available to promote to queen
-
-- eval score at the bottom of eval bar?
-    - eval score more prominent?
-
-- make board bigger?
-
-- on mobile functionality - need to make page unscrollable or other suitable method to deal with half screen arrow presses
 
 - mobile functionality  
     - currently awful experience for mobile users
@@ -36,12 +22,14 @@ changes
             - stop page scrolling as user drags piece?
             - alternative option to move pieces?
 
+    - on mobile functionality - need to make page unscrollable or other suitable method to deal with half screen arrow presses
+
 FEATURES TO BETTER LICHESS.ORG
 - auto board flip when analysing games as black
 
 - more engine optionality
     - engine selection
-    -choose number of lines/arrows
+    - choose number of lines/arrows
 
 
 - IMPLEMENT TRUE ANALYSIS FEATURES
@@ -62,7 +50,5 @@ in PGN:
 1. e4 d6 2. d4 Nf6 { B00 Pirc Defense } 3. Nc3 e5 4. dxe5 dxe5 5. Qxd8+ Kxd8 6. Nf3 Bd6 7. Be3 Be6 8. O-O-O a6 9. Kb1 h6 10. Nxe5 Ke7 11. Nf3 Bg4 12. Be2 Bxf3 13. Bxf3 Nc6 14. a3 Ne5 15. Be2 Nfg4 16. Nd5+ Kd7 17. Bd4 c6 18. Nb6+ { Black resigns. } 1-0
 
 When opportunity to fork with pawn is missed the eval score goes from ~+4 to ~ -2, when it should of gone from +4 to +2, weird?
-
-
 
 NEED TO TEST NOTATION STUFF
