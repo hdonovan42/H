@@ -13,13 +13,13 @@ body {
 /* Board container: relative for canvas overlay positioning */
 #board-container {
   position: relative;
-  width: 400px;
-  height: 400px;
+  width: 500px;
+  height: 500px;
 }
 
 #myBoard {
-  width: 400px;
-  height: 400px;
+  width: 500px;
+  height: 500px;
 }
 
 /* Canvas overlay for arrows */
@@ -27,15 +27,15 @@ body {
   position: absolute;
   top: 0;
   left: 0;
-  width: 400px;
-  height: 400px;
+  width: 500px;
+  height: 500px;
   pointer-events: none;
 }
 
 /* Evaluation bar – its background will be dynamically updated */
 .evaluation-bar {
   width: 30px;
-  height: 400px;
+  height: 500px;
   background: linear-gradient(to top, black 50%, white 50%);
   margin-right: 20px;
   border: 1px solid #888;
@@ -48,7 +48,7 @@ body {
   white-space: pre-wrap;
   top: 20px;  /* Distance from top of viewport */
   width: 250px;
-  height: 400px;
+  height: 500px;
   background-color: white;    
 }
 

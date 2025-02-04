@@ -1,3 +1,6 @@
+const BOARD_SIZE = 500;
+const SQUARE_SIZE = BOARD_SIZE / 8;
+
 // Initialize board, game, and Stockfish engine.
 var board = null;
 var game = new Chess();
@@ -251,12 +254,12 @@ function getSquareCenter(square) {
     // In a 400x400 board with 50px squares:
     // - Files are reversed: a->h becomes (7 - fileIndex)
     // - Ranks are reversed: 1->8 becomes (rank - 1) (since white orientation had y = (8 - rank)*50+25)
-    x = (7 - fileIndex) * 50 + 25;
-    y = (rank - 1) * 50 + 25;
+    x = (7 - fileIndex) * SQUARE_SIZE + SQUARE_SIZE /2
+    y = (rank - 1) * SQUARE_SIZE + SQUARE_SIZE /2
   } else {
     // Standard white orientation.
-    x = fileIndex * 50 + 25;
-    y = (8 - rank) * 50 + 25;
+    x = fileIndex * SQUARE_SIZE + SQUARE_SIZE /2
+    y = (8 - rank) * SQUARE_SIZE + SQUARE_SIZE /2
   }
   return { x, y };
 }
@@ -272,9 +275,9 @@ function updateBoardArrows() {
   // Second best (2): moderately opaque, medium thickness
   // Third best (3): translucent, thinnest
   const styles = {
-    1: { lineWidth: 6, alpha: 1 },
-    2: { lineWidth: 4, alpha: 0.7 },
-    3: { lineWidth: 2, alpha: 0.4 }
+    1: { lineWidth: 8, alpha: 1 },
+    2: { lineWidth: 5, alpha: 0.6 },
+    3: { lineWidth: 3, alpha: 0.4 }
   };
 
   const sortedKeys = Object.keys(multipvResults).sort((a, b) => a - b);
