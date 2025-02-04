@@ -12,7 +12,9 @@ let pgnMoves = [];
 let currentMoveIndex = 0; // How many moves have been applied
 //new pgn globals
 let pgnMainlineMoves = [];
-let currentPGNIndex = 0;
+let currentPGNIndex = 0; //redundant now?
+let userMoves = [];
+let currentIndex = 0;
 
 // --- Chessboard.js callbacks ---
 function onDragStart(source, piece, position, orientation) {
@@ -28,15 +30,16 @@ function onDrop(source, target) {
   var move = game.move({
     from: source,
     to: target,
-    promotion: 'q' //NEED TO CHANGE AT SOME POINT
+    promotion: 'q'
   });
   if (move === null) return 'snapback';
-  // If no PGN is loaded, update the navigation pointer with the current game history.
-  // Otherwise, do nothing so that the loaded PGN remains the “reference” for navigation.
-  if (pgnMainlineMoves.length === 0) {
-    currentMoveIndex = game.history().length;
-  }
+  
+  // Update the current game move history and pointer.
+  userMoves = game.history();
+  currentIndex = userMoves.length;
+  
   updateStockfish();
+  updateOutput();
 }
 
 function onSnapEnd() {
@@ -97,6 +100,27 @@ function updateOutput() {
 
   updateEvaluationBar();
   updateBoardArrows();
+
+  // --- New: Display current game notation ---
+  const notationDiv = document.createElement('div');
+notationDiv.style.marginTop = "20px";
+notationDiv.style.fontFamily = "monospace";
+let notationHTML = "<strong>Current Game Notation:</strong><br>";
+for (let i = 0; i < userMoves.length; i++) {
+  // Compare to PGN mainline, if available.
+  if (pgnMainlineMoves.length > i) {
+    if (pgnMainlineMoves[i] === userMoves[i]) {
+      notationHTML += `${i + 1}. ${userMoves[i]} `;
+    } else {
+      notationHTML += `<span style="color:red;">${i + 1}. ${userMoves[i]}*</span> `;
+    }
+  } else {
+    // Moves beyond the loaded PGN.
+    notationHTML += `<span style="color:red;">${i + 1}. ${userMoves[i]}*</span> `;
+  }
+}
+notationDiv.innerHTML = notationHTML;
+document.getElementById('stockfish-output').appendChild(notationDiv);
 }
 
 // --- Evaluation Bar Update ---
@@ -339,57 +363,55 @@ document.getElementById('load-pgn').addEventListener('click', function() {
   }
   // Save the PGN moves (mainline) and reset navigation pointer.
   pgnMainlineMoves = game.history();
-  currentPGNIndex = 0;
-  // Reset the game to the start.
+  userMoves = [...pgnMainlineMoves];
+  currentIndex = 0; // Start at the beginning.
+  // Reset the game and update display.
   game.reset();
   board.start();
   updateStockfish();
+  updateOutput();
 });
+
+function rebuildGameFromUserMoves() {
+  game.reset();
+  for (let i = 0; i < currentIndex; i++) {
+    game.move(userMoves[i]);
+  }
+  board.position(game.fen());
+}
 
 
 // standalone functions for prev move and next move logic as they are called twice
 
 function goToPreviousMove() {
-  if (pgnMainlineMoves.length > 0) {
-    if (currentPGNIndex <= 0) return;
-    game.reset();
-    for (let i = 0; i < currentPGNIndex - 1; i++) {
-      game.move(pgnMainlineMoves[i]);
-    }
-    currentPGNIndex--;
-    board.position(game.fen());
-    updateStockfish();
-  } else {
-    // If no PGN is loaded, fall back to the existing behavior.
-    if (currentMoveIndex <= 0) return;
-    game.undo();
-    currentMoveIndex--;
-    board.position(game.fen());
-    updateStockfish();
-  }
+  if (currentIndex <= 0) return;
+  currentIndex--;
+  rebuildGameFromUserMoves();
+  updateStockfish();
+  updateOutput();
 };
 
 function goToNextMove() {
-  // If a PGN was loaded, use that for navigation.
-  if (pgnMainlineMoves.length > 0) {
-    if (currentPGNIndex >= pgnMainlineMoves.length) return;
-    // Reset the game and play all moves up to the next one from the PGN.
-    game.reset();
-    for (let i = 0; i < currentPGNIndex + 1; i++) {
-      game.move(pgnMainlineMoves[i]);
+  // If a PGN is loaded and we haven't gone past its length...
+  if (pgnMainlineMoves.length > 0 && currentIndex < pgnMainlineMoves.length) {
+    // Force the next move to be the mainline move.
+    let mainlineMove = pgnMainlineMoves[currentIndex];
+    // If there was a sideline divergence here, override it.
+    if (userMoves[currentIndex] !== mainlineMove) {
+      userMoves[currentIndex] = mainlineMove;
+      // Also, remove any moves that might have been recorded beyond this point.
+      userMoves = userMoves.slice(0, currentIndex + 1);
     }
-    currentPGNIndex++;
-    board.position(game.fen());
-    updateStockfish();
+    currentIndex++;
+    rebuildGameFromUserMoves();
   } else {
-    // If no PGN is loaded, fall back to the existing behavior.
-    let moves = game.history();
-    if (currentMoveIndex >= moves.length) return;
-    game.move(moves[currentMoveIndex]);
-    currentMoveIndex++;
-    board.position(game.fen());
-    updateStockfish();
+    // If no PGN is loaded, or we're beyond the PGN, then follow userMoves.
+    if (currentIndex >= userMoves.length) return; // Nothing to do.
+    currentIndex++;
+    rebuildGameFromUserMoves();
   }
+  updateStockfish();
+  updateOutput();
 };
 
 // prev move called by button press or left arrow key -
@@ -416,11 +438,12 @@ document.addEventListener('keydown', function(event) {
 
 document.getElementById('reset-board').addEventListener('click', function() {
   game.reset();
-  currentMoveIndex = 0;
-  pgnMoves = [];
+  userMoves = [];
+  currentIndex = 0;
   board.start();
   updateStockfish();
   document.getElementById('pgn-input').value = "";
+  updateOutput();
 });
 
 function flipBoard() {
