@@ -39,6 +39,7 @@ body {
   background: linear-gradient(to top, black 50%, white 50%);
   margin-right: 20px;
   border: 1px solid #888;
+  position: relative;
 }
 
 /* Stockfish analysis output container */

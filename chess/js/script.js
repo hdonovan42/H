@@ -127,7 +127,6 @@ document.getElementById('stockfish-output').appendChild(notationDiv);
 }
 
 // --- Evaluation Bar Update ---
-// --- Evaluation Bar Update ---
 function updateEvaluationBar() {
   if (!multipvResults[1]) return;
 
@@ -172,6 +171,31 @@ function updateEvaluationBar() {
       evalBar.style.background = `linear-gradient(to top, white ${whitePercentage}%, black ${whitePercentage}%)`;
     }
   }
+  // --- Add overlay text for line 1's eval score ---
+  let evalText = (entry.mate !== undefined) ? ("Mate in " + entry.mate) : entry.score;
+  
+  // Try to get an existing overlay element; if none exists, create one.
+  let overlay = document.getElementById('eval-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = "eval-overlay";
+    // Position the overlay at the bottom of the eval bar.
+    overlay.style.position = "absolute";
+    overlay.style.bottom = "0";
+    overlay.style.width = "100%";
+    overlay.style.textAlign = "center";
+    overlay.style.pointerEvents = "none";
+    overlay.style.fontFamily = "monospace";
+    overlay.style.fontSize = "10px";
+    evalBar.appendChild(overlay);
+  }
+  // Set the text color (black in both orientations as requested)
+  if (board.orientation() === 'white') {
+    overlay.style.color = "black";
+  } else {
+    overlay.style.color = "white";
+  }
+  overlay.textContent = evalText;
 }
 
 // --- Arrow Drawing on Canvas (Lichess.org style) ---
