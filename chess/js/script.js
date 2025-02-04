@@ -10,6 +10,9 @@ let bestMoveInfo = null; // Best move information
 // PGN navigation globals
 let pgnMoves = [];
 let currentMoveIndex = 0; // How many moves have been applied
+//new pgn globals
+let pgnMainlineMoves = [];
+let currentPGNIndex = 0;
 
 // --- Chessboard.js callbacks ---
 function onDragStart(source, piece, position, orientation) {
@@ -25,12 +28,14 @@ function onDrop(source, target) {
   var move = game.move({
     from: source,
     to: target,
-    promotion: 'q'
+    promotion: 'q' //NEED TO CHANGE AT SOME POINT
   });
   if (move === null) return 'snapback';
-  // Clear any loaded PGN navigation when a new move is made.
-  pgnMoves = [];
-  currentMoveIndex = 0;
+  // If no PGN is loaded, update the navigation pointer with the current game history.
+  // Otherwise, do nothing so that the loaded PGN remains the “reference” for navigation.
+  if (pgnMainlineMoves.length === 0) {
+    currentMoveIndex = game.history().length;
+  }
   updateStockfish();
 }
 
@@ -320,43 +325,71 @@ stockfish.onmessage = function(event) {
 // Tell Stockfish we're ready.
 stockfish.postMessage("isready");
 
-// --- PGN Controls & Navigation ---
 document.getElementById('load-pgn').addEventListener('click', function() {
   const pgnText = document.getElementById('pgn-input').value;
   if (!pgnText.trim()) {
     alert("Please enter a PGN.");
     return;
   }
-  // Load the PGN.
+  // Attempt to load the PGN.
   const loadSuccess = game.load_pgn(pgnText);
   if (!loadSuccess) {
     alert("Invalid PGN.");
     return;
   }
-  // Save the move history then reset the board for step-by-step navigation.
-  pgnMoves = game.history();
-  currentMoveIndex = 0;
+  // Save the PGN moves (mainline) and reset navigation pointer.
+  pgnMainlineMoves = game.history();
+  currentPGNIndex = 0;
+  // Reset the game to the start.
   game.reset();
   board.start();
   updateStockfish();
 });
 
+
 // standalone functions for prev move and next move logic as they are called twice
 
 function goToPreviousMove() {
-  if (currentMoveIndex <= 0) return;
-  game.undo();
-  currentMoveIndex--;
-  board.position(game.fen());
-  updateStockfish();
+  if (pgnMainlineMoves.length > 0) {
+    if (currentPGNIndex <= 0) return;
+    game.reset();
+    for (let i = 0; i < currentPGNIndex - 1; i++) {
+      game.move(pgnMainlineMoves[i]);
+    }
+    currentPGNIndex--;
+    board.position(game.fen());
+    updateStockfish();
+  } else {
+    // If no PGN is loaded, fall back to the existing behavior.
+    if (currentMoveIndex <= 0) return;
+    game.undo();
+    currentMoveIndex--;
+    board.position(game.fen());
+    updateStockfish();
+  }
 };
 
 function goToNextMove() {
-  if (currentMoveIndex >= pgnMoves.length) return;
-  game.move(pgnMoves[currentMoveIndex]);
-  currentMoveIndex++;
-  board.position(game.fen());
-  updateStockfish();
+  // If a PGN was loaded, use that for navigation.
+  if (pgnMainlineMoves.length > 0) {
+    if (currentPGNIndex >= pgnMainlineMoves.length) return;
+    // Reset the game and play all moves up to the next one from the PGN.
+    game.reset();
+    for (let i = 0; i < currentPGNIndex + 1; i++) {
+      game.move(pgnMainlineMoves[i]);
+    }
+    currentPGNIndex++;
+    board.position(game.fen());
+    updateStockfish();
+  } else {
+    // If no PGN is loaded, fall back to the existing behavior.
+    let moves = game.history();
+    if (currentMoveIndex >= moves.length) return;
+    game.move(moves[currentMoveIndex]);
+    currentMoveIndex++;
+    board.position(game.fen());
+    updateStockfish();
+  }
 };
 
 // prev move called by button press or left arrow key -
