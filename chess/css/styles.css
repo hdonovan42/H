@@ -36,7 +36,7 @@ body {
 .evaluation-bar {
   width: 30px;
   height: 500px;
-  background: linear-gradient(to top, black 50%, white 50%);
+  background: linear-gradient(to top, white 50%, black 50%);
   margin-right: 20px;
   border: 1px solid #888;
   position: relative;
