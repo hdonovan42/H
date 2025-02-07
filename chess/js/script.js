@@ -19,6 +19,10 @@ let currentPGNIndex = 0; //redundant now?
 let userMoves = [];
 let currentIndex = 0;
 
+//load bar global
+let stockfishReady = false;
+
+
 // --- Chessboard.js callbacks ---
 function onDragStart(source, piece, position, orientation) {
   if (game.game_over()) return false;
@@ -62,6 +66,64 @@ board = Chessboard('myBoard', config);
 
 // --- Stockfish Setup & Update ---
 stockfish.postMessage('uci');
+
+//load bar 
+stockfish.onmessage = function(event) {
+  const message = (typeof event.data === "string") ? event.data : event.data.data;
+  console.log("Message from Stockfish:", message);
+
+  if (message === 'readyok') {
+      console.log("Stockfish is ready!");
+      stockfishReady = true;
+      document.getElementById('stockfish-loading').style.display = 'none';
+  } else if (message.startsWith('info depth')) {
+      if (!stockfishReady) return;
+      
+      const parts = message.split(' ');
+      let depth = null, score = null, pv = null, multipv = 1, mate = undefined;
+      for (let i = 0; i < parts.length; i++) {
+          switch(parts[i]) {
+              case 'depth':
+                  depth = parseInt(parts[i+1], 10);
+                  i++;
+                  break;
+              case 'multipv':
+                  multipv = parseInt(parts[i+1], 10);
+                  i++;
+                  break;
+              case 'cp':
+                  score = (parseInt(parts[i+1], 10) / 100).toFixed(2);
+                  i++;
+                  break;
+              case 'mate':
+                  mate = parseInt(parts[i+1], 10);
+                  i++;
+                  break;
+              case 'pv':
+                  pv = parts.slice(i+1).join(' ');
+                  i = parts.length;
+                  break;
+          }
+      }
+      if (depth !== null && pv !== null) {
+          let scoreDisplay = (mate !== undefined) ? ("Mate in " + mate) : score;
+          multipvResults[multipv] = { depth, score, scoreDisplay, pv };
+          if (mate !== undefined) {
+              multipvResults[multipv].mate = mate;
+          }
+          updateOutput();
+      }
+  } else if (message.startsWith('bestmove')) {
+      if (!stockfishReady) return;
+      
+      const parts = message.split(' ');
+      bestMoveInfo = { bestMove: parts[1] };
+      if (parts.length >= 4 && parts[2] === 'ponder') {
+          bestMoveInfo.ponder = parts[3];
+      }
+      updateOutput();
+  }
+};
 
 // Update Stockfish analysis.
 function updateStockfish() {
@@ -337,58 +399,6 @@ function updateBoardArrows() {
     drawArrow(ctx, start, end, style.lineWidth, style.alpha);
   });
 }
-
-// --- Stockfish Message Handling ---
-stockfish.onmessage = function(event) {
-  const message = (typeof event.data === "string") ? event.data : event.data.data;
-  console.log("Message from Stockfish:", message);
-
-  if (message === 'readyok') {
-    console.log("Stockfish is ready!");
-  } else if (message.startsWith('info depth')) {
-    const parts = message.split(' ');
-    let depth = null, score = null, pv = null, multipv = 1, mate = undefined;
-    for (let i = 0; i < parts.length; i++) {
-      switch(parts[i]) {
-        case 'depth':
-          depth = parseInt(parts[i+1], 10);
-          i++;
-          break;
-        case 'multipv':
-          multipv = parseInt(parts[i+1], 10);
-          i++;
-          break;
-        case 'cp':
-          score = (parseInt(parts[i+1], 10) / 100).toFixed(2);
-          i++;
-          break;
-        case 'mate':
-          mate = parseInt(parts[i+1], 10);
-          i++;
-          break;
-        case 'pv':
-          pv = parts.slice(i+1).join(' ');
-          i = parts.length;
-          break;
-      }
-    }
-    if (depth !== null && pv !== null) {
-      let scoreDisplay = (mate !== undefined) ? ("Mate in " + mate) : score;
-      multipvResults[multipv] = { depth, score, scoreDisplay, pv };
-      if (mate !== undefined) {
-        multipvResults[multipv].mate = mate;
-      }
-      updateOutput();
-    }
-  } else if (message.startsWith('bestmove')) {
-    const parts = message.split(' ');
-    bestMoveInfo = { bestMove: parts[1] };
-    if (parts.length >= 4 && parts[2] === 'ponder') {
-      bestMoveInfo.ponder = parts[3];
-    }
-    updateOutput();
-  }
-};
 
 // Tell Stockfish we're ready.
 stockfish.postMessage("isready");
