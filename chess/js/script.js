@@ -67,7 +67,7 @@ board = Chessboard('myBoard', config);
 // --- Stockfish Setup & Update ---
 stockfish.postMessage('uci');
 
-//load bar 
+//Stockfish initialisation and load bar
 stockfish.onmessage = function(event) {
   const message = (typeof event.data === "string") ? event.data : event.data.data;
   console.log("Message from Stockfish:", message);
@@ -76,6 +76,8 @@ stockfish.onmessage = function(event) {
       console.log("Stockfish is ready!");
       stockfishReady = true;
       document.getElementById('stockfish-loading').style.display = 'none';
+      // triger initial analysis
+      updateStockfish();
   } else if (message.startsWith('info depth')) {
       if (!stockfishReady) return;
       

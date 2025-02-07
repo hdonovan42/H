@@ -1,12 +1,5 @@
 changes 
 
--add favicon
-
--load bar - DONE
-
-make arrow appear on empty board 
-    -currently arrows only appear when a move is made
-
 - disable arrow key scrolling
 
 - widen analysis container?
