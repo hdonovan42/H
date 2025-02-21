@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blog Post Title</title> <link rel="stylesheet" href="styles.css"> 
+    <style>
+        body {
+            background-color: #FFF1E5;
+            font-family: sans-serif;
+        }
+        .ft-headline {
+            font-family: "Georgia", "Times New Roman", serif;
+            font-weight: 500;
+            font-size: 2.5rem;
+            line-height: 1.15;
+            letter-spacing: -0.02em;
+            color: #33302E;
+            margin-bottom: 1rem;
+        }
+        .header {
+            font-size: 1.5em;
+            margin-bottom: 5px;
+            padding-bottom: 5px;
+            padding-top: 10px;
+        }
+
+        .header a {
+            text-decoration: none;
+            color: black;
+        }
+
+        .header a:hover {
+            text-decoration: underline;
+        }
+
+        .blog-container {
+            display: flex;
+            flex-direction: column;
+            /* Align items vertically */
+            align-items: flex-start;
+            /* Align items to the left */
+        }
+
+        .blog-entry {
+            margin-bottom: 20px;
+            padding: 10px;
+            line-height: 1.4em;
+
+        }
+
+        .blog-entry a {
+            text-decoration: none;
+        }
+
+        .title {
+            font-size: 2em;
+            font-weight: bold;
+            display: inline-block;
+            color: black;
+        }
+
+        .subtitle {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: gray;
+            margin-top: 5px;
+        }
+
+        .content {
+            margin-top: 20px;
+            font-size: 1em;
+            line-height: 1.6;
+        }
+
+        .footer {
+            padding: 10px;
+            text-align: center;
+        }
+        .footer-content {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 20px;
+        }
+
+        .button-container {
+            display: flex;
+            align-items: center; /* Vertically align items */
+            justify-content: left; /* Adjust alignment as needed */
+        }
+
+        .button-container a {
+            text-decoration: none; /* Remove default link underline */
+            padding: 10px 20px;   /* Add some padding to the buttons */
+            padding-left: 0 -10px;
+            /*border: 1px solid #000; /* Add a border if you like */
+            margin: 0;             /* Remove default margin */
+        }
+
+        .button-container a:hover {
+            text-decoration: underline;
+        }
+
+        .button-container .x-logo {
+            padding: 10px 10px; /* Adjust padding as needed */
+            display: flex;
+            align-items: center;
+        }
+
+        .button-container .x-logo svg {
+            height: 20px; /* Adjust height as needed */
+            width: 20px; /* Adjust width as needed */
+            fill: #000; /* Default fill color */
+        }
+
+        .button-container .x-logo:hover svg {
+            fill: #1DA1F2; /* Fill color on hover - adjust as needed */
+        }
+
+        .button-container .x-logo {
+          margin: 0 10px; /* Adjust negative margin as needed */
+        }
+
+        .footer a {
+            color: white;
+            text-decoration: none;
+            text-align: center;
+        }
+    </style>
+    <script>
+        function openX(e) {
+           e.preventDefault();
+           window.location.href = 'twitter://user?screen_name=fidybucks';
+           setTimeout(() => {
+               window.location.href = 'https://x.com/fidybucks';
+           }, 1000);
+        }
+    </script>  
+</head>
+<body>
+
+    <div class="header ft-headline">
+        <a href="../index.html">H</a> - <a href="writings.html">Writings</a>
+    </div>
+
+    <hr>
+
+    <div class="blog-container">
+        <h1 class="title">Blog Post Title</h1>
+        <h2 class="subtitle">Blog Post Subtitle</h2>
+        <div class="content">
+            <p>Paragraph 1 of your blog post goes here. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>
+            <p>Paragraph 2 of your blog post goes here. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
+        </div>
+    </div>
+    <hr>
+    <footer class="footer">
+        <div class="container">
+            <div class="button-container">
+                <a href="https://x.com/fidybucks" class="x-logo" onclick="openX(event)">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+                    </svg>
+                </a>
+            </div>
+</footer>
+</body>
+</html>
+
+
+
