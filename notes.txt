@@ -1,0 +1,8 @@
+INDEX.html
+
+
+
+WRITINGS.html
+-make writings styles in its own file as its used in multiple places
+
+- add a div type = content so a <p></p> isn't required for each sentence

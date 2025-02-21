@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blog Post Title</title> <link rel="stylesheet" href="styles.css"> 
+    <style>
+        body {
+            background-color: #FFF1E5;
+            font-family: sans-serif;
+        }
+        .ft-headline {
+            font-family: "Georgia", "Times New Roman", serif;
+            font-weight: 500;
+            font-size: 2.5rem;
+            line-height: 1.15;
+            letter-spacing: -0.02em;
+            color: #33302E;
+            margin-bottom: 1rem;
+        }
+        .header {
+            font-size: 1.5em;
+            margin-bottom: 5px;
+            padding-bottom: 5px;
+            padding-top: 10px;
+        }
+
+        .header a {
+            text-decoration: none;
+            color: black;
+        }
+
+        .header a:hover {
+            text-decoration: underline;
+        }
+
+        .blog-container {
+            display: flex;
+            flex-direction: column;
+            /* Align items vertically */
+            align-items: flex-start;
+            /* Align items to the left */
+        }
+
+        .blog-entry {
+            margin-bottom: 20px;
+            padding: 10px;
+            line-height: 1.4em;
+
+        }
+
+        .blog-entry a {
+            text-decoration: none;
+        }
+
+        .title {
+            font-size: 2em;
+            font-weight: bold;
+            display: inline-block;
+            color: black;
+        }
+
+        .subtitle {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: gray;
+            margin-top: 5px;
+        }
+
+        .date {
+            font-size: 1em;
+            color: #777;
+            margin-top: 10px;
+            font-weight: normal;
+            margin-bottom: 0px;
+        }
+
+        .content {
+            margin-top: 20px;
+            font-size: 1em;
+            line-height: 1.6;
+        }
+
+        .footer {
+            padding: 10px;
+            text-align: center;
+        }
+        .footer-content {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 20px;
+        }
+
+        .button-container {
+            display: flex;
+            align-items: center; /* Vertically align items */
+            justify-content: left; /* Adjust alignment as needed */
+        }
+
+        .button-container a {
+            text-decoration: none; /* Remove default link underline */
+            padding: 10px 20px;   /* Add some padding to the buttons */
+            padding-left: 0 -10px;
+            /*border: 1px solid #000; /* Add a border if you like */
+            margin: 0;             /* Remove default margin */
+        }
+
+        .button-container a:hover {
+            text-decoration: underline;
+        }
+
+        .button-container .x-logo {
+            padding: 10px 10px; /* Adjust padding as needed */
+            display: flex;
+            align-items: center;
+        }
+
+        .button-container .x-logo svg {
+            height: 20px; /* Adjust height as needed */
+            width: 20px; /* Adjust width as needed */
+            fill: #000; /* Default fill color */
+        }
+
+        .button-container .x-logo:hover svg {
+            fill: #1DA1F2; /* Fill color on hover - adjust as needed */
+        }
+
+        .button-container .x-logo {
+          margin: 0 10px; /* Adjust negative margin as needed */
+        }
+
+        .footer a {
+            color: white;
+            text-decoration: none;
+            text-align: center;
+        }
+        h4 {
+            margin-bottom: 0px;
+        }
+        p {
+            margin-top: 10px;
+            margin-bottom: 30px;
+        }
+    </style>
+    <script>
+        function openX(e) {
+           e.preventDefault();
+           window.location.href = 'twitter://user?screen_name=fidybucks';
+           setTimeout(() => {
+               window.location.href = 'https://x.com/fidybucks';
+           }, 1000);
+        }
+    </script>  
+</head>
+<body>
+
+    <div class="header ft-headline">
+        <a href="../index.html">H</a> - <a href="writings.html">Writings</a>
+    </div>
+
+    <hr>
+
+    <div class="blog-container">
+        <h1 class="title">Incentives</h1>
+        <h2 class="subtitle">"You show me the incentives, I'll show you the outcome"</h2>
+        <h3 class="date">Aug 28, 2024</h3>
+        <div class="content">
+            <h4>Prisoners Dilemma</h4>
+            <p>In the late 18th and 19th century, the UK decided to send convicts to the Australian colony to serve their sentences. This posed a logistical challenge for a pre-airline society. So, the work was outsourced to private companies under contract to the British government to handle the transportation. The ship captains were compensated for each prisoner that boarded their ship, inadvertently creating a perverse incentive structure.
+                Captains, rather predictably, stuffed as many prisoners as possible onto their ships, with no regard for prisoners’ welfare. The survival rate (or death rate) was said to approximately 50%, with some particularly disastrous voyages, while those who were lucky enough to survive arrived “beaten, starved and sick”.
+                The British government soon caught word of the situation and scrambled for a solution, their answer was then as it would be today, regulation. Captains were required to stock citrus fruits, bring doctors along for the voyage and were provided with more provisions than before. In another disregard for the importance of incentives, the captains were permitted to sell on any ‘excess’ rations, further misaligning the incentives of the two parties. Appeals to morality were tried, the clergy begged the captains to take better care of the prisoners. None of it worked.
+                Finally, economist Edwin Chadwick, with an appreciation for the power of incentives proposed a solution. Instead of compensating the captain for each prisoner who stepped foot on the boat, they would be compensated for each prisoner who stepped foot off the boat. The impact was enormous, mortality fell to almost zero.
+            </p>
+            <h4>FedEx</h4>    
+            <p>On a less morbid note, incentives have been harnessed at FedEx to create a wonderfully productive organisation. The integrity of the Federal Express business relies on a nightly regathering of their fleet and parcels moved around their numerous planes ready for efficient deliveries the following day. This task must be completed rapidly and reliably for the business to function effectively.
+                Management, unhappy with staff performance, tried to improve employee productivity; moral suasion, threats, you name it. None of it worked.
+                Armed with an appreciation for incentives, the issue was obvious. The employees were paid by the hour, such an incentive structure was counterproductive to the employers desired result.
+                This compensation structure was actually incentivising slower work, slower workers would get paid more for a fixed amount of output. The system in place was only effective at achieving one thing: maximising billable hours of employee service. The solution was simple, pay your workers a fixed amount per SHIFT, and let them go home when they were finished. The results were astonishing.
+            </p>
+            <h4>Conclusion</h4>
+            <p>In the words of Benjamin Franklin, “if you wish to persuade, appeal to interest and not to intellect”. Throughout history, leaders have constantly battled with the challenge of persuading others to act in ways that they may not be naturally inclined.
+                For the prosperity of the group, individuals must put the interests of the group above that of their own. As it is only fair to expect people to act in their own self-interest, if you wish to “persuade” it is not only wise, but imperative to reward them for their cooperation.
+                This constant of human behaviour was identified and embraced by Adam Smith. His concept of the ‘invisible hand’ states that socially or economically beneficial outcomes can arise from the accumulated self-interested actions of individuals, whether knowingly or otherwise. This use of the carrot rather than the stick makes the life of the farmer much simpler, and the donkey’s life much more pleasant. As Rosseau states, when “men are no longer forced to obey, obligation is at its end”.
+                If you wish to achieve mammoth tasks, the combined, concentrated efforts of many talented individuals is often the only practical solution. This can only be achieved through the alignment of the personal interests of each individual member with those of the group as a whole. Therefore, an appreciation for the superpower of incentives is essential for anyone who wishes to steer great ships.
+                </p>
+        </div>
+    </div>
+    <hr>
+    <footer class="footer">
+        <div class="container">
+            <div class="button-container">
+                <a href="https://x.com/fidybucks" class="x-logo" onclick="openX(event)">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+                    </svg>
+                </a>
+            </div>
+</footer>
+</body>
+</html>
+
+
+
