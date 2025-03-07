@@ -23,6 +23,8 @@ let currentIndex = 0;
 let analysisQueue = null;
 const ANALYSIS_DEBOUNCE_TIME = 300; // milliseconds to wait before sending new position to Stockfish
 let arrowsDrawn = false;
+let lastFen = '';
+let isAnalysisInProgress = false;
 
 //load bar global
 let stockfishReady = false;
@@ -133,138 +135,51 @@ stockfish.onmessage = function(event) {
 };
 // ANALYSIS FIX - ARROWS VANISH WITH RAPID MOVEMENT THROUGH MOVES
 
-// Update Stockfish analysis.
 function updateStockfish() {
   // Cancel any pending analysis
   if (analysisQueue) {
     clearTimeout(analysisQueue);
+    analysisQueue = null;
   }
   
-  // Don't immediately clear arrows or multipvResults
-  // This allows arrows to remain visible until new analysis is ready
+  // Get current position FEN
+  const currentFen = game.fen();
+  
+  // If we're already analyzing this position, don't restart
+  if (currentFen === lastFen && isAnalysisInProgress) {
+    return;
+  }
+  
+  // Record this position as the one we're analyzing
+  lastFen = currentFen;
   
   // Create a debounced analysis request
   analysisQueue = setTimeout(function() {
-    // Only clear results when we're actually going to analyze a new position
-    multipvResults = {};
-    bestMoveInfo = null;
+    isAnalysisInProgress = true;
     
     // Stop any current analysis
     stockfish.postMessage("stop");
     
     // Give Stockfish a moment to stop before sending new commands
     setTimeout(function() {
-      // Clear the arrows right before starting new analysis
-      clearArrows();
+      // Keep previous results until new ones are ready
+      // We'll update them incrementally as we receive new analysis
       
       // Update output to show we're analyzing
       const outputDiv = document.getElementById('stockfish-output');
-      outputDiv.innerHTML = '<div style="color: #856404;">Analyzing position...</div>';
+      
+      // Preserve existing arrows for a smoother transition
+      // We'll redraw them in updateOutput when we get results
       
       // Set analysis options and start
       stockfish.postMessage("setoption name MultiPV value 3");
-      stockfish.postMessage(`position fen ${game.fen()}`);
+      stockfish.postMessage(`position fen ${currentFen}`);
       stockfish.postMessage('go depth 15');
     }, 50);
   }, ANALYSIS_DEBOUNCE_TIME);
 }
 
-// --- Fix 3: Improve the updateOutput function to handle pending analysis ---
-function updateOutput() {
-  const outputDiv = document.getElementById('stockfish-output');
-  
-  // If we have no analysis results yet
-  if (Object.keys(multipvResults).length === 0 && !bestMoveInfo) {
-    // Keep existing content (don't clear it unless we have new content)
-    return;
-  }
-  
-  // Clear previous output only when we have new results
-  outputDiv.innerHTML = '';
-
-  if (bestMoveInfo) {
-    const bestMoveDiv = document.createElement('div');
-    bestMoveDiv.textContent = `Best Move: ${bestMoveInfo.bestMove}\n`;
-    outputDiv.appendChild(bestMoveDiv);
-  }
-
-  // Sorted by MultiPV index (1, 2, 3)
-  const sortedKeys = Object.keys(multipvResults).sort((a, b) => a - b);
-  sortedKeys.forEach(key => {
-    const info = multipvResults[key];
-    const lineDiv = document.createElement('div');
-    lineDiv.textContent = `${key}. Score: ${info.scoreDisplay}\nLine: ${info.pv}\n`;
-    outputDiv.appendChild(lineDiv);
-  });
-
-  updateEvaluationBar();
-  updateBoardArrows();
-
-  // --- Display current game notation ---
-  const notationDiv = document.createElement('div');
-  notationDiv.style.marginTop = "20px";
-  notationDiv.style.fontFamily = "monospace";
-  let notationHTML = "<strong>Notation:</strong><br>";
-  for (let i = 0; i < userMoves.length; i++) {
-    // Compare to PGN mainline, if available.
-    if (pgnMainlineMoves.length > i) {
-      if (pgnMainlineMoves[i] === userMoves[i]) {
-        notationHTML += `${i + 1}. ${userMoves[i]} `;
-      } else {
-        notationHTML += `<span style="color:red;">${i + 1}. ${userMoves[i]}*</span> `;
-      }
-    } else {
-      // Moves beyond the loaded PGN.
-      notationHTML += `<span style="color:red;">${i + 1}. ${userMoves[i]}*</span> `;
-    }
-  }
-  notationDiv.innerHTML = notationHTML;
-  outputDiv.appendChild(notationDiv);
-}
-
-// --- Fix 4: Improve the navigation logic to handle arrow persistence ---
-function goToPreviousMove() {
-  if (currentIndex <= 0) return;
-  currentIndex--;
-  rebuildGameFromUserMoves();
-  
-  // Instead of directly calling updateStockfish, which clears arrows immediately
-  // we'll do a "soft update" of the board position first
-  board.position(game.fen());
-  
-  // Then trigger the debounced stockfish update
-  updateStockfish();
-}
-
-function goToNextMove() {
-  // If a PGN is loaded and we haven't gone past its length...
-  if (pgnMainlineMoves.length > 0 && currentIndex < pgnMainlineMoves.length) {
-    // Force the next move to be the mainline move.
-    let mainlineMove = pgnMainlineMoves[currentIndex];
-    // If there was a sideline divergence here, override it.
-    if (userMoves[currentIndex] !== mainlineMove) {
-      userMoves[currentIndex] = mainlineMove;
-      // Also, remove any moves that might have been recorded beyond this point.
-      userMoves = userMoves.slice(0, currentIndex + 1);
-    }
-    currentIndex++;
-    rebuildGameFromUserMoves();
-  } else {
-    // If no PGN is loaded, or we're beyond the PGN, then follow userMoves.
-    if (currentIndex >= userMoves.length) return; // Nothing to do.
-    currentIndex++;
-    rebuildGameFromUserMoves();
-  }
-  
-  // Update board position first
-  board.position(game.fen());
-  
-  // Then trigger the debounced stockfish update
-  updateStockfish();
-}
-
-// --- Fix 5: Improve the stockfish.onmessage handler for more reliable arrow drawing ---
-// Replace or modify the relevant section in the stockfish.onmessage function:
+// --- Improved stockfish.onmessage handler ---
 stockfish.onmessage = function(event) {
   const message = (typeof event.data === "string") ? event.data : event.data.data;
   
@@ -313,14 +228,16 @@ stockfish.onmessage = function(event) {
         multipvResults[multipv].mate = mate;
       }
       
-      // Only update UI occasionally to prevent constant redrawing
-      // This helps with the arrows disappearing during rapid navigation
-      if (depth % 2 === 0 || depth >= 15) {
+      // Only update UI on deeper depths to avoid flickering
+      // First few depths analyze quickly, so we can skip refreshing UI
+      if (depth > 5 || depth % 3 === 0) {
         updateOutput();
       }
     }
   } else if (message.startsWith('bestmove')) {
     if (!stockfishReady) return;
+    
+    isAnalysisInProgress = false;
     
     const parts = message.split(' ');
     bestMoveInfo = { bestMove: parts[1] };
@@ -333,7 +250,51 @@ stockfish.onmessage = function(event) {
   }
 };
 
-// Modify clearArrows to check if we actually need to clear
+// --- Improved navigation functions ---
+function goToPreviousMove() {
+  if (currentIndex <= 0) return;
+  
+  // Set the board position
+  currentIndex--;
+  rebuildGameFromUserMoves();
+  board.position(game.fen());
+  
+  // Update Stockfish analysis (debounced)
+  updateStockfish();
+  
+  // Immediately update the output to show current game state
+  // This will preserve existing arrows temporarily
+  updateOutput();
+}
+
+function goToNextMove() {
+  // Original pgn/user move logic
+  if (pgnMainlineMoves.length > 0 && currentIndex < pgnMainlineMoves.length) {
+    let mainlineMove = pgnMainlineMoves[currentIndex];
+    if (userMoves[currentIndex] !== mainlineMove) {
+      userMoves[currentIndex] = mainlineMove;
+      userMoves = userMoves.slice(0, currentIndex + 1);
+    }
+    currentIndex++;
+    rebuildGameFromUserMoves();
+  } else {
+    if (currentIndex >= userMoves.length) return;
+    currentIndex++;
+    rebuildGameFromUserMoves();
+  }
+  
+  // Set the board position
+  board.position(game.fen());
+  
+  // Update Stockfish analysis (debounced)
+  updateStockfish();
+  
+  // Immediately update the output to show current game state
+  // This will preserve existing arrows temporarily
+  updateOutput();
+}
+
+// --- Improved clearArrows and updateBoardArrows functions ---
 function clearArrows() {
   const canvas = document.getElementById('arrows-overlay');
   const ctx = canvas.getContext('2d');
@@ -341,18 +302,18 @@ function clearArrows() {
   arrowsDrawn = false;
 }
 
-// Update the arrow drawing function to track arrow state
 function updateBoardArrows() {
+  if (Object.keys(multipvResults).length === 0) {
+    // If we have no analysis results, don't clear existing arrows
+    // This helps keep arrows visible during navigation
+    return;
+  }
+  
   const canvas = document.getElementById('arrows-overlay');
   const ctx = canvas.getContext('2d');
   
-  // Only clear if there are new arrows to draw
-  if (Object.keys(multipvResults).length > 0) {
-    clearArrows();
-  } else if (arrowsDrawn) {
-    // If we have no results but arrows are drawn, keep them
-    return;
-  }
+  // Clear existing arrows
+  clearArrows();
 
   // Define drawing styles for each MultiPV index
   const styles = {
@@ -361,6 +322,7 @@ function updateBoardArrows() {
     3: { lineWidth: 3, alpha: 0.4 }
   };
 
+  // Draw new arrows
   const sortedKeys = Object.keys(multipvResults).sort((a, b) => a - b);
   if (sortedKeys.length > 0) {
     sortedKeys.forEach(key => {
@@ -381,56 +343,136 @@ function updateBoardArrows() {
   }
 }
 
-// --- Fix 7: Improve the reset-board handler to clean things up properly ---
+// --- Improved updateOutput function ---
+function updateOutput() {
+  const outputDiv = document.getElementById('stockfish-output');
+  
+  // First, update the board arrows
+  // Do this early to maintain visual continuity
+  updateBoardArrows();
+  
+  // Now update the text output
+  outputDiv.innerHTML = '';
+
+  // Show analysis results
+  if (bestMoveInfo) {
+    const bestMoveDiv = document.createElement('div');
+    bestMoveDiv.textContent = `Best Move: ${bestMoveInfo.bestMove}\n`;
+    outputDiv.appendChild(bestMoveDiv);
+  }
+
+  // Show lines from multipv results
+  const sortedKeys = Object.keys(multipvResults).sort((a, b) => a - b);
+  sortedKeys.forEach(key => {
+    const info = multipvResults[key];
+    const lineDiv = document.createElement('div');
+    lineDiv.textContent = `${key}. Score: ${info.scoreDisplay}\nLine: ${info.pv}\n`;
+    outputDiv.appendChild(lineDiv);
+  });
+
+  // Update evaluation bar
+  updateEvaluationBar();
+
+  // Display game notation
+  const notationDiv = document.createElement('div');
+  notationDiv.style.marginTop = "20px";
+  notationDiv.style.fontFamily = "monospace";
+  let notationHTML = "<strong>Notation:</strong><br>";
+  
+  for (let i = 0; i < userMoves.length; i++) {
+    if (pgnMainlineMoves.length > i) {
+      if (pgnMainlineMoves[i] === userMoves[i]) {
+        notationHTML += `${i + 1}. ${userMoves[i]} `;
+      } else {
+        notationHTML += `<span style="color:red;">${i + 1}. ${userMoves[i]}*</span> `;
+      }
+    } else {
+      notationHTML += `<span style="color:red;">${i + 1}. ${userMoves[i]}*</span> `;
+    }
+  }
+  
+  notationDiv.innerHTML = notationHTML;
+  outputDiv.appendChild(notationDiv);
+  
+  // Add analysis status indicator
+  if (isAnalysisInProgress) {
+    const statusDiv = document.createElement('div');
+    statusDiv.style.marginTop = "10px";
+    statusDiv.style.color = "#856404";
+    statusDiv.style.backgroundColor = "#fff3cd";
+    statusDiv.style.padding = "5px";
+    statusDiv.style.borderRadius = "3px";
+    statusDiv.textContent = "Analysis in progress...";
+    outputDiv.appendChild(statusDiv);
+  }
+}
+
+// --- Event handlers ---
+// Reset board handler
 document.getElementById('reset-board').addEventListener('click', function() {
   // Cancel any pending analysis
   if (analysisQueue) {
     clearTimeout(analysisQueue);
+    analysisQueue = null;
   }
   
   // Stop the engine
   stockfish.postMessage("stop");
+  isAnalysisInProgress = false;
   
   // Clear the analysis results
   multipvResults = {};
   bestMoveInfo = null;
+  lastFen = '';
   
   // Reset the game
   game.reset();
   userMoves = [];
   currentIndex = 0;
-  board.start();
   
-  // Clear arrows explicitly
+  // Clear arrows and reset board
   clearArrows();
+  board.start();
   
   // Clear PGN input
   document.getElementById('pgn-input').value = "";
   
-  // Wait a moment then start a fresh analysis
+  // Start a fresh analysis
   setTimeout(function() {
     updateStockfish();
   }, 100);
 });
 
-// --- Fix 8: Improve the flip-board handler to maintain arrows ---
+// Flip board handler
 document.getElementById('flip-board').addEventListener('click', function() {
   // Flip the board
   board.orientation(board.orientation() === 'white' ? 'black' : 'white');
   
-  // Redraw arrows without clearing first
-  // This ensures the arrows stay visible during the flip
-  updateBoardArrows();
+  // Store existing multipvResults
+  const oldResults = { ...multipvResults };
+  
+  // Update evaluation bar first
   updateEvaluationBar();
+  
+  // Clear and redraw arrows without clearing multipvResults
+  const canvas = document.getElementById('arrows-overlay');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  arrowsDrawn = false;
+  
+  // Redraw arrows with orientation change
+  updateBoardArrows();
 });
 
-// --- Fix 9: Add a resize handler to adjust arrow positions when window is resized ---
+// Add resize handler
 window.addEventListener('resize', function() {
-  // Only redraw if we have arrows
-  if (arrowsDrawn) {
+  // Only redraw if we have arrows data
+  if (Object.keys(multipvResults).length > 0) {
     updateBoardArrows();
   }
 });
+
+/// END OF updateStockfish
   
 // --- Update Output Display ---
 function updateOutput() {
