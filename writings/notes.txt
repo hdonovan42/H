@@ -1,0 +1,8 @@
+- fix header positioning bug - writings.html has header slightly to the right of incentives.html
+    - add standalone styling sheet may fix this
+
+- move header to a central styles.css folder for all files
+
+- centralise x logo in blog footer
+
+- use ft font for blog title?

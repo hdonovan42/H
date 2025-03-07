@@ -1,5 +1,11 @@
 changes 
 
+BUGS
+-sometimes arrows just vanish, most often when going through a game quickly
+
+- when there is a mate for black, the text is in white
+
+
 - disable arrow key scrolling
 
 - widen analysis container?
