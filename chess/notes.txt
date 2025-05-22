@@ -1,9 +1,23 @@
 changes 
 
+22.05.25
+-fix 'flip board' button
+-fix eval bar - bar flips on moves, objective eval score
+-eval graph
+-accuracy score - normalised on chess.com score
+
+
 BUGS
--sometimes arrows just vanish, most often when going through a game quickly
+-sometimes arrows just vanish, most often when going through a game quickly - LARGELY FIXED
 
 - when there is a mate for black, the text is in white
+
+
+- INVESTIGATE STRONGER (+ WIDER RANGE OF) CHESS ENGINES
+    - carlsen mentions top players pay for cloud compute for analysis
+        - was unaware top engines where compute constraint
+    
+    - SELF PLAY REINFORCEMENT LEARNING results in more 'novel' moves, first engine above stockfish to be LEILA/equiv.
 
 
 - disable arrow key scrolling
