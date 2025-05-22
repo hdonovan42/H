@@ -842,10 +842,3 @@ document.getElementById('reset-board').addEventListener('click', function() {
   document.getElementById('pgn-input').value = "";
   updateOutput();
 });
-
-document.getElementById('flip-board').addEventListener('click', function() {
-  board.orientation(board.orientation() === 'white' ? 'black' : 'white');
-  clearArrows();
-  updateBoardArrows();
-  updateEvaluationBar();
-});

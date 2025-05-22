@@ -1,8 +1,6 @@
 changes 
 
 22.05.25
--fix 'flip board' button
--fix eval bar - bar flips on moves, objective eval score
 -eval graph
 -accuracy score - normalised on chess.com score
 
