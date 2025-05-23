@@ -1,401 +1,304 @@
+// Chess Analysis Script - Optimized Version
+// Constants
 const BOARD_SIZE = 500;
 const SQUARE_SIZE = BOARD_SIZE / 8;
+const ANALYSIS_DEBOUNCE_TIME = 300;
+const ANALYSIS_DEPTH = 15;
+const MULTI_PV_LINES = 3;
 
-// Initialize board, game, and Stockfish engine.
-var board = null;
-var game = new Chess();
-var stockfish = new Worker('js/stockfish-16.1-single.js');
+// Chess piece symbols for better readability
+const PIECE_SYMBOLS = {
+  K: '♔', Q: '♕', R: '♖', B: '♗', N: '♘', P: '♙',
+  k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟'
+};
 
-// Global storage for engine analysis
-let multipvResults = {}; // Stores analysis for MultiPV 1-3
-let bestMoveInfo = null; // Best move information
+// Application state
+const AppState = {
+  board: null,
+  game: null,
+  stockfish: null,
+  multipvResults: {},
+  bestMoveInfo: null,
+  pgnMainlineMoves: [],
+  userMoves: [],
+  currentIndex: 0,
+  analysisQueue: null,
+  lastFen: '',
+  isAnalysisInProgress: false,
+  stockfishReady: false,
+  arrowsEnabled: true
+};
 
-// PGN navigation globals
-let pgnMoves = [];
-let currentMoveIndex = 0; // How many moves have been applied
-//new pgn globals
-let pgnMainlineMoves = [];
-let currentPGNIndex = 0; //redundant now?
-let userMoves = [];
-let currentIndex = 0;
+// Initialize the application
+function initializeApp() {
+  // Initialize Chess.js game
+  AppState.game = new Chess();
+  
+  // Initialize Stockfish
+  initializeStockfish();
+  
+  // Initialize board with configuration
+  const config = {
+    draggable: true,
+    position: 'start',
+    dropOffBoard: 'snapback',
+    sparePieces: false,
+    onDragStart: handleDragStart,
+    onDrop: handleDrop,
+    onSnapEnd: handleSnapEnd
+  };
+  
+  AppState.board = Chessboard('myBoard', config);
+  
+  // Set up event listeners
+  setupEventListeners();
+}
 
-//globals for arrows
-let analysisQueue = null;
-const ANALYSIS_DEBOUNCE_TIME = 300; // milliseconds to wait before sending new position to Stockfish
-let arrowsDrawn = false;
-let lastFen = '';
-let isAnalysisInProgress = false;
+// Stockfish initialization
+function initializeStockfish() {
+  try {
+    AppState.stockfish = new Worker('js/stockfish-16.1-single.js');
+    AppState.stockfish.postMessage('uci');
+    AppState.stockfish.postMessage('setoption name MultiPV value ' + MULTI_PV_LINES);
+    AppState.stockfish.postMessage('isready');
+    
+    AppState.stockfish.onmessage = handleStockfishMessage;
+  } catch (error) {
+    console.error('Failed to initialize Stockfish:', error);
+    showError('Failed to load chess engine. Please refresh the page.');
+  }
+}
 
-//load bar global
-let stockfishReady = false;
+// Stockfish message handler
+function handleStockfishMessage(event) {
+  const message = typeof event.data === 'string' ? event.data : event.data.data;
+  
+  if (message === 'readyok') {
+    handleStockfishReady();
+  } else if (message.startsWith('info depth')) {
+    handleAnalysisInfo(message);
+  } else if (message.startsWith('bestmove')) {
+    handleBestMove(message);
+  }
+}
 
+function handleStockfishReady() {
+  console.log('Stockfish is ready!');
+  AppState.stockfishReady = true;
+  document.getElementById('stockfish-loading').style.display = 'none';
+  updateStockfishAnalysis();
+}
 
-// --- Chessboard.js callbacks ---
-function onDragStart(source, piece, position, orientation) {
-  if (game.game_over()) return false;
-  // Only allow pieces from the side whose turn it is.
-  if ((game.turn() === 'w' && piece.search(/^b/) !== -1) ||
-      (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
+function handleAnalysisInfo(message) {
+  if (!AppState.stockfishReady) return;
+  
+  const info = parseStockfishInfo(message);
+  if (!info) return;
+  
+  // Check if this is analysis for the current position
+  // If not, ignore it (this prevents old analysis from overwriting new position)
+  const currentFen = AppState.game.fen();
+  if (currentFen !== AppState.lastFen) return;
+  
+  AppState.multipvResults[info.multipv] = info;
+  
+  // Update display immediately for better responsiveness
+  updateDisplay();
+}
+
+function handleBestMove(message) {
+  if (!AppState.stockfishReady) return;
+  
+  // Check if this is analysis for the current position
+  const currentFen = AppState.game.fen();
+  if (currentFen !== AppState.lastFen) return;
+  
+  AppState.isAnalysisInProgress = false;
+  
+  const parts = message.split(' ');
+  AppState.bestMoveInfo = { 
+    bestMove: parts[1],
+    ponder: parts[3] || null
+  };
+  
+  updateDisplay();
+}
+
+// Parse Stockfish analysis info
+function parseStockfishInfo(message) {
+  const parts = message.split(' ');
+  const info = {
+    depth: null,
+    score: null,
+    pv: null,
+    multipv: 1,
+    mate: undefined
+  };
+  
+  for (let i = 0; i < parts.length; i++) {
+    switch (parts[i]) {
+      case 'depth':
+        info.depth = parseInt(parts[++i], 10);
+        break;
+      case 'multipv':
+        info.multipv = parseInt(parts[++i], 10);
+        break;
+      case 'cp':
+        info.score = (parseInt(parts[++i], 10) / 100).toFixed(2);
+        break;
+      case 'mate':
+        info.mate = parseInt(parts[++i], 10);
+        break;
+      case 'pv':
+        info.pv = parts.slice(++i).join(' ');
+        i = parts.length;
+        break;
+    }
+  }
+  
+  if (info.depth === null || info.pv === null) return null;
+  
+  // Store the score from White's perspective to prevent twitching
+  if (AppState.game.turn() === 'b') {
+    if (info.mate !== undefined) {
+      info.mate = -info.mate;
+    } else if (info.score !== null) {
+      info.score = (-parseFloat(info.score)).toFixed(2);
+    }
+  }
+  
+  info.scoreDisplay = info.mate !== undefined 
+    ? `Mate in ${Math.abs(info.mate)}` 
+    : info.score;
+  
+  return info;
+}
+
+// Board event handlers
+function handleDragStart(source, piece, position, orientation) {
+  if (AppState.game.game_over()) return false;
+  
+  // Only allow the side to move
+  const turn = AppState.game.turn();
+  if ((turn === 'w' && piece.search(/^b/) !== -1) ||
+      (turn === 'b' && piece.search(/^w/) !== -1)) {
     return false;
   }
+  
+  return true;
 }
 
-function onDrop(source, target) {
-  var move = game.move({
+function handleDrop(source, target) {
+  const move = AppState.game.move({
     from: source,
     to: target,
-    promotion: 'q'
+    promotion: 'q' // TODO: Add promotion dialog
   });
+  
   if (move === null) return 'snapback';
   
-  // Update the current game move history and pointer.
-  userMoves = game.history();
-  currentIndex = userMoves.length;
+  // Update move history
+  AppState.userMoves = AppState.game.history();
+  AppState.currentIndex = AppState.userMoves.length;
   
-  updateStockfish();
-  updateOutput();
+  updateStockfishAnalysis();
+  updateDisplay();
+  
+  return 'drop';
 }
 
-function onSnapEnd() {
-  board.position(game.fen());
+function handleSnapEnd() {
+  AppState.board.position(AppState.game.fen());
 }
 
-var config = {
-  draggable: true,
-  position: 'start',
-  dropOffBoard: 'snapback',
-  sparePieces: false,
-  onDragStart: onDragStart,
-  onDrop: onDrop,
-  onSnapEnd: onSnapEnd
-};
-board = Chessboard('myBoard', config);
-
-// --- Stockfish Setup & Update ---
-stockfish.postMessage('uci');
-
-//Stockfish initialisation and load bar
-stockfish.onmessage = function(event) {
-  const message = (typeof event.data === "string") ? event.data : event.data.data;
-  console.log("Message from Stockfish:", message);
-
-  if (message === 'readyok') {
-      console.log("Stockfish is ready!");
-      stockfishReady = true;
-      document.getElementById('stockfish-loading').style.display = 'none';
-      // triger initial analysis
-      updateStockfish();
-  } else if (message.startsWith('info depth')) {
-      if (!stockfishReady) return;
-      
-      const parts = message.split(' ');
-      let depth = null, score = null, pv = null, multipv = 1, mate = undefined;
-      for (let i = 0; i < parts.length; i++) {
-          switch(parts[i]) {
-              case 'depth':
-                  depth = parseInt(parts[i+1], 10);
-                  i++;
-                  break;
-              case 'multipv':
-                  multipv = parseInt(parts[i+1], 10);
-                  i++;
-                  break;
-              case 'cp':
-                  score = (parseInt(parts[i+1], 10) / 100).toFixed(2);
-                  i++;
-                  break;
-              case 'mate':
-                  mate = parseInt(parts[i+1], 10);
-                  i++;
-                  break;
-              case 'pv':
-                  pv = parts.slice(i+1).join(' ');
-                  i = parts.length;
-                  break;
-          }
-      }
-      if (depth !== null && pv !== null) {
-          let scoreDisplay = (mate !== undefined) ? ("Mate in " + mate) : score;
-          multipvResults[multipv] = { depth, score, scoreDisplay, pv };
-          if (mate !== undefined) {
-              multipvResults[multipv].mate = mate;
-          }
-          updateOutput();
-      }
-  } else if (message.startsWith('bestmove')) {
-      if (!stockfishReady) return;
-      
-      const parts = message.split(' ');
-      bestMoveInfo = { bestMove: parts[1] };
-      if (parts.length >= 4 && parts[2] === 'ponder') {
-          bestMoveInfo.ponder = parts[3];
-      }
-      updateOutput();
-  }
-};
-// ANALYSIS FIX - ARROWS VANISH WITH RAPID MOVEMENT THROUGH MOVES
-
-function updateStockfish() {
-  // Cancel any pending analysis
-  if (analysisQueue) {
-    clearTimeout(analysisQueue);
-    analysisQueue = null;
+// Stockfish analysis update (debounced)
+function updateStockfishAnalysis() {
+  // Cancel pending analysis
+  if (AppState.analysisQueue) {
+    clearTimeout(AppState.analysisQueue);
+    AppState.analysisQueue = null;
   }
   
-  // Get current position FEN
-  const currentFen = game.fen();
+  const currentFen = AppState.game.fen();
   
-  // If we're already analyzing this position, don't restart
-  if (currentFen === lastFen && isAnalysisInProgress) {
+  // Skip if already analyzing this position
+  if (currentFen === AppState.lastFen && AppState.isAnalysisInProgress) {
     return;
   }
   
-  // Record this position as the one we're analyzing
-  lastFen = currentFen;
+  AppState.lastFen = currentFen;
   
-  // Create a debounced analysis request
-  analysisQueue = setTimeout(function() {
-    isAnalysisInProgress = true;
+  // Debounce analysis request - but keep it short for responsive arrows
+  AppState.analysisQueue = setTimeout(() => {
+    AppState.isAnalysisInProgress = true;
     
-    // Stop any current analysis
-    stockfish.postMessage("stop");
+    // Don't clear previous results - keep them until we get new ones
+    // This prevents the eval bar from twitching
     
-    // Give Stockfish a moment to stop before sending new commands
-    setTimeout(function() {
-      // Keep previous results until new ones are ready
-      // We'll update them incrementally as we receive new analysis
-      
-      // Update output to show we're analyzing
-      const outputDiv = document.getElementById('stockfish-output');
-      
-      // Preserve existing arrows for a smoother transition
-      // We'll redraw them in updateOutput when we get results
-      
-      // Set analysis options and start
-      stockfish.postMessage("setoption name MultiPV value 3");
-      stockfish.postMessage(`position fen ${currentFen}`);
-      stockfish.postMessage('go depth 15');
+    // Stop current analysis
+    AppState.stockfish.postMessage('stop');
+    
+    // Start new analysis after a brief delay
+    setTimeout(() => {
+      AppState.stockfish.postMessage(`position fen ${currentFen}`);
+      AppState.stockfish.postMessage(`go depth ${ANALYSIS_DEPTH}`);
     }, 50);
-  }, ANALYSIS_DEBOUNCE_TIME);
+  }, 100); // Reduced from 300ms to 100ms for faster response
 }
 
-// --- Improved stockfish.onmessage handler ---
-stockfish.onmessage = function(event) {
-  const message = (typeof event.data === "string") ? event.data : event.data.data;
-  
-  if (message === 'readyok') {
-    console.log("Stockfish is ready!");
-    stockfishReady = true;
-    document.getElementById('stockfish-loading').style.display = 'none';
-    // trigger initial analysis
-    updateStockfish();
-  } else if (message.startsWith('info depth')) {
-    if (!stockfishReady) return;
-    
-    const parts = message.split(' ');
-    let depth = null, score = null, pv = null, multipv = 1, mate = undefined;
-    
-    // Parse the Stockfish message
-    for (let i = 0; i < parts.length; i++) {
-      switch(parts[i]) {
-        case 'depth':
-          depth = parseInt(parts[i+1], 10);
-          i++;
-          break;
-        case 'multipv':
-          multipv = parseInt(parts[i+1], 10);
-          i++;
-          break;
-        case 'cp':
-          score = (parseInt(parts[i+1], 10) / 100).toFixed(2);
-          i++;
-          break;
-        case 'mate':
-          mate = parseInt(parts[i+1], 10);
-          i++;
-          break;
-        case 'pv':
-          pv = parts.slice(i+1).join(' ');
-          i = parts.length;
-          break;
-      }
-    }
-    
-    if (depth !== null && pv !== null) {
-      let scoreDisplay = (mate !== undefined) ? ("Mate in " + mate) : score;
-      multipvResults[multipv] = { depth, score, scoreDisplay, pv };
-      if (mate !== undefined) {
-        multipvResults[multipv].mate = mate;
-      }
-      
-      // Only update UI on deeper depths to avoid flickering
-      // First few depths analyze quickly, so we can skip refreshing UI
-      if (depth > 5 || depth % 3 === 0) {
-        updateOutput();
-      }
-    }
-  } else if (message.startsWith('bestmove')) {
-    if (!stockfishReady) return;
-    
-    isAnalysisInProgress = false;
-    
-    const parts = message.split(' ');
-    bestMoveInfo = { bestMove: parts[1] };
-    if (parts.length >= 4 && parts[2] === 'ponder') {
-      bestMoveInfo.ponder = parts[3];
-    }
-    
-    // Always update the output when we get the final best move
-    updateOutput();
-  }
-};
-
-// --- Improved navigation functions ---
-function goToPreviousMove() {
-  if (currentIndex <= 0) return;
-  
-  // Set the board position
-  currentIndex--;
-  rebuildGameFromUserMoves();
-  board.position(game.fen());
-  
-  // Update Stockfish analysis (debounced)
-  updateStockfish();
-  
-  // Immediately update the output to show current game state
-  // This will preserve existing arrows temporarily
-  updateOutput();
-}
-
-function goToNextMove() {
-  // Original pgn/user move logic
-  if (pgnMainlineMoves.length > 0 && currentIndex < pgnMainlineMoves.length) {
-    let mainlineMove = pgnMainlineMoves[currentIndex];
-    if (userMoves[currentIndex] !== mainlineMove) {
-      userMoves[currentIndex] = mainlineMove;
-      userMoves = userMoves.slice(0, currentIndex + 1);
-    }
-    currentIndex++;
-    rebuildGameFromUserMoves();
-  } else {
-    if (currentIndex >= userMoves.length) return;
-    currentIndex++;
-    rebuildGameFromUserMoves();
-  }
-  
-  // Set the board position
-  board.position(game.fen());
-  
-  // Update Stockfish analysis (debounced)
-  updateStockfish();
-  
-  // Immediately update the output to show current game state
-  // This will preserve existing arrows temporarily
-  updateOutput();
-}
-
-// --- Improved clearArrows and updateBoardArrows functions ---
-function clearArrows() {
-  const canvas = document.getElementById('arrows-overlay');
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  arrowsDrawn = false;
-}
-
-function updateBoardArrows() {
-  if (Object.keys(multipvResults).length === 0) {
-    // If we have no analysis results, don't clear existing arrows
-    // This helps keep arrows visible during navigation
-    return;
-  }
-  
-  const canvas = document.getElementById('arrows-overlay');
-  const ctx = canvas.getContext('2d');
-  
-  // Clear existing arrows
-  clearArrows();
-
-  // Define drawing styles for each MultiPV index
-  const styles = {
-    1: { lineWidth: 8, alpha: 1 },
-    2: { lineWidth: 5, alpha: 0.6 },
-    3: { lineWidth: 3, alpha: 0.4 }
-  };
-
-  // Draw new arrows
-  const sortedKeys = Object.keys(multipvResults).sort((a, b) => a - b);
-  if (sortedKeys.length > 0) {
-    sortedKeys.forEach(key => {
-      const pv = multipvResults[key].pv;
-      if (!pv) return;
-      const moves = pv.split(' ');
-      if (moves.length === 0) return;
-      const move = moves[0];
-      if (move.length < 4) return;
-      const from = move.substring(0, 2);
-      const to = move.substring(2, 4);
-      const start = getSquareCenter(from);
-      const end = getSquareCenter(to);
-      const style = styles[key] || { lineWidth: 4, alpha: 0.7 };
-      drawArrow(ctx, start, end, style.lineWidth, style.alpha);
-      arrowsDrawn = true;
-    });
+// Display update functions
+function updateDisplay() {
+  updateAnalysisOutput();
+  updateEvaluationBar();
+  if (AppState.arrowsEnabled) {
+    updateBoardArrows();
   }
 }
 
-// --- Improved updateOutput function ---
-function updateOutput() {
+function updateAnalysisOutput() {
   const outputDiv = document.getElementById('stockfish-output');
-  
-  // First, update the board arrows
-  // Do this early to maintain visual continuity
-  updateBoardArrows();
-  
-  // Now update the text output
   outputDiv.innerHTML = '';
 
-  // Show analysis results
-  if (bestMoveInfo) {
+  if (AppState.bestMoveInfo) {
     const bestMoveDiv = document.createElement('div');
-    bestMoveDiv.textContent = `Best Move: ${bestMoveInfo.bestMove}\n`;
+    bestMoveDiv.textContent = `Best Move: ${AppState.bestMoveInfo.bestMove}\n`;
     outputDiv.appendChild(bestMoveDiv);
   }
 
-  // Show lines from multipv results
-  const sortedKeys = Object.keys(multipvResults).sort((a, b) => a - b);
+  // Sorted by MultiPV index (1, 2, 3) - original format
+  const sortedKeys = Object.keys(AppState.multipvResults).sort((a, b) => a - b);
   sortedKeys.forEach(key => {
-    const info = multipvResults[key];
+    const info = AppState.multipvResults[key];
     const lineDiv = document.createElement('div');
     lineDiv.textContent = `${key}. Score: ${info.scoreDisplay}\nLine: ${info.pv}\n`;
     outputDiv.appendChild(lineDiv);
   });
 
-  // Update evaluation bar
-  updateEvaluationBar();
-
-  // Display game notation
+  // Display current game notation - original format
   const notationDiv = document.createElement('div');
   notationDiv.style.marginTop = "20px";
   notationDiv.style.fontFamily = "monospace";
   let notationHTML = "<strong>Notation:</strong><br>";
   
-  for (let i = 0; i < userMoves.length; i++) {
-    if (pgnMainlineMoves.length > i) {
-      if (pgnMainlineMoves[i] === userMoves[i]) {
-        notationHTML += `${i + 1}. ${userMoves[i]} `;
+  for (let i = 0; i < AppState.userMoves.length; i++) {
+    // Compare to PGN mainline, if available.
+    if (AppState.pgnMainlineMoves.length > i) {
+      if (AppState.pgnMainlineMoves[i] === AppState.userMoves[i]) {
+        notationHTML += `${i + 1}. ${AppState.userMoves[i]} `;
       } else {
-        notationHTML += `<span style="color:red;">${i + 1}. ${userMoves[i]}*</span> `;
+        notationHTML += `<span style="color:red;">${i + 1}. ${AppState.userMoves[i]}*</span> `;
       }
     } else {
-      notationHTML += `<span style="color:red;">${i + 1}. ${userMoves[i]}*</span> `;
+      // Moves beyond the loaded PGN.
+      notationHTML += `<span style="color:red;">${i + 1}. ${AppState.userMoves[i]}*</span> `;
     }
   }
   
   notationDiv.innerHTML = notationHTML;
   outputDiv.appendChild(notationDiv);
   
-  // Add analysis status indicator
-  if (isAnalysisInProgress) {
+  // Analysis status
+  if (AppState.isAnalysisInProgress) {
     const statusDiv = document.createElement('div');
     statusDiv.style.marginTop = "10px";
     statusDiv.style.color = "#856404";
@@ -407,147 +310,27 @@ function updateOutput() {
   }
 }
 
-// --- Event handlers ---
-// Reset board handler
-document.getElementById('reset-board').addEventListener('click', function() {
-  // Cancel any pending analysis
-  if (analysisQueue) {
-    clearTimeout(analysisQueue);
-    analysisQueue = null;
-  }
-  
-  // Stop the engine
-  stockfish.postMessage("stop");
-  isAnalysisInProgress = false;
-  
-  // Clear the analysis results
-  multipvResults = {};
-  bestMoveInfo = null;
-  lastFen = '';
-  
-  // Reset the game
-  game.reset();
-  userMoves = [];
-  currentIndex = 0;
-  
-  // Clear arrows and reset board
-  clearArrows();
-  board.start();
-  
-  // Clear PGN input
-  document.getElementById('pgn-input').value = "";
-  
-  // Start a fresh analysis
-  setTimeout(function() {
-    updateStockfish();
-  }, 100);
-});
-
-// Flip board handler
-document.getElementById('flip-board').addEventListener('click', function() {
-  // Flip the board
-  board.orientation(board.orientation() === 'white' ? 'black' : 'white');
-  
-  // Store existing multipvResults
-  const oldResults = { ...multipvResults };
-  
-  // Update evaluation bar first
-  updateEvaluationBar();
-  
-  // Clear and redraw arrows without clearing multipvResults
-  const canvas = document.getElementById('arrows-overlay');
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  arrowsDrawn = false;
-  
-  // Redraw arrows with orientation change
-  updateBoardArrows();
-});
-
-// Add resize handler
-window.addEventListener('resize', function() {
-  // Only redraw if we have arrows data
-  if (Object.keys(multipvResults).length > 0) {
-    updateBoardArrows();
-  }
-});
-
-/// END OF updateStockfish
-  
-// --- Update Output Display ---
-function updateOutput() {
-  const outputDiv = document.getElementById('stockfish-output');
-  outputDiv.innerHTML = '';
-
-  if (bestMoveInfo) {
-    const bestMoveDiv = document.createElement('div');
-    bestMoveDiv.textContent = `Best Move: ${bestMoveInfo.bestMove}\n`;
-    outputDiv.appendChild(bestMoveDiv);
-  }
-
-  // Sorted by MultiPV index (1, 2, 3)
-  const sortedKeys = Object.keys(multipvResults).sort((a, b) => a - b);
-  sortedKeys.forEach(key => {
-    const info = multipvResults[key];
-    const lineDiv = document.createElement('div');
-    lineDiv.textContent = `${key}. Score: ${info.scoreDisplay}\nLine: ${info.pv}\n`;
-    outputDiv.appendChild(lineDiv);
-  });
-
-  updateEvaluationBar();
-  updateBoardArrows();
-
-  // --- New: Display current game notation ---
-  const notationDiv = document.createElement('div');
-notationDiv.style.marginTop = "20px";
-notationDiv.style.fontFamily = "monospace";
-let notationHTML = "<strong>Notation:</strong><br>";
-for (let i = 0; i < userMoves.length; i++) {
-  // Compare to PGN mainline, if available.
-  if (pgnMainlineMoves.length > i) {
-    if (pgnMainlineMoves[i] === userMoves[i]) {
-      notationHTML += `${i + 1}. ${userMoves[i]} `;
-    } else {
-      notationHTML += `<span style="color:red;">${i + 1}. ${userMoves[i]}*</span> `;
-    }
-  } else {
-    // Moves beyond the loaded PGN.
-    notationHTML += `<span style="color:red;">${i + 1}. ${userMoves[i]}*</span> `;
-  }
-}
-notationDiv.innerHTML = notationHTML;
-document.getElementById('stockfish-output').appendChild(notationDiv);
-}
-
-// --- Evaluation Bar Update ---
 function updateEvaluationBar() {
-  if (!multipvResults[1]) return;
+  if (!AppState.multipvResults[1]) return;
 
-  const entry = multipvResults[1];
+  const entry = AppState.multipvResults[1];
   let effectiveEval;
 
+  // The score is already stored from White's perspective in parseStockfishInfo
   if (entry.mate !== undefined) {
-    let mateVal = entry.mate;
-    if (game.turn() === 'b') {
-      mateVal = -mateVal;
-    }
-    effectiveEval = (mateVal > 0) ? 10 : -10;
+    effectiveEval = (entry.mate > 0) ? 10 : -10;
   } else {
     effectiveEval = parseFloat(entry.score);
-    if (game.turn() === 'b') {
-      effectiveEval = -effectiveEval;
-    }
     effectiveEval = Math.max(-10, Math.min(10, effectiveEval));
   }
 
   // Compute the percentage of the bar that should be white.
-  // For effectiveEval: -10 -> 0% white, 0 -> 50% white, +10 -> 100% white.
   const whitePercentage = ((effectiveEval + 10) / 20) * 100;
 
   const evalBar = document.getElementById('eval-bar');
 
   // If board is flipped, reverse the gradient direction.
-  if (board.orientation() === 'black') {
+  if (AppState.board.orientation() === 'black') {
     if (whitePercentage <= 0) {
       evalBar.style.background = "black";
     } else if (whitePercentage >= 100) {
@@ -565,32 +348,19 @@ function updateEvaluationBar() {
     }
   }
 
-// --- Overlay the eval score at the bottom of the eval bar ---
-// eval score should be absolute
-// positive = white advantage, negative = black advantage
-let evalText = "";
-if (entry.mate !== undefined) {
-  // For mate scores, flip the value if it's black's turn.
-  let mateVal = entry.mate;
-  if (game.turn() === 'b') {
-    mateVal = -mateVal;
+  // --- Overlay the eval score at the bottom of the eval bar ---
+  let evalText = "";
+  if (entry.mate !== undefined) {
+    evalText = "M" + entry.mate;
+  } else {
+    evalText = entry.score;
   }
-  evalText = "M" + mateVal;
-} else {
-  // For centipawn scores, flip the score if it's black's turn.
-  let score = parseFloat(entry.score);
-  if (game.turn() === 'b') {
-    score = -score;
-  }
-  // Format to two decimals (or adjust as desired).
-  evalText = score.toFixed(2);
-}
+  
   // Try to get an existing overlay element; if none exists, create one.
   let overlay = document.getElementById('eval-overlay');
   if (!overlay) {
     overlay = document.createElement('div');
     overlay.id = "eval-overlay";
-    // Position the overlay at the bottom of the eval bar.
     overlay.style.position = "absolute";
     overlay.style.bottom = "0";
     overlay.style.width = "100%";
@@ -601,7 +371,7 @@ if (entry.mate !== undefined) {
     evalBar.appendChild(overlay);
   }
   // set text colour to opposite of orientation, for readability
-  if (board.orientation() === 'white') {
+  if (AppState.board.orientation() === 'white') {
     overlay.style.color = "black";
   } else {
     overlay.style.color = "white";
@@ -609,38 +379,106 @@ if (entry.mate !== undefined) {
   overlay.textContent = evalText;
 }
 
-// Arrow Drawing on Canvas
-// Clear the arrows by clearing the canvas.
-function clearArrows() {
-  const canvas = document.getElementById('arrows-overlay');
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+function updateEvalBarGradient(evalBar, whitePercentage) {
+  const isFlipped = AppState.board.orientation() === 'black';
+  const direction = isFlipped ? 'to bottom' : 'to top';
+  
+  if (whitePercentage <= 0) {
+    evalBar.style.background = 'black';
+  } else if (whitePercentage >= 100) {
+    evalBar.style.background = 'white';
+  } else {
+    evalBar.style.background = 
+      `linear-gradient(${direction}, white ${whitePercentage}%, black ${whitePercentage}%)`;
+  }
 }
 
-/**
-* * Draw an arrow from point "from" to point "to" on the given canvas context.
- * The main line ends exactly at the base midpoint of the arrowhead so that the
- * arrowhead attaches directly with no gap.
- * @param {CanvasRenderingContext2D} ctx - The canvas context.
- * @param {Object} from - The starting point {x, y}.
- * @param {Object} to - The tip of the arrow {x, y}.
- * @param {number} lineWidth - The thickness of the line.
- * @param {number} alpha - The opacity (0 to 1) of the arrow.
- */
+function updateEvalText(evalBar, entry) {
+  let evalText = '';
+  
+  if (entry.mate !== undefined) {
+    const mateVal = AppState.game.turn() === 'b' ? -entry.mate : entry.mate;
+    evalText = `M${mateVal}`;
+  } else {
+    const score = AppState.game.turn() === 'b' ? -parseFloat(entry.score) : parseFloat(entry.score);
+    evalText = score.toFixed(2);
+  }
+  
+  let overlay = document.getElementById('eval-overlay');
+  if (!overlay) {
+    overlay = createEvalOverlay();
+    evalBar.appendChild(overlay);
+  }
+  
+  overlay.textContent = evalText;
+  overlay.style.color = AppState.board.orientation() === 'white' ? 'black' : 'white';
+}
+
+function createEvalOverlay() {
+  const overlay = document.createElement('div');
+  overlay.id = 'eval-overlay';
+  overlay.style.cssText = `
+    position: absolute;
+    bottom: 0;
+    width: 100%;
+    text-align: center;
+    pointer-events: none;
+    font-family: monospace;
+    font-size: 12px;
+    font-weight: bold;
+  `;
+  return overlay;
+}
+
+// Arrow drawing functions
+function updateBoardArrows() {
+  const canvas = document.getElementById('arrows-overlay');
+  const ctx = canvas.getContext('2d');
+  
+  // Clear canvas
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+  // Don't draw if no analysis results
+  if (Object.keys(AppState.multipvResults).length === 0) {
+    return;
+  }
+  
+  // Define drawing styles for each MultiPV index - original blue colors
+  const styles = {
+    1: { lineWidth: 8, alpha: 1 },
+    2: { lineWidth: 5, alpha: 0.6 },
+    3: { lineWidth: 3, alpha: 0.4 }
+  };
+  
+  const sortedKeys = Object.keys(AppState.multipvResults).sort((a, b) => a - b);
+  sortedKeys.forEach(key => {
+    const pv = AppState.multipvResults[key].pv;
+    if (!pv) return;
+    const moves = pv.split(' ');
+    if (moves.length === 0) return;
+    const move = moves[0];
+    if (move.length < 4) return;
+    const from = move.substring(0, 2);
+    const to = move.substring(2, 4);
+    const style = styles[key] || { lineWidth: 4, alpha: 0.7 };
+    drawArrow(ctx, from, to, style.lineWidth, style.alpha);
+  });
+}
+
 function drawArrow(ctx, from, to, lineWidth, alpha) {
+  const startPos = getSquareCenter(from);
+  const endPos = getSquareCenter(to);
+  
   const headLength = 16; // Length of the arrowhead (along the arrow direction)
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
+  const dx = endPos.x - startPos.x;
+  const dy = endPos.y - startPos.y;
   const angle = Math.atan2(dy, dx);
 
   // Compute the midpoint of the arrowhead's base.
-  // The arrowhead is an isosceles triangle with its tip at "to" and base angle 30° (π/6).
-  // The base of the triangle lies along the line direction. Its midpoint is given by:
-  // baseMid = to - (headLength * cos(π/6)) * (cos(angle), sin(angle))
   const cosOffset = Math.cos(Math.PI / 6); // ≈ 0.8660
   const baseMid = {
-    x: to.x - headLength * cosOffset * Math.cos(angle),
-    y: to.y - headLength * cosOffset * Math.sin(angle)
+    x: endPos.x - headLength * cosOffset * Math.cos(angle),
+    y: endPos.y - headLength * cosOffset * Math.sin(angle)
   };
 
   // Set the drawing color to blue with the provided opacity.
@@ -651,194 +489,235 @@ function drawArrow(ctx, from, to, lineWidth, alpha) {
 
   // Draw the main line from "from" to the base midpoint.
   ctx.beginPath();
-  ctx.moveTo(from.x, from.y);
+  ctx.moveTo(startPos.x, startPos.y);
   ctx.lineTo(baseMid.x, baseMid.y);
   ctx.stroke();
 
   // Compute the two base corners of the arrowhead using ±30° offsets.
   const offsetAngle = Math.PI / 6; // 30 degrees
   const baseLeft = {
-    x: to.x - headLength * Math.cos(angle - offsetAngle),
-    y: to.y - headLength * Math.sin(angle - offsetAngle)
+    x: endPos.x - headLength * Math.cos(angle - offsetAngle),
+    y: endPos.y - headLength * Math.sin(angle - offsetAngle)
   };
   const baseRight = {
-    x: to.x - headLength * Math.cos(angle + offsetAngle),
-    y: to.y - headLength * Math.sin(angle + offsetAngle)
+    x: endPos.x - headLength * Math.cos(angle + offsetAngle),
+    y: endPos.y - headLength * Math.sin(angle + offsetAngle)
   };
 
   // Draw the arrowhead as a filled triangle.
   ctx.beginPath();
-  ctx.moveTo(to.x, to.y);         // Tip of the arrow
+  ctx.moveTo(endPos.x, endPos.y);         // Tip of the arrow
   ctx.lineTo(baseLeft.x, baseLeft.y);
   ctx.lineTo(baseRight.x, baseRight.y);
   ctx.closePath();
   ctx.fill();
 }
 
-// Compute the center coordinates of a square on a 400x400 board with each square 50x50.
-// Updated getSquareCenter() function that accounts for board orientation.
 function getSquareCenter(square) {
-  const file = square[0];
-  const rank = parseInt(square[1], 10);
-  const fileIndex = file.charCodeAt(0) - 'a'.charCodeAt(0);
-  let x, y;
+  const file = square.charCodeAt(0) - 'a'.charCodeAt(0);
+  const rank = parseInt(square[1], 10) - 1;
+  const isFlipped = AppState.board.orientation() === 'black';
   
-  // If the board is flipped (black orientation), mirror the coordinates.
-  if (board.orientation() === 'black') {
-    // In a 400x400 board with 50px squares:
-    // - Files are reversed: a->h becomes (7 - fileIndex)
-    // - Ranks are reversed: 1->8 becomes (rank - 1) (since white orientation had y = (8 - rank)*50+25)
-    x = (7 - fileIndex) * SQUARE_SIZE + SQUARE_SIZE /2
-    y = (rank - 1) * SQUARE_SIZE + SQUARE_SIZE /2
-  } else {
-    // Standard white orientation.
-    x = fileIndex * SQUARE_SIZE + SQUARE_SIZE /2
-    y = (8 - rank) * SQUARE_SIZE + SQUARE_SIZE /2
-  }
+  const x = (isFlipped ? 7 - file : file) * SQUARE_SIZE + SQUARE_SIZE / 2;
+  const y = (isFlipped ? rank : 7 - rank) * SQUARE_SIZE + SQUARE_SIZE / 2;
+  
   return { x, y };
 }
 
-// Draw arrows for each analysis line using the canvas overlay.
-function updateBoardArrows() {
-  const canvas = document.getElementById('arrows-overlay');
-  const ctx = canvas.getContext('2d');
-  clearArrows();
+// Navigation functions
+function navigateToPreviousMove() {
+  if (AppState.currentIndex <= 0) return;
+  
+  AppState.currentIndex--;
+  rebuildGameFromMoves();
+  AppState.board.position(AppState.game.fen());
+  
+  // Update display immediately
+  updateDisplay();
+  
+  // Update Stockfish analysis separately (debounced)
+  updateStockfishAnalysis();
+}
 
-  // Define drawing styles for each MultiPV index.
-  // Best move (1): opaque, thicker
-  // Second best (2): moderately opaque, medium thickness
-  // Third best (3): translucent, thinnest
-  const styles = {
-    1: { lineWidth: 8, alpha: 1 },
-    2: { lineWidth: 5, alpha: 0.6 },
-    3: { lineWidth: 3, alpha: 0.4 }
-  };
+function navigateToNextMove() {
+  if (AppState.pgnMainlineMoves.length > 0 && 
+      AppState.currentIndex < AppState.pgnMainlineMoves.length) {
+    // Follow mainline
+    const mainlineMove = AppState.pgnMainlineMoves[AppState.currentIndex];
+    if (AppState.userMoves[AppState.currentIndex] !== mainlineMove) {
+      AppState.userMoves[AppState.currentIndex] = mainlineMove;
+      AppState.userMoves = AppState.userMoves.slice(0, AppState.currentIndex + 1);
+    }
+  } else if (AppState.currentIndex >= AppState.userMoves.length) {
+    return;
+  }
+  
+  AppState.currentIndex++;
+  rebuildGameFromMoves();
+  AppState.board.position(AppState.game.fen());
+  
+  // Update display immediately
+  updateDisplay();
+  
+  // Update Stockfish analysis separately (debounced)
+  updateStockfishAnalysis();
+}
 
-  const sortedKeys = Object.keys(multipvResults).sort((a, b) => a - b);
-  sortedKeys.forEach(key => {
-    const pv = multipvResults[key].pv;
-    if (!pv) return;
-    const moves = pv.split(' ');
-    if (moves.length === 0) return;
-    const move = moves[0];
-    if (move.length < 4) return;
-    const from = move.substring(0, 2);
-    const to = move.substring(2, 4);
-    const start = getSquareCenter(from);
-    const end = getSquareCenter(to);
-    const style = styles[key] || { lineWidth: 4, alpha: 0.7 };
-    drawArrow(ctx, start, end, style.lineWidth, style.alpha);
+function rebuildGameFromMoves() {
+  AppState.game.reset();
+  
+  for (let i = 0; i < AppState.currentIndex; i++) {
+    AppState.game.move(AppState.userMoves[i]);
+  }
+  
+  AppState.board.position(AppState.game.fen());
+}
+
+// PGN handling
+function loadPGN() {
+  const pgnText = document.getElementById('pgn-input').value.trim();
+  
+  if (!pgnText) {
+    showError('Please enter a PGN.');
+    return;
+  }
+  
+  const tempGame = new Chess();
+  if (!tempGame.load_pgn(pgnText)) {
+    showError('Invalid PGN format.');
+    return;
+  }
+  
+  // Reset and load the game
+  AppState.game.load_pgn(pgnText);
+  AppState.pgnMainlineMoves = AppState.game.history();
+  AppState.userMoves = [...AppState.pgnMainlineMoves];
+  AppState.currentIndex = 0;
+  
+  // Reset to starting position
+  AppState.game.reset();
+  AppState.board.start();
+  
+  updateStockfishAnalysis();
+  updateDisplay();
+}
+
+// Board control functions
+function resetBoard() {
+  // Stop analysis
+  if (AppState.analysisQueue) {
+    clearTimeout(AppState.analysisQueue);
+    AppState.analysisQueue = null;
+  }
+  
+  AppState.stockfish.postMessage('stop');
+  AppState.isAnalysisInProgress = false;
+  
+  // Clear state
+  AppState.multipvResults = {};
+  AppState.bestMoveInfo = null;
+  AppState.lastFen = '';
+  AppState.userMoves = [];
+  AppState.pgnMainlineMoves = [];
+  AppState.currentIndex = 0;
+  
+  // Reset board
+  AppState.game.reset();
+  AppState.board.start();
+  
+  // Clear UI
+  document.getElementById('pgn-input').value = '';
+  clearCanvas(
+    document.getElementById('arrows-overlay').getContext('2d'),
+    document.getElementById('arrows-overlay')
+  );
+  
+  // Restart analysis
+  setTimeout(() => updateStockfishAnalysis(), 100);
+}
+
+function flipBoard() {
+  AppState.board.flip();
+  updateDisplay();
+}
+
+// Event listener setup
+function setupEventListeners() {
+  // Button listeners
+  document.getElementById('load-pgn').addEventListener('click', loadPGN);
+  document.getElementById('prev-move').addEventListener('click', navigateToPreviousMove);
+  document.getElementById('next-move').addEventListener('click', navigateToNextMove);
+  document.getElementById('reset-board').addEventListener('click', resetBoard);
+  document.getElementById('flip-board').addEventListener('click', flipBoard);
+  
+  // Keyboard shortcuts
+  document.addEventListener('keydown', handleKeyPress);
+  
+  // Window resize
+  window.addEventListener('resize', debounce(() => {
+    if (Object.keys(AppState.multipvResults).length > 0) {
+      updateBoardArrows();
+    }
+  }, 250));
+  
+  // Prevent arrow key scrolling
+  window.addEventListener('keydown', (e) => {
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+      e.preventDefault();
+    }
   });
 }
 
-// Tell Stockfish we're ready.
-stockfish.postMessage("isready");
-
-// make loadPGN standalone function as it can be called two different ways 
-function loadPGN () {
-  const pgnText = document.getElementById('pgn-input').value;
-  if (!pgnText.trim()) {
-    alert("Please enter a PGN.");
-    return;
+function handleKeyPress(event) {
+  const keyActions = {
+    'ArrowLeft': navigateToPreviousMove,
+    'ArrowRight': navigateToNextMove,
+    'Enter': loadPGN,
+    'r': resetBoard,
+    'f': flipBoard,
+    'a': () => {
+      AppState.arrowsEnabled = !AppState.arrowsEnabled;
+      updateDisplay();
+    }
+  };
+  
+  const action = keyActions[event.key];
+  if (action) {
+    event.preventDefault();
+    action();
   }
-  // Attempt to load the PGN.
-  const loadSuccess = game.load_pgn(pgnText);
-  if (!loadSuccess) {
-    alert("Invalid PGN.");
-    return;
-  }
-  // Save the PGN moves (mainline) and reset navigation pointer.
-  pgnMainlineMoves = game.history();
-  userMoves = [...pgnMainlineMoves];
-  currentIndex = 0; // Start at the beginning.
-  // Reset the game and update display.
-  game.reset();
-  board.start();
-  updateStockfish();
-  updateOutput();
-};
-
-// call loadpgn by pressing button
-document.getElementById('load-pgn').addEventListener('click', function() {
-  loadPGN();
-});
-
-// call loadpgn by pressing 'enter' on keyboard
-document.addEventListener('keydown', function(event) {
-  if (event.key === 'Enter') {
-    loadPGN();
-  }
-});
-
-// rebuilds notation for sidelines
-function rebuildGameFromUserMoves() {
-  game.reset();
-  for (let i = 0; i < currentIndex; i++) {
-    game.move(userMoves[i]);
-  }
-  board.position(game.fen());
 }
 
-// standalone functions for prev move and next move logic as they are called twice
-function goToPreviousMove() {
-  if (currentIndex <= 0) return;
-  currentIndex--;
-  rebuildGameFromUserMoves();
-  updateStockfish();
-  updateOutput();
-};
+// Utility functions
+function createDiv(content = '', className = '') {
+  const div = document.createElement('div');
+  if (content) div.textContent = content;
+  if (className) div.className = className;
+  return div;
+}
 
-function goToNextMove() {
-  // If a PGN is loaded and we haven't gone past its length...
-  if (pgnMainlineMoves.length > 0 && currentIndex < pgnMainlineMoves.length) {
-    // Force the next move to be the mainline move.
-    let mainlineMove = pgnMainlineMoves[currentIndex];
-    // If there was a sideline divergence here, override it.
-    if (userMoves[currentIndex] !== mainlineMove) {
-      userMoves[currentIndex] = mainlineMove;
-      // Also, remove any moves that might have been recorded beyond this point.
-      userMoves = userMoves.slice(0, currentIndex + 1);
-    }
-    currentIndex++;
-    rebuildGameFromUserMoves();
-  } else {
-    // If no PGN is loaded, or we're beyond the PGN, then follow userMoves.
-    if (currentIndex >= userMoves.length) return; // Nothing to do.
-    currentIndex++;
-    rebuildGameFromUserMoves();
-  }
-  updateStockfish();
-  updateOutput();
-};
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
 
-// prev move called by button press or left arrow key -
-document.getElementById('prev-move').addEventListener('click', function() {
-  goToPreviousMove();
-});
+function showError(message) {
+  // Could be replaced with a better UI notification system
+  alert(message);
+}
 
-document.addEventListener('keydown', function(event) {
-  if (event.key === 'ArrowLeft') {
-    goToPreviousMove();
-  }
-})
-
-// next move called by button press or right arrow key
-document.getElementById('next-move').addEventListener('click', function() {
-  goToNextMove()
-});
-
-document.addEventListener('keydown', function(event) {
-  if (event.key === 'ArrowRight') {
-    goToNextMove();
-  }
-});
-
-document.getElementById('reset-board').addEventListener('click', function() {
-  game.reset();
-  userMoves = [];
-  currentIndex = 0;
-  board.start();
-  updateStockfish();
-  document.getElementById('pgn-input').value = "";
-  updateOutput();
-});
+// Initialize when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    initializeApp();
+  });
+} else {
+  initializeApp();
+}
