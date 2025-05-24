@@ -4,6 +4,19 @@ changes
 -eval graph
 -accuracy score - normalised on chess.com score
 
+- personalised AI coach that give give personalised advice
+    - requires profiles
+    - build a dataset of a users moves 
+    - builds profile on them - repotoire, trends, habits, common mistakes etc
+    - provides tailored advice
+
+ENGINES
+-default to local, small engine for speed and redundancy
+-Full strength stockfish - hosted on server
+-Full strength neural network engine - leela
+    - why do pros need cloud compute?
+
+-REDESIGN
 
 BUGS
 -sometimes arrows just vanish, most often when going through a game quickly - LARGELY FIXED
@@ -18,14 +31,11 @@ BUGS
     - SELF PLAY REINFORCEMENT LEARNING results in more 'novel' moves, first engine above stockfish to be LEILA/equiv.
 
 
-- disable arrow key scrolling
-
-- widen analysis container?
-
 - bring chess.js and jquery local - for futureproofing and to help with loading times
 
 - REMOVE ALL BUTTONS???, REPLACE WITH INTUITIVE KEYS - CLEANER
         - FLIP? 
+        - replace text with icons?
 
 - arrows ON/OFF button
 
