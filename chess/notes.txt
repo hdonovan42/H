@@ -1,5 +1,7 @@
 changes 
 
+EVALUATION ENGINE MAGNUS CARLSEN WOULD BE PROUD TO USE
+
 22.05.25
 -eval graph
 -accuracy score - normalised on chess.com score
@@ -17,6 +19,9 @@ ENGINES
     - why do pros need cloud compute?
 
 -REDESIGN
+- cap line analysis to max length in a defined space so notation size doesn't bounce around
+- move numbered - with interative feature to click on specific move
+- DARK MODE?
 
 BUGS
 -sometimes arrows just vanish, most often when going through a game quickly - LARGELY FIXED
