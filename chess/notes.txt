@@ -1,5 +1,18 @@
 changes 
 
+bugs 
+    - stockfish loading time
+    - engine freezes 
+        - engine turn ON/OFF to reset? - some value in no arrows at times?
+        - timeout and restart after x seconds?
+    - colouring text in eval bar for m in x
+
+NEXT MAJOR STEP
+-eval graph throughout the game
+-accuracy score
+-classificiation of moves - good, brilliant, etc
+    
+
 EVALUATION ENGINE MAGNUS CARLSEN WOULD BE PROUD TO USE
 
 22.05.25
