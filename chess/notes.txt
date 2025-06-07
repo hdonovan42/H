@@ -1,4 +1,4 @@
-changes 
+EVALUATION ENGINE MAGNUS CARLSEN WOULD BE PROUD TO USE
 
 bugs 
     - stockfish loading time
@@ -6,64 +6,39 @@ bugs
         - engine turn ON/OFF to reset? - some value in no arrows at times?
         - timeout and restart after x seconds?
     - colouring text in eval bar for m in x
+    - currently only available to promote to queen
+    - notation overflows - dynamic box or scroll?
 
 NEXT MAJOR STEP
--eval graph throughout the game
--accuracy score
--classificiation of moves - good, brilliant, etc
-    
+- inform user of keyboard shortcuts
+- bring chess.js and jquery local - for futureproofing and to help with loading times
+- IMPLEMENT TRUE ANALYSIS FEATURES
+    - graph of eval score
+    - accuracy% score (centipawn?) - normalised on chess.com score
+    - classificiation and visualisation of moves (good, great, brilliant!!, etc)
+- show whos up in pieces on the board (e.g. if up a queen, shows +9 )
+- moves numbered - with interative feature to click on specific move
+- DARK MODE?
+- PGN's played as black should auto flip - one up on lichess - not sure how possible this is
 
-EVALUATION ENGINE MAGNUS CARLSEN WOULD BE PROUD TO USE
-
-22.05.25
--eval graph
--accuracy score - normalised on chess.com score
+ENGINES
+-optionality for number of lines/arrows
+-default to local, small engine for speed and redundancy
+-Full strength stockfish - hosted on server
+-Full strength neural network engine - leela - results in more 'novel' moves
+    - why do pros need cloud compute?
+- INVESTIGATE STRONGER (+ WIDER RANGE OF) CHESS ENGINES
+    - carlsen mentions top players pay for cloud compute for analysis
+        - was unaware top engines where compute constraint
 
 - personalised AI coach that give give personalised advice
     - requires profiles
     - build a dataset of a users moves 
     - builds profile on them - repotoire, trends, habits, common mistakes etc
     - provides tailored advice
-
-ENGINES
--default to local, small engine for speed and redundancy
--Full strength stockfish - hosted on server
--Full strength neural network engine - leela
-    - why do pros need cloud compute?
-
--REDESIGN
-- cap line analysis to max length in a defined space so notation size doesn't bounce around
-- move numbered - with interative feature to click on specific move
-- DARK MODE?
-
-BUGS
--sometimes arrows just vanish, most often when going through a game quickly - LARGELY FIXED
-
-- when there is a mate for black, the text is in white
-
-
-- INVESTIGATE STRONGER (+ WIDER RANGE OF) CHESS ENGINES
-    - carlsen mentions top players pay for cloud compute for analysis
-        - was unaware top engines where compute constraint
-    
-    - SELF PLAY REINFORCEMENT LEARNING results in more 'novel' moves, first engine above stockfish to be LEILA/equiv.
-
-
-- bring chess.js and jquery local - for futureproofing and to help with loading times
-
-- REMOVE ALL BUTTONS???, REPLACE WITH INTUITIVE KEYS - CLEANER
-        - FLIP? 
-        - replace text with icons?
-
-- arrows ON/OFF button
-
-- Board flip button - how to get pgn to flip automatically for games as black? - one up on lichess
-
-- how to deal with checkmates?
-
-- show whos up in pieces on the board (e.g. if up a queen, shows +9 )
-
-- currently only available to promote to queen
+PERSONALISED CHESS COACH - COMING
+-build profile of common mistakes
+-personalised coaching
 
 - mobile functionality  
     - currently awful experience for mobile users
@@ -71,24 +46,3 @@ BUGS
             - click piece you wish to move, then click where to move too?
             - stop page scrolling as user drags piece?
             - alternative option to move pieces?
-
-
-FEATURES TO BETTER LICHESS.ORG
-- auto board flip when analysing games as black
-
-- more engine optionality
-    - engine selection
-    - choose number of lines/arrows
-
-
-- IMPLEMENT TRUE ANALYSIS FEATURES
-    - graph of eval score
-    - accuracy% (centipawn?)
-    - classificiation and visualisation of moves (good, great, brilliant!!, etc)
-
-PERSONALISED CHESS COACH - COMING
--build profile of common mistakes
--personalised coaching
-
-BUGS/TESTING
-- NEED TO TEST NOTATION STUFF
