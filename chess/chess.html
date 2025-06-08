@@ -3,6 +3,15 @@
   <head>
     <title>Chess Analysis with Stockfish</title>
     <link rel="icon" type="image/png" href="/images/H-favicon.png"> 
+    
+    <!-- Preload critical resources -->
+    <link rel="preload" href="js/stockfish-16.1-single.js" as="fetch" crossorigin="anonymous">
+    <link rel="preload" href="js/chessboard-1.0.0.min.js" as="script">
+    <link rel="preload" href="js/script.js" as="script">
+    <link rel="preload" href="https://code.jquery.com/jquery-3.6.0.min.js" as="script" crossorigin="anonymous">
+    <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js" as="script" crossorigin="anonymous">
+    
+    <!-- Stylesheets -->
     <link rel="stylesheet" href="css/chessboard-1.0.0.min.css">
     <link rel="stylesheet" href="css/styles.css">
   </head>
@@ -39,10 +48,14 @@
       <button id="flip-board">Flip</button>
     </div>
 
+    <!-- Load dependencies first (jQuery and chess.js are needed by chessboard) -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+
+    <!-- Load chessboard after its dependencies -->
     <script src="js/chessboard-1.0.0.min.js"></script>
-    <script src="js/stockfish-16.1-single.js"></script>
-    <script src="js/script.js"></script>
+    
+    <!-- Load main script with defer to ensure DOM is ready -->
+    <script src="js/script.js" defer></script>
   </body>
 </html>
