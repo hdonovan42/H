@@ -1,13 +1,37 @@
 EVALUATION ENGINE MAGNUS CARLSEN WOULD BE PROUD TO USE
 
+v1
+-remove all buttons
+-eval graph - currently draws as i go to stop freeze at start
+-notation box scrollable
+
+next version - v2
+-stockfish on/off + show which engine is running
+-HOW IS CHECKMATE HANDLED?
+-eval score always in white section of the eval bar - score at bottom for white, top for black - solves text colour issue
+v3
+-engine optionality - default to quickest engine
+    - stockfish fast, stockfish strong, & AI engine
+-promote to not only queen
+-notation numbered clearer - each move can be clicked to traverse to that move of the game
+
+MAJOR bugs-
+- engine freezes - ability to turn engine on/off - also see what engine is running - with brief description
+- current engine claims a winning position but main line ends in draw - WTF?
+
 bugs 
     - stockfish loading time
     - engine freezes 
         - engine turn ON/OFF to reset? - some value in no arrows at times?
         - timeout and restart after x seconds?
-    - colouring text in eval bar for m in x
+    - colouring text in eval bar for m in x - keep text colour fixed, have text always on the white portion - on flip board push the text to the top
     - currently only available to promote to queen
     - notation overflows - dynamic box or scroll?
+
+minor step 
+-remove all buttons - keyboard shortcuts cleaner
+-move pgn box to left 
+-eval graph to right
 
 NEXT MAJOR STEP
 - inform user of keyboard shortcuts

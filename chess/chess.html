@@ -34,18 +34,17 @@
       </div>
       <!-- Stockfish analysis output -->
       <div id="analysis-container">
-        <div id="stockfish-output"></div>
+        <canvas id="analysis-eval-graph" width="400" height="150"></canvas>
+        <div id="analysis-content">
+          <div id="stockfish-output"></div>
+        </div>
       </div>
     </div>
 
     <!-- PGN controls and board reset -->
     <div id="pgn-controls">
-      <textarea id="pgn-input" placeholder="Paste PGN here..." rows="4" cols="50"></textarea><br>
-      <button id="load-pgn">Load PGN</button>
-      <button id="prev-move">Previous Move</button>
-      <button id="next-move">Next Move</button>
-      <button id="reset-board">Reset Board</button>
-      <button id="flip-board">Flip</button>
+      <textarea id="pgn-input" placeholder="Paste PGN here and press Enter..." rows="4" cols="50"></textarea>
+      <div class="pgn-hint">Arrow keys to navigate - F to flip - R to reset</div>
     </div>
 
     <!-- Load dependencies first (jQuery and chess.js are needed by chessboard) -->

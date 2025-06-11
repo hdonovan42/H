@@ -1,4 +1,4 @@
-// Chess Analysis Script - Optimized Version
+// Chess Analysis Script - Updated Version with Eval Graph
 // Constants
 const BOARD_SIZE = 500;
 const SQUARE_SIZE = BOARD_SIZE / 8;
@@ -26,7 +26,10 @@ const AppState = {
   lastFen: '',
   isAnalysisInProgress: false,
   stockfishReady: false,
-  arrowsEnabled: true
+  arrowsEnabled: true,
+  evalHistory: [], // Store evaluation for each position
+  gameLoaded: false,
+  isNavigating: false // Track rapid navigation
 };
 
 // Initialize the application
@@ -52,6 +55,9 @@ function initializeApp() {
   
   // Set up event listeners
   setupEventListeners();
+  
+  // Initialize empty eval graph
+  drawEvalGraph();
 }
 
 // Stockfish initialization
@@ -120,6 +126,31 @@ function handleBestMove(message) {
     bestMove: parts[1],
     ponder: parts[3] || null
   };
+  
+  // Store evaluation in history for current position (only if game is loaded)
+  if (AppState.multipvResults[1] && AppState.gameLoaded) {
+    const eval1 = AppState.multipvResults[1];
+    let evalScore;
+    
+    if (eval1.mate !== undefined) {
+      evalScore = eval1.mate > 0 ? 10 : -10;
+    } else {
+      evalScore = parseFloat(eval1.score);
+      evalScore = Math.max(-10, Math.min(10, evalScore));
+    }
+    
+    // Update eval history for current position only
+    AppState.evalHistory[AppState.currentIndex] = evalScore;
+    
+    // Only update graph if we're not rapidly navigating
+    if (!AppState.isNavigating) {
+      setTimeout(() => {
+        if (!AppState.isNavigating) {
+          requestAnimationFrame(() => drawEvalGraph());
+        }
+      }, 100);
+    }
+  }
   
   updateDisplay();
 }
@@ -379,57 +410,6 @@ function updateEvaluationBar() {
   overlay.textContent = evalText;
 }
 
-function updateEvalBarGradient(evalBar, whitePercentage) {
-  const isFlipped = AppState.board.orientation() === 'black';
-  const direction = isFlipped ? 'to bottom' : 'to top';
-  
-  if (whitePercentage <= 0) {
-    evalBar.style.background = 'black';
-  } else if (whitePercentage >= 100) {
-    evalBar.style.background = 'white';
-  } else {
-    evalBar.style.background = 
-      `linear-gradient(${direction}, white ${whitePercentage}%, black ${whitePercentage}%)`;
-  }
-}
-
-function updateEvalText(evalBar, entry) {
-  let evalText = '';
-  
-  if (entry.mate !== undefined) {
-    const mateVal = AppState.game.turn() === 'b' ? -entry.mate : entry.mate;
-    evalText = `M${mateVal}`;
-  } else {
-    const score = AppState.game.turn() === 'b' ? -parseFloat(entry.score) : parseFloat(entry.score);
-    evalText = score.toFixed(2);
-  }
-  
-  let overlay = document.getElementById('eval-overlay');
-  if (!overlay) {
-    overlay = createEvalOverlay();
-    evalBar.appendChild(overlay);
-  }
-  
-  overlay.textContent = evalText;
-  overlay.style.color = AppState.board.orientation() === 'white' ? 'black' : 'white';
-}
-
-function createEvalOverlay() {
-  const overlay = document.createElement('div');
-  overlay.id = 'eval-overlay';
-  overlay.style.cssText = `
-    position: absolute;
-    bottom: 0;
-    width: 100%;
-    text-align: center;
-    pointer-events: none;
-    font-family: monospace;
-    font-size: 12px;
-    font-weight: bold;
-  `;
-  return overlay;
-}
-
 // Arrow drawing functions
 function updateBoardArrows() {
   const canvas = document.getElementById('arrows-overlay');
@@ -524,9 +504,161 @@ function getSquareCenter(square) {
   return { x, y };
 }
 
+// Evaluation graph drawing (optimized for smooth navigation)
+function drawEvalGraph() {
+  // Only draw if we have actual evaluation data to show
+  if (!AppState.gameLoaded || AppState.evalHistory.length === 0) {
+    clearEvalGraph();
+    return;
+  }
+  
+  // Check if we have any actual evaluation data
+  const hasData = AppState.evalHistory.some(val => val !== undefined);
+  if (!hasData) {
+    clearEvalGraph();
+    return;
+  }
+  
+  // Use requestAnimationFrame to prevent blocking the UI thread
+  requestAnimationFrame(() => {
+    drawAnalysisEvalGraph();
+  });
+}
+
+function clearEvalGraph() {
+  const canvas = document.getElementById('analysis-eval-graph');
+  if (!canvas) return;
+  
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width;
+  const height = canvas.height;
+  
+  // Just clear and draw empty graph structure
+  ctx.clearRect(0, 0, width, height);
+  
+  // Draw background
+  ctx.fillStyle = '#f8f8f8';
+  ctx.fillRect(0, 0, width, height);
+  
+  // Set up margins
+  const margin = { top: 10, right: 15, bottom: 10, left: 15 };
+  const chartWidth = width - margin.left - margin.right;
+  const chartHeight = height - margin.top - margin.bottom;
+  
+  // Draw center line (0.0 evaluation)
+  ctx.strokeStyle = '#888';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  ctx.beginPath();
+  const centerY = margin.top + chartHeight / 2;
+  ctx.moveTo(margin.left, centerY);
+  ctx.lineTo(margin.left + chartWidth, centerY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  
+  // Draw axes
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  // Y-axis
+  ctx.moveTo(margin.left, margin.top);
+  ctx.lineTo(margin.left, margin.top + chartHeight);
+  // X-axis
+  ctx.moveTo(margin.left, margin.top + chartHeight);
+  ctx.lineTo(margin.left + chartWidth, margin.top + chartHeight);
+  ctx.stroke();
+}
+
+function drawAnalysisEvalGraph() {
+  const canvas = document.getElementById('analysis-eval-graph');
+  if (!canvas) return; // Safety check
+  
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width;
+  const height = canvas.height;
+  
+  // Clear canvas
+  ctx.clearRect(0, 0, width, height);
+  
+  // Set up margins for compact display (reduced margins since no labels)
+  const margin = { top: 10, right: 15, bottom: 10, left: 15 };
+  const chartWidth = width - margin.left - margin.right;
+  const chartHeight = height - margin.top - margin.bottom;
+  
+  // Draw background
+  ctx.fillStyle = '#f8f8f8';
+  ctx.fillRect(0, 0, width, height);
+  
+  // Draw center line (0.0 evaluation)
+  ctx.strokeStyle = '#888';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  ctx.beginPath();
+  const centerY = margin.top + chartHeight / 2;
+  ctx.moveTo(margin.left, centerY);
+  ctx.lineTo(margin.left + chartWidth, centerY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  
+  // Draw axes
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  // Y-axis
+  ctx.moveTo(margin.left, margin.top);
+  ctx.lineTo(margin.left, margin.top + chartHeight);
+  // X-axis
+  ctx.moveTo(margin.left, margin.top + chartHeight);
+  ctx.lineTo(margin.left + chartWidth, margin.top + chartHeight);
+  ctx.stroke();
+  
+  // Only draw if we have evaluation data
+  if (AppState.evalHistory.length <= 1) return;
+  
+  // Draw evaluation line
+  ctx.strokeStyle = '#2196F3';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  
+  let hasStarted = false;
+  const evalRange = 10; // -10 to +10
+  
+  for (let i = 0; i < AppState.evalHistory.length; i++) {
+    if (AppState.evalHistory[i] !== undefined) {
+      const x = margin.left + (i / Math.max(1, AppState.evalHistory.length - 1)) * chartWidth;
+      const eval_val = Math.max(-evalRange, Math.min(evalRange, AppState.evalHistory[i]));
+      const y = margin.top + chartHeight - ((eval_val + evalRange) / (2 * evalRange)) * chartHeight;
+      
+      if (!hasStarted) {
+        ctx.moveTo(x, y);
+        hasStarted = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+  }
+  ctx.stroke();
+  
+  // Draw current position indicator
+  if (AppState.currentIndex < AppState.evalHistory.length && 
+      AppState.evalHistory[AppState.currentIndex] !== undefined) {
+    const x = margin.left + (AppState.currentIndex / Math.max(1, AppState.evalHistory.length - 1)) * chartWidth;
+    const eval_val = Math.max(-evalRange, Math.min(evalRange, AppState.evalHistory[AppState.currentIndex]));
+    const y = margin.top + chartHeight - ((eval_val + evalRange) / (2 * evalRange)) * chartHeight;
+    
+    ctx.fillStyle = '#FF5722';
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+}
+
 // Navigation functions
 function navigateToPreviousMove() {
   if (AppState.currentIndex <= 0) return;
+  
+  // Set navigation flag to prevent graph updates during rapid navigation
+  AppState.isNavigating = true;
   
   AppState.currentIndex--;
   rebuildGameFromMoves();
@@ -535,7 +667,17 @@ function navigateToPreviousMove() {
   // Update display immediately
   updateDisplay();
   
-  // Update Stockfish analysis separately (debounced)
+  // Clear navigation flag after a short delay
+  clearTimeout(AppState.navigationTimeout);
+  AppState.navigationTimeout = setTimeout(() => {
+    AppState.isNavigating = false;
+    // Update graph once navigation stops
+    if (AppState.gameLoaded) {
+      requestAnimationFrame(() => drawEvalGraph());
+    }
+  }, 200);
+  
+  // Update Stockfish analysis last (this is the slow part)
   updateStockfishAnalysis();
 }
 
@@ -552,6 +694,9 @@ function navigateToNextMove() {
     return;
   }
   
+  // Set navigation flag to prevent graph updates during rapid navigation
+  AppState.isNavigating = true;
+  
   AppState.currentIndex++;
   rebuildGameFromMoves();
   AppState.board.position(AppState.game.fen());
@@ -559,7 +704,17 @@ function navigateToNextMove() {
   // Update display immediately
   updateDisplay();
   
-  // Update Stockfish analysis separately (debounced)
+  // Clear navigation flag after a short delay
+  clearTimeout(AppState.navigationTimeout);
+  AppState.navigationTimeout = setTimeout(() => {
+    AppState.isNavigating = false;
+    // Update graph once navigation stops
+    if (AppState.gameLoaded) {
+      requestAnimationFrame(() => drawEvalGraph());
+    }
+  }, 200);
+  
+  // Update Stockfish analysis last (this is the slow part)
   updateStockfishAnalysis();
 }
 
@@ -593,14 +748,115 @@ function loadPGN() {
   AppState.pgnMainlineMoves = AppState.game.history();
   AppState.userMoves = [...AppState.pgnMainlineMoves];
   AppState.currentIndex = 0;
+  AppState.gameLoaded = true;
+  
+  // Initialize eval history array (empty)
+  AppState.evalHistory = new Array(AppState.pgnMainlineMoves.length + 1);
   
   // Reset to starting position
   AppState.game.reset();
   AppState.board.start();
   
+  // Just clear the graph initially - don't draw anything yet
+  clearEvalGraph();
+  
   updateStockfishAnalysis();
   updateDisplay();
+  
+  // Don't call drawEvalGraph() here - let it populate as user navigates
 }
+
+// Remove the blocking background analysis functions
+// These were creating multiple Stockfish workers and blocking the UI
+
+// Comment out or remove these functions that were causing the blocking:
+/*
+function analyzeGamePositions() {
+  const tempGame = new Chess();
+  let moveIndex = 0;
+  
+  // Analyze starting position
+  analyzePosition(tempGame.fen(), moveIndex);
+  
+  // Analyze each position after a move
+  for (const move of AppState.pgnMainlineMoves) {
+    tempGame.move(move);
+    moveIndex++;
+    analyzePosition(tempGame.fen(), moveIndex);
+  }
+}
+
+function analyzePosition(fen, moveIndex) {
+  // Create a temporary worker for this analysis
+  const tempStockfish = new Worker('js/stockfish-16.1-single.js');
+  
+  tempStockfish.onmessage = function(event) {
+    const message = typeof event.data === 'string' ? event.data : event.data.data;
+    
+    if (message === 'readyok') {
+      tempStockfish.postMessage(`position fen ${fen}`);
+      tempStockfish.postMessage('go depth 10');
+    } else if (message.startsWith('bestmove')) {
+      tempStockfish.terminate();
+    } else if (message.startsWith('info depth 10') && message.includes('score')) {
+      const info = parseStockfishInfoForGraph(message, fen);
+      if (info) {
+        let evalScore;
+        if (info.mate !== undefined) {
+          evalScore = info.mate > 0 ? 10 : -10;
+        } else {
+          evalScore = parseFloat(info.score);
+          evalScore = Math.max(-10, Math.min(10, evalScore));
+        }
+        
+        AppState.evalHistory[moveIndex] = evalScore;
+        // Use requestAnimationFrame to prevent blocking
+        requestAnimationFrame(() => drawEvalGraph());
+      }
+    }
+  };
+  
+  tempStockfish.postMessage('uci');
+  tempStockfish.postMessage('isready');
+}
+
+function parseStockfishInfoForGraph(message, fen) {
+  const tempGame = new Chess(fen);
+  const parts = message.split(' ');
+  const info = {
+    depth: null,
+    score: null,
+    mate: undefined
+  };
+  
+  for (let i = 0; i < parts.length; i++) {
+    switch (parts[i]) {
+      case 'depth':
+        info.depth = parseInt(parts[++i], 10);
+        break;
+      case 'cp':
+        info.score = (parseInt(parts[++i], 10) / 100).toFixed(2);
+        break;
+      case 'mate':
+        info.mate = parseInt(parts[++i], 10);
+        break;
+    }
+  }
+  
+  if (info.depth === null) return null;
+  
+  // Adjust score based on side to move
+  if (tempGame.turn() === 'b') {
+    if (info.mate !== undefined) {
+      info.mate = -info.mate;
+    } else if (info.score !== null) {
+      info.score = (-parseFloat(info.score)).toFixed(2);
+    }
+  }
+  
+  return info;
+}
+*/
 
 // Board control functions
 function resetBoard() {
@@ -620,6 +876,8 @@ function resetBoard() {
   AppState.userMoves = [];
   AppState.pgnMainlineMoves = [];
   AppState.currentIndex = 0;
+  AppState.evalHistory = [];
+  AppState.gameLoaded = false;
   
   // Reset board
   AppState.game.reset();
@@ -632,6 +890,9 @@ function resetBoard() {
     document.getElementById('arrows-overlay')
   );
   
+  // Clear eval graph
+  drawEvalGraph();
+  
   // Restart analysis
   setTimeout(() => updateStockfishAnalysis(), 100);
 }
@@ -643,12 +904,13 @@ function flipBoard() {
 
 // Event listener setup
 function setupEventListeners() {
-  // Button listeners
-  document.getElementById('load-pgn').addEventListener('click', loadPGN);
-  document.getElementById('prev-move').addEventListener('click', navigateToPreviousMove);
-  document.getElementById('next-move').addEventListener('click', navigateToNextMove);
-  document.getElementById('reset-board').addEventListener('click', resetBoard);
-  document.getElementById('flip-board').addEventListener('click', flipBoard);
+  // PGN input enter key
+  document.getElementById('pgn-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      loadPGN();
+    }
+  });
   
   // Keyboard shortcuts
   document.addEventListener('keydown', handleKeyPress);
@@ -658,6 +920,7 @@ function setupEventListeners() {
     if (Object.keys(AppState.multipvResults).length > 0) {
       updateBoardArrows();
     }
+    drawEvalGraph();
   }, 250));
   
   // Prevent arrow key scrolling
@@ -669,13 +932,24 @@ function setupEventListeners() {
 }
 
 function handleKeyPress(event) {
+  // Don't handle shortcuts if typing in textarea
+  if (event.target.tagName === 'TEXTAREA') return;
+  
+  // Ensure we're not in any input field
+  if (event.target.tagName === 'INPUT') return;
+  
   const keyActions = {
     'ArrowLeft': navigateToPreviousMove,
     'ArrowRight': navigateToNextMove,
-    'Enter': loadPGN,
     'r': resetBoard,
+    'R': resetBoard,
     'f': flipBoard,
+    'F': flipBoard,
     'a': () => {
+      AppState.arrowsEnabled = !AppState.arrowsEnabled;
+      updateDisplay();
+    },
+    'A': () => {
       AppState.arrowsEnabled = !AppState.arrowsEnabled;
       updateDisplay();
     }
@@ -684,16 +958,14 @@ function handleKeyPress(event) {
   const action = keyActions[event.key];
   if (action) {
     event.preventDefault();
+    event.stopPropagation();
     action();
   }
 }
 
 // Utility functions
-function createDiv(content = '', className = '') {
-  const div = document.createElement('div');
-  if (content) div.textContent = content;
-  if (className) div.className = className;
-  return div;
+function clearCanvas(ctx, canvas) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
 function debounce(func, wait) {
@@ -709,7 +981,6 @@ function debounce(func, wait) {
 }
 
 function showError(message) {
-  // Could be replaced with a better UI notification system
   alert(message);
 }
 
