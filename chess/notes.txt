@@ -5,6 +5,11 @@ v1
 -eval graph - currently draws as i go to stop freeze at start
 -notation box scrollable
 
+v1.5
+DESIGN TWEAKS
+- close gap between board and pgn box 
+- replace '-' with bullet points
+
 next version - v2
 -stockfish on/off + show which engine is running
 -HOW IS CHECKMATE HANDLED?
