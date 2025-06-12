@@ -89,7 +89,7 @@ function initializeStockfish() {
         document.getElementById('engine-toggle').checked = false;
         AppState.engineEnabled = false;
       }
-    }, 10000); // 10 second timeout
+    }, 30000); // 10 second timeout
     
     AppState.stockfish.onmessage = function(event) {
       // Clear timeout on first message
