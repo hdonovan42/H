@@ -1,7 +1,5 @@
 EVALUATION ENGINE MAGNUS CARLSEN WOULD BE PROUD TO USE
 
-TEMP FIX - TIMEOUT CAUSING ENGINE TO NEVER START - TEMPORARILY 30 SECONDS
-
 metrics to track
 - needing to refresh the page - metric should approach 0
 - time to load first arrow (any engine allowed) - approaching 0
@@ -23,6 +21,7 @@ v1.7
 
 v1.8
 -engine crash handling - current pop up at the top seems obtuse - just a message in right container should suffice
+optimise load up time - delete WASM file? - current optimisations avoid the stockfish-16.1 file which is the problem
 
 v2
 -HOW IS CHECKMATE HANDLED?

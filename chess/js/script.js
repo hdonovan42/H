@@ -60,6 +60,8 @@ function initializeApp() {
   drawEvalGraph();
 }
 
+AppState.hasLoadedOnce = false;
+
 // Stockfish initialization
 function initializeStockfish() {
   try {
@@ -78,18 +80,22 @@ function initializeStockfish() {
       }
     };
     
-    // Add timeout protection
-    let initTimeout = setTimeout(() => {
-      console.error('Stockfish initialization timeout');
-      document.getElementById('stockfish-loading').style.display = 'none';
-      showError('Chess engine failed to start. Please toggle the engine off and on to retry.');
-      
-      // Automatically disable the engine
-      if (AppState.engineEnabled) {
-        document.getElementById('engine-toggle').checked = false;
-        AppState.engineEnabled = false;
-      }
-    }, 30000); // 10 second timeout
+    // Add timeout protection - NOT ON FIRST LOADUP
+    let initTimeout = null;
+
+    if (AppState.hasLoadedOnce) {
+      // Enforce timeout ONLY if this is not the first load
+      initTimeout = setTimeout(() => {
+        console.error('Stockfish initialization timeout');
+        document.getElementById('stockfish-loading').style.display = 'none';
+        showError('Chess engine failed to start. Please toggle the engine off and on to retry.');
+
+        if (AppState.engineEnabled) {
+          document.getElementById('engine-toggle').checked = false;
+          AppState.engineEnabled = false;
+        }
+      }, 10000); // 10 second timeout
+    }
     
     AppState.stockfish.onmessage = function(event) {
       // Clear timeout on first message
@@ -127,6 +133,7 @@ function handleStockfishMessage(event) {
 function handleStockfishReady() {
   console.log('Stockfish is ready!');
   AppState.stockfishReady = true;
+  AppState.hasLoadedOnce = true;
   document.getElementById('stockfish-loading').style.display = 'none';
   if (AppState.engineEnabled) {
     updateStockfishAnalysis();
