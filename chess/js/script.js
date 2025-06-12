@@ -504,12 +504,18 @@ function drawAnalysisEvalGraph() {
   ctx.fillStyle = '#f8f8f8';
   ctx.fillRect(0, 0, width, height);
   
+  // Calculate center line position (0.0 evaluation)
+  const centerY = margin.top + chartHeight / 2;
+  
+  // Shade the area below the center line (black advantage)
+  ctx.fillStyle = '#e0e0e0'; // Light grey
+  ctx.fillRect(margin.left, centerY, chartWidth, chartHeight / 2);
+  
   // Draw center line (0.0 evaluation)
   ctx.strokeStyle = '#888';
   ctx.lineWidth = 1;
   ctx.setLineDash([3, 3]);
   ctx.beginPath();
-  const centerY = margin.top + chartHeight / 2;
   ctx.moveTo(margin.left, centerY);
   ctx.lineTo(margin.left + chartWidth, centerY);
   ctx.stroke();
