@@ -1,4 +1,4 @@
-// Chess Analysis Script - Updated Version with Eval Graph
+// Chess Analysis Script - Updated Version with Eval Graph and Engine Control
 // Constants
 const BOARD_SIZE = 500;
 const SQUARE_SIZE = BOARD_SIZE / 8;
@@ -28,7 +28,8 @@ const AppState = {
   stockfishReady: false,
   arrowsEnabled: true,
   evalHistory: [], // Store evaluation for each position
-  gameLoaded: false
+  gameLoaded: false,
+  engineEnabled: true // New state for engine toggle
 };
 
 // Initialize the application
@@ -63,13 +64,49 @@ function initializeApp() {
 function initializeStockfish() {
   try {
     AppState.stockfish = new Worker('js/stockfish-16.1-single.js');
+    
+    // Add error handler for the worker
+    AppState.stockfish.onerror = function(error) {
+      console.error('Stockfish worker error:', error);
+      document.getElementById('stockfish-loading').style.display = 'none';
+      showError('Chess engine crashed. Please toggle the engine off and on to restart.');
+      
+      // Automatically disable the engine
+      if (AppState.engineEnabled) {
+        document.getElementById('engine-toggle').checked = false;
+        AppState.engineEnabled = false;
+      }
+    };
+    
+    // Add timeout protection
+    let initTimeout = setTimeout(() => {
+      console.error('Stockfish initialization timeout');
+      document.getElementById('stockfish-loading').style.display = 'none';
+      showError('Chess engine failed to start. Please toggle the engine off and on to retry.');
+      
+      // Automatically disable the engine
+      if (AppState.engineEnabled) {
+        document.getElementById('engine-toggle').checked = false;
+        AppState.engineEnabled = false;
+      }
+    }, 10000); // 10 second timeout
+    
+    AppState.stockfish.onmessage = function(event) {
+      // Clear timeout on first message
+      if (initTimeout) {
+        clearTimeout(initTimeout);
+        initTimeout = null;
+      }
+      handleStockfishMessage(event);
+    };
+    
     AppState.stockfish.postMessage('uci');
     AppState.stockfish.postMessage('setoption name MultiPV value ' + MULTI_PV_LINES);
     AppState.stockfish.postMessage('isready');
     
-    AppState.stockfish.onmessage = handleStockfishMessage;
   } catch (error) {
     console.error('Failed to initialize Stockfish:', error);
+    document.getElementById('stockfish-loading').style.display = 'none';
     showError('Failed to load chess engine. Please refresh the page.');
   }
 }
@@ -91,11 +128,13 @@ function handleStockfishReady() {
   console.log('Stockfish is ready!');
   AppState.stockfishReady = true;
   document.getElementById('stockfish-loading').style.display = 'none';
-  updateStockfishAnalysis();
+  if (AppState.engineEnabled) {
+    updateStockfishAnalysis();
+  }
 }
 
 function handleAnalysisInfo(message) {
-  if (!AppState.stockfishReady) return;
+  if (!AppState.stockfishReady || !AppState.engineEnabled) return;
   
   const info = parseStockfishInfo(message);
   if (!info) return;
@@ -112,7 +151,7 @@ function handleAnalysisInfo(message) {
 }
 
 function handleBestMove(message) {
-  if (!AppState.stockfishReady) return;
+  if (!AppState.stockfishReady || !AppState.engineEnabled) return;
   
   // Check if this is analysis for the current position
   const currentFen = AppState.game.fen();
@@ -206,7 +245,9 @@ function handleDrop(source, target) {
   AppState.userMoves = AppState.game.history();
   AppState.currentIndex = AppState.userMoves.length;
   
-  updateStockfishAnalysis();
+  if (AppState.engineEnabled) {
+    updateStockfishAnalysis();
+  }
   updateDisplay();
   
   return 'drop';
@@ -218,6 +259,11 @@ function handleSnapEnd() {
 
 // Stockfish analysis update (debounced)
 function updateStockfishAnalysis() {
+  // If engine is disabled, don't analyze
+  if (!AppState.engineEnabled || !AppState.stockfish) {
+    return;
+  }
+  
   // Cancel pending analysis
   if (AppState.analysisQueue) {
     clearTimeout(AppState.analysisQueue);
@@ -235,19 +281,38 @@ function updateStockfishAnalysis() {
   
   // Debounce analysis request - but keep it short for responsive arrows
   AppState.analysisQueue = setTimeout(() => {
+    if (!AppState.engineEnabled || !AppState.stockfish || !AppState.stockfishReady) {
+      return;
+    }
+    
     AppState.isAnalysisInProgress = true;
     
     // Don't clear previous results - keep them until we get new ones
     // This prevents the eval bar from twitching
     
-    // Stop current analysis
-    AppState.stockfish.postMessage('stop');
-    
-    // Start new analysis after a brief delay
-    setTimeout(() => {
-      AppState.stockfish.postMessage(`position fen ${currentFen}`);
-      AppState.stockfish.postMessage(`go depth ${ANALYSIS_DEPTH}`);
-    }, 50);
+    try {
+      // Stop current analysis
+      AppState.stockfish.postMessage('stop');
+      
+      // Start new analysis after a brief delay
+      setTimeout(() => {
+        if (AppState.stockfish && AppState.engineEnabled) {
+          AppState.stockfish.postMessage(`position fen ${currentFen}`);
+          AppState.stockfish.postMessage(`go depth ${ANALYSIS_DEPTH}`);
+          
+          // Add a timeout to detect frozen analysis
+          setTimeout(() => {
+            if (AppState.isAnalysisInProgress && AppState.lastFen === currentFen) {
+              console.warn('Analysis appears to be frozen, you may need to toggle the engine');
+              // Don't auto-toggle, let the user decide
+            }
+          }, 15000); // 15 seconds should be enough for depth 15
+        }
+      }, 50);
+    } catch (error) {
+      console.error('Error updating Stockfish analysis:', error);
+      AppState.isAnalysisInProgress = false;
+    }
   }, 100); // Reduced from 300ms to 100ms for faster response
 }
 
@@ -255,8 +320,13 @@ function updateStockfishAnalysis() {
 function updateDisplay() {
   updateAnalysisOutput();
   updateEvaluationBar();
-  if (AppState.arrowsEnabled) {
+  if (AppState.arrowsEnabled && AppState.engineEnabled) {
     updateBoardArrows();
+  } else {
+    // Clear arrows if disabled
+    const canvas = document.getElementById('arrows-overlay');
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
   }
 }
 
@@ -264,20 +334,34 @@ function updateAnalysisOutput() {
   const outputDiv = document.getElementById('stockfish-output');
   outputDiv.innerHTML = '';
 
-  if (AppState.bestMoveInfo) {
+  // Show engine status if disabled
+  if (!AppState.engineEnabled) {
+    const statusDiv = document.createElement('div');
+    statusDiv.style.color = "#dc3545";
+    statusDiv.style.backgroundColor = "#f8d7da";
+    statusDiv.style.padding = "10px";
+    statusDiv.style.borderRadius = "3px";
+    statusDiv.style.marginBottom = "10px";
+    statusDiv.textContent = "Engine is disabled. Toggle on to resume analysis.";
+    outputDiv.appendChild(statusDiv);
+  }
+
+  if (AppState.bestMoveInfo && AppState.engineEnabled) {
     const bestMoveDiv = document.createElement('div');
     bestMoveDiv.textContent = `Best Move: ${AppState.bestMoveInfo.bestMove}\n`;
     outputDiv.appendChild(bestMoveDiv);
   }
 
   // Sorted by MultiPV index (1, 2, 3) - original format
-  const sortedKeys = Object.keys(AppState.multipvResults).sort((a, b) => a - b);
-  sortedKeys.forEach(key => {
-    const info = AppState.multipvResults[key];
-    const lineDiv = document.createElement('div');
-    lineDiv.textContent = `${key}. Score: ${info.scoreDisplay}\nLine: ${info.pv}\n`;
-    outputDiv.appendChild(lineDiv);
-  });
+  if (AppState.engineEnabled) {
+    const sortedKeys = Object.keys(AppState.multipvResults).sort((a, b) => a - b);
+    sortedKeys.forEach(key => {
+      const info = AppState.multipvResults[key];
+      const lineDiv = document.createElement('div');
+      lineDiv.textContent = `${key}. Score: ${info.scoreDisplay}\nLine: ${info.pv}\n`;
+      outputDiv.appendChild(lineDiv);
+    });
+  }
 
   // Display current game notation - original format
   const notationDiv = document.createElement('div');
@@ -303,7 +387,7 @@ function updateAnalysisOutput() {
   outputDiv.appendChild(notationDiv);
   
   // Analysis status
-  if (AppState.isAnalysisInProgress) {
+  if (AppState.isAnalysisInProgress && AppState.engineEnabled) {
     const statusDiv = document.createElement('div');
     statusDiv.style.marginTop = "10px";
     statusDiv.style.color = "#856404";
@@ -392,8 +476,8 @@ function updateBoardArrows() {
   // Clear canvas
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   
-  // Don't draw if no analysis results
-  if (Object.keys(AppState.multipvResults).length === 0) {
+  // Don't draw if no analysis results or engine is disabled
+  if (Object.keys(AppState.multipvResults).length === 0 || !AppState.engineEnabled) {
     return;
   }
   
@@ -574,6 +658,72 @@ function drawAnalysisEvalGraph() {
   }
 }
 
+// Toggle engine on/off
+function toggleEngine() {
+  AppState.engineEnabled = !AppState.engineEnabled;
+  
+  if (AppState.engineEnabled) {
+    // Engine turned on - completely restart Stockfish
+    console.log('Restarting Stockfish engine...');
+    
+    // Terminate the old worker if it exists
+    if (AppState.stockfish) {
+      try {
+        AppState.stockfish.terminate();
+      } catch (e) {
+        console.error('Error terminating old Stockfish worker:', e);
+      }
+    }
+    
+    // Reset all engine-related state
+    AppState.stockfish = null;
+    AppState.stockfishReady = false;
+    AppState.multipvResults = {};
+    AppState.bestMoveInfo = null;
+    AppState.isAnalysisInProgress = false;
+    AppState.lastFen = '';
+    
+    // Clear any pending analysis
+    if (AppState.analysisQueue) {
+      clearTimeout(AppState.analysisQueue);
+      AppState.analysisQueue = null;
+    }
+    
+    // Show loading indicator
+    document.getElementById('stockfish-loading').style.display = 'block';
+    
+    // Reinitialize Stockfish with a small delay
+    setTimeout(() => {
+      initializeStockfish();
+    }, 100);
+    
+  } else {
+    // Engine turned off - stop analysis
+    if (AppState.stockfish) {
+      try {
+        AppState.stockfish.postMessage('stop');
+      } catch (e) {
+        console.error('Error stopping Stockfish:', e);
+      }
+    }
+    
+    // Clear any pending analysis
+    if (AppState.analysisQueue) {
+      clearTimeout(AppState.analysisQueue);
+      AppState.analysisQueue = null;
+    }
+    
+    AppState.isAnalysisInProgress = false;
+    
+    // Clear arrows immediately
+    const canvas = document.getElementById('arrows-overlay');
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+  
+  updateDisplay();
+}
+
 // Navigation functions
 function navigateToPreviousMove() {
   if (AppState.currentIndex <= 0) return;
@@ -591,7 +741,9 @@ function navigateToPreviousMove() {
   }
   
   // Update Stockfish analysis last
-  updateStockfishAnalysis();
+  if (AppState.engineEnabled) {
+    updateStockfishAnalysis();
+  }
 }
 
 function navigateToNextMove() {
@@ -620,7 +772,9 @@ function navigateToNextMove() {
   }
   
   // Update Stockfish analysis last
-  updateStockfishAnalysis();
+  if (AppState.engineEnabled) {
+    updateStockfishAnalysis();
+  }
 }
 
 function rebuildGameFromMoves() {
@@ -665,7 +819,9 @@ function loadPGN() {
   // Analyze all positions in the game
   analyzeGamePositions();
   
-  updateStockfishAnalysis();
+  if (AppState.engineEnabled) {
+    updateStockfishAnalysis();
+  }
   updateDisplay();
   drawEvalGraph();
 }
@@ -792,7 +948,11 @@ function resetBoard() {
   drawEvalGraph();
   
   // Restart analysis
-  setTimeout(() => updateStockfishAnalysis(), 100);
+  setTimeout(() => {
+    if (AppState.engineEnabled) {
+      updateStockfishAnalysis();
+    }
+  }, 100);
 }
 
 function flipBoard() {
@@ -802,6 +962,13 @@ function flipBoard() {
 
 // Event listener setup
 function setupEventListeners() {
+  // Engine toggle
+  document.getElementById('engine-toggle').addEventListener('change', (e) => {
+    toggleEngine();
+    // Remove focus from the toggle switch so arrow keys work immediately
+    e.target.blur();
+  });
+  
   // PGN input enter key
   document.getElementById('pgn-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {

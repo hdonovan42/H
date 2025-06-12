@@ -1,5 +1,11 @@
 EVALUATION ENGINE MAGNUS CARLSEN WOULD BE PROUD TO USE
 
+metrics to track
+- needing to refresh the page - metric should approach 0
+- time to load first arrow (any engine allowed) - approaching 0
+- elo score of strongest engine - higher is better
+- times needed to turn engine ON/OFF to unfreeze arrows - approaching 0
+
 v1
 -remove all buttons
 -eval graph - currently draws as i go to stop freeze at start
@@ -10,12 +16,10 @@ DESIGN TWEAKS
 - close gap between board and pgn box 
 - replace '-' with bullet points
 
-BUGS FROM v1.x
--after pgn is loaded, i have to click out in order to traverse
--flipping board causes graph to flip - graph should be fixed - shade half of the graph black 
+v1.7
+-stockfish on/off + show which engine is running - should fix arrow freeze issue
 
-next version - v2
--stockfish on/off + show which engine is running
+v2
 -HOW IS CHECKMATE HANDLED?
 -eval score always in white section of the eval bar - score at bottom for white, top for black - solves text colour issue
 v3

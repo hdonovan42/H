@@ -34,6 +34,18 @@
       </div>
       <!-- Stockfish analysis output -->
       <div id="analysis-container">
+        <!-- Engine control section -->
+        <div id="engine-control">
+          <div class="engine-info">
+            <select id="engine-select" disabled>
+              <option value="stockfish">Stockfish 16.1</option>
+            </select>
+            <label class="toggle-switch">
+              <input type="checkbox" id="engine-toggle" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
         <canvas id="analysis-eval-graph" width="400" height="150"></canvas>
         <div id="analysis-content">
           <div id="stockfish-output"></div>
