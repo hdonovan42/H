@@ -10,6 +10,11 @@ DESIGN TWEAKS
 - close gap between board and pgn box 
 - replace '-' with bullet points
 
+BUGS FROM v1.x
+-after pgn is loaded, i have to click out in order to traverse
+-rapid game traversal causes graph to skip moves - make the graph be printed at the start without taking up too many resources
+-flipping board causes graph to flip - graph should be fixed - shade half of the graph black 
+
 next version - v2
 -stockfish on/off + show which engine is running
 -HOW IS CHECKMATE HANDLED?
@@ -21,8 +26,8 @@ v3
 -notation numbered clearer - each move can be clicked to traverse to that move of the game
 
 MAJOR bugs-
-- engine freezes - ability to turn engine on/off - also see what engine is running - with brief description
-- current engine claims a winning position but main line ends in draw - WTF?
+- engine freezes -SOLVED BY ability to toggle engine on/off - also see what engine is running - with brief description
+- current engine claims a winning position but main line ends in draw - WTF? - SOLVED BY engine optionality
 
 bugs 
     - stockfish loading time
