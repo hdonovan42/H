@@ -12,7 +12,6 @@ DESIGN TWEAKS
 
 BUGS FROM v1.x
 -after pgn is loaded, i have to click out in order to traverse
--rapid game traversal causes graph to skip moves - make the graph be printed at the start without taking up too many resources
 -flipping board causes graph to flip - graph should be fixed - shade half of the graph black 
 
 next version - v2

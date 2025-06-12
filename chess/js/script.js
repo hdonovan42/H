@@ -28,8 +28,7 @@ const AppState = {
   stockfishReady: false,
   arrowsEnabled: true,
   evalHistory: [], // Store evaluation for each position
-  gameLoaded: false,
-  isNavigating: false // Track rapid navigation
+  gameLoaded: false
 };
 
 // Initialize the application
@@ -126,31 +125,6 @@ function handleBestMove(message) {
     bestMove: parts[1],
     ponder: parts[3] || null
   };
-  
-  // Store evaluation in history for current position (only if game is loaded)
-  if (AppState.multipvResults[1] && AppState.gameLoaded) {
-    const eval1 = AppState.multipvResults[1];
-    let evalScore;
-    
-    if (eval1.mate !== undefined) {
-      evalScore = eval1.mate > 0 ? 10 : -10;
-    } else {
-      evalScore = parseFloat(eval1.score);
-      evalScore = Math.max(-10, Math.min(10, evalScore));
-    }
-    
-    // Update eval history for current position only
-    AppState.evalHistory[AppState.currentIndex] = evalScore;
-    
-    // Only update graph if we're not rapidly navigating
-    if (!AppState.isNavigating) {
-      setTimeout(() => {
-        if (!AppState.isNavigating) {
-          requestAnimationFrame(() => drawEvalGraph());
-        }
-      }, 100);
-    }
-  }
   
   updateDisplay();
 }
@@ -504,69 +478,10 @@ function getSquareCenter(square) {
   return { x, y };
 }
 
-// Evaluation graph drawing (optimized for smooth navigation)
+// Evaluation graph drawing
 function drawEvalGraph() {
-  // Only draw if we have actual evaluation data to show
-  if (!AppState.gameLoaded || AppState.evalHistory.length === 0) {
-    clearEvalGraph();
-    return;
-  }
-  
-  // Check if we have any actual evaluation data
-  const hasData = AppState.evalHistory.some(val => val !== undefined);
-  if (!hasData) {
-    clearEvalGraph();
-    return;
-  }
-  
-  // Use requestAnimationFrame to prevent blocking the UI thread
-  requestAnimationFrame(() => {
-    drawAnalysisEvalGraph();
-  });
-}
-
-function clearEvalGraph() {
-  const canvas = document.getElementById('analysis-eval-graph');
-  if (!canvas) return;
-  
-  const ctx = canvas.getContext('2d');
-  const width = canvas.width;
-  const height = canvas.height;
-  
-  // Just clear and draw empty graph structure
-  ctx.clearRect(0, 0, width, height);
-  
-  // Draw background
-  ctx.fillStyle = '#f8f8f8';
-  ctx.fillRect(0, 0, width, height);
-  
-  // Set up margins
-  const margin = { top: 10, right: 15, bottom: 10, left: 15 };
-  const chartWidth = width - margin.left - margin.right;
-  const chartHeight = height - margin.top - margin.bottom;
-  
-  // Draw center line (0.0 evaluation)
-  ctx.strokeStyle = '#888';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([3, 3]);
-  ctx.beginPath();
-  const centerY = margin.top + chartHeight / 2;
-  ctx.moveTo(margin.left, centerY);
-  ctx.lineTo(margin.left + chartWidth, centerY);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  
-  // Draw axes
-  ctx.strokeStyle = '#333';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  // Y-axis
-  ctx.moveTo(margin.left, margin.top);
-  ctx.lineTo(margin.left, margin.top + chartHeight);
-  // X-axis
-  ctx.moveTo(margin.left, margin.top + chartHeight);
-  ctx.lineTo(margin.left + chartWidth, margin.top + chartHeight);
-  ctx.stroke();
+  // Draw in the analysis container
+  drawAnalysisEvalGraph();
 }
 
 function drawAnalysisEvalGraph() {
@@ -657,9 +572,6 @@ function drawAnalysisEvalGraph() {
 function navigateToPreviousMove() {
   if (AppState.currentIndex <= 0) return;
   
-  // Set navigation flag to prevent graph updates during rapid navigation
-  AppState.isNavigating = true;
-  
   AppState.currentIndex--;
   rebuildGameFromMoves();
   AppState.board.position(AppState.game.fen());
@@ -667,17 +579,12 @@ function navigateToPreviousMove() {
   // Update display immediately
   updateDisplay();
   
-  // Clear navigation flag after a short delay
-  clearTimeout(AppState.navigationTimeout);
-  AppState.navigationTimeout = setTimeout(() => {
-    AppState.isNavigating = false;
-    // Update graph once navigation stops
-    if (AppState.gameLoaded) {
-      requestAnimationFrame(() => drawEvalGraph());
-    }
-  }, 200);
+  // Update graph to show current position
+  if (AppState.gameLoaded) {
+    drawEvalGraph();
+  }
   
-  // Update Stockfish analysis last (this is the slow part)
+  // Update Stockfish analysis last
   updateStockfishAnalysis();
 }
 
@@ -694,9 +601,6 @@ function navigateToNextMove() {
     return;
   }
   
-  // Set navigation flag to prevent graph updates during rapid navigation
-  AppState.isNavigating = true;
-  
   AppState.currentIndex++;
   rebuildGameFromMoves();
   AppState.board.position(AppState.game.fen());
@@ -704,17 +608,12 @@ function navigateToNextMove() {
   // Update display immediately
   updateDisplay();
   
-  // Clear navigation flag after a short delay
-  clearTimeout(AppState.navigationTimeout);
-  AppState.navigationTimeout = setTimeout(() => {
-    AppState.isNavigating = false;
-    // Update graph once navigation stops
-    if (AppState.gameLoaded) {
-      requestAnimationFrame(() => drawEvalGraph());
-    }
-  }, 200);
+  // Update graph to show current position
+  if (AppState.gameLoaded) {
+    drawEvalGraph();
+  }
   
-  // Update Stockfish analysis last (this is the slow part)
+  // Update Stockfish analysis last
   updateStockfishAnalysis();
 }
 
@@ -750,27 +649,22 @@ function loadPGN() {
   AppState.currentIndex = 0;
   AppState.gameLoaded = true;
   
-  // Initialize eval history array (empty)
+  // Initialize eval history array
   AppState.evalHistory = new Array(AppState.pgnMainlineMoves.length + 1);
   
   // Reset to starting position
   AppState.game.reset();
   AppState.board.start();
   
-  // Just clear the graph initially - don't draw anything yet
-  clearEvalGraph();
+  // Analyze all positions in the game
+  analyzeGamePositions();
   
   updateStockfishAnalysis();
   updateDisplay();
-  
-  // Don't call drawEvalGraph() here - let it populate as user navigates
+  drawEvalGraph();
 }
 
-// Remove the blocking background analysis functions
-// These were creating multiple Stockfish workers and blocking the UI
-
-// Comment out or remove these functions that were causing the blocking:
-/*
+// Analyze all positions in the loaded game
 function analyzeGamePositions() {
   const tempGame = new Chess();
   let moveIndex = 0;
@@ -810,8 +704,7 @@ function analyzePosition(fen, moveIndex) {
         }
         
         AppState.evalHistory[moveIndex] = evalScore;
-        // Use requestAnimationFrame to prevent blocking
-        requestAnimationFrame(() => drawEvalGraph());
+        drawEvalGraph();
       }
     }
   };
@@ -856,7 +749,6 @@ function parseStockfishInfoForGraph(message, fen) {
   
   return info;
 }
-*/
 
 // Board control functions
 function resetBoard() {
@@ -909,6 +801,8 @@ function setupEventListeners() {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       loadPGN();
+      // Remove focus from textarea after loading PGN
+      e.target.blur();
     }
   });
   
