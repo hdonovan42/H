@@ -20,6 +20,14 @@ v1.7
 -stockfish on/off + show which engine is running - should fix arrow freeze issue
 
 v1.8
+-engine switch
+FROM: stockfish-16.1-single (js+wasm) ~ 67mb
+    LOAD TIME: 5-15 seconds
+TO: stockfish-17-lite-single ~ 6mb
+    LOAD TIME: on web server < 1 second - GREAT
+x10 smaller engine with *similar* strength
+
+v1.8
 -engine crash handling - current pop up at the top seems obtuse - just a message in right container should suffice
 optimise load up time - delete WASM file? - current optimisations avoid the stockfish-16.1 file which is the problem
 

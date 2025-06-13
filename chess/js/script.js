@@ -65,7 +65,7 @@ AppState.hasLoadedOnce = false;
 // Stockfish initialization
 function initializeStockfish() {
   try {
-    AppState.stockfish = new Worker('js/stockfish-16.1-single.js');
+    AppState.stockfish = new Worker('js/stockfish-17-lite-single.js');
     
     // Add error handler for the worker
     AppState.stockfish.onerror = function(error) {
@@ -119,7 +119,7 @@ function initializeStockfish() {
 
 // Stockfish message handler
 function handleStockfishMessage(event) {
-  const message = typeof event.data === 'string' ? event.data : event.data.data;
+  const message = event.data;
   
   if (message === 'readyok') {
     handleStockfishReady();
@@ -851,7 +851,7 @@ function analyzeGamePositions() {
 
 function analyzePosition(fen, moveIndex) {
   // Create a temporary worker for this analysis
-  const tempStockfish = new Worker('js/stockfish-16.1-single.js');
+  const tempStockfish = new Worker('js/stockfish-17-lite-single.js');
   
   tempStockfish.onmessage = function(event) {
     const message = typeof event.data === 'string' ? event.data : event.data.data;
