@@ -9,20 +9,11 @@ metrics to track
 current bugs 
     - colouring text in eval bar for m in x - keep text colour fixed, have text always on the white portion - on flip board push the text to the top
         - when playing as black, overwhelming winning position for white, eval score text is invisible
-    - promotion - images don't appear
-    - status shows checkmate even in resignation - just have states - white win, black win, & draw 
 
-v1.8
-- handle checkmates and draws - done, need to test
-- promote to not only queen - make sure notation logic works
-
-v2
--HOW IS CHECKMATE HANDLED?
-    - visualise checkmate, draw, stalemate 
-    - logic handles game over - doesn't distinguish between win, stalemate, & draw 
-    - players can still attempt moves after the game ends - only theoretically, not in practise
--promote to not only queen
--eval score always in white section of the eval bar - score at bottom for white, top for black - solves text colour issue
+v1.95
+- handle checkmates and draws - done, need to test - DONE 
+- promote to not only queen - make sure notation logic works - DONE 
+-eval score sometimes invisible bug
 
 v2.5
 -engine optionality - default to quickest engine
