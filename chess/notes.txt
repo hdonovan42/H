@@ -6,6 +6,60 @@ metrics to track
 - elo score of strongest engine - higher is better
 - times needed to turn engine ON/OFF to unfreeze arrows - approaching 0
 
+current bugs 
+    - engine error popup too obtuse
+    - colouring text in eval bar for m in x - keep text colour fixed, have text always on the white portion - on flip board push the text to the top
+    - currently only available to promote to queen
+
+v1.85
+-code cleanup - removed upneeded code + tweaks/optimisations
+
+v1.9
+-engine crash handling - current pop up at the top seems obtuse - just a message in the container should suffice
+
+v2
+-HOW IS CHECKMATE HANDLED?
+-promote to not only queen
+-eval score always in white section of the eval bar - score at bottom for white, top for black - solves text colour issue
+
+v2.5
+-engine optionality - default to quickest engine
+    - stockfish fast, stockfish strong, & AI engine
+        - why do pros need cloud compute? - server?
+- ADD ENGINE SETTINGS BUTTON 
+    -optionality for number of lines/arrows, threads, memory usage, & search time
+-notation numbered clearer - with interative feature to click on specific move
+
+
+v3 - TRUE ANALYSIS FEATURES
+- accuracy% score (centipawn?) - normalised on chess.com score
+- classificiation and visualisation of moves (good, great, brilliant!!, etc)
+- show whos up in pieces on the board (e.g. if up a queen, shows +9 )
+- DARK MODE?
+- PGN's played as black should auto flip - one up on lichess - not sure how possible this is
+  
+- INVESTIGATE STRONGER (+ WIDER RANGE OF) CHESS ENGINES
+    - carlsen mentions top players pay for cloud compute for analysis
+        - was unaware top engines where compute constraint
+
+- personalised AI coach that give give personalised advice
+    - requires profiles
+    - build a dataset of a users moves 
+    - builds profile on them - repotoire, trends, habits, common mistakes etc
+    - provides tailored advice
+PERSONALISED CHESS COACH - COMING
+-build profile of common mistakes
+-personalised coaching
+
+- mobile functionality  
+    - currently awful experience for mobile users
+        - how to fix?
+            - click piece you wish to move, then click where to move too?
+            - stop page scrolling as user drags piece?
+            - alternative option to move pieces?
+
+OLD VERSIONS MOVED TO BOTTOM 
+
 v1
 -remove all buttons
 -eval graph - currently draws as i go to stop freeze at start
@@ -26,72 +80,3 @@ FROM: stockfish-16.1-single (js+wasm) ~ 67mb
 TO: stockfish-17-lite-single ~ 6mb
     LOAD TIME: on web server < 1 second - GREAT
 x10 smaller engine with *similar* strength
-
-v1.8
--engine crash handling - current pop up at the top seems obtuse - just a message in right container should suffice
-optimise load up time - delete WASM file? - current optimisations avoid the stockfish-16.1 file which is the problem
-
-v2
--HOW IS CHECKMATE HANDLED?
--eval score always in white section of the eval bar - score at bottom for white, top for black - solves text colour issue
-v3
--engine optionality - default to quickest engine
-    - stockfish fast, stockfish strong, & AI engine
--promote to not only queen
--notation numbered clearer - each move can be clicked to traverse to that move of the game
-
-MAJOR bugs-
-- engine freezes -SOLVED BY ability to toggle engine on/off - also see what engine is running - with brief description
-- current engine claims a winning position but main line ends in draw - WTF? - SOLVED BY engine optionality
-
-bugs 
-    - stockfish loading time
-    - engine freezes 
-        - engine turn ON/OFF to reset? - some value in no arrows at times?
-        - timeout and restart after x seconds?
-    - colouring text in eval bar for m in x - keep text colour fixed, have text always on the white portion - on flip board push the text to the top
-    - currently only available to promote to queen
-    - notation overflows - dynamic box or scroll?
-
-minor step 
--remove all buttons - keyboard shortcuts cleaner
--move pgn box to left 
--eval graph to right
-
-NEXT MAJOR STEP
-- inform user of keyboard shortcuts
-- bring chess.js and jquery local - for futureproofing and to help with loading times
-- IMPLEMENT TRUE ANALYSIS FEATURES
-    - graph of eval score
-    - accuracy% score (centipawn?) - normalised on chess.com score
-    - classificiation and visualisation of moves (good, great, brilliant!!, etc)
-- show whos up in pieces on the board (e.g. if up a queen, shows +9 )
-- moves numbered - with interative feature to click on specific move
-- DARK MODE?
-- PGN's played as black should auto flip - one up on lichess - not sure how possible this is
-
-ENGINES
--optionality for number of lines/arrows
--default to local, small engine for speed and redundancy
--Full strength stockfish - hosted on server
--Full strength neural network engine - leela - results in more 'novel' moves
-    - why do pros need cloud compute?
-- INVESTIGATE STRONGER (+ WIDER RANGE OF) CHESS ENGINES
-    - carlsen mentions top players pay for cloud compute for analysis
-        - was unaware top engines where compute constraint
-
-- personalised AI coach that give give personalised advice
-    - requires profiles
-    - build a dataset of a users moves 
-    - builds profile on them - repotoire, trends, habits, common mistakes etc
-    - provides tailored advice
-PERSONALISED CHESS COACH - COMING
--build profile of common mistakes
--personalised coaching
-
-- mobile functionality  
-    - currently awful experience for mobile users
-        - how to fix?
-            - click piece you wish to move, then click where to move too?
-            - stop page scrolling as user drags piece?
-            - alternative option to move pieces?

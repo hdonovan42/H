@@ -2,15 +2,9 @@
 // Constants
 const BOARD_SIZE = 500;
 const SQUARE_SIZE = BOARD_SIZE / 8;
-const ANALYSIS_DEBOUNCE_TIME = 300;
+const ANALYSIS_DEBOUNCE_TIME = 200;
 const ANALYSIS_DEPTH = 15;
 const MULTI_PV_LINES = 3;
-
-// Chess piece symbols for better readability
-const PIECE_SYMBOLS = {
-  K: '♔', Q: '♕', R: '♖', B: '♗', N: '♘', P: '♙',
-  k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟'
-};
 
 // Application state
 const AppState = {
