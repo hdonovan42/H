@@ -65,7 +65,6 @@ function initializeStockfish() {
     AppState.stockfish.onerror = function(error) {
       console.error('Stockfish worker error:', error);
       document.getElementById('stockfish-loading').style.display = 'none';
-      showError('Chess engine crashed. Please toggle the engine off and on to restart.');
       
       // Automatically disable the engine
       if (AppState.engineEnabled) {
@@ -82,7 +81,6 @@ function initializeStockfish() {
       initTimeout = setTimeout(() => {
         console.error('Stockfish initialization timeout');
         document.getElementById('stockfish-loading').style.display = 'none';
-        showError('Chess engine failed to start. Please toggle the engine off and on to retry.');
 
         if (AppState.engineEnabled) {
           document.getElementById('engine-toggle').checked = false;
