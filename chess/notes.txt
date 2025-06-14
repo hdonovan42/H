@@ -7,18 +7,21 @@ metrics to track
 - times needed to turn engine ON/OFF to unfreeze arrows - approaching 0
 
 current bugs 
-    - engine error popup too obtuse
     - colouring text in eval bar for m in x - keep text colour fixed, have text always on the white portion - on flip board push the text to the top
     - currently only available to promote to queen
+    - only able to promote to queen
+    - end of game handling - distinguish between wins,draws & stalemates
+    - when playing as black, overwhelming winning position for white, eval score text is invisible
 
-v1.85
--code cleanup - removed upneeded code + tweaks/optimisations
-
-v1.9
--engine crash handling - current pop up at the top seems obtuse - just a message in the container should suffice
+v1.8
+- handle checkmates and draws
+- promote to not only queen - make sure notation logic works
 
 v2
 -HOW IS CHECKMATE HANDLED?
+    - visualise checkmate, draw, stalemate 
+    - logic handles game over - doesn't distinguish between win, stalemate, & draw 
+    - players can still attempt moves after the game ends - only theoretically, not in practise
 -promote to not only queen
 -eval score always in white section of the eval bar - score at bottom for white, top for black - solves text colour issue
 
@@ -31,7 +34,7 @@ v2.5
 -notation numbered clearer - with interative feature to click on specific move
 
 
-v3 - TRUE ANALYSIS FEATURES
+v3 - TRUE ANALYSIS FEATURES - PROFILES + PAYWALL
 - accuracy% score (centipawn?) - normalised on chess.com score
 - classificiation and visualisation of moves (good, great, brilliant!!, etc)
 - show whos up in pieces on the board (e.g. if up a queen, shows +9 )
@@ -51,6 +54,15 @@ PERSONALISED CHESS COACH - COMING
 -build profile of common mistakes
 -personalised coaching
 
+PAYMENTS
+-custom domain
+-move hosting away from github
+-hide code from inspect element
+
+-how to handle freemium tier 
+    - standard analysis features always free - advanced features mentioned here behind paywall 
+    - need to establish how to offer users chance to experience the service for free once per account or once per day
+
 - mobile functionality  
     - currently awful experience for mobile users
         - how to fix?
@@ -58,8 +70,10 @@ PERSONALISED CHESS COACH - COMING
             - stop page scrolling as user drags piece?
             - alternative option to move pieces?
 
-OLD VERSIONS MOVED TO BOTTOM 
 
+
+
+OLD VERSION HISTORY MOVED TO BOTTOM 
 v1
 -remove all buttons
 -eval graph - currently draws as i go to stop freeze at start
@@ -80,3 +94,9 @@ FROM: stockfish-16.1-single (js+wasm) ~ 67mb
 TO: stockfish-17-lite-single ~ 6mb
     LOAD TIME: on web server < 1 second - GREAT
 x10 smaller engine with *similar* strength
+
+v1.85
+-code cleanup - removed upneeded code + tweaks/optimisations
+
+v1.9
+-engine crash handling - current pop up at the top seems obtuse - just a message in the container should suffice

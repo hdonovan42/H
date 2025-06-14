@@ -23,7 +23,10 @@ const AppState = {
   arrowsEnabled: true,
   evalHistory: [], // Store evaluation for each position
   gameLoaded: false,
-  engineEnabled: true // New state for engine toggle
+  engineEnabled: true, // New state for engine toggle
+  gameStatus: 'ongoing', // 'ongoing', 'checkmate', 'draw'
+  checkmateWinner: null, // 'white', 'black', or null
+  isInCheck: false
 };
 
 // Initialize the application
@@ -106,6 +109,45 @@ function initializeStockfish() {
     console.error('Failed to initialize Stockfish:', error);
     document.getElementById('stockfish-loading').style.display = 'none';
     showError('Failed to load chess engine. Please refresh the page.');
+  }
+}
+
+// Enhanced game status detection that also checks PGN results
+function updateGameStatus() {
+  const game = AppState.game;
+  
+  // Reset status
+  AppState.gameStatus = 'ongoing';
+  AppState.checkmateWinner = null;
+  AppState.isInCheck = game.in_check();
+  
+  // First check if game is over by position
+  if (game.game_over()) {
+    if (game.in_checkmate()) {
+      AppState.gameStatus = 'checkmate';
+      // The player who just moved delivered checkmate
+      AppState.checkmateWinner = game.turn() === 'w' ? 'black' : 'white';
+    } else {
+      // All other positional game endings are draws
+      AppState.gameStatus = 'draw';
+    }
+  }
+  // Also check if we're at the end of a loaded PGN with a result
+  else if (AppState.gameLoaded && AppState.currentIndex >= AppState.pgnMainlineMoves.length) {
+    // Try to get the PGN result from the original PGN text
+    const pgnText = document.getElementById('pgn-input').value.trim();
+    if (pgnText) {
+      // Look for game result at the end of PGN
+      if (pgnText.includes('1-0')) {
+        AppState.gameStatus = 'checkmate';
+        AppState.checkmateWinner = 'white';
+      } else if (pgnText.includes('0-1')) {
+        AppState.gameStatus = 'checkmate';
+        AppState.checkmateWinner = 'black';
+      } else if (pgnText.includes('1/2-1/2') || pgnText.includes('½-½')) {
+        AppState.gameStatus = 'draw';
+      }
+    }
   }
 }
 
@@ -219,6 +261,11 @@ function parseStockfishInfo(message) {
 
 // Board event handlers
 function handleDragStart(source, piece, position, orientation) {
+  // Prevent moves if game is over
+  if (AppState.gameStatus !== 'ongoing') {
+    return false;
+  }
+  
   if (AppState.game.game_over()) return false;
   
   // Only allow the side to move
@@ -232,6 +279,11 @@ function handleDragStart(source, piece, position, orientation) {
 }
 
 function handleDrop(source, target) {
+  // Prevent moves if game is over
+  if (AppState.gameStatus !== 'ongoing') {
+    return 'snapback';
+  }
+  
   const move = AppState.game.move({
     from: source,
     to: target,
@@ -243,6 +295,9 @@ function handleDrop(source, target) {
   // Update move history
   AppState.userMoves = AppState.game.history();
   AppState.currentIndex = AppState.userMoves.length;
+  
+  // Check for game ending conditions
+  updateGameStatus();
   
   if (AppState.engineEnabled) {
     updateStockfishAnalysis();
@@ -333,6 +388,42 @@ function updateAnalysisOutput() {
   const outputDiv = document.getElementById('stockfish-output');
   outputDiv.innerHTML = '';
 
+  // Show game status ONLY in analysis panel
+  if (AppState.gameStatus !== 'ongoing') {
+    const statusDiv = document.createElement('div');
+    statusDiv.style.cssText = `
+      padding: 12px;
+      border-radius: 5px;
+      margin-bottom: 10px;
+      text-align: center;
+      font-weight: bold;
+      font-size: 14px;
+    `;
+    
+    let statusText = '';
+    let statusStyles = '';
+    
+    switch (AppState.gameStatus) {
+      case 'checkmate':
+        if (AppState.checkmateWinner === 'white') {
+          statusText = 'CHECKMATE - WHITE WINS';
+          statusStyles = 'color: white; background-color: white; color: black; border: 2px solid #333;';
+        } else {
+          statusText = 'CHECKMATE - BLACK WINS';
+          statusStyles = 'color: white; background-color: black;';
+        }
+        break;
+      case 'draw':
+        statusText = 'DRAW';
+        statusStyles = 'color: white; background-color: #6c757d;';
+        break;
+    }
+    
+    statusDiv.style.cssText += statusStyles;
+    statusDiv.textContent = statusText;
+    outputDiv.appendChild(statusDiv);
+  }
+
   // Show engine status if disabled
   if (!AppState.engineEnabled) {
     const statusDiv = document.createElement('div');
@@ -357,6 +448,18 @@ function updateAnalysisOutput() {
     sortedKeys.forEach(key => {
       const info = AppState.multipvResults[key];
       const lineDiv = document.createElement('div');
+      
+      // Highlight mate lines
+      if (info.mate !== undefined) {
+        lineDiv.style.cssText = `
+          background-color: ${info.mate > 0 ? '#d4edda' : '#f8d7da'};
+          padding: 5px;
+          margin: 2px 0;
+          border-radius: 3px;
+          font-weight: bold;
+        `;
+      }
+      
       lineDiv.textContent = `${key}. Score: ${info.scoreDisplay}\nLine: ${info.pv}\n`;
       outputDiv.appendChild(lineDiv);
     });
@@ -380,6 +483,13 @@ function updateAnalysisOutput() {
       // Moves beyond the loaded PGN.
       notationHTML += `<span style="color:red;">${i + 1}. ${AppState.userMoves[i]}*</span> `;
     }
+  }
+  
+  // Add game result to notation if game is over
+  if (AppState.gameStatus === 'checkmate') {
+    notationHTML += AppState.checkmateWinner === 'white' ? ' 1-0' : ' 0-1';
+  } else if (AppState.gameStatus === 'draw') {
+    notationHTML += ' ½-½';
   }
   
   notationDiv.innerHTML = notationHTML;
@@ -731,6 +841,9 @@ function navigateToPreviousMove() {
   rebuildGameFromMoves();
   AppState.board.position(AppState.game.fen());
   
+  // Update game status for the new position
+  updateGameStatus();
+  
   // Update display immediately
   updateDisplay();
   
@@ -761,6 +874,9 @@ function navigateToNextMove() {
   AppState.currentIndex++;
   rebuildGameFromMoves();
   AppState.board.position(AppState.game.fen());
+  
+  // Update game status for the new position
+  updateGameStatus();
   
   // Update display immediately
   updateDisplay();
@@ -814,6 +930,9 @@ function loadPGN() {
   // Reset to starting position
   AppState.game.reset();
   AppState.board.start();
+  
+  // Update game status for starting position
+  updateGameStatus();
   
   // Analyze all positions in the game
   analyzeGamePositions();
@@ -919,10 +1038,12 @@ function resetBoard() {
     AppState.analysisQueue = null;
   }
   
-  AppState.stockfish.postMessage('stop');
+  if (AppState.stockfish) {
+    AppState.stockfish.postMessage('stop');
+  }
   AppState.isAnalysisInProgress = false;
   
-  // Clear state
+  // Clear state including game status
   AppState.multipvResults = {};
   AppState.bestMoveInfo = null;
   AppState.lastFen = '';
@@ -931,6 +1052,9 @@ function resetBoard() {
   AppState.currentIndex = 0;
   AppState.evalHistory = [];
   AppState.gameLoaded = false;
+  AppState.gameStatus = 'ongoing';
+  AppState.checkmateWinner = null;
+  AppState.isInCheck = false;
   
   // Reset board
   AppState.game.reset();
