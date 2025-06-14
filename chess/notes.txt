@@ -8,13 +8,12 @@ metrics to track
 
 current bugs 
     - colouring text in eval bar for m in x - keep text colour fixed, have text always on the white portion - on flip board push the text to the top
-    - currently only available to promote to queen
-    - only able to promote to queen
-    - end of game handling - distinguish between wins,draws & stalemates
-    - when playing as black, overwhelming winning position for white, eval score text is invisible
+        - when playing as black, overwhelming winning position for white, eval score text is invisible
+    - promotion - images don't appear
+    - status shows checkmate even in resignation - just have states - white win, black win, & draw 
 
 v1.8
-- handle checkmates and draws
+- handle checkmates and draws - done, need to test
 - promote to not only queen - make sure notation logic works
 
 v2

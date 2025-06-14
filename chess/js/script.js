@@ -26,7 +26,10 @@ const AppState = {
   engineEnabled: true, // New state for engine toggle
   gameStatus: 'ongoing', // 'ongoing', 'checkmate', 'draw'
   checkmateWinner: null, // 'white', 'black', or null
-  isInCheck: false
+  isInCheck: false,
+  promotionPending: false,
+  promotionMove: null, // Stores the pending promotion move
+  promotionCallback: null // Callback function to execute after promotion choice
 };
 
 // Initialize the application
@@ -261,10 +264,6 @@ function parseStockfishInfo(message) {
 
 // Board event handlers
 function handleDragStart(source, piece, position, orientation) {
-  // Prevent moves if game is over
-  if (AppState.gameStatus !== 'ongoing') {
-    return false;
-  }
   
   if (AppState.game.game_over()) return false;
   
@@ -279,15 +278,25 @@ function handleDragStart(source, piece, position, orientation) {
 }
 
 function handleDrop(source, target) {
-  // Prevent moves if game is over
-  if (AppState.gameStatus !== 'ongoing') {
-    return 'snapback';
+
+  // Check if this is a promotion move
+  const piece = AppState.game.get(source);
+  const isPawn = piece && piece.type === 'p';
+  const isPromotionRank = (piece && piece.color === 'w' && target[1] === '8') || 
+                         (piece && piece.color === 'b' && target[1] === '1');
+  
+  if (isPawn && isPromotionRank) {
+    // This is a promotion move - show promotion grid
+    AppState.promotionMove = { from: source, to: target };
+    AppState.promotionPending = true;
+    showPromotionGrid(piece.color);
+    return 'drop'; // Allow the visual drop, we'll handle the actual move after promotion choice
   }
   
+  // Regular move (not promotion)
   const move = AppState.game.move({
     from: source,
-    to: target,
-    promotion: 'q' // TODO: Add promotion dialog
+    to: target
   });
   
   if (move === null) return 'snapback';
@@ -406,10 +415,10 @@ function updateAnalysisOutput() {
     switch (AppState.gameStatus) {
       case 'checkmate':
         if (AppState.checkmateWinner === 'white') {
-          statusText = 'CHECKMATE - WHITE WINS';
+          statusText = 'WHITE WIN';
           statusStyles = 'color: white; background-color: white; color: black; border: 2px solid #333;';
         } else {
-          statusText = 'CHECKMATE - BLACK WINS';
+          statusText = 'BLACK WIN';
           statusStyles = 'color: white; background-color: black;';
         }
         break;
@@ -1043,6 +1052,10 @@ function resetBoard() {
   }
   AppState.isAnalysisInProgress = false;
   
+  // Clear promotion state
+  AppState.promotionPending = false;
+  AppState.promotionMove = null;
+  
   // Clear state including game status
   AppState.multipvResults = {};
   AppState.bestMoveInfo = null;
@@ -1076,6 +1089,139 @@ function resetBoard() {
       updateStockfishAnalysis();
     }
   }, 100);
+}
+
+//Promotion Grid
+function showPromotionGrid(color) {  
+  // Create overlay
+  const overlay = document.createElement('div');
+  overlay.id = 'promotion-overlay';
+  overlay.style.cssText = `
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  `;
+  
+  // Create promotion grid
+  const grid = document.createElement('div');
+  grid.style.cssText = `
+    width: 150px;
+    height: 150px;
+    background-color: rgba(255, 255, 255, 0.95);
+    border: 2px solid #333;
+    border-radius: 8px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 2px;
+    padding: 5px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+  `;
+  
+  // Define pieces in order: Queen, Rook, Bishop, Knight
+  // Using your actual image file naming convention
+  const pieces = [
+    { type: 'q', filename: `${color}Q.png` },
+    { type: 'r', filename: `${color}R.png` },
+    { type: 'b', filename: `${color}B.png` },
+    { type: 'n', filename: `${color}N.png` }
+  ];
+  // these are in an img folder - need to fix
+  
+  pieces.forEach(pieceInfo => {
+    const pieceDiv = document.createElement('div');
+    pieceDiv.style.cssText = `
+      background-color: white;
+      border: 2px solid #ddd;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      position: relative;
+    `;
+    pieceDiv.dataset.piece = pieceInfo.type;
+    
+    // Create image element
+    const pieceImg = document.createElement('img');
+    pieceImg.src = `img/chesspieces/wikipedia/${pieceInfo.filename}`;
+    pieceImg.style.cssText = `
+      width: 50px;
+      height: 50px;
+      pointer-events: none;
+    `;
+    pieceImg.alt = `${color === 'w' ? 'White' : 'Black'} ${pieceInfo.type.toUpperCase()}`;
+    
+    // Add hover effects
+    pieceDiv.addEventListener('mouseenter', function() {
+      this.style.backgroundColor = '#e8f4fd';
+      this.style.borderColor = '#2196F3';
+      this.style.transform = 'scale(1.05)';
+    });
+    
+    pieceDiv.addEventListener('mouseleave', function() {
+      this.style.backgroundColor = 'white';
+      this.style.borderColor = '#ddd';
+      this.style.transform = 'scale(1)';
+    });
+    
+    // Add click handler
+    pieceDiv.addEventListener('click', function() {
+      handlePromotionChoice(pieceInfo.type);
+    });
+    
+    pieceDiv.appendChild(pieceImg);
+    grid.appendChild(pieceDiv);
+  });
+  
+  overlay.appendChild(grid);
+  document.getElementById('board-container').appendChild(overlay);
+}
+
+function handlePromotionChoice(promotionPiece) {
+  if (!AppState.promotionPending || !AppState.promotionMove) return;
+  
+  // Execute the promotion move
+  const move = AppState.game.move({
+    from: AppState.promotionMove.from,
+    to: AppState.promotionMove.to,
+    promotion: promotionPiece
+  });
+  
+  if (move) {
+    // Update move history
+    AppState.userMoves = AppState.game.history();
+    AppState.currentIndex = AppState.userMoves.length;
+    
+    // Update board position
+    AppState.board.position(AppState.game.fen());
+    
+    // Check for game ending conditions
+    updateGameStatus();
+    
+    if (AppState.engineEnabled) {
+      updateStockfishAnalysis();
+    }
+    updateDisplay();
+  }
+  
+  // Clean up promotion state
+  AppState.promotionPending = false;
+  AppState.promotionMove = null;
+  
+  // Remove promotion grid
+  const overlay = document.getElementById('promotion-overlay');
+  if (overlay) {
+    overlay.remove();
+  }
 }
 
 function flipBoard() {
@@ -1122,6 +1268,9 @@ function setupEventListeners() {
 }
 
 function handleKeyPress(event) {
+  // Don't handle shortcuts if promotion is pending
+  if (AppState.promotionPending) return;
+  
   // Don't handle shortcuts if typing in textarea
   if (event.target.tagName === 'TEXTAREA') return;
   

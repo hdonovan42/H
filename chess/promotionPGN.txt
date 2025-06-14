@@ -1,0 +1,20 @@
+[Event "Live Chess"]
+[Site "Chess.com"]
+[Date "2025.06.11"]
+[Round "?"]
+[White "harrydonovan"]
+[Black "BRORY2"]
+[Result "1-0"]
+[TimeControl "600"]
+[WhiteElo "1417"]
+[BlackElo "1378"]
+[Termination "harrydonovan won by resignation"]
+[ECO "B01"]
+[EndTime "20:45:17 GMT+0000"]
+[Link "https://www.chess.com/game/live/139484715532?move=0"]
+
+1. e4 d5 2. exd5 Qxd5 3. Nc3 Qe5+ 4. Be2 Bg4 5. d4 Bxe2 6. Ngxe2 Qh5 7. Be3 e6
+8. Qd2 Bd6 9. g3 Ne7 10. O-O-O Bb4 11. Bf4 Qa5 12. Kb1 Nbc6 13. Qd3 a6 14. Bc1
+O-O-O 15. a3 Bxc3 16. bxc3 e5 17. Qc4 Qb6+ 18. Bb2 Na5 19. Qb4 Qxb4 20. cxb4 Nc4
+21. dxe5 Nxb2 22. Kxb2 Nc6 23. f4 Rhe8 24. Rhe1 Rxd1 25. Rxd1 f6 26. exf6 Rxe2
+27. f7 1-0
