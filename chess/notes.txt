@@ -7,14 +7,8 @@ metrics to track
 - times needed to turn engine ON/OFF to unfreeze arrows - approaching 0
 
 current bugs 
-    - as 3 lines are always drawn - if player only has 1/2 legal moves, the last players arrows wont be overwritten
-        - fix, after each move clear old arrows, then draw new ones, dont wait for arrows to be overwritten 
-
-v1.95
-- handle checkmates and draws - done, need to test - DONE 
-- promote to not only queen - make sure notation logic works - DONE 
--eval score sometimes invisible bug fix 
-
+-
+    
 v2
 -thorough testing - fix all bugs
 -test suite?
@@ -94,3 +88,8 @@ v1.85
 
 v1.9
 -engine crash handling - current pop up at the top seems obtuse - just a message in the container should suffice
+
+v1.95
+- handle checkmates and draws - done, need to test - DONE 
+- promote to not only queen - make sure notation logic works - DONE 
+-eval score sometimes invisible bug fix 

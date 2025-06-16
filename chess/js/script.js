@@ -349,9 +349,13 @@ function updateStockfishAnalysis() {
     }
     
     AppState.isAnalysisInProgress = true;
-    
-    // Don't clear previous results - keep them until we get new ones
-    // This prevents the eval bar from twitching
+
+    // Clear previous arrow results to prevent leftover arrows, but keep eval for eval bar
+    const oldEvalResult = AppState.multipvResults[1];
+    AppState.multipvResults = {};
+    if (oldEvalResult) {
+      AppState.multipvResults[1] = oldEvalResult; // Keep eval for eval bar stability
+    }
     
     try {
       // Stop current analysis
