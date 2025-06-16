@@ -558,7 +558,7 @@ function updateEvaluationBar() {
   // --- Overlay the eval score at the bottom of the eval bar ---
   let evalText = "";
   if (entry.mate !== undefined) {
-    evalText = "M" + entry.mate;
+    evalText = "M" + Math.abs(entry.mate);
   } else {
     evalText = entry.score;
   }
@@ -578,11 +578,19 @@ function updateEvaluationBar() {
     evalBar.appendChild(overlay);
   }
   // set text colour to opposite of orientation, for readability
-  if (AppState.board.orientation() === 'white') {
-    overlay.style.color = "black";
+  let textColor;
+  
+  if (AppState.board.orientation() === 'black') {
+    // When board is flipped, gradient goes "to bottom" 
+    // Bottom of bar shows black when whitePercentage < 100
+    textColor = whitePercentage >= 100 ? "black" : "white";
   } else {
-    overlay.style.color = "white";
+    // When board is normal, gradient goes "to top"
+    // Bottom of bar shows white when whitePercentage > 0
+    textColor = whitePercentage > 0 ? "black" : "white";
   }
+  
+  overlay.style.color = textColor;
   overlay.textContent = evalText;
 }
 
