@@ -177,3 +177,50 @@ body, html {
   flex-direction: column;
   align-items: center;
 }
+
+/*css for interactive notation*/
+/* Interactive notation styles for Option 2 */
+.move-pair {
+  display: inline-block;
+  margin: 0 8px 5px 0;
+  white-space: nowrap;
+}
+
+.move-number {
+  font-weight: bold;
+  color: #666;
+  margin-right: 4px;
+}
+
+.move-link {
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  transition: all 0.2s;
+  margin: 0 2px;
+  display: inline-block;
+}
+
+.move-link:hover {
+  background-color: #e3f2fd;
+  transform: translateY(-1px);
+}
+
+.move-link.current {
+  background-color: #2196F3;
+  color: white;
+  box-shadow: 0 2px 4px rgba(33, 150, 243, 0.3);
+}
+
+.white-move {
+  border-bottom: 1px solid #eee;
+}
+
+.black-move {
+  border-bottom: 1px solid #ddd;
+}
+
+.move-link.deviation {
+  color: #d32f2f;
+  font-weight: bold;
+}

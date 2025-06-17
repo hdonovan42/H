@@ -478,35 +478,67 @@ function updateAnalysisOutput() {
     });
   }
 
-  // Display current game notation - original format
+  // Display current game notation - now interactive
   const notationDiv = document.createElement('div');
   notationDiv.style.marginTop = "20px";
   notationDiv.style.fontFamily = "monospace";
   let notationHTML = "<strong>Notation:</strong><br>";
-  
-  for (let i = 0; i < AppState.userMoves.length; i++) {
-    // Compare to PGN mainline, if available.
-    if (AppState.pgnMainlineMoves.length > i) {
-      if (AppState.pgnMainlineMoves[i] === AppState.userMoves[i]) {
-        notationHTML += `${i + 1}. ${AppState.userMoves[i]} `;
-      } else {
-        notationHTML += `<span style="color:red;">${i + 1}. ${AppState.userMoves[i]}*</span> `;
-      }
-    } else {
-      // Moves beyond the loaded PGN.
-      notationHTML += `<span style="color:red;">${i + 1}. ${AppState.userMoves[i]}*</span> `;
+
+  // Build moves in pairs for proper chess notation
+  for (let i = 0; i < AppState.userMoves.length; i += 2) {
+    const moveNumber = Math.floor(i / 2) + 1;
+    const whiteMove = AppState.userMoves[i];
+    const blackMove = AppState.userMoves[i + 1];
+    
+    notationHTML += `<div class="move-pair">`;
+    notationHTML += `<span class="move-number">${moveNumber}.</span> `;
+    
+    // White move
+    const whiteMoveIndex = i + 1;
+    const isWhiteMainline = AppState.pgnMainlineMoves.length > i && 
+                          AppState.pgnMainlineMoves[i] === whiteMove;
+    const isWhiteCurrent = whiteMoveIndex === AppState.currentIndex;
+    const whiteClasses = ['move-link', 'white-move'];
+    
+    if (!isWhiteMainline && AppState.gameLoaded) {
+      whiteClasses.push('deviation');
     }
+    if (isWhiteCurrent) {
+      whiteClasses.push('current');
+    }
+    
+    notationHTML += `<span class="${whiteClasses.join(' ')}" data-move-index="${whiteMoveIndex}">${whiteMove}${!isWhiteMainline && AppState.gameLoaded ? '*' : ''}</span>`;
+    
+  // Black move (if exists)
+  if (blackMove) {
+    const blackMoveIndex = i + 2;
+    const isBlackMainline = AppState.pgnMainlineMoves.length > (i + 1) && 
+                           AppState.pgnMainlineMoves[i + 1] === blackMove;
+    const isBlackCurrent = blackMoveIndex === AppState.currentIndex;
+    const blackClasses = ['move-link', 'black-move'];
+    
+    if (!isBlackMainline && AppState.gameLoaded) {
+      blackClasses.push('deviation');
+    }
+    if (isBlackCurrent) {
+      blackClasses.push('current');
+    }
+    
+    notationHTML += ` <span class="${blackClasses.join(' ')}" data-move-index="${blackMoveIndex}">${blackMove}${!isBlackMainline && AppState.gameLoaded ? '*' : ''}</span>`;
   }
   
-  // Add game result to notation if game is over
-  if (AppState.gameStatus === 'checkmate') {
-    notationHTML += AppState.checkmateWinner === 'white' ? ' 1-0' : ' 0-1';
-  } else if (AppState.gameStatus === 'draw') {
-    notationHTML += ' ½-½';
-  }
-  
-  notationDiv.innerHTML = notationHTML;
-  outputDiv.appendChild(notationDiv);
+  notationHTML += `</div>`;
+}
+
+// Add game result to notation if game is over
+if (AppState.gameStatus === 'checkmate') {
+  notationHTML += AppState.checkmateWinner === 'white' ? ' <strong>1-0</strong>' : ' <strong>0-1</strong>';
+} else if (AppState.gameStatus === 'draw') {
+  notationHTML += ' <strong>½-½</strong>';
+}
+
+notationDiv.innerHTML = notationHTML;
+outputDiv.appendChild(notationDiv);
   
   // Analysis status
   if (AppState.isAnalysisInProgress && AppState.engineEnabled) {
@@ -913,6 +945,30 @@ function navigateToNextMove() {
   }
 }
 
+function navigateToMove(targetIndex) {
+  if (targetIndex < 0 || targetIndex > AppState.userMoves.length) return;
+  
+  AppState.currentIndex = targetIndex;
+  rebuildGameFromMoves();
+  AppState.board.position(AppState.game.fen());
+  
+  // Update game status for the new position
+  updateGameStatus();
+  
+  // Update display immediately
+  updateDisplay();
+  
+  // Update graph to show current position
+  if (AppState.gameLoaded) {
+    drawEvalGraph();
+  }
+  
+  // Update Stockfish analysis last
+  if (AppState.engineEnabled) {
+    updateStockfishAnalysis();
+  }
+}
+
 function rebuildGameFromMoves() {
   AppState.game.reset();
   
@@ -1275,6 +1331,15 @@ function setupEventListeners() {
   window.addEventListener('keydown', (e) => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
       e.preventDefault();
+    }
+  });
+  
+  // Click handler for interactive notation moves
+  document.getElementById('analysis-content').addEventListener('click', (e) => {
+    if (e.target.classList.contains('move-link')) {
+      const moveIndex = parseInt(e.target.dataset.moveIndex);
+      navigateToMove(moveIndex);
+      e.target.blur();
     }
   });
 }

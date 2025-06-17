@@ -7,11 +7,20 @@ metrics to track
 - times needed to turn engine ON/OFF to unfreeze arrows - approaching 0
 
 current bugs 
--
-    
+- scaling - board currently a fixed size perfect for my screen - needs to scale for smaller/bigger displays
+
 v2
 -thorough testing - fix all bugs
 -test suite?
+
+-interactive graph and notation - click move number or point on graph to traverse to that point of the game
+
+
+v2.5 warnings - will add a fair few lines of code so thoroughly test single engine stage first 
+engine settings come before multiple engines - make depth, threads, hash value, search time, etc modular values - not hardcoded for each value - albeit different defaults
+-give 'stockfish' loading its own styles.css reference - as its now called multiple times 
+-preload big engine on load up
+
 
 v2.5
 -engine optionality - default to quickest engine
