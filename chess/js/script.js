@@ -1462,7 +1462,7 @@ function handleKeyPress(event) {
   }
   };
   
-  const action = keyActions[event.key.toLowerCase()];
+  const action = keyActions[event.key] || keyActions[event.key.toLowerCase()];
   if (action) {
     event.preventDefault();
     event.stopPropagation();
