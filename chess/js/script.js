@@ -29,7 +29,10 @@ const AppState = {
   isInCheck: false,
   promotionPending: false,
   promotionMove: null, // Stores the pending promotion move
-  promotionCallback: null // Callback function to execute after promotion choice
+  promotionCallback: null, // Callback function to execute after promotion choice
+  // New properties for interactive graph
+  graphClickAreas: [], // Store clickable areas for graph points
+  graphHoverIndex: -1  // Currently hovered graph point (-1 = none)
 };
 
 // Initialize the application
@@ -780,9 +783,16 @@ function drawAnalysisEvalGraph() {
   ctx.stroke();
   
   // Only draw if we have evaluation data
-  if (AppState.evalHistory.length <= 1) return;
+  if (AppState.evalHistory.length <= 1) {
+    // Clear click areas if no data
+    AppState.graphClickAreas = [];
+    return;
+  }
   
-  // Draw evaluation line
+  // Clear and rebuild click areas
+  AppState.graphClickAreas = [];
+  
+  // Draw evaluation line and store click areas
   ctx.strokeStyle = '#2196F3';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -795,6 +805,14 @@ function drawAnalysisEvalGraph() {
       const x = margin.left + (i / Math.max(1, AppState.evalHistory.length - 1)) * chartWidth;
       const eval_val = Math.max(-evalRange, Math.min(evalRange, AppState.evalHistory[i]));
       const y = margin.top + chartHeight - ((eval_val + evalRange) / (2 * evalRange)) * chartHeight;
+      
+      // Store click area for this point
+      AppState.graphClickAreas.push({
+        x: x,
+        y: y,
+        radius: 8, // Click detection radius
+        moveIndex: i
+      });
       
       if (!hasStarted) {
         ctx.moveTo(x, y);
@@ -817,6 +835,21 @@ function drawAnalysisEvalGraph() {
     ctx.beginPath();
     ctx.arc(x, y, 3, 0, 2 * Math.PI);
     ctx.fill();
+  }
+  
+  // Draw hover dot if hovering over a point
+  if (AppState.graphHoverIndex >= 0 && AppState.graphHoverIndex < AppState.graphClickAreas.length) {
+    const area = AppState.graphClickAreas[AppState.graphHoverIndex];
+    
+    // Draw glow effect
+    ctx.save();
+    ctx.shadowColor = '#2196F3';
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = '#2196F3';
+    ctx.beginPath();
+    ctx.arc(area.x, area.y, 5, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.restore();
   }
 }
 
@@ -966,6 +999,54 @@ function navigateToMove(targetIndex) {
   // Update Stockfish analysis last
   if (AppState.engineEnabled) {
     updateStockfishAnalysis();
+  }
+}
+
+// Graph interaction functions
+function handleGraphMouseMove(e) {
+  const canvas = document.getElementById('analysis-eval-graph');
+  if (!canvas || AppState.graphClickAreas.length === 0) return;
+  
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  
+  let newHoverIndex = -1;
+  
+  // Check if mouse is over any click area
+  for (let i = 0; i < AppState.graphClickAreas.length; i++) {
+    const area = AppState.graphClickAreas[i];
+    const dx = x - area.x;
+    const dy = y - area.y;
+    const distanceSquared = dx * dx + dy * dy;
+    
+    if (distanceSquared <= area.radius * area.radius) {
+      newHoverIndex = i;
+      break;
+    }
+  }
+  
+  // Only redraw if hover state changed
+  if (newHoverIndex !== AppState.graphHoverIndex) {
+    AppState.graphHoverIndex = newHoverIndex;
+    drawAnalysisEvalGraph();
+  }
+}
+
+function handleGraphClick(e) {
+  if (AppState.graphHoverIndex >= 0 && AppState.graphHoverIndex < AppState.graphClickAreas.length) {
+    const area = AppState.graphClickAreas[AppState.graphHoverIndex];
+    const targetMoveIndex = area.moveIndex;
+    
+    // Navigate to the clicked position
+    navigateToMove(targetMoveIndex);
+  }
+}
+
+function handleGraphMouseLeave() {
+  if (AppState.graphHoverIndex !== -1) {
+    AppState.graphHoverIndex = -1;
+    drawAnalysisEvalGraph();
   }
 }
 
@@ -1136,6 +1217,10 @@ function resetBoard() {
   AppState.gameStatus = 'ongoing';
   AppState.checkmateWinner = null;
   AppState.isInCheck = false;
+
+// Clear graph interaction state
+  AppState.graphClickAreas = [];
+  AppState.graphHoverIndex = -1;
   
   // Reset board
   AppState.game.reset();
@@ -1342,6 +1427,14 @@ function setupEventListeners() {
       e.target.blur();
     }
   });
+
+  // Interactive evaluation graph event listeners
+  const evalGraphCanvas = document.getElementById('analysis-eval-graph');
+  if (evalGraphCanvas) {
+    evalGraphCanvas.addEventListener('mousemove', handleGraphMouseMove);
+    evalGraphCanvas.addEventListener('click', handleGraphClick);
+    evalGraphCanvas.addEventListener('mouseleave', handleGraphMouseLeave);
+  }
 }
 
 function handleKeyPress(event) {
@@ -1358,20 +1451,18 @@ function handleKeyPress(event) {
     'ArrowLeft': navigateToPreviousMove,
     'ArrowRight': navigateToNextMove,
     'r': resetBoard,
-    'R': resetBoard,
     'f': flipBoard,
-    'F': flipBoard,
     'a': () => {
       AppState.arrowsEnabled = !AppState.arrowsEnabled;
       updateDisplay();
     },
-    'A': () => {
-      AppState.arrowsEnabled = !AppState.arrowsEnabled;
-      updateDisplay();
-    }
+    't': () => {
+    document.getElementById('engine-toggle').checked = !document.getElementById('engine-toggle').checked;
+    toggleEngine();
+  }
   };
   
-  const action = keyActions[event.key];
+  const action = keyActions[event.key.toLowerCase()];
   if (action) {
     event.preventDefault();
     event.stopPropagation();

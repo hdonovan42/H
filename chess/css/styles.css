@@ -221,6 +221,15 @@ body, html {
 }
 
 .move-link.deviation {
-  color: #d32f2f;
+  color: #d32f2f; /* SUBJECT TO CHANGE */
   font-weight: bold;
+}
+
+/* Interactive evaluation graph styles */
+#analysis-eval-graph {
+  cursor: crosshair;
+}
+
+#analysis-eval-graph:hover {
+  cursor: crosshair; /* crosshair? */
 }

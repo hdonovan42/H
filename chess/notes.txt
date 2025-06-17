@@ -9,12 +9,13 @@ metrics to track
 current bugs 
 - scaling - board currently a fixed size perfect for my screen - needs to scale for smaller/bigger displays
 
-v2
+v2 
+-interactive graph and notation - click move number or point on graph to traverse to that point of the game
+-toggle engine with 't'
+
+v2.2
 -thorough testing - fix all bugs
 -test suite?
-
--interactive graph and notation - click move number or point on graph to traverse to that point of the game
-
 
 v2.5 warnings - will add a fair few lines of code so thoroughly test single engine stage first 
 engine settings come before multiple engines - make depth, threads, hash value, search time, etc modular values - not hardcoded for each value - albeit different defaults
