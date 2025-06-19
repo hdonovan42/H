@@ -1010,21 +1010,19 @@ function handleGraphMouseMove(e) {
   if (!canvas || AppState.graphClickAreas.length === 0) return;
   
   const rect = canvas.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
+  const mouseX = e.clientX - rect.left;
   
+  // Find the closest move based on X coordinate only (same logic as click)
   let newHoverIndex = -1;
+  let minDistance = Infinity;
   
-  // Check if mouse is over any click area
   for (let i = 0; i < AppState.graphClickAreas.length; i++) {
     const area = AppState.graphClickAreas[i];
-    const dx = x - area.x;
-    const dy = y - area.y;
-    const distanceSquared = dx * dx + dy * dy;
+    const distance = Math.abs(mouseX - area.x);
     
-    if (distanceSquared <= area.radius * area.radius) {
+    if (distance < minDistance) {
+      minDistance = distance;
       newHoverIndex = i;
-      break;
     }
   }
   
@@ -1036,17 +1034,30 @@ function handleGraphMouseMove(e) {
 }
 
 function handleGraphClick(e) {
-  if (AppState.graphHoverIndex >= 0 && AppState.graphHoverIndex < AppState.graphClickAreas.length) {
-    const area = AppState.graphClickAreas[AppState.graphHoverIndex];
-    const moveIndex = area.moveIndex;
+  const canvas = document.getElementById('analysis-eval-graph');
+  if (!canvas || AppState.graphClickAreas.length === 0) return;
+  
+  const rect = canvas.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  
+  // Find the closest move based on X coordinate only
+  let closestMoveIndex = -1;
+  let minDistance = Infinity;
+  
+  for (let i = 0; i < AppState.graphClickAreas.length; i++) {
+    const area = AppState.graphClickAreas[i];
+    const distance = Math.abs(clickX - area.x);
     
-    // Simple: just navigate to that position using existing function
-    // This automatically handles setting userMoves to match the position
-    if (moveIndex <= AppState.graphMainlineMoves.length) {
-      // Set userMoves to graph mainline up to this point
-      AppState.userMoves = AppState.graphMainlineMoves.slice(0, moveIndex);
-      navigateToMove(moveIndex);
+    if (distance < minDistance) {
+      minDistance = distance;
+      closestMoveIndex = area.moveIndex;
     }
+  }
+  
+  // Navigate to the closest move if found
+  if (closestMoveIndex >= 0 && closestMoveIndex <= AppState.graphMainlineMoves.length) {
+    AppState.userMoves = AppState.graphMainlineMoves.slice(0, closestMoveIndex);
+    navigateToMove(closestMoveIndex);
   }
 }
 

@@ -17,12 +17,11 @@ DEV'S CHASE MORE FEATURES - FOUNDERS STOP AND CHECK WHAT THEY'RE DOING IS SERVIN
 - THOROUGH TESTING OF THE CODE  
 
 
-BUGS TO SQUASH + ROUNDING THE EDGES OFF FEATURES
-- fix graph breaking if sideline investigated
-- the click on the graph should only be concerned with the x axis - clicking above or below the graph should still point to that move 
+BUGS TO SQUASH + ROUNDING THE EDGES OFF FEATURES 
 
 BUGS SQUASHED AS PART OF THIS INITIATIVE
--
+- fix graph breaking if sideline investigated
+- the click on the graph should only be concerned with the x axis - clicking above or below the graph should still point to that move
 
 LINES OF CODE DELETED (counting from implementing final graph fixes)
 START 
