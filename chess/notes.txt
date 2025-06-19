@@ -9,15 +9,41 @@ metrics to track
 current bugs 
 - scaling - board currently a fixed size perfect for my screen - needs to scale for smaller/bigger displays
 
-v2 
--interactive graph and notation - click move number or point on graph to traverse to that point of the game
--toggle engine with 't'
 
-v2.2
--thorough testing - fix all bugs
--test suite?
+NOW CLOSE TO FINAL SOLUTION TO STAGE 1
 
-v2.5 warnings - will add a fair few lines of code so thoroughly test single engine stage first 
+DEV'S CHASE MORE FEATURES - FOUNDERS STOP AND CHECK WHAT THEY'RE DOING IS SERVING THE FINAL GOAL
+- NOW AT A STAGE WHERE X IS REQUIRED
+- THOROUGH TESTING OF THE CODE  
+
+
+BUGS TO SQUASH + ROUNDING THE EDGES OFF FEATURES
+- fix graph breaking if sideline investigated
+- the click on the graph should only be concerned with the x axis - clicking above or below the graph should still point to that move 
+
+BUGS SQUASHED AS PART OF THIS INITIATIVE
+-
+
+LINES OF CODE DELETED (counting from implementing final graph fixes)
+START 
+analysis.html = 
+styles.css =
+script.js
+END
+analysis.html = 
+styles.css =
+script.js
+
+
+MARKETTING STRATEGY - TIME TO GET USERS 
+- get something from user as proxy for willingness to 'pay' - email, make account, click, etc
+
+- how to make people hear about the product - guerilla marketting - no spend
+-social media -
+
+
+
+v2.5 
 engine settings come before multiple engines - make depth, threads, hash value, search time, etc modular values - not hardcoded for each value - albeit different defaults
 -give 'stockfish' loading its own styles.css reference - as its now called multiple times 
 -preload big engine on load up
@@ -103,3 +129,7 @@ v1.95
 - handle checkmates and draws - done, need to test - DONE 
 - promote to not only queen - make sure notation logic works - DONE 
 -eval score sometimes invisible bug fix 
+
+v2 
+-interactive graph and notation - click move number or point on graph to traverse to that point of the game
+-toggle engine with 't'

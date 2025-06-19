@@ -32,7 +32,9 @@ const AppState = {
   promotionCallback: null, // Callback function to execute after promotion choice
   // New properties for interactive graph
   graphClickAreas: [], // Store clickable areas for graph points
-  graphHoverIndex: -1  // Currently hovered graph point (-1 = none)
+  graphHoverIndex: -1,  // Currently hovered graph point (-1 = none)
+  graphMainlineMoves: [], // Original PGN moves for graph display only
+  graphEvalHistory: []
 };
 
 // Initialize the application
@@ -1036,10 +1038,122 @@ function handleGraphMouseMove(e) {
 function handleGraphClick(e) {
   if (AppState.graphHoverIndex >= 0 && AppState.graphHoverIndex < AppState.graphClickAreas.length) {
     const area = AppState.graphClickAreas[AppState.graphHoverIndex];
-    const targetMoveIndex = area.moveIndex;
+    const moveIndex = area.moveIndex;
     
-    // Navigate to the clicked position
-    navigateToMove(targetMoveIndex);
+    // Simple: just navigate to that position using existing function
+    // This automatically handles setting userMoves to match the position
+    if (moveIndex <= AppState.graphMainlineMoves.length) {
+      // Set userMoves to graph mainline up to this point
+      AppState.userMoves = AppState.graphMainlineMoves.slice(0, moveIndex);
+      navigateToMove(moveIndex);
+    }
+  }
+}
+
+// MINIMAL CHANGE: Graph drawing uses graph data
+function drawAnalysisEvalGraph() {
+  const canvas = document.getElementById('analysis-eval-graph');
+  if (!canvas) return;
+  
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width;
+  const height = canvas.height;
+  
+  ctx.clearRect(0, 0, width, height);
+  
+  const margin = { top: 10, right: 15, bottom: 10, left: 15 };
+  const chartWidth = width - margin.left - margin.right;
+  const chartHeight = height - margin.top - margin.bottom;
+  
+  ctx.fillStyle = '#f8f8f8';
+  ctx.fillRect(0, 0, width, height);
+  
+  const centerY = margin.top + chartHeight / 2;
+  
+  ctx.fillStyle = '#e0e0e0';
+  ctx.fillRect(margin.left, centerY, chartWidth, chartHeight / 2);
+  
+  ctx.strokeStyle = '#888';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  ctx.beginPath();
+  ctx.moveTo(margin.left, centerY);
+  ctx.lineTo(margin.left + chartWidth, centerY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(margin.left, margin.top);
+  ctx.lineTo(margin.left, margin.top + chartHeight);
+  ctx.moveTo(margin.left, margin.top + chartHeight);
+  ctx.lineTo(margin.left + chartWidth, margin.top + chartHeight);
+  ctx.stroke();
+  
+  // ONLY CHANGE: Use graphEvalHistory instead of evalHistory
+  if (AppState.graphEvalHistory.length <= 1) {
+    AppState.graphClickAreas = [];
+    return;
+  }
+  
+  AppState.graphClickAreas = [];
+  
+  ctx.strokeStyle = '#2196F3';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  
+  let hasStarted = false;
+  const evalRange = 10;
+  
+  for (let i = 0; i < AppState.graphEvalHistory.length; i++) {
+    if (AppState.graphEvalHistory[i] !== undefined) {
+      const x = margin.left + (i / Math.max(1, AppState.graphEvalHistory.length - 1)) * chartWidth;
+      const eval_val = Math.max(-evalRange, Math.min(evalRange, AppState.graphEvalHistory[i]));
+      const y = margin.top + chartHeight - ((eval_val + evalRange) / (2 * evalRange)) * chartHeight;
+      
+      AppState.graphClickAreas.push({
+        x: x,
+        y: y,
+        radius: 8,
+        moveIndex: i
+      });
+      
+      if (!hasStarted) {
+        ctx.moveTo(x, y);
+        hasStarted = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+  }
+  ctx.stroke();
+  
+  // Show current position indicator - works with existing logic
+  if (AppState.currentIndex < AppState.graphEvalHistory.length && 
+      AppState.graphEvalHistory[AppState.currentIndex] !== undefined) {
+    const x = margin.left + (AppState.currentIndex / Math.max(1, AppState.graphEvalHistory.length - 1)) * chartWidth;
+    const eval_val = Math.max(-evalRange, Math.min(evalRange, AppState.graphEvalHistory[AppState.currentIndex]));
+    const y = margin.top + chartHeight - ((eval_val + evalRange) / (2 * evalRange)) * chartHeight;
+    
+    ctx.fillStyle = '#FF5722';
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+  
+  // Hover effect (unchanged)
+  if (AppState.graphHoverIndex >= 0 && AppState.graphHoverIndex < AppState.graphClickAreas.length) {
+    const area = AppState.graphClickAreas[AppState.graphHoverIndex];
+    
+    ctx.save();
+    ctx.shadowColor = '#2196F3';
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = '#2196F3';
+    ctx.beginPath();
+    ctx.arc(area.x, area.y, 5, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.restore();
   }
 }
 
@@ -1075,31 +1189,85 @@ function loadPGN() {
     return;
   }
   
-  // Reset and load the game
+  // Reset and load the game (ALL EXISTING CODE UNCHANGED)
   AppState.game.load_pgn(pgnText);
   AppState.pgnMainlineMoves = AppState.game.history();
   AppState.userMoves = [...AppState.pgnMainlineMoves];
   AppState.currentIndex = 0;
   AppState.gameLoaded = true;
   
-  // Initialize eval history array
+  // Initialize eval history array (EXISTING CODE)
   AppState.evalHistory = new Array(AppState.pgnMainlineMoves.length + 1);
   
-  // Reset to starting position
+  // NEW: Store separate copy for graph (only addition)
+  AppState.graphMainlineMoves = [...AppState.pgnMainlineMoves];
+  AppState.graphEvalHistory = new Array(AppState.graphMainlineMoves.length + 1);
+  
+  // Reset to starting position (ALL EXISTING CODE UNCHANGED)
   AppState.game.reset();
   AppState.board.start();
   
-  // Update game status for starting position
   updateGameStatus();
   
-  // Analyze all positions in the game
+  // Analyze all positions in the game (EXISTING CODE UNCHANGED)
   analyzeGamePositions();
+  
+  // NEW: Also analyze for graph (separate analysis)
+  analyzeGraphPositions();
   
   if (AppState.engineEnabled) {
     updateStockfishAnalysis();
   }
   updateDisplay();
   drawEvalGraph();
+}
+
+function analyzeGraphPositions() {
+  const tempGame = new Chess();
+  let moveIndex = 0;
+  
+  // Analyze starting position for graph
+  analyzeGraphPosition(tempGame.fen(), moveIndex);
+  
+  // Analyze each position for graph
+  for (const move of AppState.graphMainlineMoves) {
+    tempGame.move(move);
+    moveIndex++;
+    analyzeGraphPosition(tempGame.fen(), moveIndex);
+  }
+}
+
+function analyzeGraphPosition(fen, moveIndex) {
+  const tempStockfish = new Worker('js/stockfish-17-lite-single.js');
+  
+  tempStockfish.onmessage = function(event) {
+    const message = typeof event.data === 'string' ? event.data : event.data.data;
+    
+    if (message === 'readyok') {
+      tempStockfish.postMessage(`position fen ${fen}`);
+      tempStockfish.postMessage('go depth 10');
+    } else if (message.startsWith('bestmove')) {
+      tempStockfish.terminate();
+    } else if (message.startsWith('info depth 10') && message.includes('score')) {
+      const info = parseStockfishInfoForGraph(message, fen);
+      if (info) {
+        let evalScore;
+        if (info.mate !== undefined) {
+          evalScore = info.mate > 0 ? 10 : -10;
+        } else {
+          evalScore = parseFloat(info.score);
+          evalScore = Math.max(-10, Math.min(10, evalScore));
+        }
+        
+        // Store in GRAPH eval history only
+        AppState.graphEvalHistory[moveIndex] = evalScore;
+        drawEvalGraph();
+      }
+    }
+  };
+  
+  tempStockfish.postMessage('uci');
+  tempStockfish.postMessage('isready');
 }
 
 // Analyze all positions in the loaded game
