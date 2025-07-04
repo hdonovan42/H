@@ -19,9 +19,25 @@ DEV'S CHASE MORE FEATURES - FOUNDERS STOP AND CHECK WHAT THEY'RE DOING IS SERVIN
 
 BUGS TO SQUASH + ROUNDING THE EDGES OFF FEATURES 
 
+- engine seems to always turn off ~5 moves in, suspect related to graph rendering? - debug events leading to crash
+
+- weird bug - after analysing hypothetical end to game, when going back to main line, clicking the graph only loads to pgn up to that point, to see out 
+the rest of time i have to click on the graph, clicking the graph should load the pgn to that point AND ALL MOVES AFTER - currently seems to only load
+up until that point -- fix immediately
+
+- graph working in wrong order - not sure how bad this is 
+    - graph depth not deep enough - implement progressive deepening
+- drawing slightly off, graph goes off the board 
+- switch to better graph drawing library?
+- scaling on graph +/- 3 currently graphs as tiny advantage - not true
+
 BUGS SQUASHED AS PART OF THIS INITIATIVE
 - fix graph breaking if sideline investigated
 - the click on the graph should only be concerned with the x axis - clicking above or below the graph should still point to that move
+
+FINAL STAGE 1 FEATURES
+-draw arrows
+-engine settings - depth, search time, etc
 
 LINES OF CODE DELETED (counting from implementing final graph fixes)
 START 
@@ -39,6 +55,17 @@ MARKETTING STRATEGY - TIME TO GET USERS
 
 - how to make people hear about the product - guerilla marketting - no spend
 -social media -
+
+
+BEFORE STARTING ON STAGE 2
+-find and squash all bugs - how to find edge cases?
+-lean up codebase - remove/replace junk functions - 
+-get users - marketing - sign ups?
+-concrete idea of what stage 2 looks like 
+
+potential features - finishing off stage 1
+- engine settings
+- addition of stockfish heavy
 
 
 

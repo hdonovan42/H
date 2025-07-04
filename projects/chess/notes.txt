@@ -1,0 +1,161 @@
+EVALUATION ENGINE MAGNUS CARLSEN WOULD BE PROUD TO USE
+
+metrics to track
+- needing to refresh the page - metric should approach 0
+- time to load first arrow (any engine allowed) - approaching 0
+- elo score of strongest engine - higher is better
+- times needed to turn engine ON/OFF to unfreeze arrows - approaching 0
+
+current bugs 
+- scaling - board currently a fixed size perfect for my screen - needs to scale for smaller/bigger displays
+
+
+NOW CLOSE TO FINAL SOLUTION TO STAGE 1
+
+DEV'S CHASE MORE FEATURES - FOUNDERS STOP AND CHECK WHAT THEY'RE DOING IS SERVING THE FINAL GOAL
+- NOW AT A STAGE WHERE X IS REQUIRED
+- THOROUGH TESTING OF THE CODE  
+
+
+BUGS TO SQUASH + ROUNDING THE EDGES OFF FEATURES 
+
+- engine seems to always turn off ~5 moves in, suspect related to graph rendering? - debug events leading to crash
+
+- weird bug - after analysing hypothetical end to game, when going back to main line, clicking the graph only loads to pgn up to that point, to see out 
+the rest of time i have to click on the graph, clicking the graph should load the pgn to that point AND ALL MOVES AFTER - currently seems to only load
+up until that point -- fix immediately
+
+- graph working in wrong order - not sure how bad this is 
+    - graph depth not deep enough - implement progressive deepening
+- drawing slightly off, graph goes off the board 
+- switch to better graph drawing library?
+- scaling on graph +/- 3 currently graphs as tiny advantage - not true
+
+BUGS SQUASHED AS PART OF THIS INITIATIVE
+- fix graph breaking if sideline investigated
+- the click on the graph should only be concerned with the x axis - clicking above or below the graph should still point to that move
+
+FINAL STAGE 1 FEATURES
+-draw arrows
+-engine settings - depth, search time, etc
+
+LINES OF CODE DELETED (counting from implementing final graph fixes)
+START 
+analysis.html = 
+styles.css =
+script.js
+END
+analysis.html = 
+styles.css =
+script.js
+
+
+MARKETTING STRATEGY - TIME TO GET USERS 
+- get something from user as proxy for willingness to 'pay' - email, make account, click, etc
+
+- how to make people hear about the product - guerilla marketting - no spend
+-social media -
+
+
+BEFORE STARTING ON STAGE 2
+-find and squash all bugs - how to find edge cases?
+-lean up codebase - remove/replace junk functions - 
+-get users - marketing - sign ups?
+-concrete idea of what stage 2 looks like 
+
+potential features - finishing off stage 1
+- engine settings
+- addition of stockfish heavy
+
+
+
+v2.5 
+engine settings come before multiple engines - make depth, threads, hash value, search time, etc modular values - not hardcoded for each value - albeit different defaults
+-give 'stockfish' loading its own styles.css reference - as its now called multiple times 
+-preload big engine on load up
+
+
+v2.5
+-engine optionality - default to quickest engine
+    - stockfish fast, stockfish strong, & AI engine
+        - why do pros need cloud compute? - server?
+- ADD ENGINE SETTINGS BUTTON 
+    -optionality for number of lines/arrows, threads, memory usage, & search time
+-notation numbered clearer - with interative feature to click on specific move
+
+
+v3 - TRUE ANALYSIS FEATURES - PROFILES + PAYWALL
+- accuracy% score (centipawn?) - normalised on chess.com score
+- classificiation and visualisation of moves (good, great, brilliant!!, etc)
+- show whos up in pieces on the board (e.g. if up a queen, shows +9 )
+- DARK MODE?
+- PGN's played as black should auto flip - one up on lichess - not sure how possible this is
+  
+- INVESTIGATE STRONGER (+ WIDER RANGE OF) CHESS ENGINES
+    - carlsen mentions top players pay for cloud compute for analysis
+        - was unaware top engines where compute constraint
+
+- personalised AI coach that give give personalised advice
+    - requires profiles
+    - build a dataset of a users moves 
+    - builds profile on them - repotoire, trends, habits, common mistakes etc
+    - provides tailored advice
+PERSONALISED CHESS COACH - COMING
+-build profile of common mistakes
+-personalised coaching
+
+PAYMENTS
+-custom domain
+-move hosting away from github
+-hide code from inspect element
+
+-how to handle freemium tier 
+    - standard analysis features always free - advanced features mentioned here behind paywall 
+    - need to establish how to offer users chance to experience the service for free once per account or once per day
+
+- mobile functionality  
+    - currently awful experience for mobile users
+        - how to fix?
+            - click piece you wish to move, then click where to move too?
+            - stop page scrolling as user drags piece?
+            - alternative option to move pieces?
+
+
+
+
+OLD VERSION HISTORY MOVED TO BOTTOM 
+v1
+-remove all buttons
+-eval graph - currently draws as i go to stop freeze at start
+-notation box scrollable
+
+v1.5
+DESIGN TWEAKS
+- close gap between board and pgn box 
+- replace '-' with bullet points
+
+v1.7
+-stockfish on/off + show which engine is running - should fix arrow freeze issue
+
+v1.8
+-engine switch
+FROM: stockfish-16.1-single (js+wasm) ~ 67mb
+    LOAD TIME: 5-15 seconds
+TO: stockfish-17-lite-single ~ 6mb
+    LOAD TIME: on web server < 1 second - GREAT
+x10 smaller engine with *similar* strength
+
+v1.85
+-code cleanup - removed upneeded code + tweaks/optimisations
+
+v1.9
+-engine crash handling - current pop up at the top seems obtuse - just a message in the container should suffice
+
+v1.95
+- handle checkmates and draws - done, need to test - DONE 
+- promote to not only queen - make sure notation logic works - DONE 
+-eval score sometimes invisible bug fix 
+
+v2 
+-interactive graph and notation - click move number or point on graph to traverse to that point of the game
+-toggle engine with 't'
