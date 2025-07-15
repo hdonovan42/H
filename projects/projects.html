@@ -3,9 +3,81 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Projects</title>
+    <title>Writings</title>
     <link rel="icon" type="image/png" href="../images/H-favicon.png">
-    <link rel="stylesheet" href="styles.css">
+    <style>
+        body {
+            background-color: #FFF1E5;
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .ft-headline {
+            font-family: "Georgia", "Times New Roman", serif;
+            font-weight: 500;
+            font-size: 2.5rem;
+            line-height: 1.15;
+            letter-spacing: -0.02em;
+            color: #33302E;
+            margin-bottom: 1rem;
+        }
+        .header {
+            font-size: 1.5em;
+            margin-bottom: 5px;
+            padding-bottom: 5px;
+            padding-top: 10px;
+        }
+
+        .header a {
+            text-decoration: none;
+            color: black;
+        }
+
+        .header a:hover {
+            text-decoration: underline;
+        }
+
+        .blog-container {
+            display: flex;
+            flex-direction: column; /* Align items vertically */
+            align-items: flex-start; /* Align items to the left */
+        }
+
+        .blog-entry {
+            margin-bottom: 5px;
+            padding: 5px;
+            line-height: 1.4em;
+            
+        }
+        .title {
+            font-size: 1em;
+            font-weight: bold;
+            display: inline-block;
+            text-decoration: none;
+            /*color: black;*/
+            /*color: #0000FF;*/
+        }
+
+        .title:hover {
+            text-decoration: underline;
+            color: black;
+        }
+        .date {
+            /*text-decoration: none;*/
+            font-size: 0.8em;
+            color: #777;
+            margin-left: 10px; 
+        }
+        .bullet {
+            margin: 0 5px;
+            color: grey;
+            display: inline-block; /* Ensures the bullet stays on the same line */
+            vertical-align: middle;
+        }
+    </style>
 </head>
 <body>
 
@@ -14,33 +86,14 @@
     </div>
 
     <hr>
-    
-    <div class="projects-container">
-        
-        <div class="section-title">Live Projects</div>
-        
-        <div class="project-entry">
-            <span class="bullet">&bull;</span>
-            <a href="chess/analysis.html">
-                <span class="title">Chess Analysis Engine</span>
-            </a>    
-            <!-- <span class="date">2024</span> 
-            <div class="description">Interactive chess position analysis powered by Stockfish engine with evaluation graphs and move exploration</div>
-            -->
-        </div>
-        
-        <div class="section-title">Coming Soon</div>
-        
-        <!--
-        <div class="project-entry">
-            <span class="bullet">&bull;</span>
-            <span class="title">Data Visualization Suite</span>
-            <span class="status">In Development</span>
-            <div class="description">Interactive charts and graphs for exploring complex datasets</div>
-        </div>
-        -->
+
+    <div class="blog-entry">
+        <span class="bullet">&bull;</span>
+        <a href="chess/analysis.html">
+            <span class="title">Chess Analysis Engine</span></a>    
+            <!-- <span class="date">Aug 2024</span> -->
         
     </div>
     
-</body>
-</html>
+    </body>
+    </html>
