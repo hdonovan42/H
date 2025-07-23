@@ -612,7 +612,7 @@
                 
                 // If API route is excessively longer than straight line (indicating impractical routing like ferries)
                 // For short distances (<50km), be more strict about detours
-                const maxRatio = straightLineDistance < 50 ? 2.0 : 2.0;
+                const maxRatio = straightLineDistance < 50 ? 2.0 : 2.0; //need to fix this line - 2.0 twice
                 if (routeDistance > straightLineDistance * maxRatio) {
                     console.log(`API route too long for ${fromWaypoint.name} → ${toWaypoint.name}: ${routeDistance.toFixed(1)}km vs ${straightLineDistance.toFixed(1)}km direct (${(routeDistance/straightLineDistance).toFixed(1)}x longer)`);
                     throw new Error(`Impractical route - ${(routeDistance/straightLineDistance).toFixed(1)}x longer than direct`);
@@ -727,6 +727,66 @@
             return points;
         }
 
+        // Format address to show only: Name, City, Country
+        function formatAddress(geocodeData) {
+            if (!geocodeData || !geocodeData.address) {
+                return 'Unknown location';
+            }
+            
+            const addr = geocodeData.address;
+            const parts = [];
+            
+            // Get the main place name (city, town, village, etc.)
+            const placeName = addr.city || addr.town || addr.village || addr.hamlet || 
+                             addr.suburb || addr.neighbourhood || addr.county;
+            
+            if (placeName) {
+                parts.push(placeName);
+            }
+            
+            // Get country
+            if (addr.country) {
+                parts.push(addr.country);
+            }
+            
+            return parts.length > 0 ? parts.join(', ') : 'Unknown location';
+        }
+
+        // Format search result name to be concise
+        function formatSearchResultName(result) {
+            console.log('Search result data:', result); // Debug log
+            
+            if (!result.address) {
+                console.log('No address object, using display_name');
+                // Fallback: try to extract city and country from display_name
+                const parts = result.display_name.split(',').map(p => p.trim());
+                if (parts.length >= 2) {
+                    return `${parts[0]}, ${parts[parts.length - 1]}`; // First part, last part
+                }
+                return parts[0];
+            }
+            
+            const addr = result.address;
+            console.log('Address object:', addr); // Debug log
+            const parts = [];
+            
+            // Get the main place name
+            const mainName = addr.city || addr.town || addr.village || addr.hamlet || 
+                            addr.suburb || addr.neighbourhood || 
+                            result.display_name.split(',')[0];
+            
+            if (mainName) {
+                parts.push(mainName);
+            }
+            
+            // Add country
+            if (addr.country) {
+                parts.push(addr.country);
+            }
+            
+            return parts.length > 0 ? parts.join(', ') : result.display_name.split(',')[0];
+        }
+
         // Add waypoint
         function addWaypoint(lat, lng, name = null) {
             const waypoint = {
@@ -734,7 +794,7 @@
                 lat: lat,
                 lng: lng,
                 name: name || `Waypoint ${waypoints.length + 1}`,
-                address: 'Loading address...'
+                address: name ? '' : 'Loading address...'
             };
 
             waypoints.push(waypoint);
@@ -743,9 +803,6 @@
             // Reverse geocode to get address if name not provided
             if (!name) {
                 reverseGeocode(lat, lng, waypoint.id);
-            } else {
-                waypoint.address = name;
-                updateUI();
             }
         }
 
@@ -757,7 +814,7 @@
                 
                 const waypoint = waypoints.find(w => w.id === waypointId);
                 if (waypoint) {
-                    waypoint.address = data.display_name || 'Unknown location';
+                    waypoint.address = formatAddress(data);
                     updateUI();
                 }
             } catch (error) {
@@ -819,7 +876,6 @@
                                 </button>
                             </div>
                         </div>
-                        <div class="waypoint-details">${waypoint.address}</div>
                         ${routeInfo}
                     </div>
                 `;
@@ -1006,7 +1062,8 @@
                         
                         if (results.length > 0) {
                             const result = results[0];
-                            addWaypoint(parseFloat(result.lat), parseFloat(result.lon), result.display_name);
+                            const simpleName = formatSearchResultName(result);
+                            addWaypoint(parseFloat(result.lat), parseFloat(result.lon), simpleName);
                             this.value = '';
                         } else {
                             alert('Location not found');
