@@ -1,0 +1,56 @@
+categorise (air)ports 
+simplify addresses - avoid london,london
+	- not exact address?
+	- just city? - needs to allow remote locations
+sort out fallback speed
+
+DELETION OF POINTS DOESNT DELETE LINE
+
+don't allow repeat entries back to back
+
+weird map update/shift when new location added in
+	- default to western europe
+
+
+HOW TO LAY OUT VIBE-CODED PROJECTS
+-learn from mistakes of chess analysis
+-refactor code now file is small
+-segment into distinct sections
+easier to understand
+
+****
+ai api project
+
+pass .md through python script to get opus 4 output, write to index.html file & save for saving time on new projects
+EXTRA STEP -
+write notes similar to prompt for md file ->
+LLM creates .md file -> gets opus 4 to write code -> code . - so IDE opens straight away
+
+best llm for writing .md file
+
+write prompt straight from command line
+****
+
+- toggle overlays for looking at work when done
+
+
+
+DESIGN
+-remove "Plan Your Journey" crap
+
+
+
+AI - implement ai chatbox that allows you to plan a roadtrip with an ai assistant
+adventuregenie.com
+
+
+- under each step, show driving distance, time, etc from previous stop
+-favicon
+-domain?
+
+api key 
+
+scaling - stats default to centre, stick to map - minimise toolbar
+
+
+
