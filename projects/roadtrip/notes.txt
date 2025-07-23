@@ -1,22 +1,57 @@
-categorise (air)ports 
-simplify addresses - avoid london,london
-	- not exact address?
-	- just city? - needs to allow remote locations
-sort out fallback speed
-
-DELETION OF POINTS DOESNT DELETE LINE
-
-don't allow repeat entries back to back
-
-weird map update/shift when new location added in
-	- default to western europe
-
-
+STEP 1
+- split up into 3 files
+- segment and comment thoroughly on script.js 
+- find potential efficiency improvements
+- fix double 2.0 line 
 HOW TO LAY OUT VIBE-CODED PROJECTS
 -learn from mistakes of chess analysis
 -refactor code now file is small
 -segment into distinct sections
 easier to understand
+
+STEP 2
+- make line drawing more robust 
+
+-- deepdive through comments of garry tan post - lots of good ideas bound to be there 
+
+STEP 3 - moving to design 
+- total distance and driving distance - best design?
+- investigate map 'skins' - colour code country speed limits?
+- under each step, show driving distance, time, etc from previous stop - should it be previous stop?
+- remove "Plan Your Journey" crap?
+- scaling - stats default to top right - minimise toolbar - what to do with statistics?
+- favicon
+- size of points - currently too large
+
+-estimated time and waypoints - is this even helpful
+- add setting section for metric/imperial - allow hybrid approach 
+
+
+FALLBACK SPEED
+
+-domain?
+
+Start work on driver aids
+- speed limits
+- tolls
+- speed cameras?
+- fuel stops
+- restplatz - there has to be a dataset somewhere - look at that toilet finder guy
+- fuel consumption
+
+categorise (air)ports 
+sort out fallback speed - ferry currently claims 30 minutes
+
+don't allow repeat entries back to back
+
+api key 
+
+scaling - stats default to centre, stick to map - minimise toolbar?
+
+
+DESIGN
+-remove "Plan Your Journey" crap
+
 
 ****
 ai api project
@@ -34,23 +69,5 @@ write prompt straight from command line
 - toggle overlays for looking at work when done
 
 
-
-DESIGN
--remove "Plan Your Journey" crap
-
-
-
 AI - implement ai chatbox that allows you to plan a roadtrip with an ai assistant
 adventuregenie.com
-
-
-- under each step, show driving distance, time, etc from previous stop
--favicon
--domain?
-
-api key 
-
-scaling - stats default to centre, stick to map - minimise toolbar
-
-
-
