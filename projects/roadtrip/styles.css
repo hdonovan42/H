@@ -393,10 +393,20 @@
             animation: fadeIn 0.3s ease;
         }
 
-        /* Responsive */
+        /* Responsive - prioritize map on small screens */
         @media (max-width: 768px) {
             .sidebar {
-                width: 100%;
+                width: 100vw; /* Full viewport width when open */
+                transform: translateX(-100%); /* Start collapsed by default */
+            }
+            
+            .sidebar:not(.collapsed) {
+                transform: translateX(0); /* Show when explicitly opened */
+            }
+            
+            /* Ensure floating toggle is visible on mobile */
+            .floating-toggle {
+                display: flex;
             }
         }
 

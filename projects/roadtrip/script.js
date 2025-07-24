@@ -14,9 +14,27 @@ let totalStats = { distance: 0, duration: 0, roadDistance: 0, hasFallbacks: fals
 let needsFullRecalculation = false;
 let lastCalculatedWaypointCount = 0;
 
+// Check if device is mobile and auto-collapse sidebar
+function checkMobileAndCollapse() {
+    const isMobile = window.innerWidth <= 768;
+    const sidebar = document.getElementById('sidebar');
+    const floatingToggle = document.getElementById('floatingToggle');
+    
+    if (isMobile) {
+        // On mobile: always start collapsed (prioritize map)
+        sidebar.classList.add('collapsed');
+        floatingToggle.style.display = 'flex';
+    } else {
+        // On desktop: sidebar open by default
+        sidebar.classList.remove('collapsed');
+        floatingToggle.style.display = 'none';
+    }
+}
+
 // Initialize on load
 window.onload = function() {
     initMap();
+    checkMobileAndCollapse();
 };
 
 // Initialize map
@@ -554,14 +572,16 @@ function resetTrip() {
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar');
     const floatingToggle = document.getElementById('floatingToggle');
+    const isMobile = window.innerWidth <= 768;
     
     sidebar.classList.toggle('collapsed');
     
-    // Update floating toggle visibility
-    if (sidebar.classList.contains('collapsed')) {
-        floatingToggle.style.display = 'flex';
+    if (isMobile) {
+        // On mobile, always show floating toggle (since sidebar takes full width)
+        floatingToggle.style.display = sidebar.classList.contains('collapsed') ? 'flex' : 'none';
     } else {
-        floatingToggle.style.display = 'none';
+        // On desktop, show floating toggle only when collapsed
+        floatingToggle.style.display = sidebar.classList.contains('collapsed') ? 'flex' : 'none';
     }
 }
 
@@ -646,4 +666,5 @@ document.getElementById('searchInput').addEventListener('keypress', async functi
             }
         }
     }
+    window.addEventListener('resize', checkMobileAndCollapse);
 });
