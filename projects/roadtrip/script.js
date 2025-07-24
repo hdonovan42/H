@@ -5,9 +5,7 @@ let markers = [];
 let routePolylines = [];
 let draggedItem = null;
 
-// Configure your API key here - Get your free key from https://openrouteservice.org/dev/#/signup
-// Replace this with your actual API key for production use
-const API_KEY = 'YOUR_API_KEY_HERE';
+const API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjA4MTc5OWFiZmUwOTQ2ZTY4ZWI1YzE2NTkxMjQ4MzVkIiwiaCI6Im11cm11cjY0In0=';
 
 let routeSegments = [];
 let totalStats = { distance: 0, duration: 0, roadDistance: 0, hasFallbacks: false };
