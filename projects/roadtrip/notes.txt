@@ -1,3 +1,7 @@
+current approach of falling back to direct route when too indirect is wrong approach
+needs to indentify an undrivable route 
+
+
 STEP 1
 - split up into 3 files
 - segment and comment thoroughly on script.js 
@@ -25,6 +29,8 @@ STEP 3 - moving to design
 
 -estimated time and waypoints - is this even helpful
 - add setting section for metric/imperial - allow hybrid approach 
+
+STEP 4 - AUTH - for saving journeys - 
 
 
 FALLBACK SPEED
