@@ -55,8 +55,7 @@
             box-shadow: 0 4px 16px var(--shadow);
         }
 
-        /* Show floating toggle when sidebar is collapsed */
-        .sidebar.collapsed ~ .floating-toggle {
+        .floating-toggle.show {
             display: flex;
         }
 
@@ -395,20 +394,9 @@
         }
 
         /* Responsive */
-        @media (max-width: 500px) {
+        @media (max-width: 768px) {
             .sidebar {
                 width: 100%;
-            }
-        }
-
-        /* Auto-collapse sidebar on very small screens (but allow manual override) */
-        @media (max-width: 775px) {
-            .sidebar:not(.manually-opened) {
-                transform: translateX(-100%);
-            }
-            
-            .sidebar:not(.manually-opened) ~ .floating-toggle {
-                display: flex;
             }
         }
 

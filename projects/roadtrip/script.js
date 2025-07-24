@@ -24,8 +24,8 @@ window.onload = function() {
 // Initialize map
 function initMap() {
     map = L.map('map', {
-    zoomControl: false // Remove zoom buttons
-}).setView([51.5074, -0.1278], 6); //London centre
+        zoomControl: false // Remove zoom buttons
+    }).setView([51.5074, -0.1278], 6); // London center
     
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
@@ -559,21 +559,12 @@ function toggleSidebar() {
     
     sidebar.classList.toggle('collapsed');
     
-    // Mark as manually opened/closed on small screens
-    if (window.innerWidth <= 775) {
-        if (sidebar.classList.contains('collapsed')) {
-            sidebar.classList.remove('manually-opened');
-        } else {
-            sidebar.classList.add('manually-opened');
-        }
-    }
-    
+    // Update floating toggle visibility
     if (sidebar.classList.contains('collapsed')) {
         floatingToggle.style.display = 'flex';
     } else {
         floatingToggle.style.display = 'none';
     }
-        
 }
 
 // MODIFIED: Drag and drop handlers with optimization logic
