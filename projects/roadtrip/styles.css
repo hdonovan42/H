@@ -27,6 +27,7 @@
         }
 
         /* Header */
+        /* Update header styles */
         .header {
             position: absolute;
             top: 0;
@@ -43,6 +44,12 @@
             justify-content: space-between;
         }
 
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
         .logo {
             font-size: 24px;
             font-weight: 600;
@@ -56,6 +63,28 @@
 
         .logo i {
             -webkit-text-fill-color: var(--primary);
+        }
+
+        /* Update toggle button styles for header */
+        .toggle-sidebar {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 8px var(--shadow);
+        }
+
+        .toggle-sidebar:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 16px var(--shadow);
         }
 
         /* Map Container */
@@ -88,22 +117,6 @@
 
         .sidebar.collapsed {
             transform: translateX(-100%);
-        }
-
-        .sidebar-header {
-            padding: 24px;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .sidebar-title {
-            font-size: 28px;
-            font-weight: 700;
-            margin-bottom: 8px;
-        }
-
-        .sidebar-subtitle {
-            color: var(--text-secondary);
-            font-size: 14px;
         }
 
         /* Search Box */
@@ -329,32 +342,6 @@
         .stat-value {
             font-weight: 600;
             font-size: 16px;
-        }
-
-        /* Toggle Button */
-        .toggle-sidebar {
-            position: absolute;
-            top: 88px;
-            left: 16px;
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            width: 44px;
-            height: 44px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            z-index: 101;
-            transition: all 0.2s ease;
-            box-shadow: 0 2px 8px var(--shadow);
-        }
-
-        .toggle-sidebar:hover {
-            transform: scale(1.05);
-            box-shadow: 0 4px 16px var(--shadow);
         }
 
         /* Empty State */

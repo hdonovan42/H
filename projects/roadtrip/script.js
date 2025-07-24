@@ -25,21 +25,6 @@
                 subdomains: 'abcd',
                 maxZoom: 20
             }).addTo(map);
-
-            // Add click handler
-            map.on('click', function(e) {
-                addWaypoint(e.latlng.lat, e.latlng.lng);
-            });
-        }
-
-        // Add test route for demonstration
-        function addTestRoute() {
-            resetTrip();
-            // London → Dover → Calais → Munich
-            addWaypoint(51.5074, -0.1278, 'London, UK');
-            addWaypoint(51.1279, 1.3134, 'Dover, UK');
-            addWaypoint(50.9513, 1.8587, 'Calais, France');
-            addWaypoint(48.1351, 11.5820, 'Munich, Germany');
         }
 
         // Get route segment between two waypoints
@@ -322,7 +307,7 @@
                     <div class="empty-state">
                         <i class="fas fa-map-marked-alt"></i>
                         <p>No waypoints added yet</p>
-                        <p>Click on the map or search for locations to get started</p>
+                        <p>Search for locations to get started</p>
                     </div>
                 `;
                 return;

@@ -11,31 +11,27 @@
 <body>
     <!-- Header -->
     <header class="header">
+    <div class="header-left">
+        <button class="toggle-sidebar" onclick="toggleSidebar()">
+            <i class="fas fa-bars"></i>
+        </button>
         <div class="logo">
             <i class="fas fa-route"></i>
             Roadtrip Planner
         </div>
-        <div class="header-actions">
-            <button class="waypoint-action" onclick="resetTrip()" title="Reset Trip">
-                <i class="fas fa-redo"></i>
-            </button>
-        </div>
-    </header>
+    </div>
+    <div class="header-actions">
+        <button class="waypoint-action" onclick="resetTrip()" title="Reset Trip">
+            <i class="fas fa-redo"></i>
+        </button>
+    </div>
+</header>
 
     <!-- Map -->
     <div id="map"></div>
 
-    <!-- Toggle Sidebar Button -->
-    <button class="toggle-sidebar" onclick="toggleSidebar()">
-        <i class="fas fa-bars"></i>
-    </button>
-
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
-        <div class="sidebar-header">
-            <h1 class="sidebar-title">Plan Your Journey</h1>
-            <p class="sidebar-subtitle">Add waypoints to create your perfect roadtrip</p>
-        </div>
 
         <div class="search-container">
             <div class="search-box">
@@ -48,14 +44,9 @@
             <div class="empty-state">
                 <i class="fas fa-map-marked-alt"></i>
                 <p>No waypoints added yet</p>
-                <p>Click on the map or search for locations to get started</p>
+                <p>Search for locations to get started</p>
             </div>
         </div>
-
-        <button class="add-waypoint-btn" onclick="addRandomWaypoint()">
-            <i class="fas fa-plus"></i>
-            Add Waypoint
-        </button>
     </aside>
 
     <!-- Stats Panel -->
@@ -78,13 +69,8 @@
         </div>
     </div>
 
-
-
-
-    /* start of script */
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="script.js"></script>
 
     </body>
 </html>
-        
