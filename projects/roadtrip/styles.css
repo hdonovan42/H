@@ -26,71 +26,44 @@
             height: 100vh;
         }
 
-        /* Header */
-        /* Update header styles */
-        .header {
+        /* Floating Toggle Button (for when sidebar is collapsed) */
+        .floating-toggle {
             position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            padding: 16px 24px;
-            z-index: 1000;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .header-left {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-
-        .logo {
-            font-size: 24px;
-            font-weight: 600;
-            background: linear-gradient(135deg, var(--primary), var(--secondary));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .logo i {
-            -webkit-text-fill-color: var(--primary);
-        }
-
-        /* Update toggle button styles for header */
-        .toggle-sidebar {
+            top: 16px;
+            left: 16px;
+            width: 44px;
+            height: 44px;
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
             border: 1px solid var(--border);
             border-radius: 12px;
-            width: 44px;
-            height: 44px;
-            display: flex;
+            cursor: pointer;
+            display: none;
             align-items: center;
             justify-content: center;
-            cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.3s ease;
+            z-index: 200;
+            color: var(--text-secondary);
             box-shadow: 0 2px 8px var(--shadow);
         }
 
-        .toggle-sidebar:hover {
+        .floating-toggle:hover {
+            background: var(--border);
+            color: var(--text-primary);
             transform: scale(1.05);
             box-shadow: 0 4px 16px var(--shadow);
+        }
+
+        /* Show floating toggle when sidebar is collapsed */
+        .sidebar.collapsed ~ .floating-toggle {
+            display: flex;
         }
 
         /* Map Container */
         #map {
             position: absolute;
-            top: 72px;
+            top: 0;
             left: 0;
             right: 0;
             bottom: 0;
@@ -100,7 +73,7 @@
         /* Sidebar */
         .sidebar {
             position: absolute;
-            top: 72px;
+            top: 0;
             left: 0;
             bottom: 0;
             width: 380px;
@@ -119,14 +92,43 @@
             transform: translateX(-100%);
         }
 
-        /* Search Box */
+        /* Search Container */
         .search-container {
-            padding: 16px 24px;
+            padding: 16px 12px;
             border-bottom: 1px solid var(--border);
         }
 
         .search-box {
             position: relative;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+        }
+
+        .toggle-sidebar {
+            background: var(--background);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+
+        .toggle-sidebar:hover {
+            background: var(--border);
+            color: var(--text-primary);
+        }
+
+        .search-input-wrapper {
+            position: relative;
+            flex: 1;
         }
 
         .search-box input {
@@ -145,12 +147,17 @@
             box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.1);
         }
 
-        .search-box i {
+        .search-box i.fa-search {
             position: absolute;
             left: 16px;
             top: 50%;
             transform: translateY(-50%);
             color: var(--text-secondary);
+            pointer-events: none;
+        }
+
+        .search-box .waypoint-action {
+            flex-shrink: 0;
         }
 
         /* Waypoints List */
@@ -297,51 +304,45 @@
             box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
         }
 
-        /* Stats Panel */
-        .stats-panel {
-            position: absolute;
-            top: 88px;
-            right: 16px;
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border-radius: 20px;
-            padding: 24px;
-            box-shadow: 0 8px 32px var(--shadow);
-            z-index: 100;
-            min-width: 280px;
-            border: 1px solid var(--border);
+        /* Sidebar Stats */
+        .sidebar-stats {
+            padding: 16px 24px;
+            border-top: 1px solid var(--border);
+            background: rgba(0, 122, 255, 0.02);
+            margin-top: auto; /* Push to bottom of sidebar */
         }
 
-        .stats-title {
-            font-size: 18px;
+        .sidebar-stats .stats-title {
+            font-size: 16px;
             font-weight: 600;
-            margin-bottom: 16px;
+            margin-bottom: 12px;
             display: flex;
             align-items: center;
             gap: 8px;
+            color: var(--text-primary);
         }
 
-        .stat-item {
+        .sidebar-stats .stat-item {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 12px 0;
+            padding: 8px 0;
             border-bottom: 1px solid var(--border);
         }
 
-        .stat-item:last-child {
+        .sidebar-stats .stat-item:last-child {
             border-bottom: none;
         }
 
-        .stat-label {
+        .sidebar-stats .stat-label {
             color: var(--text-secondary);
             font-size: 14px;
         }
 
-        .stat-value {
+        .sidebar-stats .stat-value {
             font-weight: 600;
-            font-size: 16px;
+            font-size: 14px;
+            color: var(--text-primary);
         }
 
         /* Empty State */
@@ -394,14 +395,20 @@
         }
 
         /* Responsive */
-        @media (max-width: 768px) {
+        @media (max-width: 500px) {
             .sidebar {
                 width: 100%;
             }
+        }
+
+        /* Auto-collapse sidebar on very small screens (but allow manual override) */
+        @media (max-width: 775px) {
+            .sidebar:not(.manually-opened) {
+                transform: translateX(-100%);
+            }
             
-            .stats-panel {
-                right: 50%;
-                transform: translateX(50%);
+            .sidebar:not(.manually-opened) ~ .floating-toggle {
+                display: flex;
             }
         }
 

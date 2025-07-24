@@ -5,11 +5,12 @@ let markers = [];
 let routePolylines = [];
 let draggedItem = null;
 
-// Configure your API key here - using a demo key that may have limited functionality
-const API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjA4MTc5OWFiZmUwOTQ2ZTY4ZWI1YzE2NTkxMjQ4MzVkIiwiaCI6Im11cm11cjY0In0=';
+// Configure your API key here - Get your free key from https://openrouteservice.org/dev/#/signup
+// Replace this with your actual API key for production use
+const API_KEY = 'YOUR_API_KEY_HERE';
 
 let routeSegments = [];
-let totalStats = { distance: 0, duration: 0, hasFallbacks: false };
+let totalStats = { distance: 0, duration: 0, roadDistance: 0, hasFallbacks: false };
 
 // Track if we need full recalculation
 let needsFullRecalculation = false;
@@ -22,7 +23,9 @@ window.onload = function() {
 
 // Initialize map
 function initMap() {
-    map = L.map('map').setView([51.5074, -0.1278], 6); // London center
+    map = L.map('map', {
+    zoomControl: false // Remove zoom buttons
+}).setView([51.5074, -0.1278], 6); //London centre
     
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
@@ -33,6 +36,12 @@ function initMap() {
 
 // Get route segment between two waypoints
 async function getRouteSegment(fromWaypoint, toWaypoint) {
+    // Check if we have a valid API key
+    if (!API_KEY || API_KEY === 'YOUR_API_KEY_HERE') {
+        console.log(`No valid API key, using fallback for ${fromWaypoint.name} → ${toWaypoint.name}`);
+        return getFallbackRoute(fromWaypoint, toWaypoint);
+    }
+
     try {
         console.log(`Attempting API route from ${fromWaypoint.name} to ${toWaypoint.name}`);
         
@@ -40,11 +49,13 @@ async function getRouteSegment(fromWaypoint, toWaypoint) {
             method: 'POST',
             headers: {
                 'Authorization': API_KEY,
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
             },
             body: JSON.stringify({
                 coordinates: [[fromWaypoint.lng, fromWaypoint.lat], [toWaypoint.lng, toWaypoint.lat]],
-                radiuses: [10000, 10000] // 10km radius for each point
+                radiuses: [10000, 10000], // 10km radius for each point
+                format: 'json'
             })
         });
 
@@ -115,30 +126,34 @@ async function getRouteSegment(fromWaypoint, toWaypoint) {
         
     } catch (error) {
         console.log(`🔄 API failed for ${fromWaypoint.name} → ${toWaypoint.name}, using fallback: ${error.message}`);
-        
-        // Fallback to straight line calculation
-        const distance = calculateDistance(
-            fromWaypoint.lat, fromWaypoint.lng,
-            toWaypoint.lat, toWaypoint.lng
-        );
-        
-        // Estimate duration assuming 80 km/h average speed for fallback
-        const duration = distance / 80;
-        
-        return {
-            coordinates: [[fromWaypoint.lat, fromWaypoint.lng], [toWaypoint.lat, toWaypoint.lng]],
-            distance: distance,
-            duration: duration,
-            type: 'fallback'
-        };
+        return getFallbackRoute(fromWaypoint, toWaypoint);
     }
+}
+
+// Fallback route calculation
+function getFallbackRoute(fromWaypoint, toWaypoint) {
+    // Fallback to straight line calculation
+    const distance = calculateDistance(
+        fromWaypoint.lat, fromWaypoint.lng,
+        toWaypoint.lat, toWaypoint.lng
+    );
+    
+    // Estimate duration assuming 80 km/h average speed for fallback
+    const duration = distance / 80;
+    
+    return {
+        coordinates: [[fromWaypoint.lat, fromWaypoint.lng], [toWaypoint.lat, toWaypoint.lng]],
+        distance: distance,
+        duration: duration,
+        type: 'fallback'
+    };
 }
 
 // OPTIMIZED: Incremental route calculation
 async function calculateRoute() {
     if (waypoints.length < 2) {
         routeSegments = [];
-        totalStats = { distance: 0, duration: 0 };
+        totalStats = { distance: 0, duration: 0, roadDistance: 0 };
         lastCalculatedWaypointCount = waypoints.length;
         return;
     }
@@ -164,13 +179,18 @@ async function calculateRoute() {
         totalStats.distance += newSegment.distance;
         totalStats.duration += newSegment.duration;
         
+        // Only add to road distance if it's an actual road route (not fallback)
+        if (newSegment.type === 'api') {
+            totalStats.roadDistance += newSegment.distance;
+        }
+        
         console.log('✅ Incremental calculation complete - 1 API call used');
     } else {
         console.log('🔄 Full recalculation needed');
         
         // Full recalculation - calculate all segments step by step
         routeSegments = [];
-        totalStats = { distance: 0, duration: 0 };
+        totalStats = { distance: 0, duration: 0, roadDistance: 0 };
 
         for (let i = 0; i < waypoints.length - 1; i++) {
             const fromWaypoint = waypoints[i];
@@ -183,6 +203,11 @@ async function calculateRoute() {
             
             totalStats.distance += segment.distance;
             totalStats.duration += segment.duration;
+            
+            // Only add to road distance if it's an actual road route (not fallback)
+            if (segment.type === 'api') {
+                totalStats.roadDistance += segment.distance;
+            }
         }
         
         console.log(`✅ Full recalculation complete - ${waypoints.length - 1} API calls used`);
@@ -450,8 +475,8 @@ async function updateMap() {
 // Update stats
 function updateStats() {
     document.getElementById('totalDistance').textContent = `${totalStats.distance.toFixed(1)} km`;
+    document.getElementById('roadDistance').textContent = `${totalStats.roadDistance.toFixed(1)} km`;
     document.getElementById('estimatedTime').textContent = `${Math.floor(totalStats.duration)}h ${Math.round((totalStats.duration % 1) * 60)}m`;
-    document.getElementById('waypointCount').textContent = waypoints.length;
 }
 
 // Calculate distance between two points (Haversine formula)
@@ -484,6 +509,11 @@ function removeWaypoint(id) {
             const removedSegment = routeSegments.pop();
             totalStats.distance -= removedSegment.distance;
             totalStats.duration -= removedSegment.duration;
+            
+            // Only subtract from road distance if it was an actual road route
+            if (removedSegment.type === 'api') {
+                totalStats.roadDistance -= removedSegment.distance;
+            }
         }
         lastCalculatedWaypointCount = waypoints.length;
     } else {
@@ -491,7 +521,7 @@ function removeWaypoint(id) {
         console.log('🗑️ Removed middle waypoint - flagging for full recalculation');
         needsFullRecalculation = true;
         routeSegments = [];
-        totalStats = { distance: 0, duration: 0 };
+        totalStats = { distance: 0, duration: 0, roadDistance: 0 };
     }
     
     updateUI();
@@ -516,7 +546,7 @@ function resetTrip() {
     }
     waypoints = [];
     routeSegments = [];
-    totalStats = { distance: 0, duration: 0 };
+    totalStats = { distance: 0, duration: 0, roadDistance: 0 };
     needsFullRecalculation = false;
     lastCalculatedWaypointCount = 0;
     updateUI();
@@ -525,7 +555,25 @@ function resetTrip() {
 // Toggle sidebar
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar');
+    const floatingToggle = document.getElementById('floatingToggle');
+    
     sidebar.classList.toggle('collapsed');
+    
+    // Mark as manually opened/closed on small screens
+    if (window.innerWidth <= 775) {
+        if (sidebar.classList.contains('collapsed')) {
+            sidebar.classList.remove('manually-opened');
+        } else {
+            sidebar.classList.add('manually-opened');
+        }
+    }
+    
+    if (sidebar.classList.contains('collapsed')) {
+        floatingToggle.style.display = 'flex';
+    } else {
+        floatingToggle.style.display = 'none';
+    }
+        
 }
 
 // MODIFIED: Drag and drop handlers with optimization logic
@@ -579,7 +627,7 @@ function handleDrop(e) {
         console.log('🔄 Waypoints reordered - flagging for full recalculation');
         needsFullRecalculation = true;
         routeSegments = [];
-        totalStats = { distance: 0, duration: 0 };
+        totalStats = { distance: 0, duration: 0, roadDistance: 0 };
         updateUI();
     }
 

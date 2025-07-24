@@ -9,34 +9,29 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <!-- Header -->
-    <header class="header">
-    <div class="header-left">
-        <button class="toggle-sidebar" onclick="toggleSidebar()">
-            <i class="fas fa-bars"></i>
-        </button>
-        <div class="logo">
-            <i class="fas fa-route"></i>
-            Roadtrip Planner
-        </div>
-    </div>
-    <div class="header-actions">
-        <button class="waypoint-action" onclick="resetTrip()" title="Reset Trip">
-            <i class="fas fa-redo"></i>
-        </button>
-    </div>
-</header>
-
     <!-- Map -->
     <div id="map"></div>
+
+    <!-- Floating Toggle Button (appears when sidebar is collapsed) -->
+    <button class="floating-toggle" id="floatingToggle" onclick="toggleSidebar()">
+        <i class="fas fa-bars"></i>
+    </button>
 
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
 
         <div class="search-container">
             <div class="search-box">
-                <i class="fas fa-search"></i>
-                <input type="text" id="searchInput" placeholder="Search for a location..." />
+                <button class="toggle-sidebar" onclick="toggleSidebar()">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div class="search-input-wrapper">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="searchInput" placeholder="Search for a location..." />
+                </div>
+                <button class="waypoint-action" onclick="resetTrip()" title="Reset Trip">
+                    <i class="fas fa-redo"></i>
+                </button>
             </div>
         </div>
 
@@ -47,27 +42,28 @@
                 <p>Search for locations to get started</p>
             </div>
         </div>
-    </aside>
 
-    <!-- Stats Panel -->
-    <div class="stats-panel">
-        <div class="stats-title">
-            <i class="fas fa-chart-line"></i>
-            Trip Statistics
+        <!-- Sidebar Stats Panel -->
+        <div class="sidebar-stats" id="sidebarStats">
+            <div class="stats-title">
+                <i class="fas fa-chart-line"></i>
+                Trip Statistics
+            </div>
+
+            <div class="stat-item">
+                <span class="stat-label">Total Distance</span>
+                <span class="stat-value" id="totalDistance">0 km</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Road Distance</span>
+                <span class="stat-value" id="roadDistance">0 km</span>
+            </div>  
+            <div class="stat-item">
+                <span class="stat-label">Estimated Time</span>
+                <span class="stat-value" id="estimatedTime">0h 0m</span>
+            </div>
         </div>
-        <div class="stat-item">
-            <span class="stat-label">Total Distance</span>
-            <span class="stat-value" id="totalDistance">0 km</span>
-        </div>
-        <div class="stat-item">
-            <span class="stat-label">Estimated Time</span>
-            <span class="stat-value" id="estimatedTime">0h 0m</span>
-        </div>
-        <div class="stat-item">
-            <span class="stat-label">Waypoints</span>
-            <span class="stat-value" id="waypointCount">0</span>
-        </div>
-    </div>
+    </aside>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="script.js"></script>
