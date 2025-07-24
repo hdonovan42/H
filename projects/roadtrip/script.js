@@ -9,7 +9,7 @@ let draggedItem = null;
 const API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjA4MTc5OWFiZmUwOTQ2ZTY4ZWI1YzE2NTkxMjQ4MzVkIiwiaCI6Im11cm11cjY0In0=';
 
 let routeSegments = [];
-let totalStats = { distance: 0, duration: 0, roadDistance: 0, hasFallbacks: false };
+let totalStats = { distance: 0, duration: 0, hasFallbacks: false };
 
 // Track if we need full recalculation
 let needsFullRecalculation = false;
@@ -138,7 +138,7 @@ async function getRouteSegment(fromWaypoint, toWaypoint) {
 async function calculateRoute() {
     if (waypoints.length < 2) {
         routeSegments = [];
-        totalStats = { distance: 0, duration: 0, roadDistance: 0 };
+        totalStats = { distance: 0, duration: 0 };
         lastCalculatedWaypointCount = waypoints.length;
         return;
     }
@@ -164,18 +164,13 @@ async function calculateRoute() {
         totalStats.distance += newSegment.distance;
         totalStats.duration += newSegment.duration;
         
-        // Only add to road distance if it's an actual road route (not fallback)
-        if (newSegment.type === 'api') {
-            totalStats.roadDistance += newSegment.distance;
-        }
-        
         console.log('✅ Incremental calculation complete - 1 API call used');
     } else {
         console.log('🔄 Full recalculation needed');
         
         // Full recalculation - calculate all segments step by step
         routeSegments = [];
-        totalStats = { distance: 0, duration: 0, roadDistance: 0 };
+        totalStats = { distance: 0, duration: 0 };
 
         for (let i = 0; i < waypoints.length - 1; i++) {
             const fromWaypoint = waypoints[i];
@@ -188,11 +183,6 @@ async function calculateRoute() {
             
             totalStats.distance += segment.distance;
             totalStats.duration += segment.duration;
-            
-            // Only add to road distance if it's an actual road route (not fallback)
-            if (segment.type === 'api') {
-                totalStats.roadDistance += segment.distance;
-            }
         }
         
         console.log(`✅ Full recalculation complete - ${waypoints.length - 1} API calls used`);
@@ -460,7 +450,6 @@ async function updateMap() {
 // Update stats
 function updateStats() {
     document.getElementById('totalDistance').textContent = `${totalStats.distance.toFixed(1)} km`;
-    document.getElementById('roadDistance').textContent = `${totalStats.roadDistance.toFixed(1)} km`;
     document.getElementById('estimatedTime').textContent = `${Math.floor(totalStats.duration)}h ${Math.round((totalStats.duration % 1) * 60)}m`;
     document.getElementById('waypointCount').textContent = waypoints.length;
 }
@@ -495,11 +484,6 @@ function removeWaypoint(id) {
             const removedSegment = routeSegments.pop();
             totalStats.distance -= removedSegment.distance;
             totalStats.duration -= removedSegment.duration;
-            
-            // Only subtract from road distance if it was an actual road route
-            if (removedSegment.type === 'api') {
-                totalStats.roadDistance -= removedSegment.distance;
-            }
         }
         lastCalculatedWaypointCount = waypoints.length;
     } else {
@@ -507,7 +491,7 @@ function removeWaypoint(id) {
         console.log('🗑️ Removed middle waypoint - flagging for full recalculation');
         needsFullRecalculation = true;
         routeSegments = [];
-        totalStats = { distance: 0, duration: 0, roadDistance: 0 };
+        totalStats = { distance: 0, duration: 0 };
     }
     
     updateUI();
@@ -532,7 +516,7 @@ function resetTrip() {
     }
     waypoints = [];
     routeSegments = [];
-    totalStats = { distance: 0, duration: 0, roadDistance: 0 };
+    totalStats = { distance: 0, duration: 0 };
     needsFullRecalculation = false;
     lastCalculatedWaypointCount = 0;
     updateUI();
@@ -595,7 +579,7 @@ function handleDrop(e) {
         console.log('🔄 Waypoints reordered - flagging for full recalculation');
         needsFullRecalculation = true;
         routeSegments = [];
-        totalStats = { distance: 0, duration: 0, roadDistance: 0 };
+        totalStats = { distance: 0, duration: 0 };
         updateUI();
     }
 

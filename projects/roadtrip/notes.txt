@@ -27,6 +27,12 @@ STEP 3 - moving to design
 - favicon
 - size of points - currently too large
 
+DESIGN - AT THE TIME 
+-remove header
+-move TS to the left
+-move toggle next to entry box
+-where to put the reset button
+
 -estimated time and waypoints - is this even helpful
 - add setting section for metric/imperial - allow hybrid approach 
 
