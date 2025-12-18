@@ -1,6 +1,27 @@
+DESIGN - 3d interactive globe
+- starlink map style
+- milradar.com
+
+- geojson <1mb
+
+
+
+notes from test route
+- map auto zoom bs - dont shift map unneccessarily 
+- how to deal with waypoiints occuring twice - currently lableed as just the greatest value
+- map skin looks shit
+- what spped is assumed in driving - autobahn 
+- roadtrip aids - HIGHLIGHT long journeys, etc 
+
+
 current approach of falling back to direct route when too indirect is wrong approach
 needs to indentify an undrivable route 
 
+- for homepage - test black test - blue under hover - over blue 
+
+
+
+autozoom currently annoying - dont shift map location if waypoint is in viewable area 
 
 STEP 1
 - split up into 3 files
@@ -23,7 +44,7 @@ STEP 3 - moving to design
 - investigate map 'skins' - colour code country speed limits?
 - under each step, show driving distance, time, etc from previous stop - should it be previous stop?
 - remove "Plan Your Journey" crap?
-- scaling - stats default to top right - minimise toolbar - what to do with statistics?
+\- scaling - stats default to top right - minimise toolbar - what to do with statistics?
 - favicon
 - size of points - currently too large
 
