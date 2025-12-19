@@ -113,6 +113,7 @@
         e.preventDefault();
         if (inputTicker.trim()) {
           setTicker(inputTicker.toUpperCase());
+          setInputTicker('');
           setSharesCount('');
         }
       };
@@ -136,31 +137,33 @@
       const areaPath = linePath ? `${linePath} L ${770} 260 L 50 260 Z` : '';
 
       return (
-        <div style={{ minHeight: '100vh', background: '#f4f1e8', fontFamily: '"IBM Plex Mono", monospace', color: '#1a1a1a', padding: '32px' }}>
+        <div style={{ minHeight: '100vh', background: '#f4f1e8', fontFamily: '"IBM Plex Mono", monospace', color: '#1a1a1a', padding: '22px' }}> 
           <style>{`
             @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap');
             * { box-sizing: border-box; margin: 0; padding: 0; }
-            .container { max-width: 1100px; margin: 0 auto; }
+            .container { max-width: 1200px; margin: 0 auto; padding: 0px 28px; }
             .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px; padding-bottom: 20px; border-bottom: 2px solid #1a1a1a; }
             .ticker-display { font-size: 44px; font-weight: 600; letter-spacing: -1px; }
             .ticker-form { display: flex; gap: 8px; }
-            .ticker-input { background: transparent; border: 2px solid #1a1a1a; padding: 10px 12px; font-family: inherit; font-size: 14px; text-transform: uppercase; width: 90px; letter-spacing: 2px; }
+            .ticker-input { background: transparent; border: 2px solid #1a1a1a; padding: 9px 12px; font-family: inherit; font-size: 14px; text-transform: uppercase; width: 90px; letter-spacing: 2px; margin-bottom: 8px;}
             .ticker-input:focus { outline: none; background: rgba(0,0,0,0.05); }
+            .top-row { display: flex; gap: 20px; margin-bottom: 0; }
+            .top-row .price-section { flex: 0 0 auto; width: 340px; }
+            .top-row .chart-wrapper { flex: 1; display: flex; flex-direction: column; }
+            .top-row .chart-wrapper .section-label { margin-top: 0; }
             .section-label { font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: #666; margin-bottom: 10px; margin-top: 14px; }
             .box { background: #faf9f5; border: 1px solid #d0cdc4; margin-bottom: 0; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.5), 0 2px 8px rgba(0,0,0,0.08); }
-            .price-section { padding: 28px 32px; }
-            .price-main { display: flex; align-items: baseline; gap: 16px; margin-bottom: 4px; }
-            .price-current { font-size: 44px; font-weight: 600; letter-spacing: -1px; }
-            .price-change { font-size: 18px; font-weight: 500; }
-            .price-subtitle { font-size: 12px; color: #888; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid #e8e5dc; }
-            .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); }
-            .stat-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ebe8df; }
-            .stat-row:nth-child(odd) { padding-right: 24px; border-right: 1px solid #ebe8df; }
-            .stat-row:nth-child(even) { padding-left: 24px; }
-            .stat-row:nth-last-child(-n+2) { border-bottom: none; }
-            .stat-label { font-size: 13px; color: #666; }
-            .stat-value { font-size: 13px; font-weight: 500; }
-            .chart-box { padding: 20px 16px; }
+            .price-section { padding: 24px 28px; }
+            .price-main { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; flex-wrap: wrap; }
+            .price-current { font-size: 36px; font-weight: 600; letter-spacing: -1px; }
+            .price-change { font-size: 16px; font-weight: 500; }
+            .price-subtitle { font-size: 11px; color: #888; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #e8e5dc; }
+            .stats-grid { display: flex; flex-direction: column; }
+            .stat-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #ebe8df; }
+            .stat-row:last-child { border-bottom: none; }
+            .stat-label { font-size: 12px; color: #666; }
+            .stat-value { font-size: 12px; font-weight: 500; }
+            .chart-box { padding: 16px 12px; height: 100%; display: flex; flex-direction: column; justify-content: center; }
             .spreadsheet { overflow-x: auto; }
             .spreadsheet-header { display: grid; grid-template-columns: 100px 80px 70px 70px auto; background: #e8e5dc; border-bottom: 1px solid #d0cdc4; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; font-weight: 600; }
             .spreadsheet-header > div { padding: 10px; border-right: 1px solid #d0cdc4; cursor: pointer; display: flex; align-items: center; justify-content: center; }
@@ -176,13 +179,23 @@
             .spreadsheet-row:hover { background: #f0ede4; }
             .spreadsheet-cell { padding: 10px; border-right: 1px solid #e8e5dc; font-size: 13px; white-space: nowrap; text-align: center; }
             .spreadsheet-cell:last-child { border-right: none; }
-            .value-cell { color: #2d5a3d; font-weight: 500; }
+            .value-cell { color: #2d5a3d; font-weight: 500; text-align: left; }
             .positive { color: #2d5a3d; }
             .negative { color: #8b3a3a; }
             .loading { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(244,241,232,0.9); display: flex; align-items: center; justify-content: center; z-index: 100; }
             .loading-text { font-size: 14px; letter-spacing: 4px; text-transform: uppercase; animation: pulse 1.5s infinite; }
             @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
-            .timestamp { font-size: 11px; color: #888; text-align: right; margin-top: 24px; letter-spacing: 1px; }
+            .timestamp { font-size: 11px; color: #888; text-align: right; margin-top: 14px; letter-spacing: 1px; }
+            
+            @media (max-width: 900px) {
+              .top-row { flex-direction: column; }
+              .top-row .price-section { width: 100%; }
+              .price-current { font-size: 44px; }
+              .price-change { font-size: 18px; }
+              .price-section { padding: 28px 32px; }
+              .stat-label, .stat-value { font-size: 13px; }
+              .stat-row { padding: 10px 0; }
+            }
           `}</style>
 
           {loading && <div className="loading"><div className="loading-text">Loading {ticker}...</div></div>}
@@ -195,62 +208,63 @@
               </form>
             </header>
 
-            <div className="box price-section">
-              <div className="price-main">
-                <span className="price-current">${currentPrice.toFixed(2)}</span>
-                <span className={`price-change ${priceChange >= 0 ? 'positive' : 'negative'}`}>
-                  {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)} ({priceChange >= 0 ? '+' : ''}{priceChangePercent.toFixed(2)}%)
-                </span>
+            <div className="top-row">
+              <div className="price-section box">
+                <div className="price-main">
+                  <span className="price-current">${currentPrice.toFixed(2)}</span>
+                  <span className={`price-change ${priceChange >= 0 ? 'positive' : 'negative'}`}>
+                    {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)} ({priceChange >= 0 ? '+' : ''}{priceChangePercent.toFixed(2)}%)
+                  </span>
+                </div>
+                <div className="price-subtitle">At close: {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} 4:00 PM EST</div>
+                <div className="stats-grid">
+                  <div className="stat-row"><span className="stat-label">Day Range</span><span className="stat-value">{dayLow.toFixed(2)} - {dayHigh.toFixed(2)}</span></div>
+                  <div className="stat-row"><span className="stat-label">52 Week Range</span><span className="stat-value">{week52Low.toFixed(2)} - {week52High.toFixed(2)}</span></div>
+                  <div className="stat-row"><span className="stat-label">Avg. Volume</span><span className="stat-value">{Math.floor(avgVolume).toLocaleString()}</span></div>
+                  <div className="stat-row"><span className="stat-label">Market Cap</span><span className="stat-value">{(() => {
+                    if (marketCap <= 0) return 'N/A';
+                    const inBillions = marketCap / 1000;
+                    const inTrillions = marketCap / 1000000;
+                    if (inTrillions >= 1) return inTrillions.toPrecision(3) + 'T';
+                    if (inBillions >= 1) return inBillions.toPrecision(3) + 'B';
+                    return marketCap.toPrecision(3) + 'M';
+                  })()}</span></div>
+                  <div className="stat-row"><span className="stat-label">Forward P/E</span><span className="stat-value">{forwardPE > 0 ? forwardPE.toFixed(2) : 'N/A'}</span></div>
+                </div>
               </div>
-              <div className="price-subtitle">At close: {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} 4:00 PM EST</div>
-              <div className="stats-grid">
-                <div className="stat-row"><span className="stat-label">Day Range</span><span className="stat-value">{dayLow.toFixed(2)} - {dayHigh.toFixed(2)}</span></div>
-                <div className="stat-row"><span className="stat-label">52 Week Range</span><span className="stat-value">{week52Low.toFixed(2)} - {week52High.toFixed(2)}</span></div>
-                <div className="stat-row"><span className="stat-label">Volume</span><span className="stat-value">{(data[data.length - 1]?.volume || 0).toLocaleString()}</span></div>
-                <div className="stat-row"><span className="stat-label">Avg. Volume</span><span className="stat-value">{Math.floor(avgVolume).toLocaleString()}</span></div>
-                <div className="stat-row"><span className="stat-label">Market Cap</span><span className="stat-value">{(() => {
-                  if (marketCap <= 0) return 'N/A';
-                  // Finnhub returns market cap in millions
-                  const inBillions = marketCap / 1000;
-                  const inTrillions = marketCap / 1000000;
-                  if (inTrillions >= 1) return '$' + inTrillions.toPrecision(3) + 'T';
-                  if (inBillions >= 1) return '$' + inBillions.toPrecision(3) + 'B';
-                  return '$' + marketCap.toPrecision(3) + 'M';
-                })()}</span></div>
-                <div className="stat-row"><span className="stat-label">Forward P/E</span><span className="stat-value">{forwardPE > 0 ? forwardPE.toFixed(2) : 'N/A'}</span></div>
+              
+              <div className="chart-wrapper">
+                <div className="box chart-box">
+                  <svg viewBox="0 0 800 300" style={{ width: '100%' }}>
+                    <defs><linearGradient id="grad" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#1a73e8" stopOpacity="0.3" /><stop offset="100%" stopColor="#1a73e8" stopOpacity="0.02" /></linearGradient></defs>
+                    {(() => {
+                      const min = Math.floor(minPrice / 20) * 20;
+                      const max = Math.ceil(maxPrice / 20) * 20;
+                      const range = max - min;
+                      const step = Math.ceil(range / 5 / 20) * 20;
+                      const steps = [];
+                      for (let p = max; p >= min && steps.length < 6; p -= step) steps.push(p);
+                      return steps.map(p => <text key={p} x="8" y={20 + ((max - p) / (max - min || 1)) * 240 + 4} fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">${p}</text>);
+                    })()}
+                    {areaPath && <path d={areaPath} fill="url(#grad)" />}
+                    {linePath && <path d={linePath} fill="none" stroke="#1a73e8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
+                    {(() => {
+                      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], seen = new Set();
+                      const monthPoints = [];
+                      data.forEach((d, i) => {
+                        const m = new Date(d.date).getMonth(), key = `${new Date(d.date).getFullYear()}-${m}`;
+                        if (!seen.has(key)) {
+                          seen.add(key);
+                          monthPoints.push({ month: months[m], x: 50 + (i / (data.length - 1 || 1)) * 720 });
+                        }
+                      });
+                      return monthPoints.filter((p, i) => i === 0 ? p.x > 70 : true).map(p => (
+                        <text key={p.month + p.x} x={p.x} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{p.month}</text>
+                      ));
+                    })()}
+                  </svg>
+                </div>
               </div>
-            </div>
-
-            <div className="section-label">Price Chart — 6 Months</div>
-            <div className="box chart-box">
-              <svg viewBox="0 0 800 300" style={{ width: '100%' }}>
-                <defs><linearGradient id="grad" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#1a73e8" stopOpacity="0.3" /><stop offset="100%" stopColor="#1a73e8" stopOpacity="0.02" /></linearGradient></defs>
-                {(() => {
-                  const min = Math.floor(minPrice / 20) * 20;
-                  const max = Math.ceil(maxPrice / 20) * 20;
-                  const range = max - min;
-                  const step = Math.ceil(range / 5 / 20) * 20;
-                  const steps = [];
-                  for (let p = max; p >= min && steps.length < 6; p -= step) steps.push(p);
-                  return steps.map(p => <text key={p} x="8" y={20 + ((max - p) / (max - min || 1)) * 240 + 4} fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">${p}</text>);
-                })()}
-                {areaPath && <path d={areaPath} fill="url(#grad)" />}
-                {linePath && <path d={linePath} fill="none" stroke="#1a73e8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
-                {(() => {
-                  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], seen = new Set();
-                  const monthPoints = [];
-                  data.forEach((d, i) => {
-                    const m = new Date(d.date).getMonth(), key = `${new Date(d.date).getFullYear()}-${m}`;
-                    if (!seen.has(key)) {
-                      seen.add(key);
-                      monthPoints.push({ month: months[m], x: 50 + (i / (data.length - 1 || 1)) * 720 });
-                    }
-                  });
-                  return monthPoints.filter((p, i) => i === 0 ? p.x > 70 : true).map(p => (
-                    <text key={p.month + p.x} x={p.x} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{p.month}</text>
-                  ));
-                })()}
-              </svg>
             </div>
 
             <div className="section-label">Historical Data — 6 Months</div>
@@ -282,8 +296,7 @@
               </div>
             </div>
 
-            <div className="timestamp">Last updated: {new Date().toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
-          </div>
+<div className="timestamp">Last updated: {new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', '')}</div>          </div>
         </div>
       );
     }
