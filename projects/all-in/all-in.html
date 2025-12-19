@@ -11,75 +11,114 @@
 <body>
   <div id="root"></div>
   <script type="text/babel">
-    const { useState, useEffect, useCallback } = React;
+    const { useState, useEffect } = React;
 
-    const MOCK_HISTORICAL = Array.from({ length: 180 }, (_, i) => {
-      const date = new Date();
-      date.setDate(date.getDate() - (179 - i));
-      const base = 185 + Math.sin(i / 15) * 20 + (i / 180) * 30;
-      return {
-        date: date.toISOString().split('T')[0],
-        open: base + (Math.random() - 0.5) * 5,
-        high: base + Math.random() * 8,
-        low: base - Math.random() * 8,
-        close: base + (Math.random() - 0.5) * 6,
-        volume: Math.floor(50000000 + Math.random() * 30000000)
-      };
-    });
+    // ⚠️ ADD YOUR API KEYS HERE
+    const FINNHUB_API_KEY = 'd4iuigpr01queuaklek0d4iuigpr01queuaklekg';
+    const ALPHA_VANTAGE_KEY = '49AEFIO1PF5Y6HJX';
+
+    // Cache duration: 24 hours
+    const CACHE_DURATION = 24 * 60 * 60 * 1000;
 
     function StockTracker() {
       const [ticker, setTicker] = useState('TSLA');
       const [inputTicker, setInputTicker] = useState('');
-      const [data, setData] = useState(MOCK_HISTORICAL);
-      const [loading, setLoading] = useState(false);
+      const [data, setData] = useState([]);
+      const [quote, setQuote] = useState(null);
+      const [metrics, setMetrics] = useState(null);
+      const [loading, setLoading] = useState(true);
       const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
       const [sharesCount, setSharesCount] = useState('');
 
-      const currentPrice = data[data.length - 1]?.close || 0;
-      const previousPrice = data[data.length - 2]?.close || currentPrice;
-      const priceChange = currentPrice - previousPrice;
-      const priceChangePercent = ((priceChange / previousPrice) * 100);
-      const highestPrice = Math.max(...data.map(d => d.high));
-      const lowestPrice = Math.min(...data.map(d => d.low));
-      const avgVolume = data.reduce((sum, d) => sum + d.volume, 0) / data.length;
-      const fiftyDayMA = data.slice(-50).reduce((sum, d) => sum + d.close, 0) / Math.min(50, data.length);
+      const getCachedData = (symbol) => {
+        const cached = localStorage.getItem(`stock_${symbol}`);
+        if (cached) {
+          const { data, timestamp } = JSON.parse(cached);
+          if (Date.now() - timestamp < CACHE_DURATION) {
+            console.log('Using cached data for', symbol);
+            return data;
+          }
+        }
+        return null;
+      };
+
+      const setCachedData = (symbol, data) => {
+        localStorage.setItem(`stock_${symbol}`, JSON.stringify({ data, timestamp: Date.now() }));
+        console.log('Cached data for', symbol);
+      };
+
+      const fetchStockData = async (symbol) => {
+        setLoading(true);
+
+        try {
+          let historicalData = getCachedData(symbol);
+
+          // Fetch quote from Finnhub
+          const quoteRes = await fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`);
+          const quoteData = await quoteRes.json();
+          if (quoteData?.c > 0) setQuote(quoteData);
+
+          // Fetch metrics from Finnhub
+          const metricsRes = await fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${symbol}&metric=all&token=${FINNHUB_API_KEY}`);
+          const metricsData = await metricsRes.json();
+          if (metricsData?.metric) setMetrics(metricsData);
+
+          // Fetch historical from Alpha Vantage if not cached
+          if (!historicalData) {
+            console.log('Fetching from Alpha Vantage...');
+            const avRes = await fetch(`https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&outputsize=compact&apikey=${ALPHA_VANTAGE_KEY}`);
+            const avData = await avRes.json();
+
+            if (avData['Time Series (Daily)']) {
+              historicalData = Object.entries(avData['Time Series (Daily)'])
+                .map(([date, v]) => ({
+                  date,
+                  open: parseFloat(v['1. open']),
+                  high: parseFloat(v['2. high']),
+                  low: parseFloat(v['3. low']),
+                  close: parseFloat(v['4. close']),
+                  volume: parseInt(v['5. volume'])
+                }))
+                .sort((a, b) => new Date(a.date) - new Date(b.date))
+                .slice(-180);
+              setCachedData(symbol, historicalData);
+            }
+          }
+
+          if (historicalData?.length > 0) setData(historicalData);
+        } catch (error) {
+          console.error('Error:', error);
+        }
+
+        setLoading(false);
+      };
+
+      useEffect(() => { fetchStockData(ticker); }, [ticker]);
+
+      // Derived values
+      const currentPrice = quote?.c || data[data.length - 1]?.close || 0;
+      const priceChange = quote?.d || 0;
+      const priceChangePercent = quote?.dp || 0;
+      const dayHigh = quote?.h || data[data.length - 1]?.high || 0;
+      const dayLow = quote?.l || data[data.length - 1]?.low || 0;
+      const highestPrice = data.length > 0 ? Math.max(...data.map(d => d.high)) : 0;
+      const lowestPrice = data.length > 0 ? Math.min(...data.map(d => d.low)) : 0;
+      const avgVolume = data.length > 0 ? data.reduce((sum, d) => sum + d.volume, 0) / data.length : 0;
+      const week52High = metrics?.metric?.['52WeekHigh'] || highestPrice;
+      const week52Low = metrics?.metric?.['52WeekLow'] || lowestPrice;
+      const marketCap = metrics?.metric?.marketCapitalization || 0;
+      const forwardPE = metrics?.metric?.forwardPE || 0;
 
       const handleTickerSubmit = (e) => {
         e.preventDefault();
         if (inputTicker.trim()) {
-          setLoading(true);
           setTicker(inputTicker.toUpperCase());
-          setTimeout(() => {
-            const newData = Array.from({ length: 180 }, (_, i) => {
-              const date = new Date();
-              date.setDate(date.getDate() - (179 - i));
-              const base = 100 + Math.random() * 200 + Math.sin(i / 15) * 25 + (i / 180) * 35;
-              return {
-                date: date.toISOString().split('T')[0],
-                open: base + (Math.random() - 0.5) * 5,
-                high: base + Math.random() * 10,
-                low: base - Math.random() * 10,
-                close: base + (Math.random() - 0.5) * 8,
-                volume: Math.floor(30000000 + Math.random() * 50000000)
-              };
-            });
-            setData(newData);
-            setSharesCount('');
-            setLoading(false);
-          }, 800);
+          setSharesCount('');
         }
       };
 
-      const handleCellEdit = (index, field, value) => {
-        const newData = [...data];
-        newData[index] = { ...newData[index], [field]: parseFloat(value) || value };
-        setData(newData);
-        setEditingCell(null);
-      };
-
       const handleSort = (key) => {
-        const direction = sortConfig.key === key && sortConfig.direction === 'asc' ? 'desc' : 'asc';
-        setSortConfig({ key, direction });
+        setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }));
       };
 
       const sortedData = [...data].sort((a, b) => {
@@ -88,411 +127,75 @@
         return 0;
       });
 
-      const chartData = data;
-      const minPrice = Math.min(...chartData.map(d => d.low)) * 0.98;
-      const maxPrice = Math.max(...chartData.map(d => d.high)) * 1.02;
-      const priceRange = maxPrice - minPrice;
-
+      // Chart
+      const minPrice = data.length > 0 ? Math.min(...data.map(d => d.low)) * 0.98 : 0;
+      const maxPrice = data.length > 0 ? Math.max(...data.map(d => d.high)) * 1.02 : 100;
+      const priceRange = (maxPrice - minPrice) || 1;
       const getY = (price) => 260 - ((price - minPrice) / priceRange) * 240;
-
-      const linePath = chartData.map((d, i) => {
-        const x = 50 + (i / (chartData.length - 1)) * 720;
-        const y = getY(d.close);
-        return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
-      }).join(' ');
-
-      const areaPath = linePath + ` L ${50 + 720} 260 L 50 260 Z`;
+      const linePath = data.length > 1 ? data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${50 + (i / (data.length - 1)) * 720} ${getY(d.close)}`).join(' ') : '';
+      const areaPath = linePath ? `${linePath} L ${770} 260 L 50 260 Z` : '';
 
       return (
-        <div style={{
-          minHeight: '100vh',
-          background: '#f4f1e8',
-          fontFamily: '"IBM Plex Mono", "Courier New", monospace',
-          color: '#1a1a1a',
-          padding: '32px',
-          backgroundImage: `
-            radial-gradient(circle at 50% 50%, rgba(0,0,0,0.02) 0%, transparent 50%),
-            url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%' height='100%' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E")
-          `
-        }}>
+        <div style={{ minHeight: '100vh', background: '#f4f1e8', fontFamily: '"IBM Plex Mono", monospace', color: '#1a1a1a', padding: '32px' }}>
           <style>{`
-            @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Playfair+Display:wght@400;600&display=swap');
-            
+            @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap');
             * { box-sizing: border-box; margin: 0; padding: 0; }
-            
-            .eink-container {
-              max-width: 1100px;
-              margin: 0 auto;
-            }
-            
-            .header {
-              display: flex;
-              justify-content: space-between;
-              align-items: flex-end;
-              margin-bottom: 40px;
-              padding-bottom: 20px;
-              border-bottom: 2px solid #1a1a1a;
-            }
-            
-            .ticker-display {
-              font-family: 'IBM Plex Mono', monospace;
-              font-size: 44px;
-              font-weight: 600;
-              letter-spacing: -1px;
-              line-height: 1;
-            }
-            
-            .ticker-form {
-              display: flex;
-              gap: 8px;
-              align-items: center;
-            }
-            
-            .ticker-input {
-              background: transparent;
-              border: 2px solid #1a1a1a;
-              padding: 12px 16px;
-              font-family: inherit;
-              font-size: 14px;
-              text-transform: uppercase;
-              width: 120px;
-              letter-spacing: 2px;
-            }
-            
-            .ticker-input:focus {
-              outline: none;
-              background: rgba(0,0,0,0.05);
-            }
-            
-            .ticker-btn {
-              background: #1a1a1a;
-              color: #f4f1e8;
-              border: none;
-              padding: 14px 24px;
-              font-family: inherit;
-              font-size: 12px;
-              letter-spacing: 1px;
-              cursor: pointer;
-              transition: all 0.2s;
-            }
-            
-            .ticker-btn:hover {
-              background: #333;
-            }
-            
-            .section-label {
-              font-size: 10px;
-              letter-spacing: 3px;
-              text-transform: uppercase;
-              color: #666;
-              margin-bottom: 12px;
-            }
-            
-            .spreadsheet-container {
-              background: #faf9f5;
-              border: 1px solid #d0cdc4;
-              margin-bottom: 40px;
-              box-shadow: 
-                inset 0 0 0 1px rgba(255,255,255,0.5),
-                0 2px 8px rgba(0,0,0,0.08);
-              overflow-x: auto;
-            }
-            
-            .spreadsheet-header {
-              display: grid;
-              grid-template-columns: 100px 80px 70px 60px auto;
-              background: #e8e5dc;
-              border-bottom: 1px solid #d0cdc4;
-              font-size: 11px;
-              letter-spacing: 1px;
-              text-transform: uppercase;
-              font-weight: 600;
-            }
-            
-            .spreadsheet-header > div {
-              padding: 10px 10px;
-              border-right: 1px solid #d0cdc4;
-              cursor: pointer;
-              user-select: none;
-              display: flex;
-              align-items: center;
-              justify-content: space-between;
-            }
-            
-            .spreadsheet-header > div:hover {
-              background: #ddd9d0;
-            }
-            
-            .spreadsheet-header > div:last-child {
-              border-right: none;
-            }
-            
-            .header-input-cell {
-              padding: 6px 10px !important;
-            }
-            
-            .header-input {
-              width: 100%;
-              background: transparent;
-              border: none;
-              border-bottom: 1px solid #999;
-              font-family: inherit;
-              font-size: 11px;
-              letter-spacing: 1px;
-              text-transform: uppercase;
-              font-weight: 600;
-              padding: 4px 0;
-            }
-            
-            .header-input:focus {
-              outline: none;
-              border-bottom-color: #1a1a1a;
-            }
-            
-            .header-input::placeholder {
-              color: #999;
-            }
-            
-            .sort-indicator {
-              opacity: 0.5;
-              font-size: 10px;
-            }
-            
-            .spreadsheet-body {
-              max-height: 300px;
-              overflow-y: auto;
-            }
-            
-            .spreadsheet-row {
-              display: grid;
-              grid-template-columns: 100px 80px 70px 60px auto;
-              border-bottom: 1px solid #e8e5dc;
-              transition: background 0.15s;
-            }
-            
-            .spreadsheet-row:hover {
-              background: #f0ede4;
-            }
-            
-            .spreadsheet-row:last-child {
-              border-bottom: none;
-            }
-            
-            .spreadsheet-cell {
-              padding: 10px 10px;
-              border-right: 1px solid #e8e5dc;
-              font-size: 13px;
-              font-variant-numeric: tabular-nums;
-              white-space: nowrap;
-            }
-            
-            .spreadsheet-cell:last-child {
-              border-right: none;
-            }
-            
-            .spreadsheet-cell.editable {
-              cursor: text;
-            }
-            
-            .spreadsheet-cell.editable:hover {
-              background: rgba(0,0,0,0.03);
-            }
-            
-            .shares-input {
-              width: 100%;
-              background: transparent;
-              border: none;
-              font-family: inherit;
-              font-size: 13px;
-              text-align: right;
-              padding: 0;
-            }
-            
-            .shares-input:focus {
-              outline: none;
-              background: rgba(0,0,0,0.03);
-            }
-            
-            .shares-input::placeholder {
-              color: #ccc;
-            }
-            
-            .value-cell {
-              color: #2d5a3d;
-              font-weight: 500;
-            }
-            
-            .shares-cell {
-              text-align: right;
-              color: #666;
-            }
-            
-            .cell-input {
-              width: 100%;
-              background: #fff;
-              border: 2px solid #1a1a1a;
-              padding: 4px 8px;
-              font-family: inherit;
-              font-size: 13px;
-              margin: -6px -8px;
-            }
-            
-            .chart-container {
-              background: #faf9f5;
-              border: 1px solid #d0cdc4;
-              padding: 24px;
-              margin-bottom: 40px;
-              box-shadow: 
-                inset 0 0 0 1px rgba(255,255,255,0.5),
-                0 2px 8px rgba(0,0,0,0.08);
-            }
-            
-            .chart-container.google-style {
-              padding: 20px 16px;
-            }
-            
-            .chart-title {
-              font-family: 'Playfair Display', Georgia, serif;
-              font-size: 18px;
-              margin-bottom: 20px;
-              padding-bottom: 12px;
-              border-bottom: 1px solid #e8e5dc;
-            }
-            
-            .price-section {
-              background: #faf9f5;
-              border: 1px solid #d0cdc4;
-              padding: 28px 32px;
-              margin-bottom: 40px;
-              box-shadow: 
-                inset 0 0 0 1px rgba(255,255,255,0.5),
-                0 2px 8px rgba(0,0,0,0.08);
-            }
-            
-            .price-main {
-              display: flex;
-              align-items: baseline;
-              gap: 16px;
-              margin-bottom: 4px;
-            }
-            
-            .price-current {
-              font-family: 'IBM Plex Mono', monospace;
-              font-size: 44px;
-              font-weight: 600;
-              letter-spacing: -1px;
-            }
-            
-            .price-change {
-              font-size: 18px;
-              font-weight: 500;
-            }
-            
-            .price-subtitle {
-              font-size: 12px;
-              color: #888;
-              margin-bottom: 24px;
-              padding-bottom: 20px;
-              border-bottom: 1px solid #e8e5dc;
-            }
-            
-            .stats-grid {
-              display: grid;
-              grid-template-columns: repeat(2, 1fr);
-              gap: 0;
-            }
-            
-            .stat-row {
-              display: flex;
-              justify-content: space-between;
-              padding: 10px 0;
-              border-bottom: 1px solid #ebe8df;
-            }
-            
-            .stat-row:nth-child(odd) {
-              padding-right: 24px;
-              border-right: 1px solid #ebe8df;
-            }
-            
-            .stat-row:nth-child(even) {
-              padding-left: 24px;
-            }
-            
-            .stat-row:nth-last-child(-n+2) {
-              border-bottom: none;
-            }
-            
-            .stat-label {
-              font-size: 13px;
-              color: #666;
-            }
-            
-            .stat-value {
-              font-size: 13px;
-              font-weight: 500;
-              font-variant-numeric: tabular-nums;
-            }
-            
+            .container { max-width: 1100px; margin: 0 auto; }
+            .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 40px; padding-bottom: 20px; border-bottom: 2px solid #1a1a1a; }
+            .ticker-display { font-size: 44px; font-weight: 600; letter-spacing: -1px; }
+            .ticker-form { display: flex; gap: 8px; }
+            .ticker-input { background: transparent; border: 2px solid #1a1a1a; padding: 10px 12px; font-family: inherit; font-size: 14px; text-transform: uppercase; width: 90px; letter-spacing: 2px; }
+            .ticker-input:focus { outline: none; background: rgba(0,0,0,0.05); }
+            .section-label { font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: #666; margin-bottom: 12px; }
+            .box { background: #faf9f5; border: 1px solid #d0cdc4; margin-bottom: 40px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.5), 0 2px 8px rgba(0,0,0,0.08); }
+            .price-section { padding: 28px 32px; }
+            .price-main { display: flex; align-items: baseline; gap: 16px; margin-bottom: 4px; }
+            .price-current { font-size: 44px; font-weight: 600; letter-spacing: -1px; }
+            .price-change { font-size: 18px; font-weight: 500; }
+            .price-subtitle { font-size: 12px; color: #888; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid #e8e5dc; }
+            .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); }
+            .stat-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ebe8df; }
+            .stat-row:nth-child(odd) { padding-right: 24px; border-right: 1px solid #ebe8df; }
+            .stat-row:nth-child(even) { padding-left: 24px; }
+            .stat-row:nth-last-child(-n+2) { border-bottom: none; }
+            .stat-label { font-size: 13px; color: #666; }
+            .stat-value { font-size: 13px; font-weight: 500; }
+            .chart-box { padding: 20px 16px; }
+            .spreadsheet { overflow-x: auto; }
+            .spreadsheet-header { display: grid; grid-template-columns: 100px 80px 70px 70px auto; background: #e8e5dc; border-bottom: 1px solid #d0cdc4; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; font-weight: 600; }
+            .spreadsheet-header > div { padding: 10px; border-right: 1px solid #d0cdc4; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+            .spreadsheet-header > div:last-child { border-right: none; }
+            .spreadsheet-header > div:hover { background: #ddd9d0; }
+            .header-input-cell { padding: 6px 10px !important; }
+            .header-input { width: 100%; background: transparent; border: none; border-bottom: 1px solid #999; font-family: inherit; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; font-weight: 600; padding: 4px 0; text-align: center; }
+            .header-input:focus { outline: none; border-bottom-color: #1a1a1a; }
+            .header-input::placeholder { color: #999; }
+            .sort-indicator { opacity: 0.5; font-size: 10px; margin-left: 4px; }
+            .spreadsheet-body { max-height: 300px; overflow-y: auto; }
+            .spreadsheet-row { display: grid; grid-template-columns: 100px 80px 70px 70px auto; border-bottom: 1px solid #e8e5dc; }
+            .spreadsheet-row:hover { background: #f0ede4; }
+            .spreadsheet-cell { padding: 10px; border-right: 1px solid #e8e5dc; font-size: 13px; white-space: nowrap; text-align: center; }
+            .spreadsheet-cell:last-child { border-right: none; }
+            .value-cell { color: #2d5a3d; font-weight: 500; }
             .positive { color: #2d5a3d; }
             .negative { color: #8b3a3a; }
-            
-            .loading-overlay {
-              position: fixed;
-              top: 0;
-              left: 0;
-              right: 0;
-              bottom: 0;
-              background: rgba(244, 241, 232, 0.9);
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              z-index: 100;
-            }
-            
-            .loading-text {
-              font-size: 14px;
-              letter-spacing: 4px;
-              text-transform: uppercase;
-              animation: pulse 1.5s ease-in-out infinite;
-            }
-            
-            @keyframes pulse {
-              0%, 100% { opacity: 0.4; }
-              50% { opacity: 1; }
-            }
-            
-            .timestamp {
-              font-size: 11px;
-              color: #888;
-              text-align: right;
-              margin-top: 24px;
-              letter-spacing: 1px;
-            }
+            .loading { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(244,241,232,0.9); display: flex; align-items: center; justify-content: center; z-index: 100; }
+            .loading-text { font-size: 14px; letter-spacing: 4px; text-transform: uppercase; animation: pulse 1.5s infinite; }
+            @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+            .timestamp { font-size: 11px; color: #888; text-align: right; margin-top: 24px; letter-spacing: 1px; }
           `}</style>
 
-          {loading && (
-            <div className="loading-overlay">
-              <div className="loading-text">Loading {inputTicker.toUpperCase()}...</div>
-            </div>
-          )}
+          {loading && <div className="loading"><div className="loading-text">Loading {ticker}...</div></div>}
 
-          <div className="eink-container">
+          <div className="container">
             <header className="header">
               <div className="ticker-display">{ticker}</div>
               <form className="ticker-form" onSubmit={handleTickerSubmit}>
-                <input
-                  type="text"
-                  className="ticker-input"
-                  value={inputTicker}
-                  onChange={(e) => setInputTicker(e.target.value)}
-                  placeholder="TICKER"
-                  maxLength={5}
-                />
-                <button type="submit" className="ticker-btn">TRACK</button>
+                <input type="text" className="ticker-input" value={inputTicker} onChange={(e) => setInputTicker(e.target.value)} placeholder="TICKER" maxLength={5} />
               </form>
             </header>
 
-            <div className="price-section">
+            <div className="box price-section">
               <div className="price-main">
                 <span className="price-current">${currentPrice.toFixed(2)}</span>
                 <span className={`price-change ${priceChange >= 0 ? 'positive' : 'negative'}`}>
@@ -500,170 +203,78 @@
                 </span>
               </div>
               <div className="price-subtitle">At close: {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} 4:00 PM EST</div>
-              
               <div className="stats-grid">
-                <div className="stat-row">
-                  <span className="stat-label">Day Range</span>
-                  <span className="stat-value">{data[data.length - 1]?.low.toFixed(2)} - {data[data.length - 1]?.high.toFixed(2)}</span>
-                </div>
-                <div className="stat-row">
-                  <span className="stat-label">52 Week Range</span>
-                  <span className="stat-value">{(lowestPrice * 0.85).toFixed(2)} - {(highestPrice * 1.12).toFixed(2)}</span>
-                </div>
-                <div className="stat-row">
-                  <span className="stat-label">Volume</span>
-                  <span className="stat-value">{(data[data.length - 1]?.volume || 0).toLocaleString()}</span>
-                </div>
-                <div className="stat-row">
-                  <span className="stat-label">Avg. Volume</span>
-                  <span className="stat-value">{Math.floor(avgVolume).toLocaleString()}</span>
-                </div>
-                <div className="stat-row">
-                  <span className="stat-label">Market Cap</span>
-                  <span className="stat-value">{(currentPrice * 15.2).toFixed(2)}B</span>
-                </div>
-                <div className="stat-row">
-                  <span className="stat-label">Forward P/E</span>
-                  <span className="stat-value">{(15 + Math.random() * 20).toFixed(2)}</span>
-                </div>
+                <div className="stat-row"><span className="stat-label">Day Range</span><span className="stat-value">{dayLow.toFixed(2)} - {dayHigh.toFixed(2)}</span></div>
+                <div className="stat-row"><span className="stat-label">52 Week Range</span><span className="stat-value">{week52Low.toFixed(2)} - {week52High.toFixed(2)}</span></div>
+                <div className="stat-row"><span className="stat-label">Volume</span><span className="stat-value">{(data[data.length - 1]?.volume || 0).toLocaleString()}</span></div>
+                <div className="stat-row"><span className="stat-label">Avg. Volume</span><span className="stat-value">{Math.floor(avgVolume).toLocaleString()}</span></div>
+                <div className="stat-row"><span className="stat-label">Market Cap</span><span className="stat-value">{marketCap > 1000 ? (marketCap / 1000).toFixed(2) + 'T' : marketCap > 0 ? marketCap.toFixed(2) + 'B' : 'N/A'}</span></div>
+                <div className="stat-row"><span className="stat-label">Forward P/E</span><span className="stat-value">{forwardPE > 0 ? forwardPE.toFixed(2) : 'N/A'}</span></div>
               </div>
             </div>
 
             <div className="section-label">Price Chart — 6 Months</div>
-            <div className="chart-container google-style">
-              <svg viewBox="0 0 800 300" style={{ width: '100%', height: 'auto' }}>
-                <defs>
-                  <linearGradient id="googleGradient" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="0%" stopColor="#1a73e8" stopOpacity="0.3" />
-                    <stop offset="100%" stopColor="#1a73e8" stopOpacity="0.02" />
-                  </linearGradient>
-                </defs>
-                
+            <div className="box chart-box">
+              <svg viewBox="0 0 800 300" style={{ width: '100%' }}>
+                <defs><linearGradient id="grad" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#1a73e8" stopOpacity="0.3" /><stop offset="100%" stopColor="#1a73e8" stopOpacity="0.02" /></linearGradient></defs>
                 {(() => {
-                  const roundedMin = Math.floor(minPrice / 10) * 10;
-                  const roundedMax = Math.ceil(maxPrice / 10) * 10;
+                  const min = Math.floor(minPrice / 20) * 20;
+                  const max = Math.ceil(maxPrice / 20) * 20;
+                  const range = max - min;
+                  const step = Math.ceil(range / 5 / 20) * 20;
                   const steps = [];
-                  for (let p = roundedMax; p >= roundedMin; p -= 10) {
-                    steps.push(p);
-                  }
-                  return steps.map((price) => {
-                    const y = 20 + ((roundedMax - price) / (roundedMax - roundedMin)) * 240;
-                    return (
-                      <text key={price} x="8" y={y + 4} fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">
-                        ${price}
-                      </text>
-                    );
-                  });
+                  for (let p = max; p >= min && steps.length < 6; p -= step) steps.push(p);
+                  return steps.map(p => <text key={p} x="8" y={20 + ((max - p) / (max - min || 1)) * 240 + 4} fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">${p}</text>);
                 })()}
-                
-                <path d={areaPath} fill="url(#googleGradient)" />
-                <path d={linePath} fill="none" stroke="#1a73e8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                
+                {areaPath && <path d={areaPath} fill="url(#grad)" />}
+                {linePath && <path d={linePath} fill="none" stroke="#1a73e8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
                 {(() => {
-                  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                  const seenMonths = new Set();
-                  return chartData.map((d, idx) => {
-                    const dateObj = new Date(d.date);
-                    const monthKey = `${dateObj.getFullYear()}-${dateObj.getMonth()}`;
-                    if (seenMonths.has(monthKey)) return null;
-                    seenMonths.add(monthKey);
-                    const x = 50 + (idx / (chartData.length - 1)) * 720;
-                    return (
-                      <text key={monthKey} x={x} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">
-                        {monthNames[dateObj.getMonth()]}
-                      </text>
-                    );
+                  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], seen = new Set();
+                  const monthPoints = [];
+                  data.forEach((d, i) => {
+                    const m = new Date(d.date).getMonth(), key = `${new Date(d.date).getFullYear()}-${m}`;
+                    if (!seen.has(key)) {
+                      seen.add(key);
+                      monthPoints.push({ month: months[m], x: 50 + (i / (data.length - 1 || 1)) * 720 });
+                    }
                   });
+                  return monthPoints.filter((p, i) => i === 0 ? p.x > 70 : true).map(p => (
+                    <text key={p.month + p.x} x={p.x} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{p.month}</text>
+                  ));
                 })()}
               </svg>
             </div>
 
-            <div className="section-label">Historical Data — 6 Months</div>
-            <div className="spreadsheet-container">
+            <div className="section-label">Historical Data</div>
+            <div className="box spreadsheet">
               <div className="spreadsheet-header">
-                <div onClick={() => handleSort('date')}>
-                  date
-                  {sortConfig.key === 'date' && (
-                    <span className="sort-indicator">
-                      {sortConfig.direction === 'asc' ? '↑' : '↓'}
-                    </span>
-                  )}
-                </div>
-                <div onClick={() => handleSort('close')}>
-                  close
-                  {sortConfig.key === 'close' && (
-                    <span className="sort-indicator">
-                      {sortConfig.direction === 'asc' ? '↑' : '↓'}
-                    </span>
-                  )}
-                </div>
+                <div onClick={() => handleSort('date')}>date {sortConfig.key === 'date' && <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>}</div>
+                <div onClick={() => handleSort('close')}>close {sortConfig.key === 'close' && <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>}</div>
                 <div>chg</div>
-                <div onClick={() => handleSort('volume')}>
-                  vol
-                  {sortConfig.key === 'volume' && (
-                    <span className="sort-indicator">
-                      {sortConfig.direction === 'asc' ? '↑' : '↓'}
-                    </span>
-                  )}
-                </div>
-                <div className="header-input-cell">
-                  <input
-                    type="text"
-                    className="header-input"
-                    value={sharesCount ? parseInt(sharesCount, 10).toLocaleString() : ''}
-                    onChange={(e) => {
-                      const val = e.target.value.replace(/,/g, '');
-                      if (val === '' || /^\d+$/.test(val)) {
-                        setSharesCount(val);
-                      }
-                    }}
-                    placeholder="#"
-                  />
-                </div>
+                <div onClick={() => handleSort('volume')}>vol {sortConfig.key === 'volume' && <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>}</div>
+                <div className="header-input-cell"><input type="text" className="header-input" value={sharesCount ? parseInt(sharesCount).toLocaleString() : ''} onChange={(e) => { const v = e.target.value.replace(/,/g, ''); if (v === '' || /^\d+$/.test(v)) setSharesCount(v); }} placeholder="#" /></div>
               </div>
               <div className="spreadsheet-body">
-                {sortedData.map((row, idx) => {
-                  const sharesNum = parseInt(sharesCount, 10);
-                  const value = !isNaN(sharesNum) && sharesNum > 0 ? Math.round(sharesNum * row.close) : null;
-                  const originalIdx = data.findIndex(d => d.date === row.date);
-                  const prevClose = originalIdx > 0 ? data[originalIdx - 1].close : null;
-                  const change = prevClose !== null ? row.close - prevClose : null;
+                {sortedData.map((row) => {
+                  const shares = parseInt(sharesCount) || 0;
+                  const value = shares > 0 ? Math.round(shares * row.close) : null;
+                  const idx = data.findIndex(d => d.date === row.date);
+                  const prev = idx > 0 ? data[idx - 1].close : null;
+                  const chg = prev ? row.close - prev : null;
                   return (
                     <div key={row.date} className="spreadsheet-row">
                       <div className="spreadsheet-cell">{row.date}</div>
                       <div className="spreadsheet-cell">${row.close.toFixed(2)}</div>
-                      <div className={`spreadsheet-cell ${change !== null ? (change >= 0 ? 'positive' : 'negative') : ''}`}>
-                        {change !== null ? `${change >= 0 ? '+' : ''}${change.toFixed(2)}` : '—'}
-                      </div>
+                      <div className={`spreadsheet-cell ${chg !== null ? (chg >= 0 ? 'positive' : 'negative') : ''}`}>{chg !== null ? `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}` : '—'}</div>
                       <div className="spreadsheet-cell">{(row.volume / 1000000).toFixed(1)}M</div>
-                      <div className="spreadsheet-cell value-cell">
-                        {value !== null ? (
-                          <>
-                            ${value.toLocaleString()}
-                            {change !== null && (
-                              <span className={change >= 0 ? 'positive' : 'negative'}>
-                                {' | '}{change >= 0 ? '+' : ''}${Math.round(change * sharesNum).toLocaleString()}
-                              </span>
-                            )}
-                          </>
-                        ) : ''}
-                      </div>
+                      <div className="spreadsheet-cell value-cell">{value !== null && <>${value.toLocaleString()}{chg !== null && <span className={chg >= 0 ? 'positive' : 'negative'}> | {chg >= 0 ? '+' : ''}${Math.round(chg * shares).toLocaleString()}</span>}</>}</div>
                     </div>
                   );
                 })}
               </div>
             </div>
 
-            <div className="timestamp">
-              Last updated: {new Date().toLocaleString('en-US', { 
-                weekday: 'long',
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-              })}
-            </div>
+            <div className="timestamp">Last updated: {new Date().toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
           </div>
         </div>
       );
