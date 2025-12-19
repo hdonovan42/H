@@ -13,7 +13,7 @@
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    // ⚠️ ADD YOUR API KEYS HERE
+    // API KEYS - don't steal plz
     const FINNHUB_API_KEY = 'd4iuigpr01queuaklek0d4iuigpr01queuaklekg';
     const ALPHA_VANTAGE_KEY = '49AEFIO1PF5Y6HJX';
 
@@ -141,13 +141,13 @@
             @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap');
             * { box-sizing: border-box; margin: 0; padding: 0; }
             .container { max-width: 1100px; margin: 0 auto; }
-            .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 40px; padding-bottom: 20px; border-bottom: 2px solid #1a1a1a; }
+            .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px; padding-bottom: 20px; border-bottom: 2px solid #1a1a1a; }
             .ticker-display { font-size: 44px; font-weight: 600; letter-spacing: -1px; }
             .ticker-form { display: flex; gap: 8px; }
             .ticker-input { background: transparent; border: 2px solid #1a1a1a; padding: 10px 12px; font-family: inherit; font-size: 14px; text-transform: uppercase; width: 90px; letter-spacing: 2px; }
             .ticker-input:focus { outline: none; background: rgba(0,0,0,0.05); }
-            .section-label { font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: #666; margin-bottom: 12px; }
-            .box { background: #faf9f5; border: 1px solid #d0cdc4; margin-bottom: 40px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.5), 0 2px 8px rgba(0,0,0,0.08); }
+            .section-label { font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: #666; margin-bottom: 10px; margin-top: 14px; }
+            .box { background: #faf9f5; border: 1px solid #d0cdc4; margin-bottom: 0; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.5), 0 2px 8px rgba(0,0,0,0.08); }
             .price-section { padding: 28px 32px; }
             .price-main { display: flex; align-items: baseline; gap: 16px; margin-bottom: 4px; }
             .price-current { font-size: 44px; font-weight: 600; letter-spacing: -1px; }
@@ -167,7 +167,7 @@
             .spreadsheet-header > div:last-child { border-right: none; }
             .spreadsheet-header > div:hover { background: #ddd9d0; }
             .header-input-cell { padding: 6px 10px !important; }
-            .header-input { width: 100%; background: transparent; border: none; border-bottom: 1px solid #999; font-family: inherit; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; font-weight: 600; padding: 4px 0; text-align: center; }
+            .header-input { width: 100%; background: transparent; border: none; border-bottom: 1px solid #999; font-family: inherit; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; font-weight: 600; padding: 4px 0; text-align: left; }
             .header-input:focus { outline: none; border-bottom-color: #1a1a1a; }
             .header-input::placeholder { color: #999; }
             .sort-indicator { opacity: 0.5; font-size: 10px; margin-left: 4px; }
@@ -208,7 +208,15 @@
                 <div className="stat-row"><span className="stat-label">52 Week Range</span><span className="stat-value">{week52Low.toFixed(2)} - {week52High.toFixed(2)}</span></div>
                 <div className="stat-row"><span className="stat-label">Volume</span><span className="stat-value">{(data[data.length - 1]?.volume || 0).toLocaleString()}</span></div>
                 <div className="stat-row"><span className="stat-label">Avg. Volume</span><span className="stat-value">{Math.floor(avgVolume).toLocaleString()}</span></div>
-                <div className="stat-row"><span className="stat-label">Market Cap</span><span className="stat-value">{marketCap > 1000 ? (marketCap / 1000).toFixed(2) + 'T' : marketCap > 0 ? marketCap.toFixed(2) + 'B' : 'N/A'}</span></div>
+                <div className="stat-row"><span className="stat-label">Market Cap</span><span className="stat-value">{(() => {
+                  if (marketCap <= 0) return 'N/A';
+                  // Finnhub returns market cap in millions
+                  const inBillions = marketCap / 1000;
+                  const inTrillions = marketCap / 1000000;
+                  if (inTrillions >= 1) return '$' + inTrillions.toPrecision(3) + 'T';
+                  if (inBillions >= 1) return '$' + inBillions.toPrecision(3) + 'B';
+                  return '$' + marketCap.toPrecision(3) + 'M';
+                })()}</span></div>
                 <div className="stat-row"><span className="stat-label">Forward P/E</span><span className="stat-value">{forwardPE > 0 ? forwardPE.toFixed(2) : 'N/A'}</span></div>
               </div>
             </div>
@@ -245,7 +253,7 @@
               </svg>
             </div>
 
-            <div className="section-label">Historical Data</div>
+            <div className="section-label">Historical Data — 6 Months</div>
             <div className="box spreadsheet">
               <div className="spreadsheet-header">
                 <div onClick={() => handleSort('date')}>date {sortConfig.key === 'date' && <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>}</div>
