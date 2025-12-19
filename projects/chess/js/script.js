@@ -1005,6 +1005,31 @@ function navigateToMove(targetIndex) {
   }
 }
 
+// Navigate to the starting position (before any moves)
+function navigateToStart() {
+  if (AppState.currentIndex === 0) return;
+  
+  AppState.currentIndex = 0;
+  rebuildGameFromMoves();
+  AppState.board.position(AppState.game.fen());
+  
+  // Update game status for the new position
+  updateGameStatus();
+  
+  // Update display immediately
+  updateDisplay();
+  
+  // Update graph to show current position
+  if (AppState.gameLoaded) {
+    drawEvalGraph();
+  }
+  
+  // Update Stockfish analysis last
+  if (AppState.engineEnabled) {
+    updateStockfishAnalysis();
+  }
+}
+
 // Graph interaction functions
 function handleGraphMouseMove(e) {
   const canvas = document.getElementById('analysis-eval-graph');
@@ -1708,6 +1733,7 @@ function handleKeyPress(event) {
     'ArrowRight': navigateToNextMove,
     'r': resetBoard,
     'f': flipBoard,
+    '0': navigateToStart,
     'a': () => {
       AppState.arrowsEnabled = !AppState.arrowsEnabled;
       updateDisplay();
