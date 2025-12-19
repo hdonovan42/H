@@ -165,7 +165,7 @@
             .stat-value { font-size: 12px; font-weight: 500; }
             .chart-box { padding: 16px 12px; height: 100%; display: flex; flex-direction: column; justify-content: center; }
             .spreadsheet { overflow-x: auto; }
-            .spreadsheet-header { display: grid; grid-template-columns: 100px 80px 70px 70px auto; background: #e8e5dc; border-bottom: 1px solid #d0cdc4; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; font-weight: 600; }
+            .spreadsheet-header { display: grid; grid-template-columns: 100px 80px 80px 80px 70px 70px auto; background: #e8e5dc; border-bottom: 1px solid #d0cdc4; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; font-weight: 600; }
             .spreadsheet-header > div { padding: 10px; border-right: 1px solid #d0cdc4; cursor: pointer; display: flex; align-items: center; justify-content: center; }
             .spreadsheet-header > div:last-child { border-right: none; }
             .spreadsheet-header > div:hover { background: #ddd9d0; }
@@ -175,7 +175,7 @@
             .header-input::placeholder { color: #999; }
             .sort-indicator { opacity: 0.5; font-size: 10px; margin-left: 4px; }
             .spreadsheet-body { max-height: 300px; overflow-y: auto; }
-            .spreadsheet-row { display: grid; grid-template-columns: 100px 80px 70px 70px auto; border-bottom: 1px solid #e8e5dc; }
+            .spreadsheet-row { display: grid; grid-template-columns: 100px 80px 80px 80px 70px 70px auto; border-bottom: 1px solid #e8e5dc; }
             .spreadsheet-row:hover { background: #f0ede4; }
             .spreadsheet-cell { padding: 10px; border-right: 1px solid #e8e5dc; font-size: 13px; white-space: nowrap; text-align: center; }
             .spreadsheet-cell:last-child { border-right: none; }
@@ -271,9 +271,11 @@
             <div className="box spreadsheet">
               <div className="spreadsheet-header">
                 <div onClick={() => handleSort('date')}>date {sortConfig.key === 'date' && <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>}</div>
+                <div onClick={() => handleSort('open')}>open {sortConfig.key === 'open' && <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>}</div>
+                <div onClick={() => handleSort('high')}>high {sortConfig.key === 'high' && <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>}</div>
                 <div onClick={() => handleSort('close')}>close {sortConfig.key === 'close' && <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>}</div>
-                <div>chg</div>
                 <div onClick={() => handleSort('volume')}>vol {sortConfig.key === 'volume' && <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>}</div>
+                <div>chg</div>
                 <div className="header-input-cell"><input type="text" className="header-input" value={sharesCount ? parseInt(sharesCount).toLocaleString() : ''} onChange={(e) => { const v = e.target.value.replace(/,/g, ''); if (v === '' || /^\d+$/.test(v)) setSharesCount(v); }} placeholder="#" /></div>
               </div>
               <div className="spreadsheet-body">
@@ -286,9 +288,11 @@
                   return (
                     <div key={row.date} className="spreadsheet-row">
                       <div className="spreadsheet-cell">{row.date}</div>
+                      <div className="spreadsheet-cell">${row.open.toFixed(2)}</div>
+                      <div className="spreadsheet-cell">${row.high.toFixed(2)}</div>
                       <div className="spreadsheet-cell">${row.close.toFixed(2)}</div>
-                      <div className={`spreadsheet-cell ${chg !== null ? (chg >= 0 ? 'positive' : 'negative') : ''}`}>{chg !== null ? `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}` : '—'}</div>
                       <div className="spreadsheet-cell">{(row.volume / 1000000).toFixed(1)}M</div>
+                      <div className={`spreadsheet-cell ${chg !== null ? (chg >= 0 ? 'positive' : 'negative') : ''}`}>{chg !== null ? `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}` : '—'}</div>
                       <div className="spreadsheet-cell value-cell">{value !== null && <>${value.toLocaleString()}{chg !== null && <span className={chg >= 0 ? 'positive' : 'negative'}> | {chg >= 0 ? '+' : ''}${Math.round(chg * shares).toLocaleString()}</span>}</>}</div>
                     </div>
                   );
