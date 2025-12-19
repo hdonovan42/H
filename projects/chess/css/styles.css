@@ -57,6 +57,7 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 /* Engine control section */
@@ -132,11 +133,18 @@ input:checked + .toggle-slider:before {
   transform: translateX(20px);
 }
 
+/* Eval graph container for overlay positioning */
+#eval-graph-container {
+  position: relative;
+  width: 100%;
+  height: 150px;
+  border-bottom: 1px solid #ccc;
+}
+
 /* Eval graph in analysis container */
 #analysis-eval-graph {
   width: 100%;
   height: 150px;
-  border-bottom: 1px solid #ccc;
   background-color: #f8f8f8;
 }
 
@@ -232,4 +240,14 @@ body, html {
 
 #analysis-eval-graph:hover {
   cursor: crosshair; /* crosshair? */
+}
+
+/* Draw Graph Button Overlay */
+#draw-graph-overlay {
+  position: absolute;
+  z-index: 10;
+}
+
+#draw-graph-button {
+  font-family: Arial, sans-serif;
 }

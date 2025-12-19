@@ -34,7 +34,8 @@ const AppState = {
   graphClickAreas: [], // Store clickable areas for graph points
   graphHoverIndex: -1,  // Currently hovered graph point (-1 = none)
   graphMainlineMoves: [], // Original PGN moves for graph display only
-  graphEvalHistory: []
+  graphEvalHistory: [],
+  graphDrawn: false // Whether the graph has been drawn (user clicked Draw button)
 };
 
 // Initialize the application
@@ -1175,6 +1176,79 @@ function handleGraphMouseLeave() {
   }
 }
 
+// Draw Graph Button Functions
+function showDrawGraphButton() {
+  // Remove existing button if present
+  hideDrawGraphButton();
+  
+  const graphContainer = document.getElementById('eval-graph-container');
+  if (!graphContainer) return;
+  
+  // Create overlay div for the button
+  const buttonOverlay = document.createElement('div');
+  buttonOverlay.id = 'draw-graph-overlay';
+  buttonOverlay.style.cssText = `
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(248, 248, 248, 0.95);
+    z-index: 10;
+  `;
+  
+  // Create the Draw button
+  const drawButton = document.createElement('button');
+  drawButton.id = 'draw-graph-button';
+  drawButton.textContent = 'Draw';
+  drawButton.style.cssText = `
+    padding: 12px 32px;
+    font-size: 16px;
+    font-weight: bold;
+    background-color: #2196F3;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
+    font-family: Arial, sans-serif;
+  `;
+  
+  // Hover effects
+  drawButton.addEventListener('mouseenter', function() {
+    this.style.backgroundColor = '#1976D2';
+    this.style.transform = 'scale(1.05)';
+    this.style.boxShadow = '0 4px 12px rgba(33, 150, 243, 0.4)';
+  });
+  
+  drawButton.addEventListener('mouseleave', function() {
+    this.style.backgroundColor = '#2196F3';
+    this.style.transform = 'scale(1)';
+    this.style.boxShadow = '0 2px 8px rgba(33, 150, 243, 0.3)';
+  });
+  
+  // Click handler - trigger graph analysis
+  drawButton.addEventListener('click', function() {
+    hideDrawGraphButton();
+    AppState.graphDrawn = true;
+    analyzeGraphPositions();
+  });
+  
+  buttonOverlay.appendChild(drawButton);
+  graphContainer.appendChild(buttonOverlay);
+}
+
+function hideDrawGraphButton() {
+  const overlay = document.getElementById('draw-graph-overlay');
+  if (overlay) {
+    overlay.remove();
+  }
+}
+
 function rebuildGameFromMoves() {
   AppState.game.reset();
   
@@ -1223,8 +1297,9 @@ function loadPGN() {
   // Analyze all positions in the game (EXISTING CODE UNCHANGED)
   analyzeGamePositions();
   
-  // NEW: Also analyze for graph (separate analysis)
-  analyzeGraphPositions();
+  // NEW: Don't auto-analyze for graph - show Draw button instead
+  AppState.graphDrawn = false;
+  showDrawGraphButton();
   
   if (AppState.engineEnabled) {
     updateStockfishAnalysis();
@@ -1400,6 +1475,8 @@ function resetBoard() {
 // Clear graph interaction state
   AppState.graphClickAreas = [];
   AppState.graphHoverIndex = -1;
+  AppState.graphDrawn = false;
+  hideDrawGraphButton();
   
   // Reset board
   AppState.game.reset();
