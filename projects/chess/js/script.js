@@ -348,9 +348,14 @@ function updateStockfishAnalysis() {
   
   AppState.lastFen = currentFen;
   
-  // Debounce analysis request - but keep it short for responsive arrows
+  // Debounce analysis request - increased to reduce engine stress during rapid navigation
   AppState.analysisQueue = setTimeout(() => {
     if (!AppState.engineEnabled || !AppState.stockfish || !AppState.stockfishReady) {
+      return;
+    }
+    
+    // Double-check the FEN hasn't changed during debounce (user navigated away)
+    if (AppState.game.fen() !== currentFen) {
       return;
     }
     
@@ -367,26 +372,40 @@ function updateStockfishAnalysis() {
       // Stop current analysis
       AppState.stockfish.postMessage('stop');
       
-      // Start new analysis after a brief delay
+      // Start new analysis after a brief delay to let stop complete
       setTimeout(() => {
-        if (AppState.stockfish && AppState.engineEnabled) {
+        // Re-check conditions after delay
+        if (!AppState.stockfish || !AppState.engineEnabled || !AppState.stockfishReady) {
+          AppState.isAnalysisInProgress = false;
+          return;
+        }
+        
+        // Check if position changed during the delay
+        if (AppState.game.fen() !== currentFen) {
+          AppState.isAnalysisInProgress = false;
+          return;
+        }
+        
+        try {
           AppState.stockfish.postMessage(`position fen ${currentFen}`);
           AppState.stockfish.postMessage(`go depth ${ANALYSIS_DEPTH}`);
-          
-          // Add a timeout to detect frozen analysis
-          setTimeout(() => {
-            if (AppState.isAnalysisInProgress && AppState.lastFen === currentFen) {
-              console.warn('Analysis appears to be frozen, you may need to toggle the engine');
-              // Don't auto-toggle, let the user decide
-            }
-          }, 15000); // 15 seconds should be enough for depth 15
+        } catch (e) {
+          console.error('Error sending commands to Stockfish:', e);
+          AppState.isAnalysisInProgress = false;
         }
-      }, 50);
+        
+        // Add a timeout to detect frozen analysis
+        setTimeout(() => {
+          if (AppState.isAnalysisInProgress && AppState.lastFen === currentFen) {
+            console.warn('Analysis appears to be frozen, you may need to toggle the engine');
+          }
+        }, 15000); // 15 seconds should be enough for depth 15
+      }, 100); // Increased delay to let stop command complete
     } catch (error) {
       console.error('Error updating Stockfish analysis:', error);
       AppState.isAnalysisInProgress = false;
     }
-  }, 100); // Reduced from 300ms to 100ms for faster response
+  }, 200); // Increased debounce from 100ms to 200ms for stability
 }
 
 // Display update functions
@@ -734,126 +753,6 @@ function getSquareCenter(square) {
 function drawEvalGraph() {
   // Draw in the analysis container
   drawAnalysisEvalGraph();
-}
-
-function drawAnalysisEvalGraph() {
-  const canvas = document.getElementById('analysis-eval-graph');
-  if (!canvas) return; // Safety check
-  
-  const ctx = canvas.getContext('2d');
-  const width = canvas.width;
-  const height = canvas.height;
-  
-  // Clear canvas
-  ctx.clearRect(0, 0, width, height);
-  
-  // Set up margins for compact display (reduced margins since no labels)
-  const margin = { top: 10, right: 15, bottom: 10, left: 15 };
-  const chartWidth = width - margin.left - margin.right;
-  const chartHeight = height - margin.top - margin.bottom;
-  
-  // Draw background
-  ctx.fillStyle = '#f8f8f8';
-  ctx.fillRect(0, 0, width, height);
-  
-  // Calculate center line position (0.0 evaluation)
-  const centerY = margin.top + chartHeight / 2;
-  
-  // Shade the area below the center line (black advantage)
-  ctx.fillStyle = '#e0e0e0'; // Light grey
-  ctx.fillRect(margin.left, centerY, chartWidth, chartHeight / 2);
-  
-  // Draw center line (0.0 evaluation)
-  ctx.strokeStyle = '#888';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([3, 3]);
-  ctx.beginPath();
-  ctx.moveTo(margin.left, centerY);
-  ctx.lineTo(margin.left + chartWidth, centerY);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  
-  // Draw axes
-  ctx.strokeStyle = '#333';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  // Y-axis
-  ctx.moveTo(margin.left, margin.top);
-  ctx.lineTo(margin.left, margin.top + chartHeight);
-  // X-axis
-  ctx.moveTo(margin.left, margin.top + chartHeight);
-  ctx.lineTo(margin.left + chartWidth, margin.top + chartHeight);
-  ctx.stroke();
-  
-  // Only draw if we have evaluation data
-  if (AppState.evalHistory.length <= 1) {
-    // Clear click areas if no data
-    AppState.graphClickAreas = [];
-    return;
-  }
-  
-  // Clear and rebuild click areas
-  AppState.graphClickAreas = [];
-  
-  // Draw evaluation line and store click areas
-  ctx.strokeStyle = '#2196F3';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  
-  let hasStarted = false;
-  const evalRange = 10; // -10 to +10
-  
-  for (let i = 0; i < AppState.evalHistory.length; i++) {
-    if (AppState.evalHistory[i] !== undefined) {
-      const x = margin.left + (i / Math.max(1, AppState.evalHistory.length - 1)) * chartWidth;
-      const eval_val = Math.max(-evalRange, Math.min(evalRange, AppState.evalHistory[i]));
-      const y = margin.top + chartHeight - ((eval_val + evalRange) / (2 * evalRange)) * chartHeight;
-      
-      // Store click area for this point
-      AppState.graphClickAreas.push({
-        x: x,
-        y: y,
-        radius: 8, // Click detection radius
-        moveIndex: i
-      });
-      
-      if (!hasStarted) {
-        ctx.moveTo(x, y);
-        hasStarted = true;
-      } else {
-        ctx.lineTo(x, y);
-      }
-    }
-  }
-  ctx.stroke();
-  
-  // Draw current position indicator
-  if (AppState.currentIndex < AppState.evalHistory.length && 
-      AppState.evalHistory[AppState.currentIndex] !== undefined) {
-    const x = margin.left + (AppState.currentIndex / Math.max(1, AppState.evalHistory.length - 1)) * chartWidth;
-    const eval_val = Math.max(-evalRange, Math.min(evalRange, AppState.evalHistory[AppState.currentIndex]));
-    const y = margin.top + chartHeight - ((eval_val + evalRange) / (2 * evalRange)) * chartHeight;
-    
-    ctx.fillStyle = '#FF5722';
-    ctx.beginPath();
-    ctx.arc(x, y, 3, 0, 2 * Math.PI);
-    ctx.fill();
-  }
-  
-  // Draw hover dot if hovering over a point
-  if (AppState.graphHoverIndex >= 0 && AppState.graphHoverIndex < AppState.graphClickAreas.length) {
-    const area = AppState.graphClickAreas[AppState.graphHoverIndex];
-    
-    // Draw glow effect
-    ctx.save();
-    ctx.shadowColor = '#2196F3';
-    ctx.shadowBlur = 8;
-    ctx.fillStyle = '#2196F3';
-    ctx.beginPath();
-    ctx.arc(area.x, area.y, 5, 0, 2 * Math.PI);
-    ctx.fill();
-    ctx.restore();
-  }
 }
 
 // Toggle engine on/off
@@ -1319,8 +1218,8 @@ function loadPGN() {
   
   updateGameStatus();
   
-  // Analyze all positions in the game (EXISTING CODE UNCHANGED)
-  analyzeGamePositions();
+  // NOTE: analyzeGamePositions() removed - evalHistory is not used since 
+  // drawAnalysisEvalGraph uses graphEvalHistory instead
   
   // NEW: Don't auto-analyze for graph - show Draw button instead
   AppState.graphDrawn = false;
@@ -1334,22 +1233,58 @@ function loadPGN() {
 }
 
 function analyzeGraphPositions() {
+  const positions = [];
   const tempGame = new Chess();
-  let moveIndex = 0;
   
   // Analyze starting position for graph
-  analyzeGraphPosition(tempGame.fen(), moveIndex);
+  positions.push({ fen: tempGame.fen(), moveIndex: 0 });
   
-  // Analyze each position for graph
-  for (const move of AppState.graphMainlineMoves) {
-    tempGame.move(move);
-    moveIndex++;
-    analyzeGraphPosition(tempGame.fen(), moveIndex);
+  // Build list of all positions for graph
+  for (let i = 0; i < AppState.graphMainlineMoves.length; i++) {
+    tempGame.move(AppState.graphMainlineMoves[i]);
+    positions.push({ fen: tempGame.fen(), moveIndex: i + 1 });
   }
+  
+  // Process positions sequentially to avoid overwhelming the browser
+  let currentIndex = 0;
+  const maxConcurrent = 2; // Limit concurrent workers
+  let activeWorkers = 0;
+  
+  function processNext() {
+    while (activeWorkers < maxConcurrent && currentIndex < positions.length) {
+      const pos = positions[currentIndex++];
+      activeWorkers++;
+      analyzeGraphPositionQueued(pos.fen, pos.moveIndex, () => {
+        activeWorkers--;
+        processNext();
+      });
+    }
+  }
+  
+  processNext();
 }
 
-function analyzeGraphPosition(fen, moveIndex) {
+function analyzeGraphPositionQueued(fen, moveIndex, onComplete) {
   const tempStockfish = new Worker('js/stockfish-17-lite-single.js');
+  let completed = false;
+  
+  // Timeout to prevent hanging workers
+  const timeout = setTimeout(() => {
+    if (!completed) {
+      completed = true;
+      try { tempStockfish.terminate(); } catch(e) {}
+      onComplete();
+    }
+  }, 10000); // 10 second timeout per position
+  
+  tempStockfish.onerror = function(error) {
+    if (!completed) {
+      completed = true;
+      clearTimeout(timeout);
+      try { tempStockfish.terminate(); } catch(e) {}
+      onComplete();
+    }
+  };
   
   tempStockfish.onmessage = function(event) {
     const message = typeof event.data === 'string' ? event.data : event.data.data;
@@ -1358,7 +1293,12 @@ function analyzeGraphPosition(fen, moveIndex) {
       tempStockfish.postMessage(`position fen ${fen}`);
       tempStockfish.postMessage('go depth 10');
     } else if (message.startsWith('bestmove')) {
-      tempStockfish.terminate();
+      if (!completed) {
+        completed = true;
+        clearTimeout(timeout);
+        tempStockfish.terminate();
+        onComplete();
+      }
     } else if (message.startsWith('info depth 10') && message.includes('score')) {
       const info = parseStockfishInfoForGraph(message, fen);
       if (info) {
@@ -1372,55 +1312,6 @@ function analyzeGraphPosition(fen, moveIndex) {
         
         // Store in GRAPH eval history only
         AppState.graphEvalHistory[moveIndex] = evalScore;
-        drawEvalGraph();
-      }
-    }
-  };
-  
-  tempStockfish.postMessage('uci');
-  tempStockfish.postMessage('isready');
-}
-
-// Analyze all positions in the loaded game
-function analyzeGamePositions() {
-  const tempGame = new Chess();
-  let moveIndex = 0;
-  
-  // Analyze starting position
-  analyzePosition(tempGame.fen(), moveIndex);
-  
-  // Analyze each position after a move
-  for (const move of AppState.pgnMainlineMoves) {
-    tempGame.move(move);
-    moveIndex++;
-    analyzePosition(tempGame.fen(), moveIndex);
-  }
-}
-
-function analyzePosition(fen, moveIndex) {
-  // Create a temporary worker for this analysis
-  const tempStockfish = new Worker('js/stockfish-17-lite-single.js');
-  
-  tempStockfish.onmessage = function(event) {
-    const message = typeof event.data === 'string' ? event.data : event.data.data;
-    
-    if (message === 'readyok') {
-      tempStockfish.postMessage(`position fen ${fen}`);
-      tempStockfish.postMessage('go depth 10');
-    } else if (message.startsWith('bestmove')) {
-      tempStockfish.terminate();
-    } else if (message.startsWith('info depth 10') && message.includes('score')) {
-      const info = parseStockfishInfoForGraph(message, fen);
-      if (info) {
-        let evalScore;
-        if (info.mate !== undefined) {
-          evalScore = info.mate > 0 ? 10 : -10;
-        } else {
-          evalScore = parseFloat(info.score);
-          evalScore = Math.max(-10, Math.min(10, evalScore));
-        }
-        
-        AppState.evalHistory[moveIndex] = evalScore;
         drawEvalGraph();
       }
     }
