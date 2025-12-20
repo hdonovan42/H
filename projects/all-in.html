@@ -521,7 +521,17 @@
         if (d.isToday && d.date !== tradingDay) return false;
         return true;
       });
-      const sortedData = [...cleanedData].sort((a, b) => {
+      
+      // Add change values to each row for sorting
+      const dataWithChange = cleanedData.map((row, index) => {
+        if (index === 0) {
+          return { ...row, chg: null };
+        }
+        const prevRow = cleanedData[index - 1];
+        return { ...row, chg: row.close - prevRow.close };
+      });
+      
+      const sortedData = [...dataWithChange].sort((a, b) => {
         if (a[sortConfig.key] < b[sortConfig.key]) return sortConfig.direction === 'asc' ? -1 : 1;
         if (a[sortConfig.key] > b[sortConfig.key]) return sortConfig.direction === 'asc' ? 1 : -1;
         return 0;
@@ -932,7 +942,7 @@
                 <div onClick={() => handleSort('high')}>high {sortConfig.key === 'high' && <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>}</div>
                 <div onClick={() => handleSort('close')}>close {sortConfig.key === 'close' && <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>}</div>
                 <div onClick={() => handleSort('volume')}>vol {sortConfig.key === 'volume' && <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>}</div>
-                <div>chg</div>
+                <div onClick={() => handleSort('chg')}>chg {sortConfig.key === 'chg' && <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>}</div>
                 <div className="header-input-cell"><input type="text" className="header-input" value={sharesCount ? parseInt(sharesCount).toLocaleString() : ''} onChange={(e) => { const v = e.target.value.replace(/,/g, ''); if (v === '' || /^\d+$/.test(v)) setSharesCount(v); }} placeholder="#" /></div>
               </div>
               <div className="spreadsheet-body">
@@ -940,19 +950,7 @@
                   const shares = parseInt(sharesCount) || 0;
                   const value = shares > 0 ? Math.round(shares * row.close) : null;
                   const isLivePrice = row.isToday;
-                  
-                  let chg = null;
-                  let prevIndex;
-                  if (sortConfig.direction === 'desc') {
-                    prevIndex = index + 1;
-                  } else {
-                    prevIndex = index - 1;
-                  }
-                  
-                  if (prevIndex >= 0 && prevIndex < sortedData.length) {
-                    const previousRow = sortedData[prevIndex];
-                    chg = row.close - previousRow.close;
-                  }
+                  const chg = row.chg;
                   
                   return (
                     <div key={row.date} className="spreadsheet-row">
