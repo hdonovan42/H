@@ -28,7 +28,6 @@
       const [timeframe, setTimeframe] = useState('6M');
       const [quote, setQuote] = useState(null);
       const [metrics, setMetrics] = useState(null);
-      const [marketStatus, setMarketStatus] = useState(null);
       const [loading, setLoading] = useState(true);
       const [priceUpdating, setPriceUpdating] = useState(false);
       const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
@@ -99,7 +98,7 @@
               shortName: meta.shortName || meta.symbol // Company short name
             };
             
-            console.log(`Yahoo Finance SUCCESS: $${displayPrice} (${priceSource}, market: ${meta.marketState}), Volume: ${yahooQuote.volume}`);
+            console.log(`Yahoo Finance SUCCESS: $${displayPrice} (${priceSource}, market: ${meta.marketState}), Volume: ${yahooQuote.volume}, PrevClose: $${meta.previousClose}, RegularPrice: $${meta.regularMarketPrice}`);
             return yahooQuote;
           } else {
             console.error('Yahoo Finance: Invalid response structure', data);
@@ -149,56 +148,31 @@
         setLoading(true);
 
         try {
-          // Fetch market status via worker
-          const clockRes = await fetch(`${WORKER_URL}/clock`);
-          const clockData = await clockRes.json();
-          if (clockData) setMarketStatus(clockData);
-
-          // Fetch today's bars to get actual open, high, low, close
-          // Try 1Day bar first for accurate official close, fall back to 1Min if not available
+          // Fetch today's intraday bars only when market is open (for real-time OHLC)
           let todayBars = null;
-          try {
-            const tradingDay = getTradingDay();
-            
-            // First try to get the official 1Day bar (has accurate close price)
-            const todayDayBarRes = await fetch(
-              `${WORKER_URL}/bars/${symbol}?start=${tradingDay}T00:00:00Z&end=${new Date().toISOString()}&timeframe=1Day&feed=iex`
-            );
-            const todayDayBarData = await todayDayBarRes.json();
-            
-            if (todayDayBarData?.bars?.length > 0) {
-              // We have the official daily bar - use this for accurate close
-              const bar = todayDayBarData.bars[0];
-              todayBars = {
-                open: bar.o,
-                high: bar.h,
-                low: bar.l,
-                close: bar.c, // Official closing price
-                isOfficial: true // Mark as official data
-              };
-              console.log('Today\'s official daily bar:', todayBars);
-            } else {
-              // No daily bar yet, fall back to 1-minute bars
+          if (isMarketOpen()) {
+            try {
+              const tradingDay = getTradingDay();
               const todayMinBarsRes = await fetch(
                 `${WORKER_URL}/bars/${symbol}?start=${tradingDay}T00:00:00Z&end=${new Date().toISOString()}&timeframe=1Min&feed=iex`
               );
               const todayMinBarsData = await todayMinBarsRes.json();
               
               if (todayMinBarsData?.bars?.length > 0) {
-                // Calculate from 1-minute bars
+                // Calculate today's OHLC from 1-minute bars
                 const bars = todayMinBarsData.bars;
                 todayBars = {
                   open: bars[0].o,
                   high: Math.max(...bars.map(b => b.h)),
                   low: Math.min(...bars.map(b => b.l)),
-                  close: bars[bars.length - 1].c, // Last minute bar close
-                  isOfficial: false // Mark as calculated, not official
+                  close: bars[bars.length - 1].c,
+                  volume: bars.reduce((sum, b) => sum + (b.v || 0), 0) // Sum all 1-min volumes
                 };
-                console.log('Today\'s intraday bars (1Min) - close may not be exact:', todayBars);
+                console.log('Today\'s intraday bars (market open):', todayBars);
               }
+            } catch (e) {
+              console.log('Could not fetch today\'s intraday bars:', e);
             }
-          } catch (e) {
-            console.log('Could not fetch today\'s bars:', e);
           }
 
           // Fetch real-time quote from Yahoo Finance (includes pre/post market)
@@ -239,15 +213,6 @@
               price: alpacaQuote.price,
               source: 'alpaca'
             };
-          }
-
-          // If market is closed and we have intraday bars (not official daily bar),
-          // use Yahoo's official close price
-          if (!clockData?.is_open && todayBars && yahooQuote && !todayBars.isOfficial) {
-            console.log(`Market closed: Using Yahoo official close $${yahooQuote.regularMarketPrice} instead of last 1-min bar $${todayBars.close}`);
-            todayBars.close = yahooQuote.regularMarketPrice;
-            todayBars.high = Math.max(todayBars.high, yahooQuote.high);
-            todayBars.low = Math.min(todayBars.low, yahooQuote.low);
           }
 
           let historicalData = getCachedData(symbol);
@@ -352,7 +317,7 @@
                 const change = currentPrice - previousClose;
                 const changePercent = (change / previousClose) * 100;
                 
-                console.log(`Market ${clockData?.is_open ? 'OPEN' : 'CLOSED'}: Current: $${currentPrice}, Previous close: $${previousClose}, Change: ${change.toFixed(2)} (${changePercent.toFixed(2)}%)`);
+                console.log(`Market ${isMarketOpen() ? 'OPEN' : 'CLOSED'}: Current: $${currentPrice}, Previous close: $${previousClose}, Change: ${change.toFixed(2)} (${changePercent.toFixed(2)}%)`);
                 if (todayBars) console.log(`Today's Open: $${dayOpen}, High: $${dayHigh}, Low: $${dayLow}`);
                 
                 setQuote({
@@ -451,7 +416,7 @@
               const change = currentPrice - previousClose;
               const changePercent = (change / previousClose) * 100;
               
-              console.log(`Using cached data. Market ${clockData?.is_open ? 'OPEN' : 'CLOSED'}: Current: $${currentPrice}, Previous close: $${previousClose}, Change: ${change.toFixed(2)} (${changePercent.toFixed(2)}%)`);
+              console.log(`Using cached data. Market ${isMarketOpen() ? 'OPEN' : 'CLOSED'}: Current: $${currentPrice}, Previous close: $${previousClose}, Change: ${change.toFixed(2)} (${changePercent.toFixed(2)}%)`);
               if (todayBars) console.log(`Today's Open: $${dayOpen}, High: $${dayHigh}, Low: $${dayLow}`);
               
               setQuote({
@@ -633,10 +598,60 @@
         }
       }, [ticker, data]);
 
+      // Calculate today's change from spreadsheet data (we know this is correct)
+      let todayChange = 0;
+      let todayChangePercent = 0;
+      
+      // Need to calculate sortedData first to get today's change
+      const dataWithToday = [...data];
+      const tradingDay = getTradingDay();
+      const lastDate = data.length > 0 ? data[data.length - 1].date : null;
+      const hasTodayData = lastDate === tradingDay;
+      const hasManualTodayRow = dataWithToday.some(d => d.date === tradingDay && d.isToday);
+      
+      if (!hasTodayData && !hasManualTodayRow && quote?.c) {
+        const isLiveData = isMarketOpen();
+        dataWithToday.push({
+          date: tradingDay,
+          open: quote.o || quote.c,
+          high: quote.h || quote.c,
+          low: quote.l || quote.c,
+          close: quote.c,
+          volume: quote.todayBars?.volume || 0,
+          isToday: isLiveData
+        });
+      }
+      
+      const cleanedData = dataWithToday.filter(d => {
+        if (d.isToday && d.date !== tradingDay) {
+          return false;
+        }
+        return true;
+      });
+
+      const sortedData = [...cleanedData].sort((a, b) => {
+        if (a[sortConfig.key] < b[sortConfig.key]) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (a[sortConfig.key] > b[sortConfig.key]) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+      
+      // Find today's row and calculate change
+      const todayRow = sortConfig.direction === 'desc' ? sortedData[0] : sortedData[sortedData.length - 1];
+      
+      if (todayRow && sortedData.length > 1) {
+        const prevIndex = sortConfig.direction === 'desc' ? 1 : sortedData.length - 2;
+        const prevRow = sortedData[prevIndex];
+        
+        if (prevRow) {
+          todayChange = todayRow.close - prevRow.close;
+          todayChangePercent = (todayChange / prevRow.close) * 100;
+        }
+      }
+
       // Derived values
       const currentPrice = quote?.c || data[data.length - 1]?.close || 0;
-      const priceChange = quote?.d || 0;
-      const priceChangePercent = quote?.dp || 0;
+      const priceChange = todayChange; // Use spreadsheet-calculated change (we know this is correct)
+      const priceChangePercent = todayChangePercent; // Use spreadsheet-calculated percent
       const dayHigh = quote?.h || data[data.length - 1]?.high || 0;
       const dayLow = quote?.l || data[data.length - 1]?.low || 0;
       const highestPrice = data.length > 0 ? Math.max(...data.map(d => d.high)) : 0;
@@ -659,51 +674,6 @@
       const handleSort = (key) => {
         setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }));
       };
-
-      // Add today's row to spreadsheet if data doesn't include today yet
-      const dataWithToday = [...data];
-      const tradingDay = getTradingDay(); // Use trading day, not calendar day
-      const lastDate = data.length > 0 ? data[data.length - 1].date : null;
-      
-      // Check if we have today's trading day data already in the historical data
-      const hasTodayData = lastDate === tradingDay;
-      
-      // Also check if we already have a manually added row for today
-      const hasManualTodayRow = dataWithToday.some(d => d.date === tradingDay && d.isToday);
-      
-      console.log(`Trading day: ${tradingDay}, Last data date: ${lastDate}, Has today's data: ${hasTodayData}, Has manual row: ${hasManualTodayRow}`);
-      
-      // Only add today's row if:
-      // 1. We don't have today's data in the historical API response
-      // 2. We haven't already manually added it
-      // 3. We have a quote to show
-      if (!hasTodayData && !hasManualTodayRow && quote?.c) {
-        const isLiveData = isMarketOpen();
-        dataWithToday.push({
-          date: tradingDay,
-          open: quote.o || quote.c,
-          high: quote.h || quote.c,
-          low: quote.l || quote.c,
-          close: quote.c, // Current price (live if market open, close if market closed)
-          volume: quote.todayBars?.volume || 0, // Use Yahoo/Alpaca volume if available
-          isToday: isLiveData // Flag yellow only if market is actually open
-        });
-      }
-      
-      // Remove any stale manual rows (rows marked isToday that are no longer the trading day)
-      const cleanedData = dataWithToday.filter(d => {
-        if (d.isToday && d.date !== tradingDay) {
-          console.log(`Removing stale manual row for ${d.date}`);
-          return false; // Remove old manual rows
-        }
-        return true;
-      });
-
-      const sortedData = [...cleanedData].sort((a, b) => {
-        if (a[sortConfig.key] < b[sortConfig.key]) return sortConfig.direction === 'asc' ? -1 : 1;
-        if (a[sortConfig.key] > b[sortConfig.key]) return sortConfig.direction === 'asc' ? 1 : -1;
-        return 0;
-      });
 
       // Chart
       const minPrice = chartData.length > 0 ? Math.min(...chartData.map(d => d.low)) * 0.98 : 0;
@@ -800,17 +770,17 @@
             <div className="top-row">
               <div className="price-section box">
                 <div className="price-main">
-                  <span className={`price-current ${priceUpdating ? 'flash' : ''}`}>${currentPrice.toFixed(2)}</span>
-                  <span className={`price-change ${priceChange >= 0 ? 'positive' : 'negative'} ${priceUpdating ? 'flash' : ''}`}>
-                    {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)} ({priceChange >= 0 ? '+' : ''}{priceChangePercent.toFixed(2)}%)
-                  </span>
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%'}}>
+                    <div style={{display: 'flex', flexDirection: 'column'}}>
+                      <span className={`price-current ${priceUpdating ? 'flash' : ''}`}>${currentPrice.toFixed(2)}</span>
+                      <span className={`price-change ${priceChange >= 0 ? 'positive' : 'negative'} ${priceUpdating ? 'flash' : ''}`}>
+                        {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)} ({priceChange >= 0 ? '+' : ''}{priceChangePercent.toFixed(2)}%)
+                      </span>
+                    </div>
+                    <div className={`status-dot ${isMarketOpen() ? 'open' : 'closed'}`}></div>
+                  </div>
                 </div>
-                <div className="market-status">
-                  <div className={`status-dot ${isMarketOpen() ? 'open' : 'closed'}`}></div>
-                  <span className="status-text">
-                    Market {isMarketOpen() ? 'Open' : 'Closed'}
-                  </span>
-                </div>
+                <hr style={{margin: '16px 0', border: 'none', borderTop: '1px solid #e8e5dc'}} />
                 <div className="stats-grid">
                   <div className="stat-row"><span className="stat-label">Day Range</span><span className="stat-value">{dayLow.toFixed(2)} - {dayHigh.toFixed(2)}</span></div>
                   <div className="stat-row"><span className="stat-label">52 Week Range</span><span className="stat-value">{week52Low.toFixed(2)} - {week52High.toFixed(2)}</span></div>
@@ -920,22 +890,28 @@
                 <div className="header-input-cell"><input type="text" className="header-input" value={sharesCount ? parseInt(sharesCount).toLocaleString() : ''} onChange={(e) => { const v = e.target.value.replace(/,/g, ''); if (v === '' || /^\d+$/.test(v)) setSharesCount(v); }} placeholder="#" /></div>
               </div>
               <div className="spreadsheet-body">
-                {sortedData.map((row) => {
+                {sortedData.map((row, index) => {
                   const shares = parseInt(sharesCount) || 0;
                   const value = shares > 0 ? Math.round(shares * row.close) : null;
                   const isLivePrice = row.isToday; // Flag for today's live data (yellow when market open)
                   
                   // Calculate change: today's close - yesterday's close
-                  // Find yesterday's data in the cleaned dataset (not sortedData, to avoid sort order issues)
+                  // Need to account for sort order to find the previous trading day
                   let chg = null;
-                  const rowDate = new Date(row.date);
-                  const yesterday = new Date(rowDate);
-                  yesterday.setDate(yesterday.getDate() - 1);
-                  const yesterdayStr = yesterday.toISOString().split('T')[0];
                   
-                  const yesterdayData = cleanedData.find(d => d.date === yesterdayStr);
-                  if (yesterdayData) {
-                    chg = row.close - yesterdayData.close;
+                  // Determine which index is the "previous" day based on sort order
+                  let prevIndex;
+                  if (sortConfig.direction === 'desc') {
+                    // Descending (newest first): index+1 is previous day
+                    prevIndex = index + 1;
+                  } else {
+                    // Ascending (oldest first): index-1 is previous day
+                    prevIndex = index - 1;
+                  }
+                  
+                  if (prevIndex >= 0 && prevIndex < sortedData.length) {
+                    const previousRow = sortedData[prevIndex];
+                    chg = row.close - previousRow.close;
                   }
                   
                   return (
