@@ -4,6 +4,8 @@ bugs
 
 
 improvements
+- more thought on data below price - maybe add one more
+
 -completely redo graph 
 -draw dynamically - currently treated like an image, creates dead space
 
