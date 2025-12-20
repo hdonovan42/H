@@ -51,28 +51,7 @@
         console.log('Cached data for', symbol);
       };
 
-      // Fetch real-time quote - use Finnhub via worker for post-market data
-      const fetchLatestPrice = async (symbol) => {
-        try {
-          const response = await fetch(`${WORKER_URL}/finnhub/quote/${symbol}`);
-          const data = await response.json();
-          
-          if (data && data.c) {
-            return {
-              currentPrice: data.c,
-              previousClose: data.pc,
-              open: data.o,
-              high: data.h,
-              low: data.l,
-              change: data.c - data.pc,
-              changePercent: ((data.c - data.pc) / data.pc) * 100
-            };
-          }
-        } catch (e) {
-          console.error('Finnhub quote failed:', e);
-        }
-        return null;
-      };
+      // Note: fetchLatestPrice (Finnhub) removed - now using Alpaca SIP for post-market
       
       // Fetch real-time quote from Yahoo Finance via Cloudflare Worker  
       const fetchYahooQuote = async (symbol) => {
@@ -156,133 +135,192 @@
         return timeInMinutes >= marketOpen && timeInMinutes < marketClose;
       };
 
+      // ============================================
+      // REAL-TIME PRICE FETCHING STRATEGY
+      // ============================================
+      // Market Open:  Alpaca (IEX) → Yahoo fallback
+      // Market Closed: Alpaca (SIP post-market) → Yahoo fallback
+      // ============================================
+
+      const fetchAlpacaIntradayBars = async (symbol) => {
+        const tradingDay = getTradingDay();
+        const res = await fetch(
+          `${WORKER_URL}/bars/${symbol}?start=${tradingDay}T00:00:00Z&end=${new Date().toISOString()}&timeframe=1Min&feed=iex`
+        );
+        const data = await res.json();
+        
+        if (data?.bars?.length > 0) {
+          const bars = data.bars;
+          return {
+            open: bars[0].o,
+            high: Math.max(...bars.map(b => b.h)),
+            low: Math.min(...bars.map(b => b.l)),
+            close: bars[bars.length - 1].c,
+            volume: bars.reduce((sum, b) => sum + (b.v || 0), 0),
+            source: 'alpaca-iex'
+          };
+        }
+        return null;
+      };
+
+      const fetchAlpacaPostMarket = async (symbol) => {
+        const now = new Date();
+        let lastTradingDay;
+        
+        if (now.getDay() === 0) {
+          lastTradingDay = new Date(now);
+          lastTradingDay.setDate(now.getDate() - 2);
+        } else if (now.getDay() === 6) {
+          lastTradingDay = new Date(now);
+          lastTradingDay.setDate(now.getDate() - 1);
+        } else {
+          lastTradingDay = now;
+        }
+        
+        const tradingDateStr = lastTradingDay.toISOString().split('T')[0];
+        const postMarketStart = `${tradingDateStr}T21:00:00Z`;
+        const endDate = new Date(lastTradingDay);
+        endDate.setDate(endDate.getDate() + 1);
+        const postMarketEndStr = `${endDate.toISOString().split('T')[0]}T01:00:00Z`;
+        
+        const res = await fetch(
+          `${WORKER_URL}/bars/${symbol}?start=${postMarketStart}&end=${postMarketEndStr}&timeframe=1Min&feed=sip`
+        );
+        const data = await res.json();
+        
+        if (data?.bars?.length > 0) {
+          const lastBar = data.bars[data.bars.length - 1];
+          return {
+            currentPrice: lastBar.c,
+            source: 'alpaca-sip-postmarket'
+          };
+        }
+        return null;
+      };
+
+      const fetchRealTimePrice = async (symbol) => {
+        const marketOpen = isMarketOpen();
+        
+        if (marketOpen) {
+          // ========== MARKET IS OPEN ==========
+          // Strategy: Try Alpaca first, fallback to Yahoo
+          
+          // 1. Try Alpaca IEX intraday bars
+          try {
+            const alpacaData = await fetchAlpacaIntradayBars(symbol);
+            if (alpacaData) {
+              console.log('✓ Using Alpaca IEX data (market open)');
+              return { ...alpacaData, isMarketOpen: true };
+            }
+          } catch (e) {
+            console.log('Alpaca IEX failed, trying Yahoo...', e);
+          }
+          
+          // 2. Fallback to Yahoo
+          try {
+            const yahooData = await fetchYahooQuote(symbol);
+            if (yahooData) {
+              console.log('✓ Using Yahoo data as fallback (market open)');
+              return {
+                currentPrice: yahooData.currentPrice,
+                open: yahooData.open,
+                high: yahooData.high,
+                low: yahooData.low,
+                previousClose: yahooData.previousClose,
+                volume: yahooData.volume,
+                source: 'yahoo',
+                yahooData: yahooData,
+                isMarketOpen: true
+              };
+            }
+          } catch (e) {
+            console.error('Yahoo fallback also failed:', e);
+          }
+          
+        } else {
+          // ========== MARKET IS CLOSED ==========
+          // Strategy: Try Alpaca SIP post-market first, fallback to Yahoo
+          // Main price = regular market close
+          // Post/pre box = after-hours price from Alpaca SIP or Yahoo
+          
+          // Always fetch Yahoo first for market data
+          let yahooData = null;
+          try {
+            yahooData = await fetchYahooQuote(symbol);
+          } catch (e) {
+            console.log('Yahoo fetch failed:', e);
+          }
+          
+          // 1. Try Alpaca SIP post-market data for extended hours price
+          try {
+            const postMarketData = await fetchAlpacaPostMarket(symbol);
+            if (postMarketData && yahooData) {
+              console.log('✓ Using Alpaca SIP post-market data');
+              // Override Yahoo's post-market price with Alpaca SIP data
+              const updatedYahooData = {
+                ...yahooData,
+                postMarketPrice: postMarketData.currentPrice,
+                postMarketChange: postMarketData.currentPrice - yahooData.regularMarketPrice,
+                postMarketChangePercent: ((postMarketData.currentPrice - yahooData.regularMarketPrice) / yahooData.regularMarketPrice) * 100
+              };
+              return {
+                currentPrice: yahooData.regularMarketPrice,  // Main display = regular close
+                open: yahooData.open,
+                high: yahooData.high,
+                low: yahooData.low,
+                previousClose: yahooData.previousClose,
+                volume: yahooData.volume,
+                source: 'alpaca-sip-postmarket',
+                yahooData: updatedYahooData,  // Post-market data goes here for the box
+                isMarketOpen: false
+              };
+            }
+          } catch (e) {
+            console.log('Alpaca SIP post-market failed, using Yahoo...', e);
+          }
+          
+          // 2. Fallback to Yahoo only
+          if (yahooData) {
+            console.log('✓ Using Yahoo data (market closed)');
+            return {
+              currentPrice: yahooData.regularMarketPrice,  // Main display = regular close
+              open: yahooData.open,
+              high: yahooData.high,
+              low: yahooData.low,
+              previousClose: yahooData.previousClose,
+              volume: yahooData.volume,
+              source: 'yahoo',
+              yahooData: yahooData,  // Yahoo already has post/pre market prices
+              isMarketOpen: false
+            };
+          }
+        }
+        
+        return null;
+      };
+
       const fetchStockData = async (symbol) => {
         setLoading(true);
 
         try {
-          let todayBars = null;
-          if (isMarketOpen()) {
-            try {
-              const tradingDay = getTradingDay();
-              const todayMinBarsRes = await fetch(
-                `${WORKER_URL}/bars/${symbol}?start=${tradingDay}T00:00:00Z&end=${new Date().toISOString()}&timeframe=1Min&feed=iex`
-              );
-              const todayMinBarsData = await todayMinBarsRes.json();
-              
-              if (todayMinBarsData?.bars?.length > 0) {
-                const bars = todayMinBarsData.bars;
-                todayBars = {
-                  open: bars[0].o,
-                  high: Math.max(...bars.map(b => b.h)),
-                  low: Math.min(...bars.map(b => b.l)),
-                  close: bars[bars.length - 1].c,
-                  volume: bars.reduce((sum, b) => sum + (b.v || 0), 0)
-                };
-              }
-            } catch (e) {
-              console.log('Could not fetch today\'s intraday bars:', e);
+          // ============================================
+          // STEP 1: Fetch real-time price using strategy
+          // ============================================
+          const realTimeData = await fetchRealTimePrice(symbol);
+          
+          // Store Yahoo data if available for UI display
+          if (realTimeData?.yahooData) {
+            setYahooData(realTimeData.yahooData);
+            if (realTimeData.yahooData.shortName) {
+              setCompanyName(realTimeData.yahooData.shortName);
             }
           }
 
-          const yahooQuote = await fetchYahooQuote(symbol);
-          
-          let latestPriceData = null;
-          if (!isMarketOpen()) {
-            try {
-              const now = new Date();
-              let lastTradingDay;
-              if (now.getDay() === 0) {
-                lastTradingDay = new Date(now);
-                lastTradingDay.setDate(now.getDate() - 2);
-              } else if (now.getDay() === 6) {
-                lastTradingDay = new Date(now);
-                lastTradingDay.setDate(now.getDate() - 1);
-              } else {
-                const todayStr = now.toISOString().split('T')[0];
-                const hasDataForToday = data.some(d => d.date === todayStr);
-                if (hasDataForToday || isMarketOpen()) {
-                  lastTradingDay = now;
-                } else {
-                  const lastDate = data.length > 0 ? data[data.length - 1].date : null;
-                  if (lastDate) {
-                    lastTradingDay = new Date(lastDate + 'T12:00:00Z');
-                  } else {
-                    lastTradingDay = new Date(now);
-                    lastTradingDay.setDate(now.getDate() - 1);
-                  }
-                }
-              }
-              
-              const tradingDateStr = lastTradingDay.toISOString().split('T')[0];
-              const postMarketStart = `${tradingDateStr}T21:00:00Z`;
-              const endDate = new Date(lastTradingDay);
-              endDate.setDate(endDate.getDate() + 1);
-              const postMarketEndStr = `${endDate.toISOString().split('T')[0]}T01:00:00Z`;
-              
-              const alpacaPostRes = await fetch(
-                `${WORKER_URL}/bars/${symbol}?start=${postMarketStart}&end=${postMarketEndStr}&timeframe=1Min&feed=sip`
-              );
-              const alpacaPostData = await alpacaPostRes.json();
-              
-              if (alpacaPostData?.bars?.length > 0) {
-                const lastPostBar = alpacaPostData.bars[alpacaPostData.bars.length - 1];
-                latestPriceData = {
-                  currentPrice: lastPostBar.c,
-                };
-              }
-            } catch (e) {
-              console.error('Alpaca post-market fetch failed:', e);
-            }
-            
-            if (!latestPriceData) {
-              latestPriceData = await fetchLatestPrice(symbol);
-            }
-          }
-          
-          if (yahooQuote) {
-            setYahooData({
-              ...yahooQuote,
-              postMarketPrice: latestPriceData?.currentPrice || yahooQuote.postMarketPrice,
-              currentPrice: latestPriceData?.currentPrice || yahooQuote.currentPrice
-            });
-            
-            if (yahooQuote.shortName) {
-              setCompanyName(yahooQuote.shortName);
-            }
-          }
-          
-          let alpacaQuote = null;
-          try {
-            const quoteRes = await fetch(`${WORKER_URL}/trades/${symbol}`);
-            const quoteData = await quoteRes.json();
-            if (quoteData?.trade) {
-              alpacaQuote = {
-                price: quoteData.trade.p,
-                timestamp: quoteData.trade.t
-              };
-            }
-          } catch (e) {
-            console.log('Could not fetch Alpaca quote:', e);
-          }
-
-          let latestQuote = null;
-          if (yahooQuote) {
-            latestQuote = {
-              price: yahooQuote.currentPrice,
-              source: 'yahoo',
-              marketState: yahooQuote.marketState,
-              priceSource: yahooQuote.priceSource
-            };
-          } else if (alpacaQuote) {
-            latestQuote = {
-              price: alpacaQuote.price,
-              source: 'alpaca'
-            };
-          }
-
+          // ============================================
+          // STEP 2: Fetch historical data (cached or fresh)
+          // ============================================
           let historicalData = getCachedData(symbol);
 
-          // FETCH HISTORY FROM YAHOO (Total Market Volume)
           if (!historicalData) {
             console.log('Fetching historical data from Yahoo...');
             const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=6mo&interval=1d`);
@@ -301,7 +339,7 @@
                   low: quote.low[i],
                   close: quote.close[i],
                   volume: quote.volume[i] || 0
-                })).filter(day => day.close !== null) // Filter empty days
+                })).filter(day => day.close !== null)
                    .sort((a, b) => new Date(a.date) - new Date(b.date));
                 
                 setCachedData(symbol, historicalData);
@@ -311,60 +349,31 @@
             }
           }
 
-          // Calculate quotes and display logic
+          // ============================================
+          // STEP 3: Calculate and set quote data
+          // ============================================
           if (historicalData && historicalData.length >= 2) {
             const latestDay = historicalData[historicalData.length - 1];
             const prevDay = historicalData[historicalData.length - 2];
             
-            let currentPrice, previousClose, dayOpen, dayHigh, dayLow;
-            const marketIsOpen = isMarketOpen();
+            let currentPrice, previousClose, dayOpen, dayHigh, dayLow, dayVolume;
             
-            if (marketIsOpen) {
-              if (todayBars && todayBars.close) {
-                currentPrice = todayBars.close;
-                previousClose = latestDay.close;
-                dayOpen = todayBars.open;
-                dayHigh = todayBars.high;
-                dayLow = todayBars.low;
-              } else if (latestQuote) {
-                currentPrice = latestQuote.price;
-                previousClose = latestDay.close;
-                dayOpen = latestDay.open;
-                dayHigh = latestDay.high;
-                dayLow = latestDay.low;
-              } else if (yahooQuote) {
-                currentPrice = yahooQuote.currentPrice;
-                previousClose = yahooQuote.previousClose;
-                dayOpen = yahooQuote.open;
-                dayHigh = yahooQuote.high;
-                dayLow = yahooQuote.low;
-              } else {
-                currentPrice = latestDay.close;
-                previousClose = prevDay.close;
-                dayOpen = latestDay.open;
-                dayHigh = latestDay.high;
-                dayLow = latestDay.low;
-              }
+            if (realTimeData) {
+              // Use real-time data from our strategy
+              currentPrice = realTimeData.currentPrice || realTimeData.close;
+              previousClose = realTimeData.previousClose || latestDay.close;
+              dayOpen = realTimeData.open || latestDay.open;
+              dayHigh = realTimeData.high || latestDay.high;
+              dayLow = realTimeData.low || latestDay.low;
+              dayVolume = realTimeData.volume || 0;
             } else {
-              if (yahooQuote) {
-                currentPrice = yahooQuote.currentPrice;
-                previousClose = yahooQuote.previousClose;
-                dayOpen = yahooQuote.open;
-                dayHigh = yahooQuote.high;
-                dayLow = yahooQuote.low;
-              } else if (todayBars && todayBars.close) {
-                currentPrice = todayBars.close;
-                previousClose = latestDay.close;
-                dayOpen = todayBars.open;
-                dayHigh = todayBars.high;
-                dayLow = todayBars.low;
-              } else {
-                currentPrice = latestDay.close;
-                previousClose = prevDay.close;
-                dayOpen = latestDay.open;
-                dayHigh = latestDay.high;
-                dayLow = latestDay.low;
-              }
+              // Fallback to historical data
+              currentPrice = latestDay.close;
+              previousClose = prevDay.close;
+              dayOpen = latestDay.open;
+              dayHigh = latestDay.high;
+              dayLow = latestDay.low;
+              dayVolume = latestDay.volume;
             }
             
             const change = currentPrice - previousClose;
@@ -378,17 +387,20 @@
               pc: previousClose,
               d: change,
               dp: changePercent,
-              todayBars: yahooQuote ? {
-                open: yahooQuote.open,
-                high: yahooQuote.high,
-                low: yahooQuote.low,
-                close: yahooQuote.currentPrice,
-                volume: yahooQuote.volume,
-                isOfficial: true
-              } : todayBars
+              todayBars: {
+                open: dayOpen,
+                high: dayHigh,
+                low: dayLow,
+                close: currentPrice,
+                volume: dayVolume,
+                isOfficial: realTimeData?.source === 'yahoo'
+              }
             });
           }
 
+          // ============================================
+          // STEP 4: Fetch additional metrics (Finnhub)
+          // ============================================
           try {
             const metricsRes = await fetch(`${WORKER_URL}/finnhub/metric/${symbol}`);
             const metricsData = await metricsRes.json();
@@ -410,17 +422,19 @@
       const updatePriceOnly = async (symbol) => {
         try {
           setPriceUpdating(true);
-          const yahooQuote = await fetchYahooQuote(symbol);
           
-          if (yahooQuote && data.length > 0) {
-            const currentPrice = yahooQuote.currentPrice;
-            const previousClose = yahooQuote.previousClose;
+          // Use the same strategy as fetchStockData
+          const realTimeData = await fetchRealTimePrice(symbol);
+          
+          if (realTimeData && data.length > 0) {
+            const currentPrice = realTimeData.currentPrice || realTimeData.close;
+            const previousClose = realTimeData.previousClose || data[data.length - 1].close;
             const change = currentPrice - previousClose;
             const changePercent = (change / previousClose) * 100;
             
-            const dayOpen = yahooQuote.open;
-            const dayHigh = yahooQuote.high;
-            const dayLow = yahooQuote.low;
+            const dayOpen = realTimeData.open || data[data.length - 1].open;
+            const dayHigh = realTimeData.high || data[data.length - 1].high;
+            const dayLow = realTimeData.low || data[data.length - 1].low;
             
             setQuote({
               c: currentPrice,
@@ -434,9 +448,15 @@
                 open: dayOpen,
                 high: dayHigh,
                 low: dayLow,
-                close: currentPrice
+                close: currentPrice,
+                volume: realTimeData.volume || 0
               }
             });
+            
+            // Update Yahoo data if available
+            if (realTimeData.yahooData) {
+              setYahooData(realTimeData.yahooData);
+            }
           }
           setTimeout(() => setPriceUpdating(false), 300);
         } catch (error) {
