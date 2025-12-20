@@ -13,8 +13,7 @@
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    // API CONFIG
-    // FINNHUB_API_KEY removed - now handled safely in Cloudflare Worker
+    // WORKER URL
     const WORKER_URL = 'https://dry-poetry-72b5.donovanh59.workers.dev';
 
     // Cache duration: 24 hours
@@ -33,6 +32,7 @@
       const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
       const [sharesCount, setSharesCount] = useState('');
       const [companyName, setCompanyName] = useState('');
+      const [yahooData, setYahooData] = useState(null);
 
       const getCachedData = (symbol) => {
         const cached = localStorage.getItem(`stock_${symbol}`);
@@ -51,24 +51,41 @@
         console.log('Cached data for', symbol);
       };
 
-      // Fetch real-time quote from Yahoo Finance via Cloudflare Worker
-      const fetchYahooQuote = async (symbol) => {
+      // Fetch real-time quote - use Finnhub via worker for post-market data
+      const fetchLatestPrice = async (symbol) => {
         try {
-          console.log('Fetching Yahoo Finance quote for', symbol);
-          const response = await fetch(`${WORKER_URL}/yahoo/${symbol}`);
+          const response = await fetch(`${WORKER_URL}/finnhub/quote/${symbol}`);
           const data = await response.json();
           
-          console.log('Yahoo Finance raw response:', data);
+          if (data && data.c) {
+            return {
+              currentPrice: data.c,
+              previousClose: data.pc,
+              open: data.o,
+              high: data.h,
+              low: data.l,
+              change: data.c - data.pc,
+              changePercent: ((data.c - data.pc) / data.pc) * 100
+            };
+          }
+        } catch (e) {
+          console.error('Finnhub quote failed:', e);
+        }
+        return null;
+      };
+      
+      // Fetch real-time quote from Yahoo Finance via Cloudflare Worker  
+      const fetchYahooQuote = async (symbol) => {
+        try {
+          // Range 1d, interval 1d gets us the summary metadata
+          const response = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=1d&includePrePost=true`);
+          const data = await response.json();
           
           if (data?.chart?.result?.[0]) {
             const result = data.chart.result[0];
             const meta = result.meta;
             const quote = result.indicators.quote[0];
             
-            console.log('Yahoo meta:', meta);
-            console.log('Yahoo quote:', quote);
-            
-            // Get current price (regular market or post-market)
             const currentPrice = meta.regularMarketPrice || meta.previousClose;
             const isPostMarket = meta.postMarketPrice !== undefined;
             const isPreMarket = meta.preMarketPrice !== undefined;
@@ -94,11 +111,16 @@
               low: quote.low?.[0] || meta.regularMarketPrice,
               volume: quote.volume?.[0] || meta.regularMarketVolume || 0,
               priceSource: priceSource,
-              marketState: meta.marketState, // 'PRE', 'REGULAR', 'POST', 'CLOSED'
-              shortName: meta.shortName || meta.symbol // Company short name
+              marketState: meta.marketState,
+              shortName: meta.shortName || meta.symbol,
+              preMarketPrice: meta.preMarketPrice,
+              preMarketChange: meta.preMarketChange,
+              preMarketChangePercent: meta.preMarketChangePercent,
+              postMarketPrice: meta.postMarketPrice,
+              postMarketChange: meta.postMarketChange,
+              postMarketChangePercent: meta.postMarketChangePercent
             };
             
-            console.log(`Yahoo Finance SUCCESS: $${displayPrice} (${priceSource}, market: ${meta.marketState}), Volume: ${yahooQuote.volume}, PrevClose: $${meta.previousClose}, RegularPrice: $${meta.regularMarketPrice}`);
             return yahooQuote;
           } else {
             console.error('Yahoo Finance: Invalid response structure', data);
@@ -109,38 +131,28 @@
         return null;
       };
 
-      // Get the current trading day (not just calendar day)
       const getTradingDay = () => {
         const now = new Date();
         const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
         const estHour = estTime.getHours();
-        
-        // If it's before 9:30 AM EST, we're still in the previous trading day
         if (estHour < 9 || (estHour === 9 && estTime.getMinutes() < 30)) {
           const yesterday = new Date(estTime);
           yesterday.setDate(yesterday.getDate() - 1);
           return yesterday.toISOString().split('T')[0];
         }
-        
         return estTime.toISOString().split('T')[0];
       };
 
-      // Check if market is currently open (9:30 AM - 4:00 PM EST on weekdays)
       const isMarketOpen = () => {
         const now = new Date();
         const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-        const day = estTime.getDay(); // 0 = Sunday, 6 = Saturday
+        const day = estTime.getDay();
         const hour = estTime.getHours();
         const minute = estTime.getMinutes();
-        
-        // Market closed on weekends
         if (day === 0 || day === 6) return false;
-        
-        // Market hours: 9:30 AM - 4:00 PM EST
         const timeInMinutes = hour * 60 + minute;
-        const marketOpen = 9 * 60 + 30; // 9:30 AM
-        const marketClose = 16 * 60; // 4:00 PM
-        
+        const marketOpen = 9 * 60 + 30;
+        const marketClose = 16 * 60;
         return timeInMinutes >= marketOpen && timeInMinutes < marketClose;
       };
 
@@ -148,7 +160,6 @@
         setLoading(true);
 
         try {
-          // Fetch today's intraday bars only when market is open (for real-time OHLC)
           let todayBars = null;
           if (isMarketOpen()) {
             try {
@@ -159,31 +170,87 @@
               const todayMinBarsData = await todayMinBarsRes.json();
               
               if (todayMinBarsData?.bars?.length > 0) {
-                // Calculate today's OHLC from 1-minute bars
                 const bars = todayMinBarsData.bars;
                 todayBars = {
                   open: bars[0].o,
                   high: Math.max(...bars.map(b => b.h)),
                   low: Math.min(...bars.map(b => b.l)),
                   close: bars[bars.length - 1].c,
-                  volume: bars.reduce((sum, b) => sum + (b.v || 0), 0) // Sum all 1-min volumes
+                  volume: bars.reduce((sum, b) => sum + (b.v || 0), 0)
                 };
-                console.log('Today\'s intraday bars (market open):', todayBars);
               }
             } catch (e) {
               console.log('Could not fetch today\'s intraday bars:', e);
             }
           }
 
-          // Fetch real-time quote from Yahoo Finance (includes pre/post market)
           const yahooQuote = await fetchYahooQuote(symbol);
           
-          // Set company name from Yahoo if available
-          if (yahooQuote?.shortName) {
-            setCompanyName(yahooQuote.shortName);
+          let latestPriceData = null;
+          if (!isMarketOpen()) {
+            try {
+              const now = new Date();
+              let lastTradingDay;
+              if (now.getDay() === 0) {
+                lastTradingDay = new Date(now);
+                lastTradingDay.setDate(now.getDate() - 2);
+              } else if (now.getDay() === 6) {
+                lastTradingDay = new Date(now);
+                lastTradingDay.setDate(now.getDate() - 1);
+              } else {
+                const todayStr = now.toISOString().split('T')[0];
+                const hasDataForToday = data.some(d => d.date === todayStr);
+                if (hasDataForToday || isMarketOpen()) {
+                  lastTradingDay = now;
+                } else {
+                  const lastDate = data.length > 0 ? data[data.length - 1].date : null;
+                  if (lastDate) {
+                    lastTradingDay = new Date(lastDate + 'T12:00:00Z');
+                  } else {
+                    lastTradingDay = new Date(now);
+                    lastTradingDay.setDate(now.getDate() - 1);
+                  }
+                }
+              }
+              
+              const tradingDateStr = lastTradingDay.toISOString().split('T')[0];
+              const postMarketStart = `${tradingDateStr}T21:00:00Z`;
+              const endDate = new Date(lastTradingDay);
+              endDate.setDate(endDate.getDate() + 1);
+              const postMarketEndStr = `${endDate.toISOString().split('T')[0]}T01:00:00Z`;
+              
+              const alpacaPostRes = await fetch(
+                `${WORKER_URL}/bars/${symbol}?start=${postMarketStart}&end=${postMarketEndStr}&timeframe=1Min&feed=sip`
+              );
+              const alpacaPostData = await alpacaPostRes.json();
+              
+              if (alpacaPostData?.bars?.length > 0) {
+                const lastPostBar = alpacaPostData.bars[alpacaPostData.bars.length - 1];
+                latestPriceData = {
+                  currentPrice: lastPostBar.c,
+                };
+              }
+            } catch (e) {
+              console.error('Alpaca post-market fetch failed:', e);
+            }
+            
+            if (!latestPriceData) {
+              latestPriceData = await fetchLatestPrice(symbol);
+            }
           }
           
-          // Fetch latest trade from Alpaca as backup
+          if (yahooQuote) {
+            setYahooData({
+              ...yahooQuote,
+              postMarketPrice: latestPriceData?.currentPrice || yahooQuote.postMarketPrice,
+              currentPrice: latestPriceData?.currentPrice || yahooQuote.currentPrice
+            });
+            
+            if (yahooQuote.shortName) {
+              setCompanyName(yahooQuote.shortName);
+            }
+          }
+          
           let alpacaQuote = null;
           try {
             const quoteRes = await fetch(`${WORKER_URL}/trades/${symbol}`);
@@ -193,13 +260,11 @@
                 price: quoteData.trade.p,
                 timestamp: quoteData.trade.t
               };
-              console.log(`Alpaca latest trade: $${alpacaQuote.price} at ${alpacaQuote.timestamp}`);
             }
           } catch (e) {
             console.log('Could not fetch Alpaca quote:', e);
           }
 
-          // Prefer Yahoo Finance quote, fall back to Alpaca if needed
           let latestQuote = null;
           if (yahooQuote) {
             latestQuote = {
@@ -217,137 +282,119 @@
 
           let historicalData = getCachedData(symbol);
 
-          // Fetch historical bars from Alpaca if not cached
+          // FETCH HISTORY FROM YAHOO (Total Market Volume)
           if (!historicalData) {
-            console.log('Fetching from Alpaca IEX...');
-            const endDate = new Date();
-            const startDate = new Date();
-            startDate.setMonth(startDate.getMonth() - 6);
-            
-            // Use worker to fetch historical data
-            const barsRes = await fetch(
-              `${WORKER_URL}/bars/${symbol}?start=${startDate.toISOString().split('T')[0]}&end=${endDate.toISOString().split('T')[0]}&timeframe=1Day&feed=iex&adjustment=split`
-            );
+            console.log('Fetching historical data from Yahoo...');
+            const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=6mo&interval=1d`);
             const barsData = await barsRes.json();
 
-            if (barsData?.bars?.length > 0) {
-              historicalData = barsData.bars.map(bar => ({
-                date: bar.t.split('T')[0],
-                open: bar.o,
-                high: bar.h,
-                low: bar.l,
-                close: bar.c,
-                volume: bar.v
-              })).sort((a, b) => new Date(a.date) - new Date(b.date));
+            if (barsData?.chart?.result?.[0]) {
+              const result = barsData.chart.result[0];
+              const timestamps = result.timestamp;
+              const quote = result.indicators.quote[0];
               
-              setCachedData(symbol, historicalData);
+              if (timestamps && quote) {
+                historicalData = timestamps.map((t, i) => ({
+                  date: new Date(t * 1000).toISOString().split('T')[0],
+                  open: quote.open[i],
+                  high: quote.high[i],
+                  low: quote.low[i],
+                  close: quote.close[i],
+                  volume: quote.volume[i] || 0
+                })).filter(day => day.close !== null) // Filter empty days
+                   .sort((a, b) => new Date(a.date) - new Date(b.date));
+                
+                setCachedData(symbol, historicalData);
+              }
+            } else {
+              console.error('Yahoo History error:', barsData);
             }
           }
-          
-          // Logic to determine current price and daily change
+
+          // Calculate quotes and display logic
           if (historicalData && historicalData.length >= 2) {
-              const latestDay = historicalData[historicalData.length - 1];
-              const prevDay = historicalData[historicalData.length - 2];
-              
-              // Determine what "current" price means based on available data
-              let currentPrice, previousClose, dayOpen, dayHigh, dayLow;
-              
-              const marketIsOpen = isMarketOpen();
-              
-              // PRIORITY LOGIC:
-              // - Market OPEN: Use Alpaca (updates more frequently)
-              // - Market CLOSED: Use Yahoo (accurate close, pre/post market)
-              
-              if (marketIsOpen) {
-                // MARKET OPEN - Prioritize Alpaca for real-time updates
-                if (todayBars && todayBars.close) {
-                  currentPrice = todayBars.close;
-                  previousClose = latestDay.close;
-                  dayOpen = todayBars.open;
-                  dayHigh = todayBars.high;
-                  dayLow = todayBars.low;
-                  console.log(`Market OPEN - Using Alpaca intraday bars: $${currentPrice}`);
-                } else if (latestQuote) {
-                  currentPrice = latestQuote.price;
-                  previousClose = latestDay.close;
-                  dayOpen = latestDay.open;
-                  dayHigh = latestDay.high;
-                  dayLow = latestDay.low;
-                  console.log(`Market OPEN - Using Alpaca live quote: $${currentPrice}`);
-                } else if (yahooQuote) {
-                  // Fallback to Yahoo if Alpaca fails
-                  currentPrice = yahooQuote.currentPrice;
-                  previousClose = yahooQuote.previousClose;
-                  dayOpen = yahooQuote.open;
-                  dayHigh = yahooQuote.high;
-                  dayLow = yahooQuote.low;
-                  console.log(`Market OPEN - Using Yahoo Finance (Alpaca failed): $${currentPrice}`);
-                } else {
-                  currentPrice = latestDay.close;
-                  previousClose = prevDay.close;
-                  dayOpen = latestDay.open;
-                  dayHigh = latestDay.high;
-                  dayLow = latestDay.low;
-                  console.log(`Market OPEN - Using yesterday's close (fallback): $${currentPrice}`);
-                }
+            const latestDay = historicalData[historicalData.length - 1];
+            const prevDay = historicalData[historicalData.length - 2];
+            
+            let currentPrice, previousClose, dayOpen, dayHigh, dayLow;
+            const marketIsOpen = isMarketOpen();
+            
+            if (marketIsOpen) {
+              if (todayBars && todayBars.close) {
+                currentPrice = todayBars.close;
+                previousClose = latestDay.close;
+                dayOpen = todayBars.open;
+                dayHigh = todayBars.high;
+                dayLow = todayBars.low;
+              } else if (latestQuote) {
+                currentPrice = latestQuote.price;
+                previousClose = latestDay.close;
+                dayOpen = latestDay.open;
+                dayHigh = latestDay.high;
+                dayLow = latestDay.low;
+              } else if (yahooQuote) {
+                currentPrice = yahooQuote.currentPrice;
+                previousClose = yahooQuote.previousClose;
+                dayOpen = yahooQuote.open;
+                dayHigh = yahooQuote.high;
+                dayLow = yahooQuote.low;
               } else {
-                // MARKET CLOSED - Prioritize Yahoo for accurate close/pre-market/post-market
-                if (yahooQuote) {
-                  currentPrice = yahooQuote.currentPrice;
-                  previousClose = yahooQuote.previousClose;
-                  dayOpen = yahooQuote.open;
-                  dayHigh = yahooQuote.high;
-                  dayLow = yahooQuote.low;
-                  console.log(`Market CLOSED - Using Yahoo Finance: $${currentPrice} (${yahooQuote.priceSource})`);
-                } else if (todayBars && todayBars.close) {
-                  currentPrice = todayBars.close;
-                  previousClose = latestDay.close;
-                  dayOpen = todayBars.open;
-                  dayHigh = todayBars.high;
-                  dayLow = todayBars.low;
-                  console.log(`Market CLOSED - Using Alpaca bars (Yahoo failed): $${currentPrice}`);
-                } else {
-                  currentPrice = latestDay.close;
-                  previousClose = prevDay.close;
-                  dayOpen = latestDay.open;
-                  dayHigh = latestDay.high;
-                  dayLow = latestDay.low;
-                  console.log(`Market CLOSED - Using yesterday's close (fallback): $${currentPrice}`);
-                }
+                currentPrice = latestDay.close;
+                previousClose = prevDay.close;
+                dayOpen = latestDay.open;
+                dayHigh = latestDay.high;
+                dayLow = latestDay.low;
               }
-              
-              const change = currentPrice - previousClose;
-              const changePercent = (change / previousClose) * 100;
-              
-              console.log(`Market ${isMarketOpen() ? 'OPEN' : 'CLOSED'}: Current: $${currentPrice}, Previous close: $${previousClose}, Change: ${change.toFixed(2)} (${changePercent.toFixed(2)}%)`);
-              
-              setQuote({
-                c: currentPrice,
-                o: dayOpen,
-                h: dayHigh,
-                l: dayLow,
-                pc: previousClose,
-                d: change,
-                dp: changePercent,
-                todayBars: yahooQuote ? {
-                  open: yahooQuote.open,
-                  high: yahooQuote.high,
-                  low: yahooQuote.low,
-                  close: yahooQuote.currentPrice,
-                  volume: yahooQuote.volume,
-                  isOfficial: true
-                } : todayBars // Use Yahoo data if available, otherwise Alpaca bars
-              });
+            } else {
+              if (yahooQuote) {
+                currentPrice = yahooQuote.currentPrice;
+                previousClose = yahooQuote.previousClose;
+                dayOpen = yahooQuote.open;
+                dayHigh = yahooQuote.high;
+                dayLow = yahooQuote.low;
+              } else if (todayBars && todayBars.close) {
+                currentPrice = todayBars.close;
+                previousClose = latestDay.close;
+                dayOpen = todayBars.open;
+                dayHigh = todayBars.high;
+                dayLow = todayBars.low;
+              } else {
+                currentPrice = latestDay.close;
+                previousClose = prevDay.close;
+                dayOpen = latestDay.open;
+                dayHigh = latestDay.high;
+                dayLow = latestDay.low;
+              }
+            }
+            
+            const change = currentPrice - previousClose;
+            const changePercent = (change / previousClose) * 100;
+            
+            setQuote({
+              c: currentPrice,
+              o: dayOpen,
+              h: dayHigh,
+              l: dayLow,
+              pc: previousClose,
+              d: change,
+              dp: changePercent,
+              todayBars: yahooQuote ? {
+                open: yahooQuote.open,
+                high: yahooQuote.high,
+                low: yahooQuote.low,
+                close: yahooQuote.currentPrice,
+                volume: yahooQuote.volume,
+                isOfficial: true
+              } : todayBars
+            });
           }
 
-          // Fetch metrics from Finnhub via Cloudflare Worker (Secure Proxy)
           try {
-            console.log('Fetching metrics from Worker...');
             const metricsRes = await fetch(`${WORKER_URL}/finnhub/metric/${symbol}`);
             const metricsData = await metricsRes.json();
             if (metricsData?.metric) setMetrics(metricsData);
           } catch (e) {
-            console.error('Metrics fetch failed:', e);
+            console.error('Finnhub metrics failed:', e);
           }
 
           if (historicalData?.length > 0) {
@@ -360,18 +407,13 @@
         setLoading(false);
       };
 
-      // Lightweight price update function (no loading screen)
       const updatePriceOnly = async (symbol) => {
         try {
-          console.log('updatePriceOnly called for', symbol);
           setPriceUpdating(true);
-
-          // Fetch real-time quote from Yahoo Finance
           const yahooQuote = await fetchYahooQuote(symbol);
           
           if (yahooQuote && data.length > 0) {
             const currentPrice = yahooQuote.currentPrice;
-            const latestDay = data[data.length - 1];
             const previousClose = yahooQuote.previousClose;
             const change = currentPrice - previousClose;
             const changePercent = (change / previousClose) * 100;
@@ -379,8 +421,6 @@
             const dayOpen = yahooQuote.open;
             const dayHigh = yahooQuote.high;
             const dayLow = yahooQuote.low;
-            
-            console.log(`Price updated: $${currentPrice} (${yahooQuote.priceSource}), Change: ${change.toFixed(2)}`);
             
             setQuote({
               c: currentPrice,
@@ -397,11 +437,7 @@
                 close: currentPrice
               }
             });
-          } else {
-            console.log('No Yahoo quote data or historical data missing');
           }
-          
-          // Flash animation
           setTimeout(() => setPriceUpdating(false), 300);
         } catch (error) {
           console.error('Error updating price:', error);
@@ -409,73 +445,50 @@
         }
       };
 
-
       const fetchChartData = async (symbol, tf) => {
         try {
-          // For 6M, use the cached historical data if available
           if (tf === '6M' && data.length > 0) {
             setChartData(data);
             return;
           }
 
-          let timeframeParam, startDate, endDate = new Date();
+          // For the charts, we will now use Yahoo (Total Volume)
+          // Previously this was using Alpaca IEX data
+          
+          let rangeParam = '6mo';
+          let intervalParam = '1d';
           
           switch(tf) {
-            case '1D':
-              timeframeParam = '5Min';
-              startDate = new Date();
-              startDate.setHours(0, 0, 0, 0);
-              break;
-            case '1W':
-              timeframeParam = '1Hour';
-              startDate = new Date();
-              startDate.setDate(startDate.getDate() - 7);
-              break;
-            case '1M':
-              timeframeParam = '1Day';
-              startDate = new Date();
-              startDate.setMonth(startDate.getMonth() - 1);
-              break;
-            case '3M':
-              timeframeParam = '1Day';
-              startDate = new Date();
-              startDate.setMonth(startDate.getMonth() - 3);
-              break;
-            case '6M':
-              timeframeParam = '1Day';
-              startDate = new Date();
-              startDate.setMonth(startDate.getMonth() - 6);
-              break;
-            case '1Y':
-              timeframeParam = '1Day';
-              startDate = new Date();
-              startDate.setFullYear(startDate.getFullYear() - 1);
-              break;
-            default:
-              timeframeParam = '1Day';
-              startDate = new Date();
-              startDate.setMonth(startDate.getMonth() - 6);
+            case '1D': rangeParam = '1d'; intervalParam = '5m'; break;
+            case '1W': rangeParam = '5d'; intervalParam = '15m'; break;
+            case '1M': rangeParam = '1mo'; intervalParam = '1d'; break;
+            case '3M': rangeParam = '3mo'; intervalParam = '1d'; break;
+            case '6M': rangeParam = '6mo'; intervalParam = '1d'; break;
+            case '1Y': rangeParam = '1y'; intervalParam = '1d'; break;
           }
 
-          console.log(`Fetching ${tf} data with timeframe ${timeframeParam}`);
-          const barsRes = await fetch(
-            `${WORKER_URL}/bars/${symbol}?start=${startDate.toISOString()}&end=${endDate.toISOString()}&timeframe=${timeframeParam}&feed=iex&adjustment=split`
-          );
+          console.log(`Fetching chart data ${tf}...`);
+          // Use Yahoo via worker
+          const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=${rangeParam}&interval=${intervalParam}`);
           const barsData = await barsRes.json();
 
-          if (barsData?.bars?.length > 0) {
-            const chartBars = barsData.bars.map(bar => ({
-              date: bar.t,
-              open: bar.o,
-              high: bar.h,
-              low: bar.l,
-              close: bar.c,
-              volume: bar.v
-            }));
-            console.log(`Loaded ${chartBars.length} bars for ${tf}`);
-            setChartData(chartBars);
-          } else {
-            console.error('No bars data received:', barsData);
+          if (barsData?.chart?.result?.[0]) {
+            const result = barsData.chart.result[0];
+            const timestamps = result.timestamp;
+            const quote = result.indicators.quote[0];
+            
+            if (timestamps && quote) {
+              const chartBars = timestamps.map((t, i) => ({
+                date: new Date(t * 1000).toISOString(),
+                open: quote.open[i],
+                high: quote.high[i],
+                low: quote.low[i],
+                close: quote.close[i],
+                volume: quote.volume[i] || 0
+              })).filter(b => b.close !== null); // Filter nulls
+              
+              setChartData(chartBars);
+            }
           }
         } catch (error) {
           console.error('Error fetching chart data:', error);
@@ -487,35 +500,29 @@
         if (ticker) fetchChartData(ticker, timeframe); 
       }, [ticker, timeframe]);
 
-      // Auto-refresh price when market is open
       useEffect(() => {
         if (isMarketOpen()) {
-          console.log('Starting auto-refresh (every 3 seconds) - Market is OPEN');
           const interval = setInterval(() => {
-            console.log('Auto-refreshing price...');
             updatePriceOnly(ticker);
-          }, 3000); // Refresh every 3 seconds when market is open
-          return () => {
-            console.log('Stopping auto-refresh');
-            clearInterval(interval);
-          };
-        } else {
-          console.log('Auto-refresh disabled - Market is CLOSED');
+          }, 3000); 
+          return () => clearInterval(interval);
         }
       }, [ticker, data]);
 
-      // Calculate today's change from spreadsheet data (we know this is correct)
       let todayChange = 0;
       let todayChangePercent = 0;
       
-      // Need to calculate sortedData first to get today's change
       const dataWithToday = [...data];
       const tradingDay = getTradingDay();
       const lastDate = data.length > 0 ? data[data.length - 1].date : null;
       const hasTodayData = lastDate === tradingDay;
       const hasManualTodayRow = dataWithToday.some(d => d.date === tradingDay && d.isToday);
       
-      if (!hasTodayData && !hasManualTodayRow && quote?.c) {
+      const now = new Date();
+      const dayOfWeek = now.getDay();
+      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+      
+      if (!isWeekend && !hasTodayData && !hasManualTodayRow && quote?.c) {
         const isLiveData = isMarketOpen();
         dataWithToday.push({
           date: tradingDay,
@@ -529,9 +536,7 @@
       }
       
       const cleanedData = dataWithToday.filter(d => {
-        if (d.isToday && d.date !== tradingDay) {
-          return false;
-        }
+        if (d.isToday && d.date !== tradingDay) return false;
         return true;
       });
 
@@ -541,7 +546,6 @@
         return 0;
       });
       
-      // Find today's row and calculate change
       const todayRow = sortConfig.direction === 'desc' ? sortedData[0] : sortedData[sortedData.length - 1];
       
       if (todayRow && sortedData.length > 1) {
@@ -554,10 +558,9 @@
         }
       }
 
-      // Derived values
       const currentPrice = quote?.c || data[data.length - 1]?.close || 0;
-      const priceChange = todayChange; // Use spreadsheet-calculated change (we know this is correct)
-      const priceChangePercent = todayChangePercent; // Use spreadsheet-calculated percent
+      const priceChange = todayChange;
+      const priceChangePercent = todayChangePercent;
       const dayHigh = quote?.h || data[data.length - 1]?.high || 0;
       const dayLow = quote?.l || data[data.length - 1]?.low || 0;
       const highestPrice = data.length > 0 ? Math.max(...data.map(d => d.high)) : 0;
@@ -581,7 +584,6 @@
         setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }));
       };
 
-      // Chart
       const minPrice = chartData.length > 0 ? Math.min(...chartData.map(d => d.low)) * 0.98 : 0;
       const maxPrice = chartData.length > 0 ? Math.max(...chartData.map(d => d.high)) * 1.02 : 100;
       const priceRange = (maxPrice - minPrice) || 1;
@@ -686,6 +688,67 @@
                     <div className={`status-dot ${isMarketOpen() ? 'open' : 'closed'}`}></div>
                   </div>
                 </div>
+                
+                {/* Pre/Post Market Bar - Show whenever market is closed */}
+                {!isMarketOpen() && yahooData && (
+                  (() => {
+                    let marketLabel, marketPrice, marketChange, marketChangePercent;
+                    
+                    if (yahooData.preMarketPrice) {
+                      marketLabel = 'PRE';
+                      marketPrice = yahooData.preMarketPrice;
+                      marketChange = marketPrice - currentPrice;
+                      marketChangePercent = (marketChange / currentPrice) * 100;
+                    } else if (yahooData.postMarketPrice) {
+                      marketLabel = 'POST';
+                      marketPrice = yahooData.postMarketPrice;
+                      marketChange = marketPrice - currentPrice;
+                      marketChangePercent = (marketChange / currentPrice) * 100;
+                    } else {
+                      marketLabel = 'POST';
+                      marketPrice = yahooData.currentPrice;
+                      marketChange = marketPrice - currentPrice;
+                      marketChangePercent = (marketChange / currentPrice) * 100;
+                    }
+                    
+                    const isPositive = marketChange >= 0;
+                    
+                    return (
+                      <div style={{
+                        marginTop: '16px',
+                        padding: '8px 16px',
+                        background: isPositive ? 'rgba(45, 90, 61, 0.08)' : 'rgba(139, 58, 58, 0.08)',
+                        borderLeft: `4px solid ${isPositive ? '#2d5a3d' : '#8b3a3a'}`,
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}>
+                        <span style={{
+                          fontSize: '12px',
+                          color: isPositive ? '#2d5a3d' : '#8b3a3a',
+                          fontWeight: 600
+                        }}>
+                          {marketLabel}
+                        </span>
+                        <span style={{
+                          fontSize: '18px',
+                          fontWeight: 600,
+                          color: isPositive ? '#2d5a3d' : '#8b3a3a',
+                          marginRight: '16px'
+                        }}>
+                          ${marketPrice.toFixed(2)}
+                        </span>
+                        <span className={isPositive ? 'positive' : 'negative'} style={{
+                          fontSize: '13px',
+                          fontWeight: 600
+                        }}>
+                          {isPositive ? '+' : ''}${marketChange.toFixed(2)} ({isPositive ? '+' : ''}{marketChangePercent.toFixed(2)}%)
+                        </span>
+                      </div>
+                    );
+                  })()
+                )}
+                
                 <hr style={{margin: '16px 0', border: 'none', borderTop: '1px solid #e8e5dc'}} />
                 <div className="stats-grid">
                   <div className="stat-row"><span className="stat-label">Day Range</span><span className="stat-value">{dayLow.toFixed(2)} - {dayHigh.toFixed(2)}</span></div>
@@ -732,7 +795,6 @@
                     {(() => {
                       if (chartData.length === 0) return null;
                       
-                      // For intraday (1D), show times
                       if (timeframe === '1D') {
                         const timePoints = [];
                         const interval = Math.max(1, Math.floor(chartData.length / 6));
@@ -745,7 +807,6 @@
                         ));
                       }
                       
-                      // For 1W, show days
                       if (timeframe === '1W') {
                         const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
                         const dayPoints = [];
@@ -763,7 +824,6 @@
                         ));
                       }
                       
-                      // For longer timeframes, show months
                       const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
                       const seen = new Set();
                       const monthPoints = [];
@@ -799,19 +859,13 @@
                 {sortedData.map((row, index) => {
                   const shares = parseInt(sharesCount) || 0;
                   const value = shares > 0 ? Math.round(shares * row.close) : null;
-                  const isLivePrice = row.isToday; // Flag for today's live data (yellow when market open)
+                  const isLivePrice = row.isToday;
                   
-                  // Calculate change: today's close - yesterday's close
-                  // Need to account for sort order to find the previous trading day
                   let chg = null;
-                  
-                  // Determine which index is the "previous" day based on sort order
                   let prevIndex;
                   if (sortConfig.direction === 'desc') {
-                    // Descending (newest first): index+1 is previous day
                     prevIndex = index + 1;
                   } else {
-                    // Ascending (oldest first): index-1 is previous day
                     prevIndex = index - 1;
                   }
                   
@@ -822,11 +876,11 @@
                   
                   return (
                     <div key={row.date} className="spreadsheet-row">
-                      <div className="spreadsheet-cell">{row.date}</div>
+                      <div className="spreadsheet-cell">{row.date.split('T')[0]}</div>
                       <div className="spreadsheet-cell">${row.open.toFixed(2)}</div>
                       <div className="spreadsheet-cell">${row.high.toFixed(2)}</div>
                       <div className={`spreadsheet-cell ${isLivePrice ? 'live-price' : ''}`}>${row.close.toFixed(2)}</div>
-                      <div className="spreadsheet-cell">{row.volume > 0 ? (row.volume / 1000000).toFixed(1) + 'M' : '—'}</div>
+                      <div className="spreadsheet-cell">{row.volume > 0 ? (row.volume / 1000000).toFixed(0) + 'M' : '—'}</div>
                       <div className={`spreadsheet-cell ${chg !== null ? (chg >= 0 ? 'positive' : 'negative') : ''}`}>{chg !== null ? `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}` : '—'}</div>
                       <div className="spreadsheet-cell value-cell">{value !== null && <>${value.toLocaleString()}{chg !== null && <span className={chg >= 0 ? 'positive' : 'negative'}> | {chg >= 0 ? '+' : ''}${Math.round(chg * shares).toLocaleString()}</span>}</>}</div>
                     </div>
@@ -835,7 +889,8 @@
               </div>
             </div>
 
-<div className="timestamp">Last updated: {new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', '')}</div>          </div>
+            <div className="timestamp">Last updated: {new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', '')}</div>
+          </div>
         </div>
       );
     }
