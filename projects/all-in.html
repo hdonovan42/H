@@ -11,7 +11,7 @@
 <body>
   <div id="root"></div>
   <script type="text/babel">
-    const { useState, useEffect } = React;
+    const { useState, useEffect, useRef } = React;
 
     // WORKER URL
     const WORKER_URL = 'https://dry-poetry-72b5.donovanh59.workers.dev';
@@ -33,6 +33,10 @@
       const [sharesCount, setSharesCount] = useState('');
       const [companyName, setCompanyName] = useState('');
       const [yahooData, setYahooData] = useState(null);
+      
+      // New State for Google-style Hover
+      const [hoverData, setHoverData] = useState(null);
+      const svgRef = useRef(null);
 
       const getCachedData = (symbol) => {
         const cached = localStorage.getItem(`stock_${symbol}`);
@@ -51,12 +55,8 @@
         console.log('Cached data for', symbol);
       };
 
-      // Note: fetchLatestPrice (Finnhub) removed - now using Alpaca SIP for post-market
-      
-      // Fetch real-time quote from Yahoo Finance via Cloudflare Worker  
       const fetchYahooQuote = async (symbol) => {
         try {
-          // Range 1d, interval 1d gets us the summary metadata
           const response = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=1d&includePrePost=true`);
           const data = await response.json();
           
@@ -101,8 +101,6 @@
             };
             
             return yahooQuote;
-          } else {
-            console.error('Yahoo Finance: Invalid response structure', data);
           }
         } catch (error) {
           console.error('Yahoo Finance fetch error:', error);
@@ -134,13 +132,6 @@
         const marketClose = 16 * 60;
         return timeInMinutes >= marketOpen && timeInMinutes < marketClose;
       };
-
-      // ============================================
-      // REAL-TIME PRICE FETCHING STRATEGY
-      // ============================================
-      // Market Open:  Alpaca (IEX) → Yahoo fallback
-      // Market Closed: Alpaca (SIP post-market) → Yahoo fallback
-      // ============================================
 
       const fetchAlpacaIntradayBars = async (symbol) => {
         const tradingDay = getTradingDay();
@@ -202,10 +193,6 @@
         const marketOpen = isMarketOpen();
         
         if (marketOpen) {
-          // ========== MARKET IS OPEN ==========
-          // Strategy: Try Alpaca first, fallback to Yahoo
-          
-          // 1. Try Alpaca IEX intraday bars
           try {
             const alpacaData = await fetchAlpacaIntradayBars(symbol);
             if (alpacaData) {
@@ -216,7 +203,6 @@
             console.log('Alpaca IEX failed, trying Yahoo...', e);
           }
           
-          // 2. Fallback to Yahoo
           try {
             const yahooData = await fetchYahooQuote(symbol);
             if (yahooData) {
@@ -238,12 +224,6 @@
           }
           
         } else {
-          // ========== MARKET IS CLOSED ==========
-          // Strategy: Try Alpaca SIP post-market first, fallback to Yahoo
-          // Main price = regular market close
-          // Post/pre box = after-hours price from Alpaca SIP or Yahoo
-          
-          // Always fetch Yahoo first for market data
           let yahooData = null;
           try {
             yahooData = await fetchYahooQuote(symbol);
@@ -251,12 +231,10 @@
             console.log('Yahoo fetch failed:', e);
           }
           
-          // 1. Try Alpaca SIP post-market data for extended hours price
           try {
             const postMarketData = await fetchAlpacaPostMarket(symbol);
             if (postMarketData && yahooData) {
               console.log('✓ Using Alpaca SIP post-market data');
-              // Override Yahoo's post-market price with Alpaca SIP data
               const updatedYahooData = {
                 ...yahooData,
                 postMarketPrice: postMarketData.currentPrice,
@@ -264,14 +242,14 @@
                 postMarketChangePercent: ((postMarketData.currentPrice - yahooData.regularMarketPrice) / yahooData.regularMarketPrice) * 100
               };
               return {
-                currentPrice: yahooData.regularMarketPrice,  // Main display = regular close
+                currentPrice: yahooData.regularMarketPrice,
                 open: yahooData.open,
                 high: yahooData.high,
                 low: yahooData.low,
                 previousClose: yahooData.previousClose,
                 volume: yahooData.volume,
                 source: 'alpaca-sip-postmarket',
-                yahooData: updatedYahooData,  // Post-market data goes here for the box
+                yahooData: updatedYahooData,
                 isMarketOpen: false
               };
             }
@@ -279,36 +257,28 @@
             console.log('Alpaca SIP post-market failed, using Yahoo...', e);
           }
           
-          // 2. Fallback to Yahoo only
           if (yahooData) {
             console.log('✓ Using Yahoo data (market closed)');
             return {
-              currentPrice: yahooData.regularMarketPrice,  // Main display = regular close
+              currentPrice: yahooData.regularMarketPrice,
               open: yahooData.open,
               high: yahooData.high,
               low: yahooData.low,
               previousClose: yahooData.previousClose,
               volume: yahooData.volume,
               source: 'yahoo',
-              yahooData: yahooData,  // Yahoo already has post/pre market prices
+              yahooData: yahooData,
               isMarketOpen: false
             };
           }
         }
-        
         return null;
       };
 
       const fetchStockData = async (symbol) => {
         setLoading(true);
-
         try {
-          // ============================================
-          // STEP 1: Fetch real-time price using strategy
-          // ============================================
           const realTimeData = await fetchRealTimePrice(symbol);
-          
-          // Store Yahoo data if available for UI display
           if (realTimeData?.yahooData) {
             setYahooData(realTimeData.yahooData);
             if (realTimeData.yahooData.shortName) {
@@ -316,21 +286,14 @@
             }
           }
 
-          // ============================================
-          // STEP 2: Fetch historical data (cached or fresh)
-          // ============================================
           let historicalData = getCachedData(symbol);
-
           if (!historicalData) {
-            console.log('Fetching historical data from Yahoo...');
             const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=6mo&interval=1d`);
             const barsData = await barsRes.json();
-
             if (barsData?.chart?.result?.[0]) {
               const result = barsData.chart.result[0];
               const timestamps = result.timestamp;
               const quote = result.indicators.quote[0];
-              
               if (timestamps && quote) {
                 historicalData = timestamps.map((t, i) => ({
                   date: new Date(t * 1000).toISOString().split('T')[0],
@@ -341,25 +304,16 @@
                   volume: quote.volume[i] || 0
                 })).filter(day => day.close !== null)
                    .sort((a, b) => new Date(a.date) - new Date(b.date));
-                
                 setCachedData(symbol, historicalData);
               }
-            } else {
-              console.error('Yahoo History error:', barsData);
             }
           }
 
-          // ============================================
-          // STEP 3: Calculate and set quote data
-          // ============================================
           if (historicalData && historicalData.length >= 2) {
             const latestDay = historicalData[historicalData.length - 1];
             const prevDay = historicalData[historicalData.length - 2];
-            
             let currentPrice, previousClose, dayOpen, dayHigh, dayLow, dayVolume;
-            
             if (realTimeData) {
-              // Use real-time data from our strategy
               currentPrice = realTimeData.currentPrice || realTimeData.close;
               previousClose = realTimeData.previousClose || latestDay.close;
               dayOpen = realTimeData.open || latestDay.open;
@@ -367,7 +321,6 @@
               dayLow = realTimeData.low || latestDay.low;
               dayVolume = realTimeData.volume || 0;
             } else {
-              // Fallback to historical data
               currentPrice = latestDay.close;
               previousClose = prevDay.close;
               dayOpen = latestDay.open;
@@ -375,10 +328,8 @@
               dayLow = latestDay.low;
               dayVolume = latestDay.volume;
             }
-            
             const change = currentPrice - previousClose;
             const changePercent = (change / previousClose) * 100;
-            
             setQuote({
               c: currentPrice,
               o: dayOpen,
@@ -398,44 +349,29 @@
             });
           }
 
-          // ============================================
-          // STEP 4: Fetch additional metrics (Finnhub)
-          // ============================================
           try {
             const metricsRes = await fetch(`${WORKER_URL}/finnhub/metric/${symbol}`);
             const metricsData = await metricsRes.json();
             if (metricsData?.metric) setMetrics(metricsData);
-          } catch (e) {
-            console.error('Finnhub metrics failed:', e);
-          }
+          } catch (e) { console.error('Finnhub metrics failed:', e); }
 
-          if (historicalData?.length > 0) {
-            setData(historicalData);
-          }
-        } catch (error) {
-          console.error('Error:', error);
-        }
-
+          if (historicalData?.length > 0) setData(historicalData);
+        } catch (error) { console.error('Error:', error); }
         setLoading(false);
       };
 
       const updatePriceOnly = async (symbol) => {
         try {
           setPriceUpdating(true);
-          
-          // Use the same strategy as fetchStockData
           const realTimeData = await fetchRealTimePrice(symbol);
-          
           if (realTimeData && data.length > 0) {
             const currentPrice = realTimeData.currentPrice || realTimeData.close;
             const previousClose = realTimeData.previousClose || data[data.length - 1].close;
             const change = currentPrice - previousClose;
             const changePercent = (change / previousClose) * 100;
-            
             const dayOpen = realTimeData.open || data[data.length - 1].open;
             const dayHigh = realTimeData.high || data[data.length - 1].high;
             const dayLow = realTimeData.low || data[data.length - 1].low;
-            
             setQuote({
               c: currentPrice,
               o: dayOpen,
@@ -452,11 +388,7 @@
                 volume: realTimeData.volume || 0
               }
             });
-            
-            // Update Yahoo data if available
-            if (realTimeData.yahooData) {
-              setYahooData(realTimeData.yahooData);
-            }
+            if (realTimeData.yahooData) setYahooData(realTimeData.yahooData);
           }
           setTimeout(() => setPriceUpdating(false), 300);
         } catch (error) {
@@ -466,18 +398,14 @@
       };
 
       const fetchChartData = async (symbol, tf) => {
+        setHoverData(null); // Reset hover when timeframe changes
         try {
           if (tf === '6M' && data.length > 0) {
             setChartData(data);
             return;
           }
-
-          // For the charts, we will now use Yahoo (Total Volume)
-          // Previously this was using Alpaca IEX data
-          
           let rangeParam = '6mo';
           let intervalParam = '1d';
-          
           switch(tf) {
             case '1D': rangeParam = '1d'; intervalParam = '5m'; break;
             case '1W': rangeParam = '5d'; intervalParam = '15m'; break;
@@ -486,17 +414,13 @@
             case '6M': rangeParam = '6mo'; intervalParam = '1d'; break;
             case '1Y': rangeParam = '1y'; intervalParam = '1d'; break;
           }
-
           console.log(`Fetching chart data ${tf}...`);
-          // Use Yahoo via worker
           const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=${rangeParam}&interval=${intervalParam}`);
           const barsData = await barsRes.json();
-
           if (barsData?.chart?.result?.[0]) {
             const result = barsData.chart.result[0];
             const timestamps = result.timestamp;
             const quote = result.indicators.quote[0];
-            
             if (timestamps && quote) {
               const chartBars = timestamps.map((t, i) => ({
                 date: new Date(t * 1000).toISOString(),
@@ -505,43 +429,80 @@
                 low: quote.low[i],
                 close: quote.close[i],
                 volume: quote.volume[i] || 0
-              })).filter(b => b.close !== null); // Filter nulls
-              
+              })).filter(b => b.close !== null);
               setChartData(chartBars);
             }
           }
-        } catch (error) {
-          console.error('Error fetching chart data:', error);
-        }
+        } catch (error) { console.error('Error fetching chart data:', error); }
       };
 
       useEffect(() => { fetchStockData(ticker); }, [ticker]);
-      useEffect(() => { 
-        if (ticker) fetchChartData(ticker, timeframe); 
-      }, [ticker, timeframe]);
-
+      useEffect(() => { if (ticker) fetchChartData(ticker, timeframe); }, [ticker, timeframe]);
       useEffect(() => {
         if (isMarketOpen()) {
-          const interval = setInterval(() => {
-            updatePriceOnly(ticker);
-          }, 3000); 
+          const interval = setInterval(() => { updatePriceOnly(ticker); }, 3000); 
           return () => clearInterval(interval);
         }
       }, [ticker, data]);
 
+      // Handle Mouse Move over Graph
+      const handleGraphHover = (e) => {
+        if (!chartData || chartData.length === 0 || !svgRef.current) return;
+        
+        const svgRect = svgRef.current.getBoundingClientRect();
+        
+        // Calculate scaling factor between Screen Pixels and SVG viewBox units (800 width)
+        const scaleX = 800 / svgRect.width;
+        
+        // Get Mouse X in SVG Coordinates
+        let mouseX = (e.clientX - svgRect.left) * scaleX;
+        
+        // Chart Area Constants (SVG Units)
+        const CHART_START_X = 50;
+        const CHART_WIDTH = 720;
+        
+        // Clamp MouseX
+        if (mouseX < CHART_START_X) mouseX = CHART_START_X;
+        if (mouseX > CHART_START_X + CHART_WIDTH) mouseX = CHART_START_X + CHART_WIDTH;
+
+        // Map Mouse X to Nearest Data Index
+        const ratio = (mouseX - CHART_START_X) / CHART_WIDTH;
+        const index = Math.round(ratio * (chartData.length - 1));
+        
+        if (index >= 0 && index < chartData.length) {
+          const point = chartData[index];
+          
+          // Calculate Y position for the point
+          const minP = minPrice;
+          const rangeP = priceRange;
+          const yPos = 260 - ((point.close - minP) / rangeP) * 240;
+          
+          // Data X is where the data point actually sits
+          const dataX = CHART_START_X + (index / (chartData.length - 1)) * CHART_WIDTH;
+
+          setHoverData({
+            mouseX: dataX,   // Snap vertical line to data point (Google Style)
+            dataX: dataX,    // Snap dot to data point
+            y: yPos,
+            data: point
+          });
+        }
+      };
+
+      const handleGraphLeave = () => {
+        setHoverData(null);
+      };
+
       let todayChange = 0;
       let todayChangePercent = 0;
-      
       const dataWithToday = [...data];
       const tradingDay = getTradingDay();
       const lastDate = data.length > 0 ? data[data.length - 1].date : null;
       const hasTodayData = lastDate === tradingDay;
       const hasManualTodayRow = dataWithToday.some(d => d.date === tradingDay && d.isToday);
-      
       const now = new Date();
       const dayOfWeek = now.getDay();
       const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-      
       if (!isWeekend && !hasTodayData && !hasManualTodayRow && quote?.c) {
         const isLiveData = isMarketOpen();
         dataWithToday.push({
@@ -554,24 +515,19 @@
           isToday: isLiveData
         });
       }
-      
       const cleanedData = dataWithToday.filter(d => {
         if (d.isToday && d.date !== tradingDay) return false;
         return true;
       });
-
       const sortedData = [...cleanedData].sort((a, b) => {
         if (a[sortConfig.key] < b[sortConfig.key]) return sortConfig.direction === 'asc' ? -1 : 1;
         if (a[sortConfig.key] > b[sortConfig.key]) return sortConfig.direction === 'asc' ? 1 : -1;
         return 0;
       });
-      
       const todayRow = sortConfig.direction === 'desc' ? sortedData[0] : sortedData[sortedData.length - 1];
-      
       if (todayRow && sortedData.length > 1) {
         const prevIndex = sortConfig.direction === 'desc' ? 1 : sortedData.length - 2;
         const prevRow = sortedData[prevIndex];
-        
         if (prevRow) {
           todayChange = todayRow.close - prevRow.close;
           todayChangePercent = (todayChange / prevRow.close) * 100;
@@ -604,12 +560,32 @@
         setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }));
       };
 
-      const minPrice = chartData.length > 0 ? Math.min(...chartData.map(d => d.low)) * 0.98 : 0;
-      const maxPrice = chartData.length > 0 ? Math.max(...chartData.map(d => d.high)) * 1.02 : 100;
+      // Chart Calculations
+      const minPrice = chartData.length > 0 ? Math.min(...chartData.map(d => d.low)) * 0.999 : 0; // Tighter bounds
+      const maxPrice = chartData.length > 0 ? Math.max(...chartData.map(d => d.high)) * 1.001 : 100;
       const priceRange = (maxPrice - minPrice) || 1;
       const getY = (price) => 260 - ((price - minPrice) / priceRange) * 240;
       const linePath = chartData.length > 1 ? chartData.map((d, i) => `${i === 0 ? 'M' : 'L'} ${50 + (i / (chartData.length - 1)) * 720} ${getY(d.close)}`).join(' ') : '';
-      const areaPath = linePath ? `${linePath} L ${770} 260 L 50 260 Z` : '';
+      const areaPath = linePath ? `${linePath} L 770 260 L 50 260 Z` : '';
+
+      // Chart Color Logic (Google Style)
+      // For 1D: Compare Current vs Prev Close
+      // For >1D: Compare Last Point vs First Point
+      let isChartPositive = true;
+      if (timeframe === '1D') {
+         // Use Previous Close from Quote if available, otherwise fallback to first bar
+         const baseline = quote?.pc || (chartData.length > 0 ? chartData[0].close : 0);
+         const current = chartData.length > 0 ? chartData[chartData.length - 1].close : 0;
+         isChartPositive = current >= baseline;
+      } else {
+         if (chartData.length > 0) {
+           isChartPositive = chartData[chartData.length - 1].close >= chartData[0].close;
+         }
+      }
+
+      const CHART_COLOR = isChartPositive ? '#137333' : '#a50e0e'; // Google Green / Red
+      const CHART_FILL_TOP = isChartPositive ? 'rgba(19, 115, 51, 0.2)' : 'rgba(165, 14, 14, 0.2)';
+      const CHART_FILL_BOTTOM = isChartPositive ? 'rgba(19, 115, 51, 0.0)' : 'rgba(165, 14, 14, 0.0)';
 
       return (
         <div style={{ minHeight: '100vh', background: '#f4f1e8', fontFamily: '"IBM Plex Mono", monospace', color: '#1a1a1a', padding: '22px' }}> 
@@ -666,8 +642,8 @@
             .spreadsheet-cell { padding: 10px; border-right: 1px solid #e8e5dc; font-size: 13px; white-space: nowrap; text-align: center; }
             .spreadsheet-cell:last-child { border-right: none; }
             .value-cell { color: #2d5a3d; font-weight: 500; text-align: left; }
-            .positive { color: #2d5a3d; }
-            .negative { color: #8b3a3a; }
+            .positive { color: #137333; }
+            .negative { color: #a50e0e; }
             .live-price { background: #fff9e6; font-weight: 600; }
             .loading { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(244,241,232,0.9); display: flex; align-items: center; justify-content: center; z-index: 100; }
             .loading-text { font-size: 14px; letter-spacing: 4px; text-transform: uppercase; animation: pulse 1.5s infinite; }
@@ -700,7 +676,7 @@
                 <div className="price-main">
                   <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%'}}>
                     <div style={{display: 'flex', flexDirection: 'column'}}>
-                      <span className={`price-current ${priceUpdating ? 'flash' : ''}`}>${currentPrice.toFixed(2)}</span>
+                      <span className={`price-current ${priceUpdating ? 'flash' : ''}`} style={{ color: CHART_COLOR }}>${currentPrice.toFixed(2)}</span>
                       <span className={`price-change ${priceChange >= 0 ? 'positive' : 'negative'} ${priceUpdating ? 'flash' : ''}`}>
                         {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)} ({priceChange >= 0 ? '+' : ''}{priceChangePercent.toFixed(2)}%)
                       </span>
@@ -709,11 +685,10 @@
                   </div>
                 </div>
                 
-                {/* Pre/Post Market Bar - Show whenever market is closed */}
+                {/* Pre/Post Market Bar */}
                 {!isMarketOpen() && yahooData && (
                   (() => {
                     let marketLabel, marketPrice, marketChange, marketChangePercent;
-                    
                     if (yahooData.preMarketPrice) {
                       marketLabel = 'PRE';
                       marketPrice = yahooData.preMarketPrice;
@@ -730,38 +705,20 @@
                       marketChange = marketPrice - currentPrice;
                       marketChangePercent = (marketChange / currentPrice) * 100;
                     }
-                    
                     const isPositive = marketChange >= 0;
-                    
                     return (
                       <div style={{
                         marginTop: '16px',
                         padding: '8px 16px',
-                        background: isPositive ? 'rgba(45, 90, 61, 0.08)' : 'rgba(139, 58, 58, 0.08)',
-                        borderLeft: `4px solid ${isPositive ? '#2d5a3d' : '#8b3a3a'}`,
+                        background: isPositive ? 'rgba(19, 115, 51, 0.08)' : 'rgba(165, 14, 14, 0.08)',
+                        borderLeft: `4px solid ${isPositive ? '#137333' : '#a50e0e'}`,
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'center'
                       }}>
-                        <span style={{
-                          fontSize: '12px',
-                          color: isPositive ? '#2d5a3d' : '#8b3a3a',
-                          fontWeight: 600
-                        }}>
-                          {marketLabel}
-                        </span>
-                        <span style={{
-                          fontSize: '18px',
-                          fontWeight: 600,
-                          color: isPositive ? '#2d5a3d' : '#8b3a3a',
-                          marginRight: '16px'
-                        }}>
-                          ${marketPrice.toFixed(2)}
-                        </span>
-                        <span className={isPositive ? 'positive' : 'negative'} style={{
-                          fontSize: '13px',
-                          fontWeight: 600
-                        }}>
+                        <span style={{ fontSize: '12px', color: isPositive ? '#137333' : '#a50e0e', fontWeight: 600 }}>{marketLabel}</span>
+                        <span style={{ fontSize: '18px', fontWeight: 600, color: isPositive ? '#137333' : '#a50e0e', marginRight: '16px' }}>${marketPrice.toFixed(2)}</span>
+                        <span className={isPositive ? 'positive' : 'negative'} style={{ fontSize: '13px', fontWeight: 600 }}>
                           {isPositive ? '+' : ''}${marketChange.toFixed(2)} ({isPositive ? '+' : ''}{marketChangePercent.toFixed(2)}%)
                         </span>
                       </div>
@@ -799,8 +756,21 @@
                       </button>
                     ))}
                   </div>
-                  <svg viewBox="0 0 800 300" style={{ width: '100%' }}>
-                    <defs><linearGradient id="grad" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#1a73e8" stopOpacity="0.3" /><stop offset="100%" stopColor="#1a73e8" stopOpacity="0.02" /></linearGradient></defs>
+                  <svg 
+                    ref={svgRef}
+                    viewBox="0 0 800 300" 
+                    style={{ width: '100%', cursor: 'crosshair' }}
+                    onMouseMove={handleGraphHover}
+                    onMouseLeave={handleGraphLeave}
+                  >
+                    <defs>
+                      <linearGradient id="grad" x1="0" x2="0" y1="0" y2="1">
+                        <stop offset="0%" stopColor={CHART_FILL_TOP} />
+                        <stop offset="100%" stopColor={CHART_FILL_BOTTOM} />
+                      </linearGradient>
+                    </defs>
+                    
+                    {/* Y Axis Grid Lines */}
                     {(() => {
                       const min = Math.floor(minPrice / 20) * 20;
                       const max = Math.ceil(maxPrice / 20) * 20;
@@ -810,9 +780,13 @@
                       for (let p = max; p >= min && steps.length < 6; p -= step) steps.push(p);
                       return steps.map(p => <text key={p} x="8" y={20 + ((max - p) / (max - min || 1)) * 240 + 4} fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">${p}</text>);
                     })()}
+                    
+                    {/* Chart Area and Line */}
                     {areaPath && <path d={areaPath} fill="url(#grad)" />}
-                    {linePath && <path d={linePath} fill="none" stroke="#1a73e8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
-                    {(() => {
+                    {linePath && <path d={linePath} fill="none" stroke={CHART_COLOR} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
+                    
+                    {/* X Axis Labels */}
+                    {!hoverData && (() => {
                       if (chartData.length === 0) return null;
                       
                       if (timeframe === '1D') {
@@ -859,6 +833,74 @@
                         <text key={p.month + p.x} x={p.x} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{p.month}</text>
                       ));
                     })()}
+                    
+                    {/* Hover Overlays */}
+                    {hoverData && (
+                      <g pointerEvents="none">
+                        {/* Vertical Line - Snapped to Data */}
+                        <line 
+                          x1={hoverData.dataX} 
+                          y1="20" 
+                          x2={hoverData.dataX} 
+                          y2="260" 
+                          stroke="#666" 
+                          strokeWidth="1" 
+                          strokeDasharray="4"
+                        />
+                        {/* Horizontal Line - Snapped to Data Y */}
+                        <line 
+                          x1="50" 
+                          y1={hoverData.y} 
+                          x2="770" 
+                          y2={hoverData.y} 
+                          stroke="#666" 
+                          strokeWidth="1" 
+                          strokeDasharray="4"
+                        />
+                         {/* Circle Intersection - Snaps to Data Point */}
+                         <circle 
+                          cx={hoverData.dataX} 
+                          cy={hoverData.y} 
+                          r="3.5" 
+                          fill={CHART_COLOR} 
+                          stroke="#fff" 
+                          strokeWidth="2" 
+                        />
+                        {/* Tooltip - Follows Data Point */}
+                        <g transform={`translate(${hoverData.dataX < 400 ? hoverData.dataX + 10 : hoverData.dataX - 130}, ${hoverData.y < 150 ? hoverData.y : hoverData.y - 60})`}>
+                          <rect 
+                            width="120" 
+                            height="55" 
+                            fill="#1a1a1a" 
+                            rx="4"
+                            opacity="0.9"
+                          />
+                          <text 
+                            x="60" 
+                            y="25" 
+                            fill="#fff" 
+                            fontSize="13" 
+                            fontWeight="600"
+                            textAnchor="middle"
+                            fontFamily="IBM Plex Mono"
+                          >
+                            ${hoverData.data.close.toFixed(2)}
+                          </text>
+                          <text 
+                            x="60" 
+                            y="45" 
+                            fill="#ccc" 
+                            fontSize="10" 
+                            textAnchor="middle"
+                            fontFamily="IBM Plex Mono"
+                          >
+                            {timeframe === '1D' 
+                              ? new Date(hoverData.data.date).toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'})
+                              : new Date(hoverData.data.date).toLocaleDateString('en-US', {month:'short', day:'numeric'})}
+                          </text>
+                        </g>
+                      </g>
+                    )}
                   </svg>
                 </div>
               </div>
