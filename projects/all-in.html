@@ -847,7 +847,7 @@
                           monthPoints.push({ month: months[m], x: 50 + (i / (chartData.length - 1 || 1)) * 720 });
                         }
                       });
-                      return monthPoints.filter((p, i) => i === 0 ? p.x > 70 : true).map(p => (
+                      return monthPoints.map(p => (
                         <text key={p.month + p.x} x={p.x} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{p.month}</text>
                       ));
                     })()}
