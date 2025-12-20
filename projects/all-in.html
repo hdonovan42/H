@@ -412,7 +412,9 @@
             case '1M': rangeParam = '1mo'; intervalParam = '1d'; break;
             case '3M': rangeParam = '3mo'; intervalParam = '1d'; break;
             case '6M': rangeParam = '6mo'; intervalParam = '1d'; break;
+            case 'YTD': rangeParam = 'ytd'; intervalParam = '1d'; break;
             case '1Y': rangeParam = '1y'; intervalParam = '1d'; break;
+            case '5Y': rangeParam = '5y'; intervalParam = '1d'; break;
           }
           console.log(`Fetching chart data ${tf}...`);
           const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=${rangeParam}&interval=${intervalParam}`);
@@ -746,7 +748,7 @@
               <div className="chart-wrapper">
                 <div className="box chart-box">
                   <div className="timeframe-controls">
-                    {['1D', '1W', '1M', '3M', '6M', '1Y'].map(tf => (
+                    {['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', '5Y'].map(tf => (
                       <button 
                         key={tf} 
                         className={`timeframe-btn ${timeframe === tf ? 'active' : ''}`}
@@ -786,7 +788,7 @@
                     {linePath && <path d={linePath} fill="none" stroke={CHART_COLOR} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
                     
                     {/* X Axis Labels */}
-                    {!hoverData && (() => {
+                    {(() => {
                       if (chartData.length === 0) return null;
                       
                       if (timeframe === '1D') {
@@ -814,6 +816,22 @@
                           }
                         });
                         return dayPoints.map((p, idx) => (
+                          <text key={idx} x={p.x} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{p.label}</text>
+                        ));
+                      }
+                      
+                      if (timeframe === '5Y') {
+                        const yearPoints = [];
+                        const seen = new Set();
+                        chartData.forEach((d, i) => {
+                          const year = new Date(d.date).getFullYear().toString().slice(-2);
+                          const fullYear = new Date(d.date).getFullYear();
+                          if (!seen.has(fullYear)) {
+                            seen.add(fullYear);
+                            yearPoints.push({ label: year, x: 50 + (i / (chartData.length - 1 || 1)) * 720 });
+                          }
+                        });
+                        return yearPoints.map((p, idx) => (
                           <text key={idx} x={p.x} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{p.label}</text>
                         ));
                       }
