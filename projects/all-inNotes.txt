@@ -4,6 +4,8 @@ bugs
 
 
 improvements
+-svg chart sub-component
+
 - more thought on data below price - maybe add one more
 
 -completely redo graph 

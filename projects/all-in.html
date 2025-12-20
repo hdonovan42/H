@@ -13,8 +13,8 @@
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    // API KEYS - don't steal plz
-    const FINNHUB_API_KEY = 'd4iuigpr01queuaklek0d4iuigpr01queuaklekg';
+    // API CONFIG
+    // FINNHUB_API_KEY removed - now handled safely in Cloudflare Worker
     const WORKER_URL = 'https://dry-poetry-72b5.donovanh59.workers.dev';
 
     // Cache duration: 24 hours
@@ -241,109 +241,11 @@
               })).sort((a, b) => new Date(a.date) - new Date(b.date));
               
               setCachedData(symbol, historicalData);
-
-              // Calculate price change from historical data
-              if (historicalData.length >= 2) {
-                const latestDay = historicalData[historicalData.length - 1];
-                const prevDay = historicalData[historicalData.length - 2];
-                
-                // Determine what "current" price means based on available data
-                let currentPrice, previousClose, dayOpen, dayHigh, dayLow;
-                
-                const marketIsOpen = isMarketOpen();
-                
-                // PRIORITY LOGIC:
-                // - Market OPEN: Use Alpaca (updates more frequently)
-                // - Market CLOSED: Use Yahoo (accurate close, pre/post market)
-                
-                if (marketIsOpen) {
-                  // MARKET OPEN - Prioritize Alpaca for real-time updates
-                  if (todayBars && todayBars.close) {
-                    currentPrice = todayBars.close;
-                    previousClose = latestDay.close;
-                    dayOpen = todayBars.open;
-                    dayHigh = todayBars.high;
-                    dayLow = todayBars.low;
-                    console.log(`Market OPEN - Using Alpaca intraday bars: $${currentPrice}`);
-                  } else if (latestQuote) {
-                    currentPrice = latestQuote.price;
-                    previousClose = latestDay.close;
-                    dayOpen = latestDay.open;
-                    dayHigh = latestDay.high;
-                    dayLow = latestDay.low;
-                    console.log(`Market OPEN - Using Alpaca live quote: $${currentPrice}`);
-                  } else if (yahooQuote) {
-                    // Fallback to Yahoo if Alpaca fails
-                    currentPrice = yahooQuote.currentPrice;
-                    previousClose = yahooQuote.previousClose;
-                    dayOpen = yahooQuote.open;
-                    dayHigh = yahooQuote.high;
-                    dayLow = yahooQuote.low;
-                    console.log(`Market OPEN - Using Yahoo Finance (Alpaca failed): $${currentPrice}`);
-                  } else {
-                    currentPrice = latestDay.close;
-                    previousClose = prevDay.close;
-                    dayOpen = latestDay.open;
-                    dayHigh = latestDay.high;
-                    dayLow = latestDay.low;
-                    console.log(`Market OPEN - Using yesterday's close (fallback): $${currentPrice}`);
-                  }
-                } else {
-                  // MARKET CLOSED - Prioritize Yahoo for accurate close/pre-market/post-market
-                  if (yahooQuote) {
-                    currentPrice = yahooQuote.currentPrice;
-                    previousClose = yahooQuote.previousClose;
-                    dayOpen = yahooQuote.open;
-                    dayHigh = yahooQuote.high;
-                    dayLow = yahooQuote.low;
-                    console.log(`Market CLOSED - Using Yahoo Finance: $${currentPrice} (${yahooQuote.priceSource})`);
-                  } else if (todayBars && todayBars.close) {
-                    currentPrice = todayBars.close;
-                    previousClose = latestDay.close;
-                    dayOpen = todayBars.open;
-                    dayHigh = todayBars.high;
-                    dayLow = todayBars.low;
-                    console.log(`Market CLOSED - Using Alpaca bars (Yahoo failed): $${currentPrice}`);
-                  } else {
-                    currentPrice = latestDay.close;
-                    previousClose = prevDay.close;
-                    dayOpen = latestDay.open;
-                    dayHigh = latestDay.high;
-                    dayLow = latestDay.low;
-                    console.log(`Market CLOSED - Using yesterday's close (fallback): $${currentPrice}`);
-                  }
-                }
-                
-                const change = currentPrice - previousClose;
-                const changePercent = (change / previousClose) * 100;
-                
-                console.log(`Market ${isMarketOpen() ? 'OPEN' : 'CLOSED'}: Current: $${currentPrice}, Previous close: $${previousClose}, Change: ${change.toFixed(2)} (${changePercent.toFixed(2)}%)`);
-                if (todayBars) console.log(`Today's Open: $${dayOpen}, High: $${dayHigh}, Low: $${dayLow}`);
-                
-                setQuote({
-                  c: currentPrice,
-                  o: dayOpen,
-                  h: dayHigh,
-                  l: dayLow,
-                  pc: previousClose,
-                  d: change,
-                  dp: changePercent,
-                  todayBars: yahooQuote ? {
-                    open: yahooQuote.open,
-                    high: yahooQuote.high,
-                    low: yahooQuote.low,
-                    close: yahooQuote.currentPrice,
-                    volume: yahooQuote.volume,
-                    isOfficial: true
-                  } : todayBars // Use Yahoo data if available, otherwise Alpaca bars
-                });
-              }
-            } else {
-              console.error('Alpaca API error:', barsData);
             }
-          } else {
-            // If using cached data, still calculate quote values
-            if (historicalData.length >= 2) {
+          }
+          
+          // Logic to determine current price and daily change
+          if (historicalData && historicalData.length >= 2) {
               const latestDay = historicalData[historicalData.length - 1];
               const prevDay = historicalData[historicalData.length - 2];
               
@@ -364,28 +266,29 @@
                   dayOpen = todayBars.open;
                   dayHigh = todayBars.high;
                   dayLow = todayBars.low;
-                  console.log(`Cached. Market OPEN - Using Alpaca intraday bars: $${currentPrice}`);
+                  console.log(`Market OPEN - Using Alpaca intraday bars: $${currentPrice}`);
                 } else if (latestQuote) {
                   currentPrice = latestQuote.price;
                   previousClose = latestDay.close;
                   dayOpen = latestDay.open;
                   dayHigh = latestDay.high;
                   dayLow = latestDay.low;
-                  console.log(`Cached. Market OPEN - Using Alpaca live quote: $${currentPrice}`);
+                  console.log(`Market OPEN - Using Alpaca live quote: $${currentPrice}`);
                 } else if (yahooQuote) {
+                  // Fallback to Yahoo if Alpaca fails
                   currentPrice = yahooQuote.currentPrice;
                   previousClose = yahooQuote.previousClose;
                   dayOpen = yahooQuote.open;
                   dayHigh = yahooQuote.high;
                   dayLow = yahooQuote.low;
-                  console.log(`Cached. Market OPEN - Using Yahoo Finance (Alpaca failed): $${currentPrice}`);
+                  console.log(`Market OPEN - Using Yahoo Finance (Alpaca failed): $${currentPrice}`);
                 } else {
                   currentPrice = latestDay.close;
                   previousClose = prevDay.close;
                   dayOpen = latestDay.open;
                   dayHigh = latestDay.high;
                   dayLow = latestDay.low;
-                  console.log(`Cached. Market OPEN - Using yesterday's close (fallback): $${currentPrice}`);
+                  console.log(`Market OPEN - Using yesterday's close (fallback): $${currentPrice}`);
                 }
               } else {
                 // MARKET CLOSED - Prioritize Yahoo for accurate close/pre-market/post-market
@@ -395,29 +298,28 @@
                   dayOpen = yahooQuote.open;
                   dayHigh = yahooQuote.high;
                   dayLow = yahooQuote.low;
-                  console.log(`Cached. Market CLOSED - Using Yahoo Finance: $${currentPrice} (${yahooQuote.priceSource})`);
+                  console.log(`Market CLOSED - Using Yahoo Finance: $${currentPrice} (${yahooQuote.priceSource})`);
                 } else if (todayBars && todayBars.close) {
                   currentPrice = todayBars.close;
                   previousClose = latestDay.close;
                   dayOpen = todayBars.open;
                   dayHigh = todayBars.high;
                   dayLow = todayBars.low;
-                  console.log(`Cached. Market CLOSED - Using Alpaca bars (Yahoo failed): $${currentPrice}`);
+                  console.log(`Market CLOSED - Using Alpaca bars (Yahoo failed): $${currentPrice}`);
                 } else {
                   currentPrice = latestDay.close;
                   previousClose = prevDay.close;
                   dayOpen = latestDay.open;
                   dayHigh = latestDay.high;
                   dayLow = latestDay.low;
-                  console.log(`Cached. Market CLOSED - Using yesterday's close (fallback): $${currentPrice}`);
+                  console.log(`Market CLOSED - Using yesterday's close (fallback): $${currentPrice}`);
                 }
               }
               
               const change = currentPrice - previousClose;
               const changePercent = (change / previousClose) * 100;
               
-              console.log(`Using cached data. Market ${isMarketOpen() ? 'OPEN' : 'CLOSED'}: Current: $${currentPrice}, Previous close: $${previousClose}, Change: ${change.toFixed(2)} (${changePercent.toFixed(2)}%)`);
-              if (todayBars) console.log(`Today's Open: $${dayOpen}, High: $${dayHigh}, Low: $${dayLow}`);
+              console.log(`Market ${isMarketOpen() ? 'OPEN' : 'CLOSED'}: Current: $${currentPrice}, Previous close: $${previousClose}, Change: ${change.toFixed(2)} (${changePercent.toFixed(2)}%)`);
               
               setQuote({
                 c: currentPrice,
@@ -436,13 +338,17 @@
                   isOfficial: true
                 } : todayBars // Use Yahoo data if available, otherwise Alpaca bars
               });
-            }
           }
 
-          // Fetch metrics from Finnhub (keep this for fundamentals)
-          const metricsRes = await fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${symbol}&metric=all&token=${FINNHUB_API_KEY}`);
-          const metricsData = await metricsRes.json();
-          if (metricsData?.metric) setMetrics(metricsData);
+          // Fetch metrics from Finnhub via Cloudflare Worker (Secure Proxy)
+          try {
+            console.log('Fetching metrics from Worker...');
+            const metricsRes = await fetch(`${WORKER_URL}/finnhub/metric/${symbol}`);
+            const metricsData = await metricsRes.json();
+            if (metricsData?.metric) setMetrics(metricsData);
+          } catch (e) {
+            console.error('Metrics fetch failed:', e);
+          }
 
           if (historicalData?.length > 0) {
             setData(historicalData);
