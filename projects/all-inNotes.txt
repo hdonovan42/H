@@ -1,18 +1,4 @@
-bugs
--daily change section of price doesnt work
--clicking through graph breaks it
-
+bugs 
 
 improvements
--svg chart sub-component
-
-- more thought on data below price - maybe add one more
-
--completely redo graph 
--draw dynamically - currently treated like an image, creates dead space
-
--move status symbol light to top right + DELETE status message
-
--add post/pre market price and movement
-
--- could refactoring work where spreadsheet becomes knowledge base for price box - should allow for deleting
+- date handling - should client based and manual calculations cause problems - use library

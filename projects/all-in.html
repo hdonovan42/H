@@ -549,7 +549,6 @@
       const currentPrice = quote?.c || data[data.length - 1]?.close || 0;
       const priceChange = todayChange;
       const priceChangePercent = todayChangePercent;
-      const PRICE_COLOR = priceChange >= 0 ? '#137333' : '#a50e0e';
       const dayHigh = quote?.h || data[data.length - 1]?.high || 0;
       const dayLow = quote?.l || data[data.length - 1]?.low || 0;
       const highestPrice = data.length > 0 ? Math.max(...data.map(d => d.high)) : 0;
