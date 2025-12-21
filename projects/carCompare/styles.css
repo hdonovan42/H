@@ -1,0 +1,236 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Space Mono', monospace;
+    background: #f4f1e8;
+    color: #2b2b2b;
+    min-height: 100vh;
+    padding: 2rem 1rem;
+}
+
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+header {
+    text-align: center;
+    margin-bottom: 3rem;
+}
+
+h1 {
+    font-size: 2.25rem;
+    font-weight: 700;
+    color: #1a1a1a;
+    margin-bottom: 0.5rem;
+    letter-spacing: -1px;
+}
+
+.subtitle {
+    color: #6b6b6b;
+    font-size: 0.95rem;
+    font-weight: 400;
+}
+
+.controls {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.input-wrapper {
+    position: relative;
+    min-width: 250px;
+}
+
+input[type="text"] {
+    width: 100%;
+    padding: 0.75rem 1.25rem;
+    background: #ffffff;
+    border: 2px solid #c5c0b5;
+    border-radius: 4px;
+    color: #2b2b2b;
+    font-size: 0.9rem;
+    font-family: 'Space Mono', monospace;
+    transition: all 0.2s;
+}
+
+input[type="text"]:hover {
+    border-color: #8b7355;
+    background: #fefefe;
+}
+
+input[type="text"]:focus {
+    outline: none;
+    border-color: #6b5742;
+    box-shadow: 0 0 0 3px rgba(107, 87, 66, 0.1);
+}
+
+.autocomplete-list {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: #ffffff;
+    border: 2px solid #c5c0b5;
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    max-height: 300px;
+    overflow-y: auto;
+    display: none;
+    z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.autocomplete-list.active {
+    display: block;
+}
+
+.autocomplete-item {
+    padding: 0.75rem 1.25rem;
+    cursor: pointer;
+    border-bottom: 1px solid #e8e4db;
+    transition: background 0.15s;
+    font-family: 'Space Mono', monospace;
+    color: #2b2b2b;
+    font-size: 0.85rem;
+}
+
+.autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+.autocomplete-item:hover,
+.autocomplete-item.active {
+    background: #f4f1e8;
+}
+
+.comparison-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.car-card {
+    background: #ffffff;
+    border-radius: 4px;
+    padding: 1.5rem;
+    border: 2px solid #d4cfc4;
+    transition: all 0.3s;
+    box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.08);
+    min-height: 400px;
+}
+
+.car-card:hover {
+    border-color: #b5ad9e;
+    box-shadow: 3px 3px 12px rgba(0, 0, 0, 0.12);
+}
+
+.car-header {
+    margin-bottom: 1.5rem;
+    text-align: center;
+    padding-bottom: 1rem;
+    border-bottom: 3px solid #d4cfc4;
+}
+
+.car-name {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #1a1a1a;
+    margin-bottom: 0.5rem;
+    letter-spacing: -0.5px;
+}
+
+.car-year {
+    color: #7a7a7a;
+    font-size: 0.85rem;
+    font-weight: 400;
+}
+
+.spec-list {
+    list-style: none;
+}
+
+.spec-item {
+    text-align: center;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid #e8e4db;
+}
+
+.spec-item:last-child {
+    border-bottom: none;
+}
+
+.spec-label {
+    display: block;
+    color: #6b6b6b;
+    font-size: 0.6rem;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 0.5rem;
+}
+
+.spec-value {
+    display: block;
+    color: #2b2b2b;
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -1px;
+}
+
+.spec-value.highlight {
+    color: #8b4513;
+    font-size: 1.65rem;
+}
+
+.spec-unit {
+    font-size: 0.85rem;
+    color: #7a7a7a;
+    font-weight: 400;
+    margin-left: 0.25rem;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: #8a8a8a;
+}
+
+.empty-state p {
+    margin-top: 1rem;
+    font-size: 1rem;
+    font-weight: 400;
+}
+
+.keyboard-hint {
+    text-align: center;
+    color: #9a9a9a;
+    font-size: 0.75rem;
+    font-weight: 400;
+}
+
+@media (max-width: 768px) {
+    h1 {
+        font-size: 1.75rem;
+    }
+    
+    .comparison-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .spec-value {
+        font-size: 1.25rem;
+    }
+    
+    .spec-value.highlight {
+        font-size: 1.4rem;
+    }
+}

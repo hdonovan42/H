@@ -1,0 +1,8 @@
+- use llm to build data.js. 
+how is this best done
+
+different prompt for each automaker?
+which api is best for this task?
+
+-create validation for each car brand. only push 100% score model/prompt.
+

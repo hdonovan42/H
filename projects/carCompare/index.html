@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Performance Car Comparison</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Performance Car Comparison</h1>
+            <p class="subtitle">Compare specs side-by-side</p>
+        </header>
+
+        <div class="controls">
+            <div class="input-wrapper">
+                <input type="text" id="car1-input" placeholder="first car..." autocomplete="off">
+                <div class="autocomplete-list" id="autocomplete1"></div>
+            </div>
+            <div class="input-wrapper">
+                <input type="text" id="car2-input" placeholder="second car..." autocomplete="off">
+                <div class="autocomplete-list" id="autocomplete2"></div>
+            </div>
+        </div>
+
+        <div class="comparison-grid" id="comparison-grid">
+        </div>
+
+        <div class="keyboard-hint">c to clear</div>
+    </div>
+
+    <script src="data.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
