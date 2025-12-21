@@ -34,6 +34,9 @@
       const [companyName, setCompanyName] = useState('');
       const [yahooData, setYahooData] = useState(null);
       
+      // Chart cache for instant timeframe switching
+      const [chartCache, setChartCache] = useState({});
+      
       // New State for Google-style Hover
       const [hoverData, setHoverData] = useState(null);
       const svgRef = useRef(null);
@@ -389,6 +392,11 @@
               }
             });
             if (realTimeData.yahooData) setYahooData(realTimeData.yahooData);
+            
+            // If user is viewing 1D chart, refresh it with live data
+            if (timeframe === '1D') {
+              fetchChartData(symbol, '1D');
+            }
           }
           setTimeout(() => setPriceUpdating(false), 300);
         } catch (error) {
@@ -400,10 +408,31 @@
       const fetchChartData = async (symbol, tf) => {
         setHoverData(null); // Reset hover when timeframe changes
         try {
-          if (tf === '6M' && data.length > 0) {
-            setChartData(data);
+          // Strategy 1: Use existing 6M data for smaller timeframes (instant)
+          if (['1M', '3M', '6M'].includes(tf) && data.length > 0) {
+            const monthsMap = { '1M': 1, '3M': 3, '6M': 6 };
+            const months = monthsMap[tf];
+            const cutoffDate = new Date();
+            cutoffDate.setMonth(cutoffDate.getMonth() - months);
+            
+            const filtered = data.filter(d => new Date(d.date) >= cutoffDate);
+            setChartData(filtered);
+            console.log(`Using cached 6M data filtered to ${tf} (${filtered.length} points)`);
             return;
           }
+          
+          // Strategy 2: Check cache for special timeframes (1D, 1W, YTD, 1Y, 5Y)
+          // Exception: Always refetch 1D if market is open (for live updates)
+          const cacheKey = `${symbol}-${tf}`;
+          const marketOpen = isMarketOpen();
+          
+          if (!marketOpen && chartCache[cacheKey]) {
+            setChartData(chartCache[cacheKey]);
+            console.log(`Using cached ${tf} data (${chartCache[cacheKey].length} points)`);
+            return;
+          }
+          
+          // Strategy 3: Fetch from API
           let rangeParam = '6mo';
           let intervalParam = '1d';
           switch(tf) {
@@ -416,9 +445,11 @@
             case '1Y': rangeParam = '1y'; intervalParam = '1d'; break;
             case '5Y': rangeParam = '5y'; intervalParam = '1d'; break;
           }
+          
           console.log(`Fetching chart data ${tf}...`);
           const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=${rangeParam}&interval=${intervalParam}`);
           const barsData = await barsRes.json();
+          
           if (barsData?.chart?.result?.[0]) {
             const result = barsData.chart.result[0];
             const timestamps = result.timestamp;
@@ -432,13 +463,23 @@
                 close: quote.close[i],
                 volume: quote.volume[i] || 0
               })).filter(b => b.close !== null);
+              
               setChartData(chartBars);
+              
+              // Cache the result (except 1D during market hours - it needs to stay fresh)
+              if (tf !== '1D' || !marketOpen) {
+                setChartCache(prev => ({ ...prev, [cacheKey]: chartBars }));
+                console.log(`Cached ${tf} data (${chartBars.length} points)`);
+              }
             }
           }
         } catch (error) { console.error('Error fetching chart data:', error); }
       };
 
-      useEffect(() => { fetchStockData(ticker); }, [ticker]);
+      useEffect(() => { 
+        setChartCache({}); // Clear cache when changing ticker
+        fetchStockData(ticker); 
+      }, [ticker]);
       useEffect(() => { if (ticker) fetchChartData(ticker, timeframe); }, [ticker, timeframe]);
       useEffect(() => {
         if (isMarketOpen()) {
