@@ -11,7 +11,7 @@
 <body>
   <div id="root"></div>
   <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
+    const { useState, useEffect, useRef, useMemo } = React;
 
     // WORKER URL
     const WORKER_URL = 'https://dry-poetry-72b5.donovanh59.workers.dev';
@@ -29,6 +29,7 @@
       const [metrics, setMetrics] = useState(null);
       const [loading, setLoading] = useState(true);
       const [priceUpdating, setPriceUpdating] = useState(false);
+      const [chartUpdating, setChartUpdating] = useState(false);
       const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
       const [sharesCount, setSharesCount] = useState('');
       const [companyName, setCompanyName] = useState('');
@@ -36,6 +37,9 @@
       
       // Chart cache for instant timeframe switching
       const [chartCache, setChartCache] = useState({});
+      
+      // Track last price to avoid unnecessary updates
+      const lastPriceRef = useRef(null);
       
       // New State for Google-style Hover
       const [hoverData, setHoverData] = useState(null);
@@ -365,16 +369,30 @@
 
       const updatePriceOnly = async (symbol) => {
         try {
-          setPriceUpdating(true);
+          console.log('[updatePriceOnly] Starting update for', symbol, 'at', new Date().toLocaleTimeString());
           const realTimeData = await fetchRealTimePrice(symbol);
+          console.log('[updatePriceOnly] Received data:', realTimeData);
+          
           if (realTimeData && data.length > 0) {
             const currentPrice = realTimeData.currentPrice || realTimeData.close;
+            
+            // Check if price actually changed
+            if (lastPriceRef.current !== null && lastPriceRef.current === currentPrice) {
+              console.log('[updatePriceOnly] Price unchanged, skipping update');
+              return;
+            }
+            
+            console.log('[updatePriceOnly] Price changed:', lastPriceRef.current, '→', currentPrice);
+            lastPriceRef.current = currentPrice;
+            
+            setPriceUpdating(true);
             const previousClose = realTimeData.previousClose || data[data.length - 1].close;
             const change = currentPrice - previousClose;
             const changePercent = (change / previousClose) * 100;
             const dayOpen = realTimeData.open || data[data.length - 1].open;
             const dayHigh = realTimeData.high || data[data.length - 1].high;
             const dayLow = realTimeData.low || data[data.length - 1].low;
+            console.log('[updatePriceOnly] Setting quote:', { currentPrice, change, changePercent });
             setQuote({
               c: currentPrice,
               o: dayOpen,
@@ -395,13 +413,14 @@
             
             // If user is viewing 1D chart, refresh it with live data
             if (timeframe === '1D') {
+              console.log('[updatePriceOnly] Refreshing 1D chart');
               fetchChartData(symbol, '1D');
             }
+            
+            setTimeout(() => setPriceUpdating(false), 300);
           }
-          setTimeout(() => setPriceUpdating(false), 300);
         } catch (error) {
           console.error('Error updating price:', error);
-          setPriceUpdating(false);
         }
       };
 
@@ -433,6 +452,8 @@
           }
           
           // Strategy 3: Fetch from API
+          setChartUpdating(true);
+          
           let rangeParam = '6mo';
           let intervalParam = '1d';
           switch(tf) {
@@ -473,18 +494,35 @@
               }
             }
           }
-        } catch (error) { console.error('Error fetching chart data:', error); }
+          
+          setTimeout(() => setChartUpdating(false), 300);
+        } catch (error) { 
+          console.error('Error fetching chart data:', error);
+          setChartUpdating(false);
+        }
       };
 
       useEffect(() => { 
         setChartCache({}); // Clear cache when changing ticker
+        lastPriceRef.current = null; // Reset last price tracking
         fetchStockData(ticker); 
       }, [ticker]);
       useEffect(() => { if (ticker) fetchChartData(ticker, timeframe); }, [ticker, timeframe]);
       useEffect(() => {
-        if (isMarketOpen()) {
-          const interval = setInterval(() => { updatePriceOnly(ticker); }, 3000); 
-          return () => clearInterval(interval);
+        const marketOpen = isMarketOpen();
+        console.log('[useEffect] Market open check:', marketOpen, 'Ticker:', ticker);
+        if (marketOpen) {
+          console.log('[useEffect] Setting up 3-second interval for price updates');
+          const interval = setInterval(() => { 
+            console.log('[Interval] Triggering updatePriceOnly');
+            updatePriceOnly(ticker); 
+          }, 3000); 
+          return () => {
+            console.log('[useEffect] Cleaning up interval');
+            clearInterval(interval);
+          };
+        } else {
+          console.log('[useEffect] Market closed, no interval set');
         }
       }, [ticker, data]);
 
@@ -541,10 +579,19 @@
       const lastDate = data.length > 0 ? data[data.length - 1].date : null;
       const hasTodayData = lastDate === tradingDay;
       const hasManualTodayRow = dataWithToday.some(d => d.date === tradingDay && d.isToday);
+      
+      // Check if current time is weekend in EST
       const now = new Date();
-      const dayOfWeek = now.getDay();
+      const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+      const dayOfWeek = estTime.getDay();
       const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-      if (!isWeekend && !hasTodayData && !hasManualTodayRow && quote?.c) {
+      
+      // Also check if tradingDay itself is a weekend date
+      const tradingDayDate = new Date(tradingDay + 'T12:00:00');
+      const tradingDayOfWeek = tradingDayDate.getDay();
+      const isTradingDayWeekend = tradingDayOfWeek === 0 || tradingDayOfWeek === 6;
+      
+      if (!isWeekend && !isTradingDayWeekend && !hasTodayData && !hasManualTodayRow && quote?.c) {
         const isLiveData = isMarketOpen();
         dataWithToday.push({
           date: tradingDay,
@@ -614,13 +661,24 @@
         setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }));
       };
 
-      // Chart Calculations
-      const minPrice = chartData.length > 0 ? Math.min(...chartData.map(d => d.low)) * 0.999 : 0; // Tighter bounds
-      const maxPrice = chartData.length > 0 ? Math.max(...chartData.map(d => d.high)) * 1.001 : 100;
-      const priceRange = (maxPrice - minPrice) || 1;
-      const getY = (price) => 260 - ((price - minPrice) / priceRange) * 240;
-      const linePath = chartData.length > 1 ? chartData.map((d, i) => `${i === 0 ? 'M' : 'L'} ${50 + (i / (chartData.length - 1)) * 720} ${getY(d.close)}`).join(' ') : '';
-      const areaPath = linePath ? `${linePath} L 770 260 L 50 260 Z` : '';
+      // Chart Calculations - recalculate when chartData changes
+      const { minPrice, maxPrice, priceRange, getY, linePath, areaPath } = useMemo(() => {
+        const min = chartData.length > 0 ? Math.min(...chartData.map(d => d.low)) * 0.999 : 0;
+        const max = chartData.length > 0 ? Math.max(...chartData.map(d => d.high)) * 1.001 : 100;
+        const range = (max - min) || 1;
+        const calcY = (price) => 260 - ((price - min) / range) * 240;
+        const line = chartData.length > 1 ? chartData.map((d, i) => `${i === 0 ? 'M' : 'L'} ${50 + (i / (chartData.length - 1)) * 720} ${calcY(d.close)}`).join(' ') : '';
+        const area = line ? `${line} L 770 260 L 50 260 Z` : '';
+        
+        return {
+          minPrice: min,
+          maxPrice: max,
+          priceRange: range,
+          getY: calcY,
+          linePath: line,
+          areaPath: area
+        };
+      }, [chartData]);
 
       // Chart Color Logic (Google Style)
       // For 1D: Compare Current vs Prev Close
@@ -698,7 +756,7 @@
             .value-cell { color: #2d5a3d; font-weight: 500; text-align: left; }
             .positive { color: #137333; }
             .negative { color: #a50e0e; }
-            .live-price { background: #fff9e6; font-weight: 600; }
+            .live-price { background: #fff4cc; font-weight: 600; }
             .loading { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(244,241,232,0.9); display: flex; align-items: center; justify-content: center; z-index: 100; }
             .loading-text { font-size: 14px; letter-spacing: 4px; text-transform: uppercase; animation: pulse 1.5s infinite; }
             @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
@@ -810,6 +868,7 @@
                       </button>
                     ))}
                   </div>
+                  
                   <svg 
                     ref={svgRef}
                     viewBox="0 0 800 300" 
@@ -999,7 +1058,7 @@
                       <div className="spreadsheet-cell">${row.open.toFixed(2)}</div>
                       <div className="spreadsheet-cell">${row.high.toFixed(2)}</div>
                       <div className={`spreadsheet-cell ${isLivePrice ? 'live-price' : ''}`}>${row.close.toFixed(2)}</div>
-                      <div className="spreadsheet-cell">{row.volume > 0 ? (row.volume / 1000000).toFixed(0) + 'M' : '—'}</div>
+                      <div className="spreadsheet-cell">{row.volume > 500000 ? (row.volume / 1000000).toFixed(0) + 'M' : '—'}</div>
                       <div className={`spreadsheet-cell ${chg !== null ? (chg >= 0 ? 'positive' : 'negative') : ''}`}>{chg !== null ? `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}` : '—'}</div>
                       <div className="spreadsheet-cell value-cell">{value !== null && <>${value.toLocaleString()}{chg !== null && <span className={chg >= 0 ? 'positive' : 'negative'}> | {chg >= 0 ? '+' : ''}${Math.round(chg * shares).toLocaleString()}</span>}</>}</div>
                     </div>
