@@ -9,13 +9,9 @@
  *  
  *  Configuration:
  *  Create a .env file with: ANTHROPIC_API_KEY=sk-ant-...
- 
  * 
  * Usage:
- *   node populate-cars.js "Porsche 911 GT3 2024" "BMW M3 2024"
- *   
- * Or with a file:
- *   node populate-cars.js --file cars-to-lookup.txt
+ *   node populate-cars.js "Porsche 911 GT3 2024" "BMW M3 2024", (with file) node populate-cars.js --file cars.txt
  * 
  */
 
