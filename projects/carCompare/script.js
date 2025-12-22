@@ -16,7 +16,7 @@ function createCarCard(car, otherCar = null) {
         { label: 'Cylinders', value: car.cylinders, unit: '', key: 'cylinders' },
         { label: 'Engine Placement', value: car.enginePlacement, unit: '', key: 'enginePlacement' },
         { label: 'Drivetrain', value: car.drivetrain, unit: '', key: 'drivetrain' },
-        { label: 'Weight', value: car.weight.toLocaleString(), unit: 'lbs', key: 'weight', reverse: true }
+        { label: 'Weight', value: car.weight.toLocaleString(), unit: 'kgs', key: 'weight', reverse: true }
     ];
 
     const specsHTML = specs.map(spec => {
@@ -42,7 +42,7 @@ function createCarCard(car, otherCar = null) {
         <div class="car-card">
             <div class="car-header">
                 <div class="car-name">${car.make} ${car.model}</div>
-                <div class="car-year">${car.year}</div>
+                <div class="car-year">${car.generation || car.year}</div>
             </div>
             <ul class="spec-list">
                 ${specsHTML}
@@ -64,8 +64,12 @@ function updateComparison() {
     comparisonGrid.innerHTML = html;
 }
 
+// Updated to use generation instead of year in display
 function getCarName(car) {
-    return `${car.year} ${car.make} ${car.model}`;
+    if (car.generation) {
+        return `${car.make} ${car.model} ${car.generation}`;
+    }
+    return `${car.make} ${car.model}`;
 }
 
 function filterCars(searchTerm) {
@@ -74,7 +78,29 @@ function filterCars(searchTerm) {
     const term = searchTerm.toLowerCase();
     return carsDatabase.filter(car => {
         const fullName = getCarName(car).toLowerCase();
-        return fullName.includes(term);
+        
+        // Check if main name matches
+        if (fullName.includes(term)) return true;
+        
+        // Check if search term starts with any alias, then check rest against main name
+        if (car.aliases && Array.isArray(car.aliases)) {
+            for (const alias of car.aliases) {
+                const aliasLower = alias.toLowerCase();
+                // If term starts with this alias, check if rest matches the name
+                if (term.startsWith(aliasLower)) {
+                    const remainder = term.slice(aliasLower.length).trim();
+                    if (remainder === '' || fullName.includes(remainder)) {
+                        return true;
+                    }
+                }
+                // Also check if alias contains the full term
+                if (aliasLower.includes(term)) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
     });
 }
 
