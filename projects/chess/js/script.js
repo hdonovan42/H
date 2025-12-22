@@ -35,7 +35,14 @@ const AppState = {
   graphHoverIndex: -1,  // Currently hovered graph point (-1 = none)
   graphMainlineMoves: [], // Original PGN moves for graph display only
   graphEvalHistory: [],
-  graphDrawn: false // Whether the graph has been drawn (user clicked Draw button)
+  graphDrawn: false, // Whether the graph has been drawn (user clicked Draw button)
+  // Analysis queue system - prevents engine crashes
+  currentAnalysisId: 0,        // Increments for each request
+  activeAnalysisId: null,      // The analysis currently running
+  pendingAnalysisFen: null,    // FEN waiting to be analyzed  
+  pendingAnalysisId: null,     // ID of the pending analysis
+  engineBusy: false,           // Is the engine currently searching?
+  stopRequested: false         // Have we sent 'stop' and waiting for bestmove?
 };
 
 // Initialize the application
@@ -70,6 +77,14 @@ AppState.hasLoadedOnce = false;
 
 // Stockfish initialization
 function initializeStockfish() {
+  // Reset analysis state
+  AppState.engineBusy = false;
+  AppState.stopRequested = false;
+  AppState.activeAnalysisId = null;
+  AppState.pendingAnalysisFen = null;
+  AppState.pendingAnalysisId = null;
+  AppState.currentAnalysisId = 0;
+  
   try {
     AppState.stockfish = new Worker('js/stockfish-17-lite-single.js');
     
@@ -177,6 +192,8 @@ function handleStockfishReady() {
   console.log('Stockfish is ready!');
   AppState.stockfishReady = true;
   AppState.hasLoadedOnce = true;
+  AppState.engineBusy = false;
+  AppState.stopRequested = false;
   document.getElementById('stockfish-loading').style.display = 'none';
   if (AppState.engineEnabled) {
     updateStockfishAnalysis();
@@ -186,13 +203,11 @@ function handleStockfishReady() {
 function handleAnalysisInfo(message) {
   if (!AppState.stockfishReady || !AppState.engineEnabled) return;
   
+  // Only accept results from active analysis
+  if (AppState.activeAnalysisId !== AppState.currentAnalysisId) return;
+  
   const info = parseStockfishInfo(message);
   if (!info) return;
-  
-  // Check if this is analysis for the current position
-  // If not, ignore it (this prevents old analysis from overwriting new position)
-  const currentFen = AppState.game.fen();
-  if (currentFen !== AppState.lastFen) return;
   
   AppState.multipvResults[info.multipv] = info;
   
@@ -201,21 +216,32 @@ function handleAnalysisInfo(message) {
 }
 
 function handleBestMove(message) {
-  if (!AppState.stockfishReady || !AppState.engineEnabled) return;
-  
-  // Check if this is analysis for the current position
-  const currentFen = AppState.game.fen();
-  if (currentFen !== AppState.lastFen) return;
-  
+  // Engine is no longer busy - this is the critical state transition
+  AppState.engineBusy = false;
+  AppState.stopRequested = false;
   AppState.isAnalysisInProgress = false;
   
-  const parts = message.split(' ');
-  AppState.bestMoveInfo = { 
-    bestMove: parts[1],
-    ponder: parts[3] || null
-  };
+  // Only process bestmove if it's for the current analysis
+  const isCurrentAnalysis = AppState.activeAnalysisId === AppState.currentAnalysisId;
   
-  updateDisplay();
+  if (isCurrentAnalysis && AppState.engineEnabled) {
+    const parts = message.split(' ');
+    const bestMove = parts[1];
+    
+    if (bestMove && bestMove !== '(none)') {
+      AppState.bestMoveInfo = { 
+        bestMove: bestMove,
+        ponder: parts[3] || null
+      };
+    }
+    updateDisplay();
+  }
+  
+  // CRITICAL: Check if there's a pending analysis waiting
+  // This handles rapid navigation - start the queued analysis now
+  if (AppState.pendingAnalysisFen && AppState.pendingAnalysisId !== null) {
+    setTimeout(() => tryStartAnalysis(), 10);
+  }
 }
 
 // Parse Stockfish analysis info
@@ -326,86 +352,79 @@ function handleSnapEnd() {
   AppState.board.position(AppState.game.fen());
 }
 
-// Stockfish analysis update (debounced)
+// Stockfish analysis update - queue-based to prevent crashes
 function updateStockfishAnalysis() {
-  // If engine is disabled, don't analyze
-  if (!AppState.engineEnabled || !AppState.stockfish) {
+  if (!AppState.engineEnabled || !AppState.stockfish || !AppState.stockfishReady) {
     return;
   }
   
-  // Cancel pending analysis
-  if (AppState.analysisQueue) {
-    clearTimeout(AppState.analysisQueue);
-    AppState.analysisQueue = null;
-  }
+  // Increment analysis ID
+  AppState.currentAnalysisId++;
+  const requestId = AppState.currentAnalysisId;
+  const fen = AppState.game.fen();
   
-  const currentFen = AppState.game.fen();
+  // Queue this request
+  AppState.pendingAnalysisFen = fen;
+  AppState.pendingAnalysisId = requestId;
   
-  // Skip if already analyzing this position
-  if (currentFen === AppState.lastFen && AppState.isAnalysisInProgress) {
-    return;
-  }
-  
-  AppState.lastFen = currentFen;
-  
-  // Debounce analysis request - increased to reduce engine stress during rapid navigation
-  AppState.analysisQueue = setTimeout(() => {
-    if (!AppState.engineEnabled || !AppState.stockfish || !AppState.stockfishReady) {
-      return;
-    }
-    
-    // Double-check the FEN hasn't changed during debounce (user navigated away)
-    if (AppState.game.fen() !== currentFen) {
-      return;
-    }
-    
-    AppState.isAnalysisInProgress = true;
+  // Try to start (may queue if engine is busy)
+  tryStartAnalysis();
+}
 
-    // Clear previous arrow results to prevent leftover arrows, but keep eval for eval bar
-    const oldEvalResult = AppState.multipvResults[1];
-    AppState.multipvResults = {};
-    if (oldEvalResult) {
-      AppState.multipvResults[1] = oldEvalResult; // Keep eval for eval bar stability
+function tryStartAnalysis() {
+  if (!AppState.stockfish || !AppState.stockfishReady || !AppState.engineEnabled) {
+    return;
+  }
+  
+  if (!AppState.pendingAnalysisFen || AppState.pendingAnalysisId === null) {
+    return;
+  }
+  
+  // If engine is busy, send stop and wait for bestmove
+  if (AppState.engineBusy) {
+    if (!AppState.stopRequested) {
+      AppState.stopRequested = true;
+      try {
+        AppState.stockfish.postMessage('stop');
+      } catch (e) {
+        console.error('Error sending stop:', e);
+        AppState.engineBusy = false;
+        AppState.stopRequested = false;
+      }
     }
-    
-    try {
-      // Stop current analysis
-      AppState.stockfish.postMessage('stop');
-      
-      // Start new analysis after a brief delay to let stop complete
-      setTimeout(() => {
-        // Re-check conditions after delay
-        if (!AppState.stockfish || !AppState.engineEnabled || !AppState.stockfishReady) {
-          AppState.isAnalysisInProgress = false;
-          return;
-        }
-        
-        // Check if position changed during the delay
-        if (AppState.game.fen() !== currentFen) {
-          AppState.isAnalysisInProgress = false;
-          return;
-        }
-        
-        try {
-          AppState.stockfish.postMessage(`position fen ${currentFen}`);
-          AppState.stockfish.postMessage(`go depth ${ANALYSIS_DEPTH}`);
-        } catch (e) {
-          console.error('Error sending commands to Stockfish:', e);
-          AppState.isAnalysisInProgress = false;
-        }
-        
-        // Add a timeout to detect frozen analysis
-        setTimeout(() => {
-          if (AppState.isAnalysisInProgress && AppState.lastFen === currentFen) {
-            console.warn('Analysis appears to be frozen, you may need to toggle the engine');
-          }
-        }, 15000); // 15 seconds should be enough for depth 15
-      }, 100); // Increased delay to let stop command complete
-    } catch (error) {
-      console.error('Error updating Stockfish analysis:', error);
-      AppState.isAnalysisInProgress = false;
-    }
-  }, 200); // Increased debounce from 100ms to 200ms for stability
+    return; // Wait for bestmove before starting new analysis
+  }
+  
+  // Engine is free - start analysis
+  const fen = AppState.pendingAnalysisFen;
+  const analysisId = AppState.pendingAnalysisId;
+  
+  // Clear pending state
+  AppState.pendingAnalysisFen = null;
+  AppState.pendingAnalysisId = null;
+  
+  // Mark as active
+  AppState.activeAnalysisId = analysisId;
+  AppState.engineBusy = true;
+  AppState.isAnalysisInProgress = true;
+  AppState.lastFen = fen;
+  
+  // Keep old eval for UI stability
+  const oldEval = AppState.multipvResults[1];
+  AppState.multipvResults = {};
+  if (oldEval) {
+    AppState.multipvResults[1] = oldEval;
+  }
+  AppState.bestMoveInfo = null;
+  
+  try {
+    AppState.stockfish.postMessage(`position fen ${fen}`);
+    AppState.stockfish.postMessage(`go depth ${ANALYSIS_DEPTH}`);
+  } catch (e) {
+    console.error('Error starting analysis:', e);
+    AppState.engineBusy = false;
+    AppState.isAnalysisInProgress = false;
+  }
 }
 
 // Display update functions
@@ -760,43 +779,27 @@ function toggleEngine() {
   AppState.engineEnabled = !AppState.engineEnabled;
   
   if (AppState.engineEnabled) {
-    // Engine turned on - completely restart Stockfish
-    console.log('Restarting Stockfish engine...');
-    
-    // Terminate the old worker if it exists
-    if (AppState.stockfish) {
-      try {
-        AppState.stockfish.terminate();
-      } catch (e) {
-        console.error('Error terminating old Stockfish worker:', e);
-      }
-    }
-    
-    // Reset all engine-related state
-    AppState.stockfish = null;
-    AppState.stockfishReady = false;
-    AppState.multipvResults = {};
-    AppState.bestMoveInfo = null;
-    AppState.isAnalysisInProgress = false;
-    AppState.lastFen = '';
-    
-    // Clear any pending analysis
-    if (AppState.analysisQueue) {
-      clearTimeout(AppState.analysisQueue);
-      AppState.analysisQueue = null;
-    }
-    
-    // Show loading indicator
-    document.getElementById('stockfish-loading').style.display = 'block';
-    
-    // Reinitialize Stockfish with a small delay
-    setTimeout(() => {
+    if (!AppState.stockfish || !AppState.stockfishReady) {
+      console.log('Recreating Stockfish worker...');
+      document.getElementById('stockfish-loading').style.display = 'block';
       initializeStockfish();
-    }, 100);
-    
+    } else {
+      console.log('Resuming analysis...');
+      AppState.multipvResults = {};
+      AppState.bestMoveInfo = null;
+      AppState.pendingAnalysisFen = null;
+      AppState.pendingAnalysisId = null;
+      
+      if (AppState.engineBusy) {
+        AppState.stopRequested = true;
+        AppState.stockfish.postMessage('stop');
+      }
+      
+      updateStockfishAnalysis();
+    }
   } else {
-    // Engine turned off - stop analysis
-    if (AppState.stockfish) {
+    if (AppState.stockfish && AppState.engineBusy) {
+      AppState.stopRequested = true;
       try {
         AppState.stockfish.postMessage('stop');
       } catch (e) {
@@ -804,18 +807,23 @@ function toggleEngine() {
       }
     }
     
-    // Clear any pending analysis
+    AppState.pendingAnalysisFen = null;
+    AppState.pendingAnalysisId = null;
+    AppState.currentAnalysisId++;
+    AppState.isAnalysisInProgress = false;
+    
+    // Clear any pending analysis timeout
     if (AppState.analysisQueue) {
       clearTimeout(AppState.analysisQueue);
       AppState.analysisQueue = null;
     }
     
-    AppState.isAnalysisInProgress = false;
-    
     // Clear arrows immediately
     const canvas = document.getElementById('arrows-overlay');
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
   }
   
   updateDisplay();
