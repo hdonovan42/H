@@ -200,9 +200,26 @@
         const marketOpen = isMarketOpen();
         
         if (marketOpen) {
+          let yahooData = null;
+          
+          // Always fetch Yahoo to get consolidated volume
+          try {
+            yahooData = await fetchYahooQuote(symbol);
+          } catch (e) {
+            console.log('Yahoo fetch failed:', e);
+          }
+          
           try {
             const alpacaData = await fetchAlpacaIntradayBars(symbol);
-            if (alpacaData) {
+            if (alpacaData && yahooData) {
+              console.log('✓ Using Alpaca IEX data (market open) + Yahoo volume');
+              return { 
+                ...alpacaData, 
+                volume: yahooData.volume, // Use Yahoo's consolidated volume
+                yahooData: yahooData,
+                isMarketOpen: true 
+              };
+            } else if (alpacaData) {
               console.log('✓ Using Alpaca IEX data (market open)');
               return { ...alpacaData, isMarketOpen: true };
             }
@@ -210,24 +227,19 @@
             console.log('Alpaca IEX failed, trying Yahoo...', e);
           }
           
-          try {
-            const yahooData = await fetchYahooQuote(symbol);
-            if (yahooData) {
-              console.log('✓ Using Yahoo data as fallback (market open)');
-              return {
-                currentPrice: yahooData.currentPrice,
-                open: yahooData.open,
-                high: yahooData.high,
-                low: yahooData.low,
-                previousClose: yahooData.previousClose,
-                volume: yahooData.volume,
-                source: 'yahoo',
-                yahooData: yahooData,
-                isMarketOpen: true
-              };
-            }
-          } catch (e) {
-            console.error('Yahoo fallback also failed:', e);
+          if (yahooData) {
+            console.log('✓ Using Yahoo data as fallback (market open)');
+            return {
+              currentPrice: yahooData.currentPrice,
+              open: yahooData.open,
+              high: yahooData.high,
+              low: yahooData.low,
+              previousClose: yahooData.previousClose,
+              volume: yahooData.volume,
+              source: 'yahoo',
+              yahooData: yahooData,
+              isMarketOpen: true
+            };
           }
           
         } else {
@@ -369,20 +381,16 @@
 
       const updatePriceOnly = async (symbol) => {
         try {
-          console.log('[updatePriceOnly] Starting update for', symbol, 'at', new Date().toLocaleTimeString());
           const realTimeData = await fetchRealTimePrice(symbol);
-          console.log('[updatePriceOnly] Received data:', realTimeData);
           
           if (realTimeData && data.length > 0) {
             const currentPrice = realTimeData.currentPrice || realTimeData.close;
             
             // Check if price actually changed
             if (lastPriceRef.current !== null && lastPriceRef.current === currentPrice) {
-              console.log('[updatePriceOnly] Price unchanged, skipping update');
               return;
             }
             
-            console.log('[updatePriceOnly] Price changed:', lastPriceRef.current, '→', currentPrice);
             lastPriceRef.current = currentPrice;
             
             setPriceUpdating(true);
@@ -392,7 +400,6 @@
             const dayOpen = realTimeData.open || data[data.length - 1].open;
             const dayHigh = realTimeData.high || data[data.length - 1].high;
             const dayLow = realTimeData.low || data[data.length - 1].low;
-            console.log('[updatePriceOnly] Setting quote:', { currentPrice, change, changePercent });
             setQuote({
               c: currentPrice,
               o: dayOpen,
@@ -413,7 +420,6 @@
             
             // If user is viewing 1D chart, refresh it with live data
             if (timeframe === '1D') {
-              console.log('[updatePriceOnly] Refreshing 1D chart');
               fetchChartData(symbol, '1D');
             }
             
@@ -447,7 +453,6 @@
           
           if (!marketOpen && chartCache[cacheKey]) {
             setChartData(chartCache[cacheKey]);
-            console.log(`Using cached ${tf} data (${chartCache[cacheKey].length} points)`);
             return;
           }
           
@@ -509,20 +514,11 @@
       }, [ticker]);
       useEffect(() => { if (ticker) fetchChartData(ticker, timeframe); }, [ticker, timeframe]);
       useEffect(() => {
-        const marketOpen = isMarketOpen();
-        console.log('[useEffect] Market open check:', marketOpen, 'Ticker:', ticker);
-        if (marketOpen) {
-          console.log('[useEffect] Setting up 3-second interval for price updates');
+        if (isMarketOpen()) {
           const interval = setInterval(() => { 
-            console.log('[Interval] Triggering updatePriceOnly');
             updatePriceOnly(ticker); 
           }, 3000); 
-          return () => {
-            console.log('[useEffect] Cleaning up interval');
-            clearInterval(interval);
-          };
-        } else {
-          console.log('[useEffect] Market closed, no interval set');
+          return () => clearInterval(interval);
         }
       }, [ticker, data]);
 
@@ -591,6 +587,24 @@
       const tradingDayOfWeek = tradingDayDate.getDay();
       const isTradingDayWeekend = tradingDayOfWeek === 0 || tradingDayOfWeek === 6;
       
+      // If today's data exists in historical data, update it with live data
+      if (!isWeekend && !isTradingDayWeekend && hasTodayData && quote?.c) {
+        const todayIndex = dataWithToday.findIndex(d => d.date === tradingDay);
+        if (todayIndex !== -1) {
+          const isLiveData = isMarketOpen();
+          dataWithToday[todayIndex] = {
+            ...dataWithToday[todayIndex],
+            open: quote.o || dataWithToday[todayIndex].open,
+            high: quote.h || dataWithToday[todayIndex].high,
+            low: quote.l || dataWithToday[todayIndex].low,
+            close: quote.c,
+            volume: quote.todayBars?.volume || dataWithToday[todayIndex].volume,
+            isToday: isLiveData
+          };
+        }
+      }
+      
+      // If today's data doesn't exist, add it
       if (!isWeekend && !isTradingDayWeekend && !hasTodayData && !hasManualTodayRow && quote?.c) {
         const isLiveData = isMarketOpen();
         dataWithToday.push({
@@ -1049,7 +1063,7 @@
                 {sortedData.map((row, index) => {
                   const shares = parseInt(sharesCount) || 0;
                   const value = shares > 0 ? Math.round(shares * row.close) : null;
-                  const isLivePrice = row.isToday;
+                  const isLivePrice = row.isToday && isMarketOpen();
                   const chg = row.chg;
                   
                   return (
@@ -1058,7 +1072,12 @@
                       <div className="spreadsheet-cell">${row.open.toFixed(2)}</div>
                       <div className="spreadsheet-cell">${row.high.toFixed(2)}</div>
                       <div className={`spreadsheet-cell ${isLivePrice ? 'live-price' : ''}`}>${row.close.toFixed(2)}</div>
-                      <div className="spreadsheet-cell">{row.volume > 500000 ? (row.volume / 1000000).toFixed(0) + 'M' : '—'}</div>
+                      <div className="spreadsheet-cell">
+                        {row.isToday 
+                          ? (row.volume > 500000 ? (row.volume / 1000000).toFixed(0) + 'M' : '—')
+                          : (row.volume > 500000 ? (row.volume / 1000000).toFixed(0) + 'M' : '—')
+                        }
+                      </div>
                       <div className={`spreadsheet-cell ${chg !== null ? (chg >= 0 ? 'positive' : 'negative') : ''}`}>{chg !== null ? `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}` : '—'}</div>
                       <div className="spreadsheet-cell value-cell">{value !== null && <>${value.toLocaleString()}{chg !== null && <span className={chg >= 0 ? 'positive' : 'negative'}> | {chg >= 0 ? '+' : ''}${Math.round(chg * shares).toLocaleString()}</span>}</>}</div>
                     </div>
