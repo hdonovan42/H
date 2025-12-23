@@ -1,18 +1,42 @@
-bugs 
+MISSION - when i want to check tsla price i go to hjd.ai instead of yahoo or perplexity
+- price slightly off - not sure if this can be fixed for free - polygon.io/massive.com $200/month tier endgame.
 
-- price box is fucked
-
--open price is incorrect - in spreadsheet - but spd logic is correct - where is it getting its data from
--day range is incorrcet - only include market open prices - excluded pre/post changes
--price is not updating often enough 
-- change scale on 1d - why is it always so high up the page - 
-
+Bugs 
+- avg volume differs from yahoo - how is mine worked out v how is yahoo's worked out?
+- mkt cap - mine shows 1.63 vs 1.611 on yahoo 
+- forward p/e vs p/e ttm 
 
 
--when invalid ticker is entered - the page breaks
--
-
-improvements
+Improvements
+- add eastern time indication to 1D ticker
 - date handling - should client based and manual calculations cause problems - use library
 
+- analyst info - price estmiate, eps estimate, price targets, etc 
+
+- add low to spreadsheet
+
+- how does data handle splits - do i need adjusted close - see yahoo's page 
+
 - graph - dragging an area shows return in that section
+
+EARNINGS DASHBOARD
+- ultimate hub for earnings evening - add date to data 
+- after hours price
+- conference call embeded - x/youtube
+- CNBC embed - video stream ideally - bulletin board instead 
+- X feed - sawyer merritt mainly - few others - create an x list and embed that feed
+
+- full transcipt 
+- Expensive LLM summary - specialise for tsla - different more loose approach to llm pipeline
+- useful context - elon musk, tesla, spacex, robotaxi, optimus, tesla model s/3/x/y, executive staff - expand this list
+- Best model - maybe do a few and find best 
+
+- see perpleity, quartr, and other summaries
+- what information is useful, what does a (prospective) investor want to get from an earnings call summary 
+    - financial data/estimates/projections
+    - progress on current projects/products
+    - progress on future projects/products
+
+    - status of staff - promotions, resignations, etc 
+
+- validation - ensure figures, dates, etc are correct with transcipt - the transcript is the perfect validation tool for specific stats - obviously include context from elsewhere

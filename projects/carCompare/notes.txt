@@ -6,3 +6,5 @@ which api is best for this task?
 
 -create validation for each car brand. only push 100% score model/prompt.
 
+-structured generation (json enforcement) -> RAG (web) -> verification pipeline (multi-source cross checking)
+
