@@ -15,6 +15,9 @@
 
     // WORKER URL
     const WORKER_URL = 'https://dry-poetry-72b5.donovanh59.workers.dev';
+    
+    // Finnhub WebSocket for real-time prices
+    const FINNHUB_API_KEY = 'd5306hpr01qggm5ue050d5306hpr01qggm5ue05g'; 
 
     // Cache duration: 24 hours
     const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
@@ -40,6 +43,11 @@
       
       // Track last price to avoid unnecessary updates
       const lastPriceRef = useRef(null);
+      
+      // WebSocket for real-time Finnhub data
+      const wsRef = useRef(null);
+      const [wsConnected, setWsConnected] = useState(false);
+      const currentSymbolRef = useRef(null);
       
       // New State for Google-style Hover
       const [hoverData, setHoverData] = useState(null);
@@ -140,23 +148,23 @@
         return timeInMinutes >= marketOpen && timeInMinutes < marketClose;
       };
 
-      // Fetch latest trade from Alpaca (sub-second latency vs 60s with bars)
-      // Using IEX feed (free tier) - covers ~2-3% of volume but still real-time
-      const fetchAlpacaLatestTrade = async (symbol) => {
-        try {
-          const res = await fetch(`${WORKER_URL}/trades/${symbol}?feed=iex`);
-          const data = await res.json();
-          
-          if (data?.trade) {
-            return {
-              price: data.trade.p,
-              timestamp: data.trade.t,
-              size: data.trade.s,
-              source: 'alpaca-iex-latest'
-            };
-          }
-        } catch (e) {
-          console.log('Alpaca latest trade failed:', e);
+      const fetchAlpacaIntradayBars = async (symbol) => {
+        const tradingDay = getTradingDay();
+        const res = await fetch(
+          `${WORKER_URL}/bars/${symbol}?start=${tradingDay}T00:00:00Z&end=${new Date().toISOString()}&timeframe=1Min&feed=iex`
+        );
+        const data = await res.json();
+        
+        if (data?.bars?.length > 0) {
+          const bars = data.bars;
+          return {
+            open: bars[0].o,
+            high: Math.max(...bars.map(b => b.h)),
+            low: Math.min(...bars.map(b => b.l)),
+            close: bars[bars.length - 1].c,
+            volume: bars.reduce((sum, b) => sum + (b.v || 0), 0),
+            source: 'alpaca-iex'
+          };
         }
         return null;
       };
@@ -224,48 +232,18 @@
         const marketOpen = isMarketOpen();
         
         if (marketOpen) {
+          // During market hours: Use Yahoo for OHLV data
+          // Finnhub WebSocket handles real-time price updates separately
           let yahooData = null;
           
-          // Always fetch Yahoo to get OHLV and consolidated volume
           try {
             yahooData = await fetchYahooQuote(symbol);
           } catch (e) {
             console.log('Yahoo fetch failed:', e);
           }
           
-          // Use Alpaca latest trade for real-time price (sub-second latency)
-          try {
-            const latestTrade = await fetchAlpacaLatestTrade(symbol);
-            if (latestTrade && yahooData) {
-              console.log('✓ Using Alpaca latest trade for price + Yahoo for OHLV');
-              return { 
-                currentPrice: latestTrade.price,
-                close: latestTrade.price,
-                // Use Yahoo for OHLV (more accurate aggregates)
-                open: yahooData.open,
-                high: Math.max(yahooData.high, latestTrade.price),
-                low: Math.min(yahooData.low, latestTrade.price),
-                previousClose: yahooData.previousClose,
-                volume: yahooData.volume,
-                source: latestTrade.source,
-                yahooData: yahooData,
-                isMarketOpen: true 
-              };
-            } else if (latestTrade) {
-              console.log('✓ Using Alpaca latest trade (no Yahoo data)');
-              return { 
-                currentPrice: latestTrade.price,
-                close: latestTrade.price,
-                source: latestTrade.source,
-                isMarketOpen: true 
-              };
-            }
-          } catch (e) {
-            console.log('Alpaca latest trade failed, trying Yahoo...', e);
-          }
-          
           if (yahooData) {
-            console.log('✓ Using Yahoo data as fallback (market open)');
+            console.log('✓ Using Yahoo data for OHLV (Finnhub WebSocket handles live price)');
             return {
               currentPrice: yahooData.currentPrice,
               open: yahooData.open,
@@ -595,25 +573,148 @@
         fetchStockData(ticker); 
       }, [ticker]);
       useEffect(() => { if (ticker) fetchChartData(ticker, timeframe); }, [ticker, timeframe]);
+      
+      // WebSocket connection for real-time prices (ONLY during regular market hours 9:30am-4pm EST)
       useEffect(() => {
-        // Update during market hours, pre-market, and post-market
-        const now = new Date();
-        const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-        const estHour = estTime.getHours();
-        const estMinute = estTime.getMinutes();
-        const timeInMinutes = estHour * 60 + estMinute;
-        const preMarketStart = 4 * 60; // 4:00 AM
-        const postMarketEnd = 20 * 60; // 8:00 PM
-        
-        const shouldUpdate = timeInMinutes >= preMarketStart && timeInMinutes < postMarketEnd;
-        
-        if (shouldUpdate) {
-          const interval = setInterval(() => { 
-            updatePriceOnly(ticker); 
-          }, 3000); 
-          return () => clearInterval(interval);
+        if (FINNHUB_API_KEY === 'YOUR_FINNHUB_API_KEY') {
+          console.log('⚠️ Finnhub API key not set - WebSocket disabled');
+          return;
         }
-      }, [ticker, data]);
+        
+        // Only connect during regular market hours
+        const checkMarketHours = () => {
+          const now = new Date();
+          const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+          const day = estTime.getDay();
+          const hour = estTime.getHours();
+          const minute = estTime.getMinutes();
+          const timeInMinutes = hour * 60 + minute;
+          const marketOpen = 9 * 60 + 30; // 9:30 AM
+          const marketClose = 16 * 60; // 4:00 PM
+          
+          // Weekday and between 9:30am-4pm EST
+          return day !== 0 && day !== 6 && timeInMinutes >= marketOpen && timeInMinutes < marketClose;
+        };
+        
+        let ws = null;
+        let reconnectTimeout = null;
+        
+        const connectWebSocket = () => {
+          if (!checkMarketHours()) {
+            console.log('Market closed - WebSocket not connecting');
+            return;
+          }
+          
+          ws = new WebSocket(`wss://ws.finnhub.io?token=${FINNHUB_API_KEY}`);
+          wsRef.current = ws;
+          
+          ws.onopen = () => {
+            console.log('✓ Finnhub WebSocket connected (market hours)');
+            setWsConnected(true);
+            if (ticker) {
+              ws.send(JSON.stringify({ type: 'subscribe', symbol: ticker }));
+              currentSymbolRef.current = ticker;
+              console.log(`✓ Subscribed to ${ticker}`);
+            }
+          };
+          
+          ws.onmessage = (event) => {
+            // Double-check we're still in market hours before updating price
+            if (!checkMarketHours()) return;
+            
+            const message = JSON.parse(event.data);
+            
+            if (message.type === 'trade' && message.data && message.data.length > 0) {
+              // Use ref instead of ticker to avoid stale closure
+              const currentSymbol = currentSymbolRef.current;
+              const trades = message.data.filter(t => t.s === currentSymbol);
+              if (trades.length > 0) {
+                const latestTrade = trades[trades.length - 1];
+                const newPrice = latestTrade.p;
+                
+                if (lastPriceRef.current !== newPrice) {
+                  lastPriceRef.current = newPrice;
+                  
+                  // Only update price and change - leave OHLV data from Yahoo intact
+                  setQuote(prev => {
+                    if (!prev) return prev;
+                    const change = newPrice - prev.pc;
+                    const changePercent = (change / prev.pc) * 100;
+                    return {
+                      ...prev,
+                      c: newPrice,
+                      d: change,
+                      dp: changePercent
+                      // Do NOT update h, l, o, or todayBars - those come from Yahoo
+                    };
+                  });
+                }
+              }
+            }
+          };
+          
+          ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            setWsConnected(false);
+          };
+          
+          ws.onclose = () => {
+            setWsConnected(false);
+            wsRef.current = null;
+            // Only reconnect if still market hours
+            if (checkMarketHours()) {
+              console.log('WebSocket disconnected, reconnecting in 3s...');
+              reconnectTimeout = setTimeout(connectWebSocket, 3000);
+            } else {
+              console.log('WebSocket closed - market now closed');
+            }
+          };
+        };
+        
+        // Initial connection if market is open
+        if (checkMarketHours()) {
+          connectWebSocket();
+        }
+        
+        // Check every minute if market just opened (for pages left open overnight)
+        const marketCheckInterval = setInterval(() => {
+          const isOpen = checkMarketHours();
+          const hasConnection = wsRef.current && wsRef.current.readyState === WebSocket.OPEN;
+          
+          if (isOpen && !hasConnection) {
+            console.log('Market just opened - connecting WebSocket');
+            connectWebSocket();
+          } else if (!isOpen && hasConnection) {
+            console.log('Market just closed - disconnecting WebSocket');
+            wsRef.current.close();
+          }
+        }, 60000);
+        
+        return () => {
+          clearInterval(marketCheckInterval);
+          if (reconnectTimeout) clearTimeout(reconnectTimeout);
+          if (wsRef.current) {
+            if (currentSymbolRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({ type: 'unsubscribe', symbol: currentSymbolRef.current }));
+            }
+            wsRef.current.close();
+            wsRef.current = null;
+          }
+        };
+      }, []);
+      
+      // Handle ticker changes - update WebSocket subscription
+      useEffect(() => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          if (currentSymbolRef.current && currentSymbolRef.current !== ticker) {
+            wsRef.current.send(JSON.stringify({ type: 'unsubscribe', symbol: currentSymbolRef.current }));
+            console.log(`✓ Unsubscribed from ${currentSymbolRef.current}`);
+          }
+          wsRef.current.send(JSON.stringify({ type: 'subscribe', symbol: ticker }));
+          currentSymbolRef.current = ticker;
+          console.log(`✓ Subscribed to ${ticker}`);
+        }
+      }, [ticker]);
 
       // Handle Mouse Move over Graph
       const handleGraphHover = (e) => {
