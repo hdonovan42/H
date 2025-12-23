@@ -1,5 +1,14 @@
 bugs 
 
+- price box is fucked
+
+-open price is incorrect - in spreadsheet - but spd logic is correct - where is it getting its data from
+-day range is incorrcet - only include market open prices - excluded pre/post changes
+-price is not updating often enough 
+- change scale on 1d - why is it always so high up the page - 
+
+
+
 -when invalid ticker is entered - the page breaks
 -
 

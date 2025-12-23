@@ -17,7 +17,7 @@
     const WORKER_URL = 'https://dry-poetry-72b5.donovanh59.workers.dev';
 
     // Cache duration: 24 hours
-    const CACHE_DURATION = 24 * 60 * 60 * 1000;
+    const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
 
     function StockTracker() {
       const [ticker, setTicker] = useState('TSLA');
@@ -236,10 +236,15 @@
           try {
             const alpacaData = await fetchAlpacaIntradayBars(symbol);
             if (alpacaData && yahooData) {
-              console.log('✓ Using Alpaca IEX data (market open) + Yahoo volume');
+              console.log('✓ Using Yahoo data for spreadsheet + Alpaca for price updates');
               return { 
-                ...alpacaData, 
-                volume: yahooData.volume, // Use Yahoo's consolidated volume
+                ...alpacaData,
+                // Use Yahoo's official OHLCV for today's spreadsheet row
+                open: yahooData.open,
+                high: yahooData.high,
+                low: yahooData.low,
+                volume: yahooData.volume,
+                // Keep Alpaca's close for real-time price display
                 yahooData: yahooData,
                 isMarketOpen: true 
               };
