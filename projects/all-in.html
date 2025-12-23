@@ -17,7 +17,7 @@
     const WORKER_URL = 'https://dry-poetry-72b5.donovanh59.workers.dev';
     
     // Finnhub WebSocket for real-time prices
-    const FINNHUB_API_KEY = 'd5306hpr01qggm5ue050d5306hpr01qggm5ue05g'; 
+    const FINNHUB_API_KEY = 'd5306hpr01qggm5ue050d5306hpr01qggm5ue05g'; // Get free key at https://finnhub.io/
 
     // Cache duration: 24 hours
     const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
@@ -648,6 +648,27 @@
                       // Do NOT update h, l, o, or todayBars - those come from Yahoo
                     };
                   });
+                  
+                  // Update 1D chart with latest price point
+                  setChartData(prev => {
+                    if (!prev || prev.length === 0) return prev;
+                    // Only update if viewing intraday chart
+                    const lastPoint = prev[prev.length - 1];
+                    const now = new Date();
+                    const lastPointTime = new Date(lastPoint.date);
+                    // If less than 5 minutes since last point, update it; otherwise this will refresh on next Yahoo fetch
+                    if ((now - lastPointTime) < 5 * 60 * 1000) {
+                      const updated = [...prev];
+                      updated[updated.length - 1] = {
+                        ...lastPoint,
+                        close: newPrice,
+                        high: Math.max(lastPoint.high, newPrice),
+                        low: Math.min(lastPoint.low, newPrice)
+                      };
+                      return updated;
+                    }
+                    return prev;
+                  });
                 }
               }
             }
@@ -715,6 +736,45 @@
           console.log(`✓ Subscribed to ${ticker}`);
         }
       }, [ticker]);
+      
+      // Periodic refresh for 1D chart (fetches new bars from Yahoo every 60 seconds)
+      useEffect(() => {
+        if (timeframe !== '1D') return;
+        if (!isMarketOpen()) return;
+        
+        const refreshChart = async () => {
+          try {
+            const barsRes = await fetch(`${WORKER_URL}/yahoo/${ticker}?range=1d&interval=5m`);
+            const barsData = await barsRes.json();
+            
+            if (barsData?.chart?.result?.[0]) {
+              const result = barsData.chart.result[0];
+              const timestamps = result.timestamp;
+              const quote = result.indicators.quote[0];
+              if (timestamps && quote) {
+                const chartBars = timestamps.map((t, i) => ({
+                  date: new Date(t * 1000).toISOString(),
+                  open: quote.open[i],
+                  high: quote.high[i],
+                  low: quote.low[i],
+                  close: quote.close[i],
+                  volume: quote.volume[i] || 0
+                })).filter(b => b.close !== null);
+                
+                setChartData(chartBars);
+                console.log(`✓ Refreshed 1D chart (${chartBars.length} bars)`);
+              }
+            }
+          } catch (error) {
+            console.error('Chart refresh failed:', error);
+          }
+        };
+        
+        // Refresh every 60 seconds
+        const interval = setInterval(refreshChart, 60000);
+        
+        return () => clearInterval(interval);
+      }, [ticker, timeframe]);
 
       // Handle Mouse Move over Graph
       const handleGraphHover = (e) => {
@@ -736,9 +796,52 @@
         if (mouseX < CHART_START_X) mouseX = CHART_START_X;
         if (mouseX > CHART_START_X + CHART_WIDTH) mouseX = CHART_START_X + CHART_WIDTH;
 
-        // Map Mouse X to Nearest Data Index
-        const ratio = (mouseX - CHART_START_X) / CHART_WIDTH;
-        const index = Math.round(ratio * (chartData.length - 1));
+        let index, dataX;
+        
+        if (timeframe === '1D') {
+          // For 1D: Map mouse position to time, then find nearest data point
+          const chartStartHour = 9.5; // 9:30am
+          const chartEndHour = 16; // 4pm
+          const totalHours = chartEndHour - chartStartHour;
+          
+          // Convert mouse X to time
+          const mouseTimeHours = chartStartHour + ((mouseX - CHART_START_X) / CHART_WIDTH) * totalHours;
+          
+          // Find nearest data point by time
+          let nearestIndex = 0;
+          let nearestDiff = Infinity;
+          
+          chartData.forEach((d, i) => {
+            const date = new Date(d.date);
+            const estTime = new Date(date.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+            const hours = estTime.getHours();
+            const minutes = estTime.getMinutes();
+            const timeInHours = hours + minutes / 60;
+            
+            const diff = Math.abs(timeInHours - mouseTimeHours);
+            if (diff < nearestDiff) {
+              nearestDiff = diff;
+              nearestIndex = i;
+            }
+          });
+          
+          index = nearestIndex;
+          
+          // Calculate actual X position based on data point's time
+          const point = chartData[index];
+          const date = new Date(point.date);
+          const estTime = new Date(date.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+          const hours = estTime.getHours();
+          const minutes = estTime.getMinutes();
+          const timeInHours = hours + minutes / 60;
+          const clampedTime = Math.max(chartStartHour, Math.min(chartEndHour, timeInHours));
+          dataX = CHART_START_X + ((clampedTime - chartStartHour) / totalHours) * CHART_WIDTH;
+        } else {
+          // For other timeframes: Map Mouse X to Nearest Data Index (evenly distributed)
+          const ratio = (mouseX - CHART_START_X) / CHART_WIDTH;
+          index = Math.round(ratio * (chartData.length - 1));
+          dataX = CHART_START_X + (index / (chartData.length - 1)) * CHART_WIDTH;
+        }
         
         if (index >= 0 && index < chartData.length) {
           const point = chartData[index];
@@ -747,9 +850,6 @@
           const minP = minPrice;
           const rangeP = priceRange;
           const yPos = 260 - ((point.close - minP) / rangeP) * 240;
-          
-          // Data X is where the data point actually sits
-          const dataX = CHART_START_X + (index / (chartData.length - 1)) * CHART_WIDTH;
 
           setHoverData({
             mouseX: dataX,   // Snap vertical line to data point (Google Style)
@@ -878,18 +978,44 @@
         const max = chartData.length > 0 ? Math.max(...chartData.map(d => d.high)) * 1.001 : 100;
         const range = (max - min) || 1;
         const calcY = (price) => 260 - ((price - min) / range) * 240;
-        const line = chartData.length > 1 ? chartData.map((d, i) => `${i === 0 ? 'M' : 'L'} ${50 + (i / (chartData.length - 1)) * 720} ${calcY(d.close)}`).join(' ') : '';
-        const area = line ? `${line} L 770 260 L 50 260 Z` : '';
+        
+        // For 1D, map data points to fixed 9:30am-4pm time scale
+        const calcX = (d, i) => {
+          if (timeframe === '1D' && chartData.length > 0) {
+            const date = new Date(d.date);
+            // Get hours and minutes in EST
+            const estTime = new Date(date.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+            const hours = estTime.getHours();
+            const minutes = estTime.getMinutes();
+            const timeInHours = hours + minutes / 60;
+            
+            // Map 9:30am (9.5) to 4pm (16) onto chart width (50 to 770)
+            const chartStartHour = 9.5;
+            const chartEndHour = 16;
+            const totalHours = chartEndHour - chartStartHour;
+            
+            // Clamp to chart bounds
+            const clampedTime = Math.max(chartStartHour, Math.min(chartEndHour, timeInHours));
+            const x = 50 + ((clampedTime - chartStartHour) / totalHours) * 720;
+            return x;
+          }
+          // Default: evenly distributed
+          return 50 + (i / (chartData.length - 1 || 1)) * 720;
+        };
+        
+        const line = chartData.length > 1 ? chartData.map((d, i) => `${i === 0 ? 'M' : 'L'} ${calcX(d, i)} ${calcY(d.close)}`).join(' ') : '';
+        const area = line ? `${line} L ${calcX(chartData[chartData.length - 1], chartData.length - 1)} 260 L ${calcX(chartData[0], 0)} 260 Z` : '';
         
         return {
           minPrice: min,
           maxPrice: max,
           priceRange: range,
           getY: calcY,
+          calcX: calcX,
           linePath: line,
           areaPath: area
         };
-      }, [chartData]);
+      }, [chartData, timeframe]);
 
       // Chart Color Logic (Google Style)
       // For 1D: Compare Current vs Prev Close
@@ -1141,20 +1267,20 @@
                       if (chartData.length === 0) return null;
                       
                       if (timeframe === '1D') {
-                        const timePoints = [];
-                        const interval = Math.max(1, Math.floor(chartData.length / 6));
-                        for (let i = 0; i < chartData.length; i += interval) {
-                          const time = new Date(chartData[i].date).toLocaleTimeString('en-US', { 
-                            hour: 'numeric', 
-                            minute: '2-digit', 
-                            hour12: true,
-                            timeZone: 'America/New_York'
-                          });
-                          timePoints.push({ label: time, x: 50 + (i / (chartData.length - 1 || 1)) * 720 });
-                        }
-                        return timePoints.map((p, idx) => (
-                          <text key={idx} x={p.x} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{p.label}</text>
-                        ));
+                        // Fixed time labels from 9:30am to 4pm EST (market hours)
+                        const fixedTimes = ['9:30', '10:30', '11:30', '12:30', '1:30', '2:30', '3:30'];
+                        const chartStartHour = 9.5; // 9:30am
+                        const chartEndHour = 16; // 4pm
+                        const totalHours = chartEndHour - chartStartHour; // 6.5 hours
+                        
+                        return fixedTimes.map((label, idx) => {
+                          // Calculate x position based on fixed time slots (1 hour apart)
+                          const hourOffset = idx;
+                          const x = 50 + (hourOffset / totalHours) * 720;
+                          return (
+                            <text key={idx} x={x} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{label}</text>
+                          );
+                        });
                       }
                       
                       if (timeframe === '1W') {
