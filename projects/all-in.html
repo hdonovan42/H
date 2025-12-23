@@ -161,6 +161,30 @@
         return null;
       };
 
+      const fetchAlpacaPreMarket = async (symbol) => {
+        const now = new Date();
+        const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        const todayStr = estTime.toISOString().split('T')[0];
+        
+        // Pre-market: 4:00 AM - 9:30 AM EST (08:00 - 13:30 UTC)
+        const preMarketStart = `${todayStr}T08:00:00Z`;
+        const preMarketEnd = `${todayStr}T13:30:00Z`;
+        
+        const res = await fetch(
+          `${WORKER_URL}/bars/${symbol}?start=${preMarketStart}&end=${preMarketEnd}&timeframe=1Min&feed=sip`
+        );
+        const data = await res.json();
+        
+        if (data?.bars?.length > 0) {
+          const lastBar = data.bars[data.bars.length - 1];
+          return {
+            currentPrice: lastBar.c,
+            source: 'alpaca-sip-premarket'
+          };
+        }
+        return null;
+      };
+
       const fetchAlpacaPostMarket = async (symbol) => {
         const now = new Date();
         let lastTradingDay;
@@ -243,6 +267,19 @@
           }
           
         } else {
+          // Market is closed - check if pre-market or post-market
+          const now = new Date();
+          const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+          const estHour = estTime.getHours();
+          const estMinute = estTime.getMinutes();
+          const timeInMinutes = estHour * 60 + estMinute;
+          const preMarketStart = 4 * 60; // 4:00 AM
+          const marketOpen = 9 * 60 + 30; // 9:30 AM
+          const marketClose = 16 * 60; // 4:00 PM
+          
+          const isPreMarketTime = timeInMinutes >= preMarketStart && timeInMinutes < marketOpen;
+          const isPostMarketTime = timeInMinutes >= marketClose;
+          
           let yahooData = null;
           try {
             yahooData = await fetchYahooQuote(symbol);
@@ -250,30 +287,62 @@
             console.log('Yahoo fetch failed:', e);
           }
           
-          try {
-            const postMarketData = await fetchAlpacaPostMarket(symbol);
-            if (postMarketData && yahooData) {
-              console.log('✓ Using Alpaca SIP post-market data');
-              const updatedYahooData = {
-                ...yahooData,
-                postMarketPrice: postMarketData.currentPrice,
-                postMarketChange: postMarketData.currentPrice - yahooData.regularMarketPrice,
-                postMarketChangePercent: ((postMarketData.currentPrice - yahooData.regularMarketPrice) / yahooData.regularMarketPrice) * 100
-              };
-              return {
-                currentPrice: yahooData.regularMarketPrice,
-                open: yahooData.open,
-                high: yahooData.high,
-                low: yahooData.low,
-                previousClose: yahooData.previousClose,
-                volume: yahooData.volume,
-                source: 'alpaca-sip-postmarket',
-                yahooData: updatedYahooData,
-                isMarketOpen: false
-              };
+          // Try Alpaca pre-market
+          if (isPreMarketTime) {
+            try {
+              const preMarketData = await fetchAlpacaPreMarket(symbol);
+              if (preMarketData && yahooData) {
+                console.log('✓ Using Alpaca SIP pre-market data');
+                const updatedYahooData = {
+                  ...yahooData,
+                  preMarketPrice: preMarketData.currentPrice,
+                  preMarketChange: preMarketData.currentPrice - yahooData.regularMarketPrice,
+                  preMarketChangePercent: ((preMarketData.currentPrice - yahooData.regularMarketPrice) / yahooData.regularMarketPrice) * 100
+                };
+                return {
+                  currentPrice: yahooData.regularMarketPrice,
+                  open: yahooData.open,
+                  high: yahooData.high,
+                  low: yahooData.low,
+                  previousClose: yahooData.previousClose,
+                  volume: yahooData.volume,
+                  source: 'alpaca-sip-premarket',
+                  yahooData: updatedYahooData,
+                  isMarketOpen: false
+                };
+              }
+            } catch (e) {
+              console.log('Alpaca SIP pre-market failed, using Yahoo...', e);
             }
-          } catch (e) {
-            console.log('Alpaca SIP post-market failed, using Yahoo...', e);
+          }
+          
+          // Try Alpaca post-market
+          if (isPostMarketTime) {
+            try {
+              const postMarketData = await fetchAlpacaPostMarket(symbol);
+              if (postMarketData && yahooData) {
+                console.log('✓ Using Alpaca SIP post-market data');
+                const updatedYahooData = {
+                  ...yahooData,
+                  postMarketPrice: postMarketData.currentPrice,
+                  postMarketChange: postMarketData.currentPrice - yahooData.regularMarketPrice,
+                  postMarketChangePercent: ((postMarketData.currentPrice - yahooData.regularMarketPrice) / yahooData.regularMarketPrice) * 100
+                };
+                return {
+                  currentPrice: yahooData.regularMarketPrice,
+                  open: yahooData.open,
+                  high: yahooData.high,
+                  low: yahooData.low,
+                  previousClose: yahooData.previousClose,
+                  volume: yahooData.volume,
+                  source: 'alpaca-sip-postmarket',
+                  yahooData: updatedYahooData,
+                  isMarketOpen: false
+                };
+              }
+            } catch (e) {
+              console.log('Alpaca SIP post-market failed, using Yahoo...', e);
+            }
           }
           
           if (yahooData) {
@@ -514,7 +583,18 @@
       }, [ticker]);
       useEffect(() => { if (ticker) fetchChartData(ticker, timeframe); }, [ticker, timeframe]);
       useEffect(() => {
-        if (isMarketOpen()) {
+        // Update during market hours, pre-market, and post-market
+        const now = new Date();
+        const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        const estHour = estTime.getHours();
+        const estMinute = estTime.getMinutes();
+        const timeInMinutes = estHour * 60 + estMinute;
+        const preMarketStart = 4 * 60; // 4:00 AM
+        const postMarketEnd = 20 * 60; // 8:00 PM
+        
+        const shouldUpdate = timeInMinutes >= preMarketStart && timeInMinutes < postMarketEnd;
+        
+        if (shouldUpdate) {
           const interval = setInterval(() => { 
             updatePriceOnly(ticker); 
           }, 3000); 
@@ -815,7 +895,33 @@
                 {!isMarketOpen() && yahooData && (
                   (() => {
                     let marketLabel, marketPrice, marketChange, marketChangePercent;
-                    if (yahooData.preMarketPrice) {
+                    
+                    // Determine if we're in pre-market or post-market based on time
+                    const now = new Date();
+                    const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+                    const estHour = estTime.getHours();
+                    const estMinute = estTime.getMinutes();
+                    const timeInMinutes = estHour * 60 + estMinute;
+                    const preMarketStart = 4 * 60; // 4:00 AM
+                    const marketOpen = 9 * 60 + 30; // 9:30 AM
+                    const marketClose = 16 * 60; // 4:00 PM
+                    const postMarketEnd = 20 * 60; // 8:00 PM
+                    
+                    const isPreMarketTime = timeInMinutes >= preMarketStart && timeInMinutes < marketOpen;
+                    const isPostMarketTime = timeInMinutes >= marketClose && timeInMinutes < postMarketEnd;
+                    
+                    // Use time-based logic first, then fall back to what data exists
+                    if (isPreMarketTime && yahooData.preMarketPrice) {
+                      marketLabel = 'PRE';
+                      marketPrice = yahooData.preMarketPrice;
+                      marketChange = marketPrice - currentPrice;
+                      marketChangePercent = (marketChange / currentPrice) * 100;
+                    } else if (isPostMarketTime && yahooData.postMarketPrice) {
+                      marketLabel = 'POST';
+                      marketPrice = yahooData.postMarketPrice;
+                      marketChange = marketPrice - currentPrice;
+                      marketChangePercent = (marketChange / currentPrice) * 100;
+                    } else if (yahooData.preMarketPrice) {
                       marketLabel = 'PRE';
                       marketPrice = yahooData.preMarketPrice;
                       marketChange = marketPrice - currentPrice;
@@ -886,7 +992,8 @@
                   <svg 
                     ref={svgRef}
                     viewBox="0 0 800 300" 
-                    style={{ width: '100%', cursor: 'crosshair' }}
+                    preserveAspectRatio="none"
+                    style={{ width: '100%', height: '100%', cursor: 'crosshair' }}
                     onMouseMove={handleGraphHover}
                     onMouseLeave={handleGraphLeave}
                   >
@@ -920,7 +1027,12 @@
                         const timePoints = [];
                         const interval = Math.max(1, Math.floor(chartData.length / 6));
                         for (let i = 0; i < chartData.length; i += interval) {
-                          const time = new Date(chartData[i].date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+                          const time = new Date(chartData[i].date).toLocaleTimeString('en-US', { 
+                            hour: 'numeric', 
+                            minute: '2-digit', 
+                            hour12: true,
+                            timeZone: 'America/New_York'
+                          });
                           timePoints.push({ label: time, x: 50 + (i / (chartData.length - 1 || 1)) * 720 });
                         }
                         return timePoints.map((p, idx) => (
@@ -1009,42 +1121,56 @@
                           stroke="#fff" 
                           strokeWidth="2" 
                         />
-                        {/* Tooltip - Follows Data Point */}
-                        <g transform={`translate(${hoverData.dataX < 400 ? hoverData.dataX + 10 : hoverData.dataX - 130}, ${hoverData.y < 150 ? hoverData.y : hoverData.y - 60})`}>
-                          <rect 
-                            width="120" 
-                            height="55" 
-                            fill="#1a1a1a" 
-                            rx="4"
-                            opacity="0.9"
-                          />
-                          <text 
-                            x="60" 
-                            y="25" 
-                            fill="#fff" 
-                            fontSize="13" 
-                            fontWeight="600"
-                            textAnchor="middle"
-                            fontFamily="IBM Plex Mono"
-                          >
-                            ${hoverData.data.close.toFixed(2)}
-                          </text>
-                          <text 
-                            x="60" 
-                            y="45" 
-                            fill="#ccc" 
-                            fontSize="10" 
-                            textAnchor="middle"
-                            fontFamily="IBM Plex Mono"
-                          >
-                            {timeframe === '1D' 
-                              ? new Date(hoverData.data.date).toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'})
-                              : new Date(hoverData.data.date).toLocaleDateString('en-US', {month:'short', day:'numeric'})}
-                          </text>
-                        </g>
                       </g>
                     )}
                   </svg>
+                  
+                  {/* Fixed-size HTML Tooltip */}
+                  {hoverData && (
+                    <div style={{
+                      position: 'absolute',
+                      left: `${(hoverData.dataX / 800) * 100}%`,
+                      top: `${(hoverData.y / 300) * 100}%`,
+                      transform: hoverData.dataX < 400 ? 'translate(10px, -50%)' : 'translate(-130px, -50%)',
+                      pointerEvents: 'none',
+                      zIndex: 10
+                    }}>
+                      <div style={{
+                        background: 'rgba(26, 26, 26, 0.9)',
+                        padding: '8px 12px',
+                        borderRadius: '4px',
+                        minWidth: '120px',
+                        textAlign: 'center'
+                      }}>
+                        <div style={{
+                          color: '#fff',
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          fontFamily: 'IBM Plex Mono',
+                          marginBottom: '4px'
+                        }}>
+                          ${hoverData.data.close.toFixed(2)}
+                        </div>
+                        <div style={{
+                          color: '#ccc',
+                          fontSize: '10px',
+                          fontFamily: 'IBM Plex Mono'
+                        }}>
+                          {timeframe === '1D' 
+                            ? new Date(hoverData.data.date).toLocaleTimeString('en-US', {
+                                hour:'numeric', 
+                                minute:'2-digit',
+                                timeZone: 'America/New_York'
+                              })
+                            : new Date(hoverData.data.date).toLocaleDateString('en-US', {
+                                month:'short', 
+                                day:'numeric',
+                                timeZone: 'America/New_York'
+                              })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

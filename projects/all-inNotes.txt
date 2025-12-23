@@ -1,4 +1,9 @@
 bugs 
 
+-when invalid ticker is entered - the page breaks
+-
+
 improvements
 - date handling - should client based and manual calculations cause problems - use library
+
+- graph - dragging an area shows return in that section
