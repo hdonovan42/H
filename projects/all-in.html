@@ -140,23 +140,23 @@
         return timeInMinutes >= marketOpen && timeInMinutes < marketClose;
       };
 
-      const fetchAlpacaIntradayBars = async (symbol) => {
-        const tradingDay = getTradingDay();
-        const res = await fetch(
-          `${WORKER_URL}/bars/${symbol}?start=${tradingDay}T00:00:00Z&end=${new Date().toISOString()}&timeframe=1Min&feed=iex`
-        );
-        const data = await res.json();
-        
-        if (data?.bars?.length > 0) {
-          const bars = data.bars;
-          return {
-            open: bars[0].o,
-            high: Math.max(...bars.map(b => b.h)),
-            low: Math.min(...bars.map(b => b.l)),
-            close: bars[bars.length - 1].c,
-            volume: bars.reduce((sum, b) => sum + (b.v || 0), 0),
-            source: 'alpaca-iex'
-          };
+      // Fetch latest trade from Alpaca (sub-second latency vs 60s with bars)
+      // Using IEX feed (free tier) - covers ~2-3% of volume but still real-time
+      const fetchAlpacaLatestTrade = async (symbol) => {
+        try {
+          const res = await fetch(`${WORKER_URL}/trades/${symbol}?feed=iex`);
+          const data = await res.json();
+          
+          if (data?.trade) {
+            return {
+              price: data.trade.p,
+              timestamp: data.trade.t,
+              size: data.trade.s,
+              source: 'alpaca-iex-latest'
+            };
+          }
+        } catch (e) {
+          console.log('Alpaca latest trade failed:', e);
         }
         return null;
       };
@@ -226,34 +226,42 @@
         if (marketOpen) {
           let yahooData = null;
           
-          // Always fetch Yahoo to get consolidated volume
+          // Always fetch Yahoo to get OHLV and consolidated volume
           try {
             yahooData = await fetchYahooQuote(symbol);
           } catch (e) {
             console.log('Yahoo fetch failed:', e);
           }
           
+          // Use Alpaca latest trade for real-time price (sub-second latency)
           try {
-            const alpacaData = await fetchAlpacaIntradayBars(symbol);
-            if (alpacaData && yahooData) {
-              console.log('✓ Using Yahoo data for spreadsheet + Alpaca for price updates');
+            const latestTrade = await fetchAlpacaLatestTrade(symbol);
+            if (latestTrade && yahooData) {
+              console.log('✓ Using Alpaca latest trade for price + Yahoo for OHLV');
               return { 
-                ...alpacaData,
-                // Use Yahoo's official OHLCV for today's spreadsheet row
+                currentPrice: latestTrade.price,
+                close: latestTrade.price,
+                // Use Yahoo for OHLV (more accurate aggregates)
                 open: yahooData.open,
-                high: yahooData.high,
-                low: yahooData.low,
+                high: Math.max(yahooData.high, latestTrade.price),
+                low: Math.min(yahooData.low, latestTrade.price),
+                previousClose: yahooData.previousClose,
                 volume: yahooData.volume,
-                // Keep Alpaca's close for real-time price display
+                source: latestTrade.source,
                 yahooData: yahooData,
                 isMarketOpen: true 
               };
-            } else if (alpacaData) {
-              console.log('✓ Using Alpaca IEX data (market open)');
-              return { ...alpacaData, isMarketOpen: true };
+            } else if (latestTrade) {
+              console.log('✓ Using Alpaca latest trade (no Yahoo data)');
+              return { 
+                currentPrice: latestTrade.price,
+                close: latestTrade.price,
+                source: latestTrade.source,
+                isMarketOpen: true 
+              };
             }
           } catch (e) {
-            console.log('Alpaca IEX failed, trying Yahoo...', e);
+            console.log('Alpaca latest trade failed, trying Yahoo...', e);
           }
           
           if (yahooData) {
@@ -677,13 +685,15 @@
         const todayIndex = dataWithToday.findIndex(d => d.date === tradingDay);
         if (todayIndex !== -1) {
           const isLiveData = isMarketOpen();
+          // Use Yahoo data for spreadsheet if available, otherwise use quote data
+          const useYahoo = yahooData?.spreadsheetOpen;
           dataWithToday[todayIndex] = {
             ...dataWithToday[todayIndex],
-            open: quote.o || dataWithToday[todayIndex].open,
-            high: quote.h || dataWithToday[todayIndex].high,
-            low: quote.l || dataWithToday[todayIndex].low,
+            open: useYahoo ? yahooData.spreadsheetOpen : (quote.o || dataWithToday[todayIndex].open),
+            high: useYahoo ? yahooData.spreadsheetHigh : (quote.h || dataWithToday[todayIndex].high),
+            low: useYahoo ? yahooData.spreadsheetLow : (quote.l || dataWithToday[todayIndex].low),
             close: quote.c,
-            volume: quote.todayBars?.volume || dataWithToday[todayIndex].volume,
+            volume: useYahoo ? yahooData.spreadsheetVolume : (quote.todayBars?.volume || dataWithToday[todayIndex].volume),
             isToday: isLiveData
           };
         }
@@ -692,13 +702,14 @@
       // If today's data doesn't exist, add it
       if (!isWeekend && !isTradingDayWeekend && !hasTodayData && !hasManualTodayRow && quote?.c) {
         const isLiveData = isMarketOpen();
+        const useYahoo = yahooData?.spreadsheetOpen;
         dataWithToday.push({
           date: tradingDay,
-          open: quote.o || quote.c,
-          high: quote.h || quote.c,
-          low: quote.l || quote.c,
+          open: useYahoo ? yahooData.spreadsheetOpen : (quote.o || quote.c),
+          high: useYahoo ? yahooData.spreadsheetHigh : (quote.h || quote.c),
+          low: useYahoo ? yahooData.spreadsheetLow : (quote.l || quote.c),
           close: quote.c,
-          volume: quote.todayBars?.volume || 0,
+          volume: useYahoo ? yahooData.spreadsheetVolume : (quote.todayBars?.volume || 0),
           isToday: isLiveData
         });
       }
