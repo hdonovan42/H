@@ -115,7 +115,8 @@
 
     // DATA FETCHING
     const fetchYahooQuote = async (symbol) => {
-      const response = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=1d&includePrePost=true`);
+      // Use 5m interval to get extended hours bars
+      const response = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=5m&includePrePost=true`);
       const data = await response.json();
       
       if (!data?.chart?.result?.[0]) return null;
@@ -123,10 +124,40 @@
       const result = data.chart.result[0];
       const meta = result.meta;
       const quote = result.indicators.quote[0];
+      const timestamps = result.timestamp || [];
+      const closes = quote.close || [];
       
       const dayHigh = meta.regularMarketDayHigh || quote.high?.[0] || meta.regularMarketPrice;
       const dayLow = meta.regularMarketDayLow || quote.low?.[0] || meta.regularMarketPrice;
       const dayOpen = meta.regularMarketOpen || quote.open?.[0] || meta.previousClose;
+      
+      // Get extended hours price from the last bar (not meta fields which are unreliable)
+      let preMarketPrice = null;
+      let postMarketPrice = null;
+      
+      if (timestamps.length > 0 && closes.length > 0) {
+        const lastTimestamp = timestamps[timestamps.length - 1];
+        const lastClose = closes[closes.length - 1];
+        
+        // Convert to EST to check if we're in extended hours
+        const lastTime = dayjs.unix(lastTimestamp).tz(EST);
+        const hour = lastTime.hour();
+        const minute = lastTime.minute();
+        const timeInMinutes = hour * 60 + minute;
+        
+        const PRE_MARKET_START = 4 * 60;      // 4:00 AM
+        const MARKET_OPEN = 9 * 60 + 30;       // 9:30 AM
+        const MARKET_CLOSE = 16 * 60;          // 4:00 PM
+        const POST_MARKET_END = 20 * 60;       // 8:00 PM
+        
+        if (timeInMinutes >= PRE_MARKET_START && timeInMinutes < MARKET_OPEN) {
+          // Last bar is in pre-market
+          preMarketPrice = lastClose;
+        } else if (timeInMinutes >= MARKET_CLOSE && timeInMinutes < POST_MARKET_END) {
+          // Last bar is in post-market
+          postMarketPrice = lastClose;
+        }
+      }
       
       return {
         regularMarketPrice: meta.regularMarketPrice,
@@ -136,47 +167,16 @@
         low: dayLow,
         volume: meta.regularMarketVolume || quote.volume?.[0] || 0,
         shortName: meta.shortName || meta.symbol,
-        preMarketPrice: meta.preMarketPrice,
-        postMarketPrice: meta.postMarketPrice,
-        tradingDay: result.timestamp?.length > 0 
-          ? dayjs.unix(result.timestamp[result.timestamp.length - 1]).format('YYYY-MM-DD')
+        preMarketPrice,
+        postMarketPrice,
+        tradingDay: timestamps.length > 0 
+          ? dayjs.unix(timestamps[timestamps.length - 1]).format('YYYY-MM-DD')
           : null,
         fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh,
         fiftyTwoWeekLow: meta.fiftyTwoWeekLow
       };
     };
 
-    const fetchAlpacaExtendedHours = async (symbol, marketState) => {
-      const todayStr = getTodayEST();
-      
-      if (marketState.state === MarketState.PRE_MARKET) {
-        const res = await fetch(
-          `${WORKER_URL}/bars/${symbol}?start=${todayStr}T08:00:00Z&end=${todayStr}T13:30:00Z&timeframe=1Min&feed=sip`
-        );
-        const data = await res.json();
-        if (data?.bars?.length > 0) {
-          return { preMarketPrice: data.bars[data.bars.length - 1].c };
-        }
-      } 
-      else if (marketState.state === MarketState.POST_MARKET) {
-        let lastTradingDay = dayjs().tz(EST);
-        if (lastTradingDay.day() === 0) lastTradingDay = lastTradingDay.subtract(2, 'day');
-        else if (lastTradingDay.day() === 6) lastTradingDay = lastTradingDay.subtract(1, 'day');
-        
-        const tradingDateStr = lastTradingDay.format('YYYY-MM-DD');
-        const endDateStr = lastTradingDay.add(1, 'day').format('YYYY-MM-DD');
-        
-        const res = await fetch(
-          `${WORKER_URL}/bars/${symbol}?start=${tradingDateStr}T21:00:00Z&end=${endDateStr}T01:00:00Z&timeframe=1Min&feed=sip`
-        );
-        const data = await res.json();
-        if (data?.bars?.length > 0) {
-          return { postMarketPrice: data.bars[data.bars.length - 1].c };
-        }
-      }
-      
-      return null;
-    };
 
     const fetchMarketOpenData = async (symbol) => {
       const [yahooData, finnhubData] = await Promise.all([
@@ -213,28 +213,15 @@
       let extendedHoursPrice = null;
       let extendedHoursType = null;
       
-      if (marketState.state === MarketState.PRE_MARKET) {
+      // Get extended hours data from Yahoo (now extracted from last bar)
+      if (marketState.state === MarketState.PRE_MARKET && yahooData.preMarketPrice) {
         extendedHoursPrice = yahooData.preMarketPrice;
         extendedHoursType = 'pre';
-      } else if (marketState.state === MarketState.POST_MARKET) {
+      } else if (marketState.state === MarketState.POST_MARKET && yahooData.postMarketPrice) {
         extendedHoursPrice = yahooData.postMarketPrice;
         extendedHoursType = 'post';
       }
       
-      if (marketState.isExtendedHours) {
-        try {
-          const alpacaData = await fetchAlpacaExtendedHours(symbol, marketState);
-          if (alpacaData?.preMarketPrice) {
-            extendedHoursPrice = alpacaData.preMarketPrice;
-            extendedHoursType = 'pre';
-          } else if (alpacaData?.postMarketPrice) {
-            extendedHoursPrice = alpacaData.postMarketPrice;
-            extendedHoursType = 'post';
-          }
-        } catch (e) {
-          // Alpaca failed, fall back to Yahoo's extended hours data
-        }
-      }
       
       return {
         currentPrice: yahooData.regularMarketPrice,
@@ -628,6 +615,9 @@
               sharesOutstanding: priceData.sharesOutstanding,
               forwardPE: priceData.forwardPE
             });
+            
+            // Log market status and price
+            console.log(`Market: ${marketState.state.toUpperCase()} | ${symbol}: $${priceData.currentPrice.toFixed(2)}${priceData.extendedHoursPrice ? ` | Extended: $${priceData.extendedHoursPrice.toFixed(2)}` : ''}`);
           }
 
           if (historicalData?.length > 0) setData(historicalData);
@@ -938,6 +928,50 @@
         
         return () => clearInterval(interval);
       }, [ticker, timeframe, fetchChartData]);
+
+      // EXTENDED HOURS ONLY - Poll for price updates every 30 seconds
+      useEffect(() => {
+        const marketState = getMarketState();
+        
+        // Only poll during pre-market or post-market
+        if (!marketState.isExtendedHours) return;
+        
+        const pollExtendedHours = async () => {
+          const currentState = getMarketState();
+          
+          // Stop polling if market opened or fully closed
+          if (!currentState.isExtendedHours) {
+            console.log('Extended hours ended, stopping poll');
+            return;
+          }
+          
+          try {
+            const { data: priceData } = await fetchPriceData(ticker);
+            
+            if (priceData && priceData.extendedHoursPrice) {
+              setQuote(prev => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  extendedHoursPrice: priceData.extendedHoursPrice,
+                  extendedHoursType: priceData.extendedHoursType
+                };
+              });
+              
+              console.log(`Market: ${currentState.state.toUpperCase()} | ${ticker}: $${priceData.currentPrice.toFixed(2)} | Extended: $${priceData.extendedHoursPrice.toFixed(2)}`);
+            }
+          } catch (error) {
+            console.error('Extended hours poll error:', error);
+          }
+        };
+        
+        const interval = setInterval(pollExtendedHours, 5000);
+        
+        return () => {
+          console.log('Extended hours polling stopped');
+          clearInterval(interval);
+        };
+      }, [ticker]);
 
       // SPREADSHEET DATA PROCESSING
       const processSpreadsheetData = useMemo(() => {

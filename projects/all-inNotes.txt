@@ -3,17 +3,20 @@ MISSION - when i want to check tsla price i go to hjd.ai instead of yahoo or per
 
 NEXT 3
 
--1. THIS WEEKEND - BULLETPROOF AFTER HOURS PRICE 
- which is the best free source of this data - make sure the label is robust - confident it is 
+1. THIS WEEKEND - BULLETPROOF AFTER HOURS PRICE - test the yahoo bars approach thoroughly
 
- 2. time library - implement dayjs
+
+2
 
 3. graph - implement candles - 1d still buggy - market open for repeating it - sometimes draws funny - what is distinct here?
     - drag for returns in that period
 
+    
+
 
 DATA
 Yahoo Finance - OHLCV data, quotes, 52-week range, pre/post prices 
+    - for OOH use yahoo bars not price
 Alpaca - Extended hours bar, market clock/status 
 FMP - shares outstanding
 Finnhub - Real time price (through websocket) + forward p/e 
@@ -32,6 +35,8 @@ Finnhub - Real time price (through websocket) + forward p/e
 - robust websocket connection
 - graph in seperate component
 - maxLabels
+
+- fixed ooh price - yahoo bars 
 
 
 
