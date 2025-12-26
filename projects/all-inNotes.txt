@@ -23,6 +23,9 @@ Finnhub - Real time price (through websocket) + forward p/e
 - added LOW to spd 
 - gathered shares outstanding from FMP
 
+- changed button appearance
+- 
+
 
 
 TODO

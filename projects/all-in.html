@@ -831,10 +831,11 @@
             .stat-label { font-size: 12px; color: #666; }
             .stat-value { font-size: 12px; font-weight: 500; }
             .chart-box { padding: 16px 12px; height: 100%; display: flex; flex-direction: column; justify-content: center; position: relative; }
-            .timeframe-controls { display: flex; gap: 6px; position: absolute; top: 20px; right: 20px; z-index: 10; }
-            .timeframe-btn { background: rgba(250, 249, 245, 0.9); border: 1px solid #d0cdc4; padding: 6px 14px; font-family: inherit; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; transition: all 0.2s; font-weight: 500; }
-            .timeframe-btn:hover { background: rgba(232, 229, 220, 0.95); }
-            .timeframe-btn.active { background: rgba(26, 26, 26, 0.95); color: #f4f1e8; border-color: #1a1a1a; }
+            .timeframe-controls { display: flex; align-items: center; position: absolute; top: 8px; right: 20px; z-index: 10; }
+            .timeframe-btn { background: transparent; border: none; padding: 6px 12px; font-family: inherit; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; transition: all 0.2s; font-weight: 500; color: #888; border-radius: 4px; }
+            .timeframe-btn:hover { background: rgba(0,0,0,0.04); color: #555; }
+            .timeframe-btn.active { background: #e0ddd4; color: #3a3a3a; font-weight: 600; }
+            .timeframe-pipe { color: #c8c5bc; font-size: 14px; user-select: none; font-weight: 300; }
             .spreadsheet { overflow-x: auto; }
             .spreadsheet-header { display: grid; grid-template-columns: 100px 80px 80px 80px 80px 70px 70px auto; background: #e8e5dc; border-bottom: 1px solid #d0cdc4; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; font-weight: 600; }
             .spreadsheet-header > div { padding: 10px; border-right: 1px solid #d0cdc4; cursor: pointer; display: flex; align-items: center; justify-content: center; }
@@ -923,8 +924,11 @@
               <div className="chart-wrapper">
                 <div className="box chart-box">
                   <div className="timeframe-controls">
-                    {['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', '5Y'].map(tf => (
-                      <button key={tf} className={`timeframe-btn ${timeframe === tf ? 'active' : ''}`} onClick={() => setTimeframe(tf)}>{tf}</button>
+                    {['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', '5Y'].map((tf, idx, arr) => (
+                      <React.Fragment key={tf}>
+                        <button className={`timeframe-btn ${timeframe === tf ? 'active' : ''}`} onClick={() => setTimeframe(tf)}>{tf}</button>
+                        {idx < arr.length - 1 && <span className="timeframe-pipe">|</span>}
+                      </React.Fragment>
                     ))}
                   </div>
                   
