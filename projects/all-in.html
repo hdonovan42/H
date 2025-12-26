@@ -101,13 +101,19 @@
       const meta = result.meta;
       const quote = result.indicators.quote[0];
       
+      // Yahoo provides regularMarketDayHigh/Low in meta which is more reliable
+      // quote.high/low arrays can be empty when market is closed
+      const dayHigh = meta.regularMarketDayHigh || quote.high?.[0] || meta.regularMarketPrice;
+      const dayLow = meta.regularMarketDayLow || quote.low?.[0] || meta.regularMarketPrice;
+      const dayOpen = meta.regularMarketOpen || quote.open?.[0] || meta.previousClose;
+      
       return {
         regularMarketPrice: meta.regularMarketPrice,
         previousClose: meta.previousClose,
-        open: quote.open?.[0] || meta.chartPreviousClose || meta.previousClose,
-        high: quote.high?.[0] || meta.regularMarketPrice,
-        low: quote.low?.[0] || meta.regularMarketPrice,
-        volume: quote.volume?.[0] || meta.regularMarketVolume || 0,
+        open: dayOpen,
+        high: dayHigh,
+        low: dayLow,
+        volume: meta.regularMarketVolume || quote.volume?.[0] || 0,
         shortName: meta.shortName || meta.symbol,
         preMarketPrice: meta.preMarketPrice,
         postMarketPrice: meta.postMarketPrice,
@@ -794,7 +800,6 @@
             .status-dot { width: 8px; height: 8px; border-radius: 50%; }
             .status-dot.open { background: #2d5a3d; box-shadow: 0 0 8px rgba(45, 90, 61, 0.6); }
             .status-dot.closed { background: #8b3a3a; box-shadow: 0 0 8px rgba(139, 58, 58, 0.6); }
-            .status-dot.extended { background: #b8860b; box-shadow: 0 0 8px rgba(184, 134, 11, 0.6); }
             .stats-grid { display: flex; flex-direction: column; }
             .stat-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #ebe8df; }
             .stat-row:last-child { border-bottom: none; }
@@ -860,7 +865,7 @@
                         {todayChange >= 0 ? '+' : ''}{todayChange.toFixed(2)} ({todayChange >= 0 ? '+' : ''}{todayChangePercent.toFixed(2)}%)
                       </span>
                     </div>
-                    <div className={`status-dot ${currentMarketState.isRegularHours ? 'open' : currentMarketState.isExtendedHours ? 'extended' : 'closed'}`} title={currentMarketState.state}></div>
+                    <div className={`status-dot ${currentMarketState.isRegularHours ? 'open' : 'closed'}`}></div>
                   </div>
                 </div>
                 
