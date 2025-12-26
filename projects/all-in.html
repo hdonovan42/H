@@ -17,6 +17,48 @@
     const FINNHUB_API_KEY = 'd579r7pr01qrcrna7fqgd579r7pr01qrcrna7fr0';
     const CACHE_DURATION = 60 * 60 * 1000;
 
+    /**
+     * Fetch shares outstanding from FMP and forward P/E from Finnhub
+     * Both cached for 24 hours since they rarely change
+     */
+    const fetchSharesOutstanding = async (symbol) => {
+      // Check cache first (valid for 24 hours)
+      const cacheKey = `shares_${symbol}`;
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const { data, timestamp } = JSON.parse(cached);
+        if (Date.now() - timestamp < 24 * 60 * 60 * 1000) { // 24 hour cache
+          return data;
+        }
+      }
+      
+      try {
+        // Fetch shares from FMP and forward P/E from Finnhub in parallel
+        const [floatRes, finnhubRes] = await Promise.all([
+          fetch(`${WORKER_URL}/fmp/shares-float/${symbol}`),
+          fetch(`${WORKER_URL}/finnhub/metric/${symbol}`)
+        ]);
+        
+        const floatData = await floatRes.json();
+        const finnhubData = await finnhubRes.json();
+        
+        if (!floatData?.[0]?.outstandingShares) return null;
+        
+        const result = {
+          sharesOutstanding: floatData[0].outstandingShares, // raw number from FMP
+          forwardPE: finnhubData?.metric?.forwardPE || null  // from Finnhub
+        };
+        
+        // Cache the result
+        localStorage.setItem(cacheKey, JSON.stringify({ data: result, timestamp: Date.now() }));
+        
+        return result;
+      } catch (e) {
+        console.error('Fetch error:', e);
+        return null;
+      }
+    };
+
     // ============================================================
     // MARKET STATE - Single source of truth for market hours
     // ============================================================
@@ -119,7 +161,10 @@
         postMarketPrice: meta.postMarketPrice,
         tradingDay: result.timestamp?.length > 0 
           ? new Date(result.timestamp[result.timestamp.length - 1] * 1000).toISOString().split('T')[0]
-          : null
+          : null,
+        // Additional stats from Yahoo meta
+        fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh,
+        fiftyTwoWeekLow: meta.fiftyTwoWeekLow
       };
     };
 
@@ -170,7 +215,10 @@
     // ============================================================
 
     const fetchMarketOpenData = async (symbol) => {
-      const yahooData = await fetchYahooQuote(symbol);
+      const [yahooData, finnhubData] = await Promise.all([
+        fetchYahooQuote(symbol),
+        fetchSharesOutstanding(symbol)
+      ]);
       if (!yahooData) return null;
       
       return {
@@ -183,7 +231,11 @@
         shortName: yahooData.shortName,
         tradingDay: yahooData.tradingDay,
         extendedHoursPrice: null,
-        extendedHoursType: null
+        extendedHoursType: null,
+        fiftyTwoWeekHigh: yahooData.fiftyTwoWeekHigh,
+        fiftyTwoWeekLow: yahooData.fiftyTwoWeekLow,
+        sharesOutstanding: finnhubData?.sharesOutstanding, // in millions
+        forwardPE: finnhubData?.forwardPE
       };
     };
 
@@ -194,7 +246,10 @@
     // ============================================================
 
     const fetchMarketClosedData = async (symbol, marketState) => {
-      const yahooData = await fetchYahooQuote(symbol);
+      const [yahooData, finnhubData] = await Promise.all([
+        fetchYahooQuote(symbol),
+        fetchSharesOutstanding(symbol)
+      ]);
       if (!yahooData) return null;
       
       // Start with Yahoo's extended hours data
@@ -235,7 +290,11 @@
         shortName: yahooData.shortName,
         tradingDay: yahooData.tradingDay,
         extendedHoursPrice,
-        extendedHoursType
+        extendedHoursType,
+        fiftyTwoWeekHigh: yahooData.fiftyTwoWeekHigh,
+        fiftyTwoWeekLow: yahooData.fiftyTwoWeekLow,
+        sharesOutstanding: finnhubData?.sharesOutstanding, // in millions
+        forwardPE: finnhubData?.forwardPE
       };
     };
 
@@ -275,7 +334,6 @@
       const [chartData, setChartData] = useState([]);
       const [timeframe, setTimeframe] = useState('6M');
       const [quote, setQuote] = useState(null);
-      const [metrics, setMetrics] = useState(null);
       const [loading, setLoading] = useState(true);
       const [priceUpdating, setPriceUpdating] = useState(false);
       const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
@@ -385,16 +443,13 @@
               volume: priceData.volume,
               tradingDay: priceData.tradingDay,
               extendedHoursPrice: priceData.extendedHoursPrice,
-              extendedHoursType: priceData.extendedHoursType
+              extendedHoursType: priceData.extendedHoursType,
+              fiftyTwoWeekHigh: priceData.fiftyTwoWeekHigh,
+              fiftyTwoWeekLow: priceData.fiftyTwoWeekLow,
+              sharesOutstanding: priceData.sharesOutstanding, // in millions, for dynamic market cap
+              forwardPE: priceData.forwardPE
             });
           }
-
-          // Fetch metrics (same regardless of market state)
-          try {
-            const metricsRes = await fetch(`${WORKER_URL}/finnhub/metric/${symbol}`);
-            const metricsData = await metricsRes.json();
-            if (metricsData?.metric) setMetrics(metricsData);
-          } catch (e) {}
 
           if (historicalData?.length > 0) setData(historicalData);
         } catch (error) { 
@@ -487,6 +542,10 @@
         
         let ws = null;
         let reconnectTimeout = null;
+        let reconnectAttempts = 0;
+        let isConnecting = false;
+        const MAX_RECONNECT_ATTEMPTS = 10;
+        const BASE_RECONNECT_DELAY = 3000; // Start at 3s to avoid rate limiting
         
         const connectWebSocket = () => {
           const marketState = getMarketState();
@@ -497,10 +556,33 @@
             return;
           }
           
-          console.log('WebSocket connecting (market is open)...');
-          ws = new WebSocket(`wss://ws.finnhub.io?token=${FINNHUB_API_KEY}`);
+          // Prevent multiple simultaneous connection attempts
+          if (isConnecting || wsRef.current?.readyState === WebSocket.OPEN) {
+            return;
+          }
+          
+          // Clean up any existing connection
+          if (ws) {
+            ws.onclose = null;
+            ws.onerror = null;
+            ws.close();
+          }
+          
+          isConnecting = true;
+          
+          try {
+            ws = new WebSocket(`wss://ws.finnhub.io?token=${FINNHUB_API_KEY}`);
+          } catch (e) {
+            console.error('WebSocket construction failed:', e);
+            isConnecting = false;
+            scheduleReconnect();
+            return;
+          }
           
           ws.onopen = () => {
+            console.log('WebSocket connected');
+            isConnecting = false;
+            reconnectAttempts = 0;
             wsRef.current = ws;
             if (ticker) {
               ws.send(JSON.stringify({ type: 'subscribe', symbol: ticker }));
@@ -534,19 +616,49 @@
             } catch (e) {}
           };
           
-          ws.onclose = () => {
+          ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            isConnecting = false;
+          };
+          
+          ws.onclose = (event) => {
+            console.log(`WebSocket closed (code: ${event.code})`);
+            isConnecting = false;
             wsRef.current = null;
+            
             const marketState = getMarketState();
             if (marketState.isRegularHours) {
-              reconnectTimeout = setTimeout(connectWebSocket, 5000);
+              scheduleReconnect();
             }
           };
         };
         
-        // Initial connection attempt
+        const scheduleReconnect = () => {
+          if (reconnectTimeout) {
+            clearTimeout(reconnectTimeout);
+          }
+          
+          const marketState = getMarketState();
+          if (!marketState.isRegularHours) return;
+          
+          if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+            console.log('Max reconnection attempts reached, will retry on next market check');
+            reconnectAttempts = 0;
+            return;
+          }
+          
+          // Exponential backoff: 1s, 2s, 4s, 8s... up to 30s max
+          const delay = Math.min(BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts), 30000);
+          reconnectAttempts++;
+          
+          console.log(`WebSocket reconnecting in ${delay/1000}s (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+          reconnectTimeout = setTimeout(connectWebSocket, delay);
+        };
+        
+        // Initial connection attempt (with small delay to avoid rapid reconnects on page refresh)
         const marketState = getMarketState();
         if (marketState.isRegularHours) {
-          connectWebSocket();
+          setTimeout(connectWebSocket, 1500);
         }
         
         // Monitor for market open/close transitions
@@ -554,24 +666,32 @@
           const marketState = getMarketState();
           const hasConnection = wsRef.current?.readyState === WebSocket.OPEN;
           
-          if (marketState.isRegularHours && !hasConnection) {
-            console.log('Market opened - connecting WebSocket');
+          if (marketState.isRegularHours && !hasConnection && !isConnecting) {
+            console.log('Market is open - attempting WebSocket connection');
+            reconnectAttempts = 0;
             connectWebSocket();
           } else if (!marketState.isRegularHours && hasConnection) {
             console.log('Market closed - disconnecting WebSocket');
-            wsRef.current.close();
+            if (ws) {
+              ws.onclose = null; // Prevent reconnection attempt
+              ws.close();
+            }
+            wsRef.current = null;
           }
         }, 60000);
         
         return () => {
           clearInterval(marketCheckInterval);
           if (reconnectTimeout) clearTimeout(reconnectTimeout);
-          if (wsRef.current) {
-            if (currentSymbolRef.current) {
-              wsRef.current.send(JSON.stringify({ type: 'unsubscribe', symbol: currentSymbolRef.current }));
+          if (ws) {
+            ws.onclose = null;
+            ws.onerror = null;
+            if (currentSymbolRef.current && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'unsubscribe', symbol: currentSymbolRef.current }));
             }
-            wsRef.current.close();
+            ws.close();
           }
+          wsRef.current = null;
         };
       }, []);
       
@@ -715,10 +835,11 @@
       const dayHigh = quote?.h || data[data.length - 1]?.high || 0;
       const dayLow = quote?.l || data[data.length - 1]?.low || 0;
       const avgVolume = data.length > 0 ? data.reduce((sum, d) => sum + d.volume, 0) / data.length : 0;
-      const week52High = metrics?.metric?.['52WeekHigh'] || (data.length > 0 ? Math.max(...data.map(d => d.high)) : 0);
-      const week52Low = metrics?.metric?.['52WeekLow'] || (data.length > 0 ? Math.min(...data.map(d => d.low)) : 0);
-      const marketCap = metrics?.metric?.marketCapitalization || 0;
-      const forwardPE = metrics?.metric?.forwardPE || 0;
+      const week52High = quote?.fiftyTwoWeekHigh || (data.length > 0 ? Math.max(...data.map(d => d.high)) : 0);
+      const week52Low = quote?.fiftyTwoWeekLow || (data.length > 0 ? Math.min(...data.map(d => d.low)) : 0);
+      // Dynamic market cap: sharesOutstanding × currentPrice (FMP returns raw shares, convert to millions for display)
+      const marketCap = quote?.sharesOutstanding ? (quote.sharesOutstanding * currentPrice) / 1e6 : 0;
+      const forwardPE = quote?.forwardPE || 0;
 
       // ============================================================
       // CHART CALCULATIONS
