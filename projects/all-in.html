@@ -13,14 +13,254 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo } = React;
 
-    // WORKER URL
     const WORKER_URL = 'https://dry-poetry-72b5.donovanh59.workers.dev';
-    
-    // Finnhub WebSocket for real-time prices
-    const FINNHUB_API_KEY = 'd5306hpr01qggm5ue050d5306hpr01qggm5ue05g'; // Get free key at https://finnhub.io/
+    const FINNHUB_API_KEY = 'd5306hpr01qggm5ue050d5306hpr01qggm5ue05g';
+    const CACHE_DURATION = 60 * 60 * 1000;
 
-    // Cache duration: 24 hours
-    const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
+    // ============================================================
+    // MARKET STATE - Single source of truth for market hours
+    // ============================================================
+    
+    const MarketState = {
+      PRE_MARKET: 'pre-market',     // 4:00 AM - 9:30 AM EST
+      OPEN: 'open',                  // 9:30 AM - 4:00 PM EST
+      POST_MARKET: 'post-market',   // 4:00 PM - 8:00 PM EST
+      CLOSED: 'closed'              // 8:00 PM - 4:00 AM EST + weekends
+    };
+
+    /**
+     * Get current market state based on EST time
+     * This is THE definitive function for determining market state
+     * @returns {Object} { state: MarketState, estTime: Date, isWeekend: boolean, timeInMinutes: number }
+     */
+    const getMarketState = () => {
+      const now = new Date();
+      const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+      const day = estTime.getDay();
+      const hour = estTime.getHours();
+      const minute = estTime.getMinutes();
+      const timeInMinutes = hour * 60 + minute;
+      
+      const isWeekend = day === 0 || day === 6;
+      
+      // Market hours in minutes from midnight (EST)
+      const PRE_MARKET_START = 4 * 60;        // 4:00 AM = 240
+      const MARKET_OPEN = 9 * 60 + 30;        // 9:30 AM = 570
+      const MARKET_CLOSE = 16 * 60;           // 4:00 PM = 960
+      const POST_MARKET_END = 20 * 60;        // 8:00 PM = 1200
+      
+      let state;
+      
+      if (isWeekend) {
+        state = MarketState.CLOSED;
+      } else if (timeInMinutes >= MARKET_OPEN && timeInMinutes < MARKET_CLOSE) {
+        state = MarketState.OPEN;
+      } else if (timeInMinutes >= PRE_MARKET_START && timeInMinutes < MARKET_OPEN) {
+        state = MarketState.PRE_MARKET;
+      } else if (timeInMinutes >= MARKET_CLOSE && timeInMinutes < POST_MARKET_END) {
+        state = MarketState.POST_MARKET;
+      } else {
+        state = MarketState.CLOSED;
+      }
+      
+      return {
+        state,
+        estTime,
+        isWeekend,
+        timeInMinutes,
+        isRegularHours: state === MarketState.OPEN,
+        isExtendedHours: state === MarketState.PRE_MARKET || state === MarketState.POST_MARKET,
+        isTradingPossible: state !== MarketState.CLOSED
+      };
+    };
+
+    /**
+     * Get today's date in EST timezone
+     */
+    const getTodayEST = () => {
+      const now = new Date();
+      const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+      return estTime.toISOString().split('T')[0];
+    };
+
+    // ============================================================
+    // DATA FETCHING - Separated by market state
+    // ============================================================
+
+    /**
+     * Fetch quote data from Yahoo Finance
+     * Used in both open and closed market scenarios
+     */
+    const fetchYahooQuote = async (symbol) => {
+      const response = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=1d&includePrePost=true`);
+      const data = await response.json();
+      
+      if (!data?.chart?.result?.[0]) return null;
+      
+      const result = data.chart.result[0];
+      const meta = result.meta;
+      const quote = result.indicators.quote[0];
+      
+      return {
+        regularMarketPrice: meta.regularMarketPrice,
+        previousClose: meta.previousClose,
+        open: quote.open?.[0] || meta.chartPreviousClose || meta.previousClose,
+        high: quote.high?.[0] || meta.regularMarketPrice,
+        low: quote.low?.[0] || meta.regularMarketPrice,
+        volume: quote.volume?.[0] || meta.regularMarketVolume || 0,
+        shortName: meta.shortName || meta.symbol,
+        preMarketPrice: meta.preMarketPrice,
+        postMarketPrice: meta.postMarketPrice,
+        tradingDay: result.timestamp?.length > 0 
+          ? new Date(result.timestamp[result.timestamp.length - 1] * 1000).toISOString().split('T')[0]
+          : null
+      };
+    };
+
+    /**
+     * Fetch extended hours data from Alpaca
+     * Only used when market is closed
+     */
+    const fetchAlpacaExtendedHours = async (symbol, marketState) => {
+      const todayStr = getTodayEST();
+      
+      if (marketState.state === MarketState.PRE_MARKET) {
+        // Pre-market: 4:00 AM - 9:30 AM EST (08:00 - 13:30 UTC)
+        const res = await fetch(
+          `${WORKER_URL}/bars/${symbol}?start=${todayStr}T08:00:00Z&end=${todayStr}T13:30:00Z&timeframe=1Min&feed=sip`
+        );
+        const data = await res.json();
+        if (data?.bars?.length > 0) {
+          return { preMarketPrice: data.bars[data.bars.length - 1].c };
+        }
+      } 
+      else if (marketState.state === MarketState.POST_MARKET) {
+        // Post-market: 4:00 PM - 8:00 PM EST (21:00 - 01:00 UTC)
+        const now = new Date();
+        let lastTradingDay = new Date(now);
+        if (now.getDay() === 0) lastTradingDay.setDate(now.getDate() - 2);
+        else if (now.getDay() === 6) lastTradingDay.setDate(now.getDate() - 1);
+        
+        const tradingDateStr = lastTradingDay.toISOString().split('T')[0];
+        const endDate = new Date(lastTradingDay);
+        endDate.setDate(endDate.getDate() + 1);
+        
+        const res = await fetch(
+          `${WORKER_URL}/bars/${symbol}?start=${tradingDateStr}T21:00:00Z&end=${endDate.toISOString().split('T')[0]}T01:00:00Z&timeframe=1Min&feed=sip`
+        );
+        const data = await res.json();
+        if (data?.bars?.length > 0) {
+          return { postMarketPrice: data.bars[data.bars.length - 1].c };
+        }
+      }
+      
+      return null;
+    };
+
+    // ============================================================
+    // MARKET OPEN: Data fetching strategy
+    // - Yahoo Finance for OHLCV data
+    // - Finnhub WebSocket for real-time price updates
+    // ============================================================
+
+    const fetchMarketOpenData = async (symbol) => {
+      const yahooData = await fetchYahooQuote(symbol);
+      if (!yahooData) return null;
+      
+      return {
+        currentPrice: yahooData.regularMarketPrice,
+        open: yahooData.open,
+        high: yahooData.high,
+        low: yahooData.low,
+        previousClose: yahooData.previousClose,
+        volume: yahooData.volume,
+        shortName: yahooData.shortName,
+        tradingDay: yahooData.tradingDay,
+        extendedHoursPrice: null,
+        extendedHoursType: null
+      };
+    };
+
+    // ============================================================
+    // MARKET CLOSED: Data fetching strategy  
+    // - Yahoo Finance for last regular market data
+    // - Alpaca SIP for pre/post market prices
+    // ============================================================
+
+    const fetchMarketClosedData = async (symbol, marketState) => {
+      const yahooData = await fetchYahooQuote(symbol);
+      if (!yahooData) return null;
+      
+      // Start with Yahoo's extended hours data
+      let extendedHoursPrice = null;
+      let extendedHoursType = null;
+      
+      if (marketState.state === MarketState.PRE_MARKET) {
+        extendedHoursPrice = yahooData.preMarketPrice;
+        extendedHoursType = 'pre';
+      } else if (marketState.state === MarketState.POST_MARKET) {
+        extendedHoursPrice = yahooData.postMarketPrice;
+        extendedHoursType = 'post';
+      }
+      
+      // Try to get fresher extended hours data from Alpaca
+      if (marketState.isExtendedHours) {
+        try {
+          const alpacaData = await fetchAlpacaExtendedHours(symbol, marketState);
+          if (alpacaData?.preMarketPrice) {
+            extendedHoursPrice = alpacaData.preMarketPrice;
+            extendedHoursType = 'pre';
+          } else if (alpacaData?.postMarketPrice) {
+            extendedHoursPrice = alpacaData.postMarketPrice;
+            extendedHoursType = 'post';
+          }
+        } catch (e) {
+          // Alpaca failed, fall back to Yahoo's extended hours data
+        }
+      }
+      
+      return {
+        currentPrice: yahooData.regularMarketPrice,
+        open: yahooData.open,
+        high: yahooData.high,
+        low: yahooData.low,
+        previousClose: yahooData.previousClose,
+        volume: yahooData.volume,
+        shortName: yahooData.shortName,
+        tradingDay: yahooData.tradingDay,
+        extendedHoursPrice,
+        extendedHoursType
+      };
+    };
+
+    // ============================================================
+    // UNIFIED DATA FETCHER - Routes to correct strategy
+    // ============================================================
+
+    const fetchPriceData = async (symbol) => {
+      const marketState = getMarketState();
+      
+      try {
+        if (marketState.isRegularHours) {
+          return {
+            data: await fetchMarketOpenData(symbol),
+            marketState
+          };
+        } else {
+          return {
+            data: await fetchMarketClosedData(symbol, marketState),
+            marketState
+          };
+        }
+      } catch (error) {
+        console.error('Price fetch error:', error);
+        return { data: null, marketState };
+      }
+    };
+
+    // ============================================================
+    // MAIN COMPONENT
+    // ============================================================
 
     function StockTracker() {
       const [ticker, setTicker] = useState('TSLA');
@@ -32,343 +272,74 @@
       const [metrics, setMetrics] = useState(null);
       const [loading, setLoading] = useState(true);
       const [priceUpdating, setPriceUpdating] = useState(false);
-      const [chartUpdating, setChartUpdating] = useState(false);
       const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
       const [sharesCount, setSharesCount] = useState('');
       const [companyName, setCompanyName] = useState('');
-      const [yahooData, setYahooData] = useState(null);
-      
-      // Chart cache for instant timeframe switching
       const [chartCache, setChartCache] = useState({});
-      
-      // Track last price to avoid unnecessary updates
-      const lastPriceRef = useRef(null);
-      
-      // WebSocket for real-time Finnhub data
-      const wsRef = useRef(null);
-      const [wsConnected, setWsConnected] = useState(false);
-      const currentSymbolRef = useRef(null);
-      
-      // New State for Google-style Hover
       const [hoverData, setHoverData] = useState(null);
+      const [currentMarketState, setCurrentMarketState] = useState(getMarketState());
+      
+      const lastPriceRef = useRef(null);
+      const wsRef = useRef(null);
+      const currentSymbolRef = useRef(null);
       const svgRef = useRef(null);
+
+      // ============================================================
+      // MARKET STATE MONITORING
+      // Update market state every minute to catch transitions
+      // ============================================================
+      
+      useEffect(() => {
+        const interval = setInterval(() => {
+          const newState = getMarketState();
+          setCurrentMarketState(prev => {
+            // Only update if state actually changed
+            if (prev.state !== newState.state) {
+              console.log(`Market state changed: ${prev.state} → ${newState.state}`);
+              return newState;
+            }
+            return prev;
+          });
+        }, 60000);
+        
+        return () => clearInterval(interval);
+      }, []);
+
+      // ============================================================
+      // CACHE HELPERS
+      // ============================================================
 
       const getCachedData = (symbol) => {
         const cached = localStorage.getItem(`stock_${symbol}`);
         if (cached) {
           const { data, timestamp } = JSON.parse(cached);
-          if (Date.now() - timestamp < CACHE_DURATION) {
-            console.log('Using cached data for', symbol);
-            return data;
-          }
+          if (Date.now() - timestamp < CACHE_DURATION) return data;
         }
         return null;
       };
 
       const setCachedData = (symbol, data) => {
         localStorage.setItem(`stock_${symbol}`, JSON.stringify({ data, timestamp: Date.now() }));
-        console.log('Cached data for', symbol);
       };
 
-      const fetchYahooQuote = async (symbol) => {
-        try {
-          const response = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=1d&includePrePost=true`);
-          const data = await response.json();
-          
-          if (data?.chart?.result?.[0]) {
-            const result = data.chart.result[0];
-            const meta = result.meta;
-            const quote = result.indicators.quote[0];
-            
-            const currentPrice = meta.regularMarketPrice || meta.previousClose;
-            const isPostMarket = meta.postMarketPrice !== undefined;
-            const isPreMarket = meta.preMarketPrice !== undefined;
-            
-            let displayPrice, priceSource;
-            if (isPostMarket) {
-              displayPrice = meta.postMarketPrice;
-              priceSource = 'post-market';
-            } else if (isPreMarket) {
-              displayPrice = meta.preMarketPrice;
-              priceSource = 'pre-market';
-            } else {
-              displayPrice = currentPrice;
-              priceSource = 'regular-market';
-            }
-            
-            const yahooQuote = {
-              currentPrice: displayPrice,
-              regularMarketPrice: meta.regularMarketPrice,
-              previousClose: meta.previousClose,
-              open: quote.open?.[0] || meta.chartPreviousClose || meta.previousClose,
-              high: quote.high?.[0] || meta.regularMarketPrice,
-              low: quote.low?.[0] || meta.regularMarketPrice,
-              volume: quote.volume?.[0] || meta.regularMarketVolume || 0,
-              priceSource: priceSource,
-              marketState: meta.marketState,
-              shortName: meta.shortName || meta.symbol,
-              preMarketPrice: meta.preMarketPrice,
-              preMarketChange: meta.preMarketChange,
-              preMarketChangePercent: meta.preMarketChangePercent,
-              postMarketPrice: meta.postMarketPrice,
-              postMarketChange: meta.postMarketChange,
-              postMarketChangePercent: meta.postMarketChangePercent,
-              // Extract the trading day from the API response timestamp
-              tradingDay: result.timestamp && result.timestamp.length > 0 
-                ? new Date(result.timestamp[result.timestamp.length - 1] * 1000).toISOString().split('T')[0]
-                : null
-            };
-            
-            return yahooQuote;
-          }
-        } catch (error) {
-          console.error('Yahoo Finance fetch error:', error);
-        }
-        return null;
-      };
-
-      // Get today's date in EST (for display purposes only)
-      const getTodayEST = () => {
-        const now = new Date();
-        const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-        return estTime.toISOString().split('T')[0];
-      };
-
-      // REMOVED: getTradingDay() - we now use the API as source of truth
-
-      const isMarketOpen = () => {
-        const now = new Date();
-        const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-        const day = estTime.getDay();
-        const hour = estTime.getHours();
-        const minute = estTime.getMinutes();
-        if (day === 0 || day === 6) return false;
-        const timeInMinutes = hour * 60 + minute;
-        const marketOpen = 9 * 60 + 30;
-        const marketClose = 16 * 60;
-        return timeInMinutes >= marketOpen && timeInMinutes < marketClose;
-      };
-
-      const fetchAlpacaIntradayBars = async (symbol, tradingDay) => {
-        const res = await fetch(
-          `${WORKER_URL}/bars/${symbol}?start=${tradingDay}T00:00:00Z&end=${new Date().toISOString()}&timeframe=1Min&feed=iex`
-        );
-        const data = await res.json();
-        
-        if (data?.bars?.length > 0) {
-          const bars = data.bars;
-          return {
-            open: bars[0].o,
-            high: Math.max(...bars.map(b => b.h)),
-            low: Math.min(...bars.map(b => b.l)),
-            close: bars[bars.length - 1].c,
-            volume: bars.reduce((sum, b) => sum + (b.v || 0), 0),
-            source: 'alpaca-iex'
-          };
-        }
-        return null;
-      };
-
-      const fetchAlpacaPreMarket = async (symbol) => {
-        const now = new Date();
-        const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-        const todayStr = estTime.toISOString().split('T')[0];
-        
-        // Pre-market: 4:00 AM - 9:30 AM EST (08:00 - 13:30 UTC)
-        const preMarketStart = `${todayStr}T08:00:00Z`;
-        const preMarketEnd = `${todayStr}T13:30:00Z`;
-        
-        const res = await fetch(
-          `${WORKER_URL}/bars/${symbol}?start=${preMarketStart}&end=${preMarketEnd}&timeframe=1Min&feed=sip`
-        );
-        const data = await res.json();
-        
-        if (data?.bars?.length > 0) {
-          const lastBar = data.bars[data.bars.length - 1];
-          return {
-            currentPrice: lastBar.c,
-            source: 'alpaca-sip-premarket'
-          };
-        }
-        return null;
-      };
-
-      const fetchAlpacaPostMarket = async (symbol) => {
-        const now = new Date();
-        let lastTradingDay;
-        
-        if (now.getDay() === 0) {
-          lastTradingDay = new Date(now);
-          lastTradingDay.setDate(now.getDate() - 2);
-        } else if (now.getDay() === 6) {
-          lastTradingDay = new Date(now);
-          lastTradingDay.setDate(now.getDate() - 1);
-        } else {
-          lastTradingDay = now;
-        }
-        
-        const tradingDateStr = lastTradingDay.toISOString().split('T')[0];
-        const postMarketStart = `${tradingDateStr}T21:00:00Z`;
-        const endDate = new Date(lastTradingDay);
-        endDate.setDate(endDate.getDate() + 1);
-        const postMarketEndStr = `${endDate.toISOString().split('T')[0]}T01:00:00Z`;
-        
-        const res = await fetch(
-          `${WORKER_URL}/bars/${symbol}?start=${postMarketStart}&end=${postMarketEndStr}&timeframe=1Min&feed=sip`
-        );
-        const data = await res.json();
-        
-        if (data?.bars?.length > 0) {
-          const lastBar = data.bars[data.bars.length - 1];
-          return {
-            currentPrice: lastBar.c,
-            source: 'alpaca-sip-postmarket'
-          };
-        }
-        return null;
-      };
-
-      const fetchRealTimePrice = async (symbol) => {
-        const marketOpen = isMarketOpen();
-        
-        if (marketOpen) {
-          // During market hours: Use Yahoo for OHLV data
-          // Finnhub WebSocket handles real-time price updates separately
-          let yahooData = null;
-          
-          try {
-            yahooData = await fetchYahooQuote(symbol);
-          } catch (e) {
-            console.log('Yahoo fetch failed:', e);
-          }
-          
-          if (yahooData) {
-            console.log('✓ Using Yahoo data for OHLV (Finnhub WebSocket handles live price)');
-            return {
-              currentPrice: yahooData.currentPrice,
-              open: yahooData.open,
-              high: yahooData.high,
-              low: yahooData.low,
-              previousClose: yahooData.previousClose,
-              volume: yahooData.volume,
-              source: 'yahoo',
-              yahooData: yahooData,
-              isMarketOpen: true,
-              tradingDay: yahooData.tradingDay  // Pass through the API's trading day
-            };
-          }
-          
-        } else {
-          // Market is closed - check if pre-market or post-market
-          const now = new Date();
-          const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-          const estHour = estTime.getHours();
-          const estMinute = estTime.getMinutes();
-          const timeInMinutes = estHour * 60 + estMinute;
-          const preMarketStart = 4 * 60; // 4:00 AM
-          const marketOpen = 9 * 60 + 30; // 9:30 AM
-          const marketClose = 16 * 60; // 4:00 PM
-          
-          const isPreMarketTime = timeInMinutes >= preMarketStart && timeInMinutes < marketOpen;
-          const isPostMarketTime = timeInMinutes >= marketClose;
-          
-          let yahooData = null;
-          try {
-            yahooData = await fetchYahooQuote(symbol);
-          } catch (e) {
-            console.log('Yahoo fetch failed:', e);
-          }
-          
-          // Try Alpaca pre-market
-          if (isPreMarketTime) {
-            try {
-              const preMarketData = await fetchAlpacaPreMarket(symbol);
-              if (preMarketData && yahooData) {
-                console.log('✓ Using Alpaca SIP pre-market data');
-                const updatedYahooData = {
-                  ...yahooData,
-                  preMarketPrice: preMarketData.currentPrice,
-                  preMarketChange: preMarketData.currentPrice - yahooData.regularMarketPrice,
-                  preMarketChangePercent: ((preMarketData.currentPrice - yahooData.regularMarketPrice) / yahooData.regularMarketPrice) * 100
-                };
-                return {
-                  currentPrice: yahooData.regularMarketPrice,
-                  open: yahooData.open,
-                  high: yahooData.high,
-                  low: yahooData.low,
-                  previousClose: yahooData.previousClose,
-                  volume: yahooData.volume,
-                  source: 'alpaca-sip-premarket',
-                  yahooData: updatedYahooData,
-                  isMarketOpen: false,
-                  tradingDay: yahooData.tradingDay
-                };
-              }
-            } catch (e) {
-              console.log('Alpaca SIP pre-market failed, using Yahoo...', e);
-            }
-          }
-          
-          // Try Alpaca post-market
-          if (isPostMarketTime) {
-            try {
-              const postMarketData = await fetchAlpacaPostMarket(symbol);
-              if (postMarketData && yahooData) {
-                console.log('✓ Using Alpaca SIP post-market data');
-                const updatedYahooData = {
-                  ...yahooData,
-                  postMarketPrice: postMarketData.currentPrice,
-                  postMarketChange: postMarketData.currentPrice - yahooData.regularMarketPrice,
-                  postMarketChangePercent: ((postMarketData.currentPrice - yahooData.regularMarketPrice) / yahooData.regularMarketPrice) * 100
-                };
-                return {
-                  currentPrice: yahooData.regularMarketPrice,
-                  open: yahooData.open,
-                  high: yahooData.high,
-                  low: yahooData.low,
-                  previousClose: yahooData.previousClose,
-                  volume: yahooData.volume,
-                  source: 'alpaca-sip-postmarket',
-                  yahooData: updatedYahooData,
-                  isMarketOpen: false,
-                  tradingDay: yahooData.tradingDay
-                };
-              }
-            } catch (e) {
-              console.log('Alpaca SIP post-market failed, using Yahoo...', e);
-            }
-          }
-          
-          if (yahooData) {
-            console.log('✓ Using Yahoo data (market closed)');
-            return {
-              currentPrice: yahooData.regularMarketPrice,
-              open: yahooData.open,
-              high: yahooData.high,
-              low: yahooData.low,
-              previousClose: yahooData.previousClose,
-              volume: yahooData.volume,
-              source: 'yahoo',
-              yahooData: yahooData,
-              isMarketOpen: false,
-              tradingDay: yahooData.tradingDay
-            };
-          }
-        }
-        return null;
-      };
+      // ============================================================
+      // MAIN DATA FETCHER
+      // ============================================================
 
       const fetchStockData = async (symbol) => {
         setLoading(true);
+        const marketState = getMarketState();
+        setCurrentMarketState(marketState);
+        
         try {
-          const realTimeData = await fetchRealTimePrice(symbol);
-          if (realTimeData?.yahooData) {
-            setYahooData(realTimeData.yahooData);
-            if (realTimeData.yahooData.shortName) {
-              setCompanyName(realTimeData.yahooData.shortName);
-            }
+          // Fetch real-time price data (strategy depends on market state)
+          const { data: priceData } = await fetchPriceData(symbol);
+          
+          if (priceData) {
+            setCompanyName(priceData.shortName || symbol);
           }
 
+          // Fetch historical data (same regardless of market state)
           let historicalData = getCachedData(symbol);
           if (!historicalData) {
             const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=6mo&interval=1d`);
@@ -392,155 +363,74 @@
             }
           }
 
-          if (historicalData && historicalData.length >= 2) {
-            const latestDay = historicalData[historicalData.length - 1];
-            const prevDay = historicalData[historicalData.length - 2];
-            let currentPrice, previousClose, dayOpen, dayHigh, dayLow, dayVolume;
-            if (realTimeData) {
-              currentPrice = realTimeData.currentPrice || realTimeData.close;
-              previousClose = realTimeData.previousClose || latestDay.close;
-              dayOpen = realTimeData.open || latestDay.open;
-              dayHigh = realTimeData.high || latestDay.high;
-              dayLow = realTimeData.low || latestDay.low;
-              dayVolume = realTimeData.volume || 0;
-            } else {
-              currentPrice = latestDay.close;
-              previousClose = prevDay.close;
-              dayOpen = latestDay.open;
-              dayHigh = latestDay.high;
-              dayLow = latestDay.low;
-              dayVolume = latestDay.volume;
-            }
-            const change = currentPrice - previousClose;
-            const changePercent = (change / previousClose) * 100;
+          // Build quote object
+          if (historicalData?.length >= 2 && priceData) {
+            const previousClose = priceData.previousClose || historicalData[historicalData.length - 2].close;
+            const change = priceData.currentPrice - previousClose;
+            
             setQuote({
-              c: currentPrice,
-              o: dayOpen,
-              h: dayHigh,
-              l: dayLow,
+              c: priceData.currentPrice,
+              o: priceData.open,
+              h: priceData.high,
+              l: priceData.low,
               pc: previousClose,
               d: change,
-              dp: changePercent,
-              todayBars: {
-                open: dayOpen,
-                high: dayHigh,
-                low: dayLow,
-                close: currentPrice,
-                volume: dayVolume,
-                isOfficial: realTimeData?.source === 'yahoo'
-              },
-              // Store the API's trading day for use in spreadsheet logic
-              apiTradingDay: realTimeData?.tradingDay || null
+              dp: (change / previousClose) * 100,
+              volume: priceData.volume,
+              tradingDay: priceData.tradingDay,
+              extendedHoursPrice: priceData.extendedHoursPrice,
+              extendedHoursType: priceData.extendedHoursType
             });
           }
 
+          // Fetch metrics (same regardless of market state)
           try {
             const metricsRes = await fetch(`${WORKER_URL}/finnhub/metric/${symbol}`);
             const metricsData = await metricsRes.json();
             if (metricsData?.metric) setMetrics(metricsData);
-          } catch (e) { console.error('Finnhub metrics failed:', e); }
+          } catch (e) {}
 
           if (historicalData?.length > 0) setData(historicalData);
-        } catch (error) { console.error('Error:', error); }
+        } catch (error) { 
+          console.error('Error:', error); 
+        }
         setLoading(false);
       };
 
-      const updatePriceOnly = async (symbol) => {
-        try {
-          const realTimeData = await fetchRealTimePrice(symbol);
-          
-          if (realTimeData && data.length > 0) {
-            const currentPrice = realTimeData.currentPrice || realTimeData.close;
-            
-            // Check if price actually changed
-            if (lastPriceRef.current !== null && lastPriceRef.current === currentPrice) {
-              return;
-            }
-            
-            lastPriceRef.current = currentPrice;
-            
-            setPriceUpdating(true);
-            const previousClose = realTimeData.previousClose || data[data.length - 1].close;
-            const change = currentPrice - previousClose;
-            const changePercent = (change / previousClose) * 100;
-            const dayOpen = realTimeData.open || data[data.length - 1].open;
-            const dayHigh = realTimeData.high || data[data.length - 1].high;
-            const dayLow = realTimeData.low || data[data.length - 1].low;
-            setQuote({
-              c: currentPrice,
-              o: dayOpen,
-              h: dayHigh,
-              l: dayLow,
-              pc: previousClose,
-              d: change,
-              dp: changePercent,
-              todayBars: {
-                open: dayOpen,
-                high: dayHigh,
-                low: dayLow,
-                close: currentPrice,
-                volume: realTimeData.volume || 0
-              },
-              apiTradingDay: realTimeData?.tradingDay || null
-            });
-            if (realTimeData.yahooData) setYahooData(realTimeData.yahooData);
-            
-            // If user is viewing 1D chart, refresh it with live data
-            if (timeframe === '1D') {
-              fetchChartData(symbol, '1D');
-            }
-            
-            setTimeout(() => setPriceUpdating(false), 300);
-          }
-        } catch (error) {
-          console.error('Error updating price:', error);
-        }
-      };
+      // ============================================================
+      // CHART DATA FETCHER
+      // ============================================================
 
       const fetchChartData = async (symbol, tf) => {
-        setHoverData(null); // Reset hover when timeframe changes
+        setHoverData(null);
+        const marketState = getMarketState();
+        
         try {
-          // Strategy 1: Use existing 6M data for smaller timeframes (instant)
+          // Use existing 6M data for smaller timeframes
           if (['1M', '3M', '6M'].includes(tf) && data.length > 0) {
-            const monthsMap = { '1M': 1, '3M': 3, '6M': 6 };
-            const months = monthsMap[tf];
+            const months = { '1M': 1, '3M': 3, '6M': 6 }[tf];
             const cutoffDate = new Date();
             cutoffDate.setMonth(cutoffDate.getMonth() - months);
-            
-            const filtered = data.filter(d => new Date(d.date) >= cutoffDate);
-            setChartData(filtered);
-            console.log(`Using cached 6M data filtered to ${tf} (${filtered.length} points)`);
+            setChartData(data.filter(d => new Date(d.date) >= cutoffDate));
             return;
           }
           
-          // Strategy 2: Check cache for special timeframes (1D, 1W, YTD, 1Y, 5Y)
-          // Exception: Always refetch 1D if market is open (for live updates)
+          // Check cache (skip cache for 1D during market hours)
           const cacheKey = `${symbol}-${tf}`;
-          const marketOpen = isMarketOpen();
-          
-          if (!marketOpen && chartCache[cacheKey]) {
+          const skipCache = tf === '1D' && marketState.isRegularHours;
+          if (!skipCache && chartCache[cacheKey]) {
             setChartData(chartCache[cacheKey]);
             return;
           }
           
-          // Strategy 3: Fetch from API
-          setChartUpdating(true);
+          // Fetch from API
+          const params = {
+            '1D': ['1d', '5m'], '1W': ['5d', '15m'], '1M': ['1mo', '1d'],
+            '3M': ['3mo', '1d'], '6M': ['6mo', '1d'], 'YTD': ['ytd', '1d'],
+            '1Y': ['1y', '1d'], '5Y': ['5y', '1d']
+          }[tf] || ['6mo', '1d'];
           
-          let rangeParam = '6mo';
-          let intervalParam = '1d';
-          switch(tf) {
-            case '1D': rangeParam = '1d'; intervalParam = '5m'; break;
-            case '1W': rangeParam = '5d'; intervalParam = '15m'; break;
-            case '1M': rangeParam = '1mo'; intervalParam = '1d'; break;
-            case '3M': rangeParam = '3mo'; intervalParam = '1d'; break;
-            case '6M': rangeParam = '6mo'; intervalParam = '1d'; break;
-            case 'YTD': rangeParam = 'ytd'; intervalParam = '1d'; break;
-            case '1Y': rangeParam = '1y'; intervalParam = '1d'; break;
-            case '5Y': rangeParam = '5y'; intervalParam = '1d'; break;
-          }
-          
-          console.log(`Fetching chart data ${tf}...`);
-          const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=${rangeParam}&interval=${intervalParam}`);
+          const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=${params[0]}&interval=${params[1]}`);
           const barsData = await barsRes.json();
           
           if (barsData?.chart?.result?.[0]) {
@@ -558,144 +448,111 @@
               })).filter(b => b.close !== null);
               
               setChartData(chartBars);
-              
-              // Cache the result (except 1D during market hours - it needs to stay fresh)
-              if (tf !== '1D' || !marketOpen) {
+              if (!skipCache) {
                 setChartCache(prev => ({ ...prev, [cacheKey]: chartBars }));
-                console.log(`Cached ${tf} data (${chartBars.length} points)`);
               }
             }
           }
-          
-          setTimeout(() => setChartUpdating(false), 300);
         } catch (error) { 
-          console.error('Error fetching chart data:', error);
-          setChartUpdating(false);
+          console.error('Error fetching chart data:', error); 
         }
       };
 
+      // ============================================================
+      // EFFECTS: Initial load and ticker changes
+      // ============================================================
+
       useEffect(() => { 
-        setChartCache({}); // Clear cache when changing ticker
-        lastPriceRef.current = null; // Reset last price tracking
+        setChartCache({});
+        lastPriceRef.current = null;
         fetchStockData(ticker); 
       }, [ticker]);
-      useEffect(() => { if (ticker) fetchChartData(ticker, timeframe); }, [ticker, timeframe]);
       
-      // WebSocket connection for real-time prices (ONLY during regular market hours 9:30am-4pm EST)
+      useEffect(() => { 
+        if (ticker) fetchChartData(ticker, timeframe); 
+      }, [ticker, timeframe]);
+
+      // ============================================================
+      // MARKET OPEN ONLY: WebSocket for real-time prices
+      // ============================================================
+      
       useEffect(() => {
-        if (FINNHUB_API_KEY === 'YOUR_FINNHUB_API_KEY') {
-          console.log('⚠️ Finnhub API key not set - WebSocket disabled');
-          return;
-        }
-        
-        // Only connect during regular market hours
-        const checkMarketHours = () => {
-          const now = new Date();
-          const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-          const day = estTime.getDay();
-          const hour = estTime.getHours();
-          const minute = estTime.getMinutes();
-          const timeInMinutes = hour * 60 + minute;
-          const marketOpen = 9 * 60 + 30; // 9:30 AM
-          const marketClose = 16 * 60; // 4:00 PM
-          
-          // Weekday and between 9:30am-4pm EST
-          return day !== 0 && day !== 6 && timeInMinutes >= marketOpen && timeInMinutes < marketClose;
-        };
+        if (FINNHUB_API_KEY === 'YOUR_FINNHUB_API_KEY') return;
         
         let ws = null;
         let reconnectTimeout = null;
         
         const connectWebSocket = () => {
-          if (!checkMarketHours()) {
-            console.log('⏰ Outside market hours - WebSocket not connecting');
+          const marketState = getMarketState();
+          
+          // Only connect during regular market hours
+          if (!marketState.isRegularHours) {
+            console.log(`WebSocket skipped: Market is ${marketState.state}`);
             return;
           }
           
-          console.log('🔌 Connecting to Finnhub WebSocket...');
+          console.log('WebSocket connecting (market is open)...');
           ws = new WebSocket(`wss://ws.finnhub.io?token=${FINNHUB_API_KEY}`);
           
           ws.onopen = () => {
-            console.log('✓ Finnhub WebSocket connected');
-            setWsConnected(true);
             wsRef.current = ws;
             if (ticker) {
               ws.send(JSON.stringify({ type: 'subscribe', symbol: ticker }));
               currentSymbolRef.current = ticker;
-              console.log(`✓ Subscribed to ${ticker}`);
             }
           };
           
           ws.onmessage = (event) => {
             try {
               const msg = JSON.parse(event.data);
-              if (msg.type === 'trade' && msg.data && msg.data.length > 0) {
-                const latestTrade = msg.data[msg.data.length - 1];
-                const newPrice = latestTrade.p;
-                
-                if (lastPriceRef.current !== null && lastPriceRef.current === newPrice) {
-                  return;
-                }
-                
+              if (msg.type === 'trade' && msg.data?.length > 0) {
+                const newPrice = msg.data[msg.data.length - 1].p;
+                if (lastPriceRef.current === newPrice) return;
                 lastPriceRef.current = newPrice;
                 
                 setQuote(prev => {
                   if (!prev) return prev;
                   const change = newPrice - prev.pc;
-                  const changePercent = (change / prev.pc) * 100;
                   return {
                     ...prev,
                     c: newPrice,
                     d: change,
-                    dp: changePercent,
+                    dp: (change / prev.pc) * 100,
                     h: Math.max(prev.h || newPrice, newPrice),
-                    l: Math.min(prev.l || newPrice, newPrice),
-                    todayBars: {
-                      ...prev.todayBars,
-                      close: newPrice,
-                      high: Math.max(prev.todayBars?.high || newPrice, newPrice),
-                      low: Math.min(prev.todayBars?.low || newPrice, newPrice)
-                    }
+                    l: Math.min(prev.l || newPrice, newPrice)
                   };
                 });
-                
                 setPriceUpdating(true);
                 setTimeout(() => setPriceUpdating(false), 150);
               }
-            } catch (e) {
-              console.error('WebSocket message error:', e);
-            }
+            } catch (e) {}
           };
           
           ws.onclose = () => {
-            console.log('🔌 Finnhub WebSocket closed');
-            setWsConnected(false);
             wsRef.current = null;
-            
-            if (checkMarketHours()) {
+            const marketState = getMarketState();
+            if (marketState.isRegularHours) {
               reconnectTimeout = setTimeout(connectWebSocket, 5000);
             }
           };
-          
-          ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
-          };
         };
         
-        if (checkMarketHours()) {
+        // Initial connection attempt
+        const marketState = getMarketState();
+        if (marketState.isRegularHours) {
           connectWebSocket();
         }
         
-        // Check every minute if market just opened (for pages left open overnight)
+        // Monitor for market open/close transitions
         const marketCheckInterval = setInterval(() => {
-          const isOpen = checkMarketHours();
-          const hasConnection = wsRef.current && wsRef.current.readyState === WebSocket.OPEN;
+          const marketState = getMarketState();
+          const hasConnection = wsRef.current?.readyState === WebSocket.OPEN;
           
-          if (isOpen && !hasConnection) {
-            console.log('Market just opened - connecting WebSocket');
+          if (marketState.isRegularHours && !hasConnection) {
+            console.log('Market opened - connecting WebSocket');
             connectWebSocket();
-          } else if (!isOpen && hasConnection) {
-            console.log('Market just closed - disconnecting WebSocket');
+          } else if (!marketState.isRegularHours && hasConnection) {
+            console.log('Market closed - disconnecting WebSocket');
             wsRef.current.close();
           }
         }, 60000);
@@ -704,269 +561,197 @@
           clearInterval(marketCheckInterval);
           if (reconnectTimeout) clearTimeout(reconnectTimeout);
           if (wsRef.current) {
-            if (currentSymbolRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            if (currentSymbolRef.current) {
               wsRef.current.send(JSON.stringify({ type: 'unsubscribe', symbol: currentSymbolRef.current }));
             }
             wsRef.current.close();
-            wsRef.current = null;
           }
         };
       }, []);
       
-      // Handle ticker changes - update WebSocket subscription
+      // Handle ticker changes for WebSocket
       useEffect(() => {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
           if (currentSymbolRef.current && currentSymbolRef.current !== ticker) {
             wsRef.current.send(JSON.stringify({ type: 'unsubscribe', symbol: currentSymbolRef.current }));
-            console.log(`✓ Unsubscribed from ${currentSymbolRef.current}`);
           }
           wsRef.current.send(JSON.stringify({ type: 'subscribe', symbol: ticker }));
           currentSymbolRef.current = ticker;
-          console.log(`✓ Subscribed to ${ticker}`);
         }
       }, [ticker]);
+
+      // ============================================================
+      // MARKET OPEN ONLY: Periodic 1D chart refresh
+      // ============================================================
       
-      // Periodic refresh for 1D chart (fetches new bars from Yahoo every 60 seconds)
       useEffect(() => {
         if (timeframe !== '1D') return;
-        if (!isMarketOpen()) return;
         
-        const refreshChart = async () => {
-          try {
-            const barsRes = await fetch(`${WORKER_URL}/yahoo/${ticker}?range=1d&interval=5m`);
-            const barsData = await barsRes.json();
-            
-            if (barsData?.chart?.result?.[0]) {
-              const result = barsData.chart.result[0];
-              const timestamps = result.timestamp;
-              const quote = result.indicators.quote[0];
-              if (timestamps && quote) {
-                const chartBars = timestamps.map((t, i) => ({
-                  date: new Date(t * 1000).toISOString(),
-                  open: quote.open[i],
-                  high: quote.high[i],
-                  low: quote.low[i],
-                  close: quote.close[i],
-                  volume: quote.volume[i] || 0
-                })).filter(b => b.close !== null);
-                
-                setChartData(chartBars);
-                console.log(`✓ Refreshed 1D chart (${chartBars.length} bars)`);
-              }
-            }
-          } catch (error) {
-            console.error('Chart refresh failed:', error);
+        const marketState = getMarketState();
+        if (!marketState.isRegularHours) return;
+        
+        const interval = setInterval(() => {
+          const currentState = getMarketState();
+          if (currentState.isRegularHours) {
+            fetchChartData(ticker, '1D');
           }
-        };
-        
-        // Refresh every 60 seconds
-        const interval = setInterval(refreshChart, 60000);
+        }, 60000);
         
         return () => clearInterval(interval);
       }, [ticker, timeframe]);
 
-      // Handle Mouse Move over Graph
+      // ============================================================
+      // CHART HOVER HANDLER
+      // ============================================================
+
       const handleGraphHover = (e) => {
-        if (!chartData || chartData.length === 0 || !svgRef.current) return;
+        if (!chartData?.length || !svgRef.current) return;
         
         const svgRect = svgRef.current.getBoundingClientRect();
-        
-        // Calculate scaling factor between Screen Pixels and SVG viewBox units (800 width)
         const scaleX = 800 / svgRect.width;
-        
-        // Get Mouse X in SVG Coordinates
-        let mouseX = (e.clientX - svgRect.left) * scaleX;
-        
-        // Chart Area Constants (SVG Units)
-        const CHART_START_X = 50;
-        const CHART_WIDTH = 720;
-        
-        // Clamp MouseX
-        if (mouseX < CHART_START_X) mouseX = CHART_START_X;
-        if (mouseX > CHART_START_X + CHART_WIDTH) mouseX = CHART_START_X + CHART_WIDTH;
+        let mouseX = Math.max(50, Math.min(770, (e.clientX - svgRect.left) * scaleX));
 
         let index, dataX;
         
         if (timeframe === '1D') {
-          // For 1D: Map mouse position to time, then find nearest data point
-          const chartStartHour = 9.5; // 9:30am
-          const chartEndHour = 16; // 4pm
-          const totalHours = chartEndHour - chartStartHour;
-          
-          // Convert mouse X to time
-          const mouseTimeHours = chartStartHour + ((mouseX - CHART_START_X) / CHART_WIDTH) * totalHours;
-          
-          // Find nearest data point by time
-          let nearestIndex = 0;
-          let nearestDiff = Infinity;
+          const mouseTimeHours = 9.5 + ((mouseX - 50) / 720) * 6.5;
+          let nearestIndex = 0, nearestDiff = Infinity;
           
           chartData.forEach((d, i) => {
-            const date = new Date(d.date);
-            const estTime = new Date(date.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-            const hours = estTime.getHours();
-            const minutes = estTime.getMinutes();
-            const timeInHours = hours + minutes / 60;
-            
+            const estTime = new Date(new Date(d.date).toLocaleString('en-US', { timeZone: 'America/New_York' }));
+            const timeInHours = estTime.getHours() + estTime.getMinutes() / 60;
             const diff = Math.abs(timeInHours - mouseTimeHours);
-            if (diff < nearestDiff) {
-              nearestDiff = diff;
-              nearestIndex = i;
-            }
+            if (diff < nearestDiff) { nearestDiff = diff; nearestIndex = i; }
           });
           
           index = nearestIndex;
-          
-          // Calculate actual X position based on data point's time
           const point = chartData[index];
-          const date = new Date(point.date);
-          const estTime = new Date(date.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-          const hours = estTime.getHours();
-          const minutes = estTime.getMinutes();
-          const timeInHours = hours + minutes / 60;
-          const clampedTime = Math.max(chartStartHour, Math.min(chartEndHour, timeInHours));
-          dataX = CHART_START_X + ((clampedTime - chartStartHour) / totalHours) * CHART_WIDTH;
+          const estTime = new Date(new Date(point.date).toLocaleString('en-US', { timeZone: 'America/New_York' }));
+          const timeInHours = Math.max(9.5, Math.min(16, estTime.getHours() + estTime.getMinutes() / 60));
+          dataX = 50 + ((timeInHours - 9.5) / 6.5) * 720;
         } else {
-          // For other timeframes: Map Mouse X to Nearest Data Index (evenly distributed)
-          const ratio = (mouseX - CHART_START_X) / CHART_WIDTH;
+          const ratio = (mouseX - 50) / 720;
           index = Math.round(ratio * (chartData.length - 1));
-          dataX = CHART_START_X + (index / (chartData.length - 1)) * CHART_WIDTH;
+          dataX = 50 + (index / (chartData.length - 1)) * 720;
         }
         
         if (index >= 0 && index < chartData.length) {
           const point = chartData[index];
-          
-          // Calculate Y position for the point
-          const minP = minPrice;
-          const rangeP = priceRange;
-          const yPos = 260 - ((point.close - minP) / rangeP) * 240;
-
-          setHoverData({
-            mouseX: dataX,   // Snap vertical line to data point (Google Style)
-            dataX: dataX,    // Snap dot to data point
-            y: yPos,
-            data: point
-          });
+          const yPos = 260 - ((point.close - minPrice) / priceRange) * 240;
+          setHoverData({ dataX, y: yPos, data: point });
         }
       };
 
-      const handleGraphLeave = () => {
-        setHoverData(null);
-      };
+      // ============================================================
+      // SPREADSHEET DATA PROCESSING
+      // ============================================================
 
-      // ===== FIXED TRADING DAY LOGIC =====
-      // Use the API as the source of truth for trading days
-      // Only add/update "today" row if:
-      // 1. The API returned data for today (proof the market traded/is trading)
-      // 2. OR if the market is currently open and we have a live quote
-      
-      const dataWithToday = [...data];
-      const todayEST = getTodayEST();  // Today's date in EST
-      const lastHistoricalDate = data.length > 0 ? data[data.length - 1].date : null;
-      
-      // Get the trading day from the API response (this is the authoritative source)
-      const apiTradingDay = quote?.apiTradingDay || yahooData?.tradingDay || null;
-      
-      // Check if the API confirms today is a trading day
-      const apiConfirmsTodayIsTradingDay = apiTradingDay === todayEST;
-      
-      // Check if historical data already includes today
-      const historicalDataHasToday = lastHistoricalDate === todayEST;
-      
-      // Only consider adding/updating today's row if:
-      // - The API confirms today is a trading day, OR
-      // - The market is currently open (real-time trading happening)
-      const shouldProcessTodayRow = apiConfirmsTodayIsTradingDay || isMarketOpen();
-      
-      // Debug logging for trading day logic
-      console.log('Trading Day Logic:', {
-        todayEST,
-        apiTradingDay,
-        lastHistoricalDate,
-        apiConfirmsTodayIsTradingDay,
-        historicalDataHasToday,
-        isMarketOpen: isMarketOpen(),
-        shouldProcessTodayRow
-      });
-      
-      // If today's data exists in historical data, update it with live data
-      if (shouldProcessTodayRow && historicalDataHasToday && quote?.c) {
-        const todayIndex = dataWithToday.findIndex(d => d.date === todayEST);
-        if (todayIndex !== -1) {
-          const isLiveData = isMarketOpen();
-          const useYahoo = yahooData?.spreadsheetOpen;
-          dataWithToday[todayIndex] = {
-            ...dataWithToday[todayIndex],
-            open: useYahoo ? yahooData.spreadsheetOpen : (quote.o || dataWithToday[todayIndex].open),
-            high: useYahoo ? yahooData.spreadsheetHigh : (quote.h || dataWithToday[todayIndex].high),
-            low: useYahoo ? yahooData.spreadsheetLow : (quote.l || dataWithToday[todayIndex].low),
-            close: quote.c,
-            volume: useYahoo ? yahooData.spreadsheetVolume : (quote.todayBars?.volume || dataWithToday[todayIndex].volume),
-            isToday: isLiveData
-          };
+      const processSpreadsheetData = useMemo(() => {
+        const dataWithToday = [...data];
+        const todayEST = getTodayEST();
+        const apiTradingDay = quote?.tradingDay;
+        const shouldProcessTodayRow = apiTradingDay === todayEST || currentMarketState.isRegularHours;
+        const historicalDataHasToday = data[data.length - 1]?.date === todayEST;
+        
+        if (shouldProcessTodayRow && quote?.c) {
+          if (historicalDataHasToday) {
+            const todayIndex = dataWithToday.findIndex(d => d.date === todayEST);
+            if (todayIndex !== -1) {
+              dataWithToday[todayIndex] = {
+                ...dataWithToday[todayIndex],
+                open: quote.o || dataWithToday[todayIndex].open,
+                high: quote.h || dataWithToday[todayIndex].high,
+                low: quote.l || dataWithToday[todayIndex].low,
+                close: quote.c,
+                volume: quote.volume || dataWithToday[todayIndex].volume,
+                isToday: currentMarketState.isRegularHours
+              };
+            }
+          } else {
+            dataWithToday.push({
+              date: todayEST,
+              open: quote.o || quote.c,
+              high: quote.h || quote.c,
+              low: quote.l || quote.c,
+              close: quote.c,
+              volume: quote.volume || 0,
+              isToday: currentMarketState.isRegularHours
+            });
+          }
         }
-      }
-      
-      // If today's data doesn't exist but API confirms today is a trading day, add it
-      if (shouldProcessTodayRow && !historicalDataHasToday && quote?.c) {
-        const isLiveData = isMarketOpen();
-        const useYahoo = yahooData?.spreadsheetOpen;
-        dataWithToday.push({
-          date: todayEST,
-          open: useYahoo ? yahooData.spreadsheetOpen : (quote.o || quote.c),
-          high: useYahoo ? yahooData.spreadsheetHigh : (quote.h || quote.c),
-          low: useYahoo ? yahooData.spreadsheetLow : (quote.l || quote.c),
-          close: quote.c,
-          volume: useYahoo ? yahooData.spreadsheetVolume : (quote.todayBars?.volume || 0),
-          isToday: isLiveData
+        
+        const cleanedData = dataWithToday.filter(d => !(d.isToday && d.date !== todayEST));
+        
+        const dataWithChange = cleanedData.map((row, index) => ({
+          ...row,
+          chg: index === 0 ? null : row.close - cleanedData[index - 1].close
+        }));
+        
+        return dataWithChange;
+      }, [data, quote, currentMarketState]);
+
+      const sortedData = useMemo(() => {
+        return [...processSpreadsheetData].sort((a, b) => {
+          if (a[sortConfig.key] < b[sortConfig.key]) return sortConfig.direction === 'asc' ? -1 : 1;
+          if (a[sortConfig.key] > b[sortConfig.key]) return sortConfig.direction === 'asc' ? 1 : -1;
+          return 0;
         });
-        console.log('✓ Added today row (API confirmed trading day):', todayEST);
-      }
-      
-      // Clean up any stale "isToday" rows that don't match the current trading day
-      const cleanedData = dataWithToday.filter(d => {
-        if (d.isToday && d.date !== todayEST) return false;
-        return true;
-      });
-      
-      // Add change values to each row for sorting
-      const dataWithChange = cleanedData.map((row, index) => {
-        if (index === 0) {
-          return { ...row, chg: null };
-        }
-        const prevRow = cleanedData[index - 1];
-        return { ...row, chg: row.close - prevRow.close };
-      });
-      
-      // Calculate today's change from chronological data (before sorting)
-      let todayChange = 0;
-      let todayChangePercent = 0;
-      if (dataWithChange.length >= 2) {
-        const todayRow = dataWithChange[dataWithChange.length - 1];
-        const yesterdayRow = dataWithChange[dataWithChange.length - 2];
-        if (todayRow && yesterdayRow) {
-          todayChange = todayRow.close - yesterdayRow.close;
-          todayChangePercent = (todayChange / yesterdayRow.close) * 100;
-        }
-      }
-      
-      const sortedData = [...dataWithChange].sort((a, b) => {
-        if (a[sortConfig.key] < b[sortConfig.key]) return sortConfig.direction === 'asc' ? -1 : 1;
-        if (a[sortConfig.key] > b[sortConfig.key]) return sortConfig.direction === 'asc' ? 1 : -1;
-        return 0;
-      });
+      }, [processSpreadsheetData, sortConfig]);
+
+      // ============================================================
+      // DERIVED VALUES
+      // ============================================================
 
       const currentPrice = quote?.c || data[data.length - 1]?.close || 0;
-      const priceChange = todayChange;
-      const priceChangePercent = todayChangePercent;
+      const lastTwo = processSpreadsheetData.slice(-2);
+      const todayChange = lastTwo.length === 2 ? lastTwo[1].close - lastTwo[0].close : 0;
+      const todayChangePercent = lastTwo.length === 2 ? (todayChange / lastTwo[0].close) * 100 : 0;
       const dayHigh = quote?.h || data[data.length - 1]?.high || 0;
       const dayLow = quote?.l || data[data.length - 1]?.low || 0;
-      const highestPrice = data.length > 0 ? Math.max(...data.map(d => d.high)) : 0;
-      const lowestPrice = data.length > 0 ? Math.min(...data.map(d => d.low)) : 0;
       const avgVolume = data.length > 0 ? data.reduce((sum, d) => sum + d.volume, 0) / data.length : 0;
-      const week52High = metrics?.metric?.['52WeekHigh'] || highestPrice;
-      const week52Low = metrics?.metric?.['52WeekLow'] || lowestPrice;
+      const week52High = metrics?.metric?.['52WeekHigh'] || (data.length > 0 ? Math.max(...data.map(d => d.high)) : 0);
+      const week52Low = metrics?.metric?.['52WeekLow'] || (data.length > 0 ? Math.min(...data.map(d => d.low)) : 0);
       const marketCap = metrics?.metric?.marketCapitalization || 0;
       const forwardPE = metrics?.metric?.forwardPE || 0;
+
+      // ============================================================
+      // CHART CALCULATIONS
+      // ============================================================
+
+      const { minPrice, maxPrice, priceRange, linePath, areaPath } = useMemo(() => {
+        const min = chartData.length > 0 ? Math.min(...chartData.map(d => d.low)) * 0.999 : 0;
+        const max = chartData.length > 0 ? Math.max(...chartData.map(d => d.high)) * 1.001 : 100;
+        const range = (max - min) || 1;
+        const calcY = (price) => 260 - ((price - min) / range) * 240;
+        
+        const calcX = (d, i) => {
+          if (timeframe === '1D' && chartData.length > 0) {
+            const estTime = new Date(new Date(d.date).toLocaleString('en-US', { timeZone: 'America/New_York' }));
+            const timeInHours = Math.max(9.5, Math.min(16, estTime.getHours() + estTime.getMinutes() / 60));
+            return 50 + ((timeInHours - 9.5) / 6.5) * 720;
+          }
+          return 50 + (i / (chartData.length - 1 || 1)) * 720;
+        };
+        
+        const line = chartData.length > 1 ? chartData.map((d, i) => `${i === 0 ? 'M' : 'L'} ${calcX(d, i)} ${calcY(d.close)}`).join(' ') : '';
+        const area = line ? `${line} L ${calcX(chartData[chartData.length - 1], chartData.length - 1)} 260 L ${calcX(chartData[0], 0)} 260 Z` : '';
+        
+        return { minPrice: min, maxPrice: max, priceRange: range, linePath: line, areaPath: area };
+      }, [chartData, timeframe]);
+
+      // Chart color
+      let isChartPositive = true;
+      if (timeframe === '1D') {
+        const baseline = quote?.pc || chartData[0]?.close || 0;
+        isChartPositive = (chartData[chartData.length - 1]?.close || 0) >= baseline;
+      } else if (chartData.length > 0) {
+        isChartPositive = chartData[chartData.length - 1].close >= chartData[0].close;
+      }
+      const CHART_COLOR = isChartPositive ? '#137333' : '#a50e0e';
+
+      // ============================================================
+      // HANDLERS
+      // ============================================================
 
       const handleTickerSubmit = (e) => {
         e.preventDefault();
@@ -981,69 +766,9 @@
         setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }));
       };
 
-      // Chart Calculations - recalculate when chartData changes
-      const { minPrice, maxPrice, priceRange, getY, linePath, areaPath } = useMemo(() => {
-        const min = chartData.length > 0 ? Math.min(...chartData.map(d => d.low)) * 0.999 : 0;
-        const max = chartData.length > 0 ? Math.max(...chartData.map(d => d.high)) * 1.001 : 100;
-        const range = (max - min) || 1;
-        const calcY = (price) => 260 - ((price - min) / range) * 240;
-        
-        // For 1D, map data points to fixed 9:30am-4pm time scale
-        const calcX = (d, i) => {
-          if (timeframe === '1D' && chartData.length > 0) {
-            const date = new Date(d.date);
-            // Get hours and minutes in EST
-            const estTime = new Date(date.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-            const hours = estTime.getHours();
-            const minutes = estTime.getMinutes();
-            const timeInHours = hours + minutes / 60;
-            
-            // Map 9:30am (9.5) to 4pm (16) onto chart width (50 to 770)
-            const chartStartHour = 9.5;
-            const chartEndHour = 16;
-            const totalHours = chartEndHour - chartStartHour;
-            
-            // Clamp to chart bounds
-            const clampedTime = Math.max(chartStartHour, Math.min(chartEndHour, timeInHours));
-            const x = 50 + ((clampedTime - chartStartHour) / totalHours) * 720;
-            return x;
-          }
-          // Default: evenly distributed
-          return 50 + (i / (chartData.length - 1 || 1)) * 720;
-        };
-        
-        const line = chartData.length > 1 ? chartData.map((d, i) => `${i === 0 ? 'M' : 'L'} ${calcX(d, i)} ${calcY(d.close)}`).join(' ') : '';
-        const area = line ? `${line} L ${calcX(chartData[chartData.length - 1], chartData.length - 1)} 260 L ${calcX(chartData[0], 0)} 260 Z` : '';
-        
-        return {
-          minPrice: min,
-          maxPrice: max,
-          priceRange: range,
-          getY: calcY,
-          calcX: calcX,
-          linePath: line,
-          areaPath: area
-        };
-      }, [chartData, timeframe]);
-
-      // Chart Color Logic (Google Style)
-      // For 1D: Compare Current vs Prev Close
-      // For >1D: Compare Last Point vs First Point
-      let isChartPositive = true;
-      if (timeframe === '1D') {
-         // Use Previous Close from Quote if available, otherwise fallback to first bar
-         const baseline = quote?.pc || (chartData.length > 0 ? chartData[0].close : 0);
-         const current = chartData.length > 0 ? chartData[chartData.length - 1].close : 0;
-         isChartPositive = current >= baseline;
-      } else {
-         if (chartData.length > 0) {
-           isChartPositive = chartData[chartData.length - 1].close >= chartData[0].close;
-         }
-      }
-
-      const CHART_COLOR = isChartPositive ? '#137333' : '#a50e0e'; // Google Green / Red
-      const CHART_FILL_TOP = isChartPositive ? 'rgba(19, 115, 51, 0.2)' : 'rgba(165, 14, 14, 0.2)';
-      const CHART_FILL_BOTTOM = isChartPositive ? 'rgba(19, 115, 51, 0.0)' : 'rgba(165, 14, 14, 0.0)';
+      // ============================================================
+      // RENDER
+      // ============================================================
 
       return (
         <div style={{ minHeight: '100vh', background: '#f4f1e8', fontFamily: '"IBM Plex Mono", monospace', color: '#1a1a1a', padding: '22px' }}> 
@@ -1059,8 +784,6 @@
             .top-row { display: flex; gap: 20px; margin-bottom: 0; margin-top: 20px; }
             .top-row .price-section { flex: 0 0 auto; width: 340px; }
             .top-row .chart-wrapper { flex: 1; display: flex; flex-direction: column; }
-            .top-row .chart-wrapper .section-label { margin-top: 0; }
-            .section-label { font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: #666; margin-bottom: 10px; margin-top: 14px; }
             .box { background: #faf9f5; border: 1px solid #d0cdc4; margin-bottom: 0; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.5), 0 2px 8px rgba(0,0,0,0.08); }
             .price-section { padding: 24px 28px; }
             .price-main { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; flex-wrap: wrap; }
@@ -1068,12 +791,10 @@
             .price-current.flash { filter: brightness(1.4); }
             .price-change { font-size: 16px; font-weight: 500; transition: filter 0.3s ease; margin-top: 8px; }
             .price-change.flash { filter: brightness(1.3); }
-            .price-subtitle { font-size: 11px; color: #888; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #e8e5dc; }
-            .market-status { display: flex; align-items: center; gap: 8px; font-size: 11px; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #e8e5dc; }
             .status-dot { width: 8px; height: 8px; border-radius: 50%; }
             .status-dot.open { background: #2d5a3d; box-shadow: 0 0 8px rgba(45, 90, 61, 0.6); }
             .status-dot.closed { background: #8b3a3a; box-shadow: 0 0 8px rgba(139, 58, 58, 0.6); }
-            .status-text { color: #666; }
+            .status-dot.extended { background: #b8860b; box-shadow: 0 0 8px rgba(184, 134, 11, 0.6); }
             .stats-grid { display: flex; flex-direction: column; }
             .stat-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #ebe8df; }
             .stat-row:last-child { border-bottom: none; }
@@ -1081,7 +802,7 @@
             .stat-value { font-size: 12px; font-weight: 500; }
             .chart-box { padding: 16px 12px; height: 100%; display: flex; flex-direction: column; justify-content: center; position: relative; }
             .timeframe-controls { display: flex; gap: 6px; position: absolute; top: 20px; right: 20px; z-index: 10; }
-            .timeframe-btn { background: rgba(250, 249, 245, 0.9); border: 1px solid #d0cdc4; padding: 6px 14px; font-family: inherit; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; transition: all 0.2s; font-weight: 500; backdrop-filter: blur(4px); }
+            .timeframe-btn { background: rgba(250, 249, 245, 0.9); border: 1px solid #d0cdc4; padding: 6px 14px; font-family: inherit; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; transition: all 0.2s; font-weight: 500; }
             .timeframe-btn:hover { background: rgba(232, 229, 220, 0.95); }
             .timeframe-btn.active { background: rgba(26, 26, 26, 0.95); color: #f4f1e8; border-color: #1a1a1a; }
             .spreadsheet { overflow-x: auto; }
@@ -1107,7 +828,7 @@
             .loading-text { font-size: 14px; letter-spacing: 4px; text-transform: uppercase; animation: pulse 1.5s infinite; }
             @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
             .timestamp { font-size: 11px; color: #888; text-align: right; margin-top: 14px; letter-spacing: 1px; }
-            
+            .extended-hours-bar { margin-top: 16px; padding: 8px 16px; background: #e8e5dc; border-left: 4px solid #b8860b; display: flex; justify-content: space-between; align-items: center; }
             @media (max-width: 900px) {
               .top-row { flex-direction: column; }
               .top-row .price-section { width: 100%; }
@@ -1134,95 +855,38 @@
                 <div className="price-main">
                   <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%'}}>
                     <div style={{display: 'flex', flexDirection: 'column'}}>
-                      <span className={`price-current ${priceUpdating ? 'flash' : ''}`} style={{ color: '#1a1a1a' }}>${currentPrice.toFixed(2)}</span>
-                      <span className={`price-change ${priceChange >= 0 ? 'positive' : 'negative'} ${priceUpdating ? 'flash' : ''}`}>
-                        {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)} ({priceChange >= 0 ? '+' : ''}{priceChangePercent.toFixed(2)}%)
+                      <span className={`price-current ${priceUpdating ? 'flash' : ''}`}>${currentPrice.toFixed(2)}</span>
+                      <span className={`price-change ${todayChange >= 0 ? 'positive' : 'negative'} ${priceUpdating ? 'flash' : ''}`}>
+                        {todayChange >= 0 ? '+' : ''}{todayChange.toFixed(2)} ({todayChange >= 0 ? '+' : ''}{todayChangePercent.toFixed(2)}%)
                       </span>
                     </div>
-                    <div className={`status-dot ${isMarketOpen() ? 'open' : 'closed'}`}></div>
+                    <div className={`status-dot ${currentMarketState.isRegularHours ? 'open' : currentMarketState.isExtendedHours ? 'extended' : 'closed'}`} title={currentMarketState.state}></div>
                   </div>
                 </div>
                 
-                {/* Pre/Post Market Bar */}
-                {!isMarketOpen() && yahooData && (
-                  (() => {
-                    let marketLabel, marketPrice, marketChange, marketChangePercent;
-                    
-                    // Determine if we're in pre-market or post-market based on time
-                    const now = new Date();
-                    const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-                    const estHour = estTime.getHours();
-                    const estMinute = estTime.getMinutes();
-                    const timeInMinutes = estHour * 60 + estMinute;
-                    const preMarketStart = 4 * 60; // 4:00 AM
-                    const marketOpen = 9 * 60 + 30; // 9:30 AM
-                    const marketClose = 16 * 60; // 4:00 PM
-                    const postMarketEnd = 20 * 60; // 8:00 PM
-                    
-                    const isPreMarketTime = timeInMinutes >= preMarketStart && timeInMinutes < marketOpen;
-                    const isPostMarketTime = timeInMinutes >= marketClose && timeInMinutes < postMarketEnd;
-                    
-                    // Use time-based logic first, then fall back to what data exists
-                    if (isPreMarketTime && yahooData.preMarketPrice) {
-                      marketLabel = 'PRE';
-                      marketPrice = yahooData.preMarketPrice;
-                      marketChange = marketPrice - currentPrice;
-                      marketChangePercent = (marketChange / currentPrice) * 100;
-                    } else if (isPostMarketTime && yahooData.postMarketPrice) {
-                      marketLabel = 'POST';
-                      marketPrice = yahooData.postMarketPrice;
-                      marketChange = marketPrice - currentPrice;
-                      marketChangePercent = (marketChange / currentPrice) * 100;
-                    } else if (yahooData.preMarketPrice) {
-                      marketLabel = 'PRE';
-                      marketPrice = yahooData.preMarketPrice;
-                      marketChange = marketPrice - currentPrice;
-                      marketChangePercent = (marketChange / currentPrice) * 100;
-                    } else if (yahooData.postMarketPrice) {
-                      marketLabel = 'POST';
-                      marketPrice = yahooData.postMarketPrice;
-                      marketChange = marketPrice - currentPrice;
-                      marketChangePercent = (marketChange / currentPrice) * 100;
-                    } else {
-                      marketLabel = 'POST';
-                      marketPrice = yahooData.currentPrice;
-                      marketChange = marketPrice - currentPrice;
-                      marketChangePercent = (marketChange / currentPrice) * 100;
-                    }
-                    const isPositive = marketChange >= 0;
-                    return (
-                      <div style={{
-                        marginTop: '16px',
-                        padding: '8px 16px',
-                        background: '#e8e5dc',
-                        borderLeft: '4px solid #b0ada4',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center'
-                      }}>
-                        <span style={{ fontSize: '12px', color: '#1a1a1a', fontWeight: 600 }}>{marketLabel}</span>
-                        <span style={{ fontSize: '18px', fontWeight: 600, color: '#1a1a1a', marginRight: '16px' }}>${marketPrice.toFixed(2)}</span>
-                        <span className={isPositive ? 'positive' : 'negative'} style={{ fontSize: '13px', fontWeight: 600 }}>
-                          {isPositive ? '+' : ''}${marketChange.toFixed(2)} ({isPositive ? '+' : ''}{marketChangePercent.toFixed(2)}%)
-                        </span>
-                      </div>
-                    );
-                  })()
-                )}
+                {/* Extended Hours Bar - Only shown when market is closed and we have extended hours data */}
+                {!currentMarketState.isRegularHours && quote?.extendedHoursPrice && (() => {
+                  const marketChange = quote.extendedHoursPrice - currentPrice;
+                  const marketChangePercent = (marketChange / currentPrice) * 100;
+                  const isPositive = marketChange >= 0;
+                  
+                  return (
+                    <div className="extended-hours-bar">
+                      <span style={{ fontSize: '12px', fontWeight: 600 }}>{quote.extendedHoursType === 'pre' ? 'PRE' : 'POST'}</span>
+                      <span style={{ fontSize: '18px', fontWeight: 600, marginRight: '16px' }}>${quote.extendedHoursPrice.toFixed(2)}</span>
+                      <span className={isPositive ? 'positive' : 'negative'} style={{ fontSize: '13px', fontWeight: 600 }}>
+                        {isPositive ? '+' : ''}${marketChange.toFixed(2)} ({isPositive ? '+' : ''}{marketChangePercent.toFixed(2)}%)
+                      </span>
+                    </div>
+                  );
+                })()}
                 
                 <hr style={{margin: '16px 0', border: 'none', borderTop: '1px solid #e8e5dc'}} />
                 <div className="stats-grid">
                   <div className="stat-row"><span className="stat-label">Day Range</span><span className="stat-value">{dayLow.toFixed(2)} - {dayHigh.toFixed(2)}</span></div>
                   <div className="stat-row"><span className="stat-label">52 Week Range</span><span className="stat-value">{week52Low.toFixed(2)} - {week52High.toFixed(2)}</span></div>
                   <div className="stat-row"><span className="stat-label">Avg. Volume</span><span className="stat-value">{Math.floor(avgVolume).toLocaleString()}</span></div>
-                  <div className="stat-row"><span className="stat-label">Market Cap</span><span className="stat-value">{(() => {
-                    if (marketCap <= 0) return 'N/A';
-                    const inBillions = marketCap / 1000;
-                    const inTrillions = marketCap / 1000000;
-                    if (inTrillions >= 1) return inTrillions.toPrecision(3) + 'T';
-                    if (inBillions >= 1) return inBillions.toPrecision(3) + 'B';
-                    return marketCap.toPrecision(3) + 'M';
-                  })()}</span></div>
+                  <div className="stat-row"><span className="stat-label">Market Cap</span><span className="stat-value">{marketCap <= 0 ? 'N/A' : marketCap >= 1000000 ? (marketCap/1000000).toPrecision(3)+'T' : marketCap >= 1000 ? (marketCap/1000).toPrecision(3)+'B' : marketCap.toPrecision(3)+'M'}</span></div>
                   <div className="stat-row"><span className="stat-label">Forward P/E</span><span className="stat-value">{forwardPE > 0 ? forwardPE.toFixed(2) : 'N/A'}</span></div>
                 </div>
               </div>
@@ -1231,194 +895,86 @@
                 <div className="box chart-box">
                   <div className="timeframe-controls">
                     {['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', '5Y'].map(tf => (
-                      <button 
-                        key={tf} 
-                        className={`timeframe-btn ${timeframe === tf ? 'active' : ''}`}
-                        onClick={() => setTimeframe(tf)}
-                      >
-                        {tf}
-                      </button>
+                      <button key={tf} className={`timeframe-btn ${timeframe === tf ? 'active' : ''}`} onClick={() => setTimeframe(tf)}>{tf}</button>
                     ))}
                   </div>
                   
-                  <svg 
-                    ref={svgRef}
-                    viewBox="0 0 800 300" 
-                    preserveAspectRatio="none"
-                    style={{ width: '100%', height: '100%', cursor: 'crosshair' }}
-                    onMouseMove={handleGraphHover}
-                    onMouseLeave={handleGraphLeave}
-                  >
+                  <svg ref={svgRef} viewBox="0 0 800 300" preserveAspectRatio="none" style={{ width: '100%', height: '100%', cursor: 'crosshair' }} onMouseMove={handleGraphHover} onMouseLeave={() => setHoverData(null)}>
                     <defs>
                       <linearGradient id="grad" x1="0" x2="0" y1="0" y2="1">
-                        <stop offset="0%" stopColor={CHART_FILL_TOP} />
-                        <stop offset="100%" stopColor={CHART_FILL_BOTTOM} />
+                        <stop offset="0%" stopColor={isChartPositive ? 'rgba(19,115,51,0.2)' : 'rgba(165,14,14,0.2)'} />
+                        <stop offset="100%" stopColor={isChartPositive ? 'rgba(19,115,51,0)' : 'rgba(165,14,14,0)'} />
                       </linearGradient>
                     </defs>
                     
-                    {/* Y Axis Grid Lines */}
+                    {/* Y Axis */}
                     {(() => {
                       const min = Math.floor(minPrice / 20) * 20;
                       const max = Math.ceil(maxPrice / 20) * 20;
-                      const range = max - min;
-                      const step = Math.ceil(range / 5 / 20) * 20;
+                      const step = Math.ceil((max - min) / 5 / 20) * 20;
                       const steps = [];
                       for (let p = max; p >= min && steps.length < 6; p -= step) steps.push(p);
-                      return steps.map(p => <text key={p} x="8" y={20 + ((max - p) / (max - min || 1)) * 240 + 4} fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">${p}</text>);
+                      return steps.map(p => <text key={p} x="8" y={20 + ((max - p) / ((max - min) || 1)) * 240 + 4} fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">${p}</text>);
                     })()}
                     
-                    {/* Chart Area and Line */}
                     {areaPath && <path d={areaPath} fill="url(#grad)" />}
                     {linePath && <path d={linePath} fill="none" stroke={CHART_COLOR} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
                     
-                    {/* X Axis Labels */}
-                    {(() => {
-                      if (chartData.length === 0) return null;
-                      
+                    {/* X Axis */}
+                    {chartData.length > 0 && (() => {
                       if (timeframe === '1D') {
-                        // Fixed time labels from 9:30am to 4pm EST (market hours) in 24h format
-                        const fixedTimes = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00'];
-                        const chartStartHour = 9.5; // 9:30am
-                        const chartEndHour = 16; // 4pm
-                        const totalHours = chartEndHour - chartStartHour; // 6.5 hours
-                        
-                        return fixedTimes.map((label, idx) => {
-                          // Calculate x position: 10:00 is 0.5h after start, then 1h apart
-                          const hourOffset = 0.5 + idx;
-                          const x = 50 + (hourOffset / totalHours) * 720;
-                          return (
-                            <text key={idx} x={x} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{label}</text>
-                          );
-                        });
+                        return ['10:00','11:00','12:00','13:00','14:00','15:00','16:00'].map((label, idx) => (
+                          <text key={idx} x={50 + ((0.5 + idx) / 6.5) * 720} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{label}</text>
+                        ));
                       }
-                      
                       if (timeframe === '1W') {
                         const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-                        const dayPoints = [];
                         const seen = new Set();
-                        chartData.forEach((d, i) => {
-                          const day = new Date(d.date).getDay();
+                        return chartData.map((d, i) => {
                           const date = new Date(d.date).toDateString();
-                          if (!seen.has(date)) {
-                            seen.add(date);
-                            dayPoints.push({ label: days[day], x: 50 + (i / (chartData.length - 1 || 1)) * 720 });
-                          }
+                          if (seen.has(date)) return null;
+                          seen.add(date);
+                          return <text key={i} x={50 + (i / (chartData.length - 1 || 1)) * 720} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{days[new Date(d.date).getDay()]}</text>;
                         });
-                        return dayPoints.map((p, idx) => (
-                          <text key={idx} x={p.x} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{p.label}</text>
-                        ));
                       }
-                      
                       if (timeframe === '5Y') {
-                        const yearPoints = [];
                         const seen = new Set();
-                        chartData.forEach((d, i) => {
-                          const year = new Date(d.date).getFullYear().toString().slice(-2);
-                          const fullYear = new Date(d.date).getFullYear();
-                          if (!seen.has(fullYear)) {
-                            seen.add(fullYear);
-                            yearPoints.push({ label: year, x: 50 + (i / (chartData.length - 1 || 1)) * 720 });
-                          }
+                        return chartData.map((d, i) => {
+                          const year = new Date(d.date).getFullYear();
+                          if (seen.has(year)) return null;
+                          seen.add(year);
+                          return <text key={i} x={50 + (i / (chartData.length - 1 || 1)) * 720} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{String(year).slice(-2)}</text>;
                         });
-                        return yearPoints.map((p, idx) => (
-                          <text key={idx} x={p.x} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{p.label}</text>
-                        ));
                       }
-                      
                       const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
                       const seen = new Set();
-                      const monthPoints = [];
-                      chartData.forEach((d, i) => {
-                        const m = new Date(d.date).getMonth();
-                        const key = `${new Date(d.date).getFullYear()}-${m}`;
-                        if (!seen.has(key)) {
-                          seen.add(key);
-                          monthPoints.push({ month: months[m], x: 50 + (i / (chartData.length - 1 || 1)) * 720 });
-                        }
+                      return chartData.map((d, i) => {
+                        const key = `${new Date(d.date).getFullYear()}-${new Date(d.date).getMonth()}`;
+                        if (seen.has(key)) return null;
+                        seen.add(key);
+                        return <text key={i} x={50 + (i / (chartData.length - 1 || 1)) * 720} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{months[new Date(d.date).getMonth()]}</text>;
                       });
-                      return monthPoints.map(p => (
-                        <text key={p.month + p.x} x={p.x} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{p.month}</text>
-                      ));
                     })()}
                     
-                    {/* Hover Overlays */}
+                    {/* Hover */}
                     {hoverData && (
                       <g pointerEvents="none">
-                        {/* Vertical Line - Snapped to Data */}
-                        <line 
-                          x1={hoverData.dataX} 
-                          y1="20" 
-                          x2={hoverData.dataX} 
-                          y2="260" 
-                          stroke="#666" 
-                          strokeWidth="1" 
-                          strokeDasharray="4"
-                        />
-                        {/* Horizontal Line - Snapped to Data Y */}
-                        <line 
-                          x1="50" 
-                          y1={hoverData.y} 
-                          x2="770" 
-                          y2={hoverData.y} 
-                          stroke="#666" 
-                          strokeWidth="1" 
-                          strokeDasharray="4"
-                        />
-                         {/* Circle Intersection - Snaps to Data Point */}
-                         <circle 
-                          cx={hoverData.dataX} 
-                          cy={hoverData.y} 
-                          r="3.5" 
-                          fill={CHART_COLOR} 
-                          stroke="#fff" 
-                          strokeWidth="2" 
-                        />
+                        <line x1={hoverData.dataX} y1="20" x2={hoverData.dataX} y2="260" stroke="#666" strokeWidth="1" strokeDasharray="4" />
+                        <line x1="50" y1={hoverData.y} x2="770" y2={hoverData.y} stroke="#666" strokeWidth="1" strokeDasharray="4" />
+                        <circle cx={hoverData.dataX} cy={hoverData.y} r="3.5" fill={CHART_COLOR} stroke="#fff" strokeWidth="2" />
                       </g>
                     )}
                   </svg>
                   
-                  {/* Fixed-size HTML Tooltip */}
+                  {/* Tooltip */}
                   {hoverData && (
-                    <div style={{
-                      position: 'absolute',
-                      left: `${(hoverData.dataX / 800) * 100}%`,
-                      top: `${(hoverData.y / 300) * 100}%`,
-                      transform: hoverData.dataX < 400 ? 'translate(10px, -50%)' : 'translate(-130px, -50%)',
-                      pointerEvents: 'none',
-                      zIndex: 10
-                    }}>
-                      <div style={{
-                        background: 'rgba(26, 26, 26, 0.9)',
-                        padding: '8px 12px',
-                        borderRadius: '4px',
-                        minWidth: '80px',
-                        textAlign: 'center'
-                      }}>
-                        <div style={{
-                          color: '#fff',
-                          fontSize: '13px',
-                          fontWeight: 600,
-                          fontFamily: 'IBM Plex Mono',
-                          marginBottom: '4px'
-                        }}>
-                          ${hoverData.data.close.toFixed(2)}
-                        </div>
-                        <div style={{
-                          color: '#ccc',
-                          fontSize: '10px',
-                          fontFamily: 'IBM Plex Mono'
-                        }}>
+                    <div style={{ position: 'absolute', left: `${(hoverData.dataX / 800) * 100}%`, top: `${(hoverData.y / 300) * 100}%`, transform: hoverData.dataX < 400 ? 'translate(10px, -50%)' : 'translate(-130px, -50%)', pointerEvents: 'none', zIndex: 10 }}>
+                      <div style={{ background: 'rgba(26, 26, 26, 0.9)', padding: '8px 12px', borderRadius: '4px', minWidth: '80px', textAlign: 'center' }}>
+                        <div style={{ color: '#fff', fontSize: '13px', fontWeight: 600, fontFamily: 'IBM Plex Mono', marginBottom: '4px' }}>${hoverData.data.close.toFixed(2)}</div>
+                        <div style={{ color: '#ccc', fontSize: '10px', fontFamily: 'IBM Plex Mono' }}>
                           {timeframe === '1D' 
-                            ? new Date(hoverData.data.date).toLocaleTimeString('en-US', {
-                                hour:'numeric', 
-                                minute:'2-digit',
-                                timeZone: 'America/New_York'
-                              })
-                            : new Date(hoverData.data.date).toLocaleDateString('en-US', {
-                                month:'short', 
-                                day:'numeric',
-                                timeZone: 'America/New_York'
-                              })}
+                            ? new Date(hoverData.data.date).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit', timeZone: 'America/New_York' })
+                            : new Date(hoverData.data.date).toLocaleDateString('en-US', { month:'short', day:'numeric', timeZone: 'America/New_York' })}
                         </div>
                       </div>
                     </div>
@@ -1438,11 +994,10 @@
                 <div className="header-input-cell"><input type="text" className="header-input" value={sharesCount ? parseInt(sharesCount).toLocaleString() : ''} onChange={(e) => { const v = e.target.value.replace(/,/g, ''); if (v === '' || /^\d+$/.test(v)) setSharesCount(v); }} placeholder="#" /></div>
               </div>
               <div className="spreadsheet-body">
-                {sortedData.map((row, index) => {
+                {sortedData.map((row) => {
                   const shares = parseInt(sharesCount) || 0;
                   const value = shares > 0 ? Math.round(shares * row.close) : null;
-                  const isLivePrice = row.isToday && isMarketOpen();
-                  const chg = row.chg;
+                  const isLivePrice = row.isToday && currentMarketState.isRegularHours;
                   
                   return (
                     <div key={row.date} className="spreadsheet-row">
@@ -1450,21 +1005,19 @@
                       <div className="spreadsheet-cell">${row.open.toFixed(2)}</div>
                       <div className="spreadsheet-cell">${row.high.toFixed(2)}</div>
                       <div className={`spreadsheet-cell ${isLivePrice ? 'live-price' : ''}`}>${row.close.toFixed(2)}</div>
-                      <div className="spreadsheet-cell">
-                        {row.isToday 
-                          ? (row.volume > 500000 ? (row.volume / 1000000).toFixed(0) + 'M' : '—')
-                          : (row.volume > 500000 ? (row.volume / 1000000).toFixed(0) + 'M' : '—')
-                        }
-                      </div>
-                      <div className={`spreadsheet-cell ${chg !== null ? (chg >= 0 ? 'positive' : 'negative') : ''}`}>{chg !== null ? `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}` : '—'}</div>
-                      <div className="spreadsheet-cell value-cell">{value !== null && <>${value.toLocaleString()}{chg !== null && <span className={chg >= 0 ? 'positive' : 'negative'}> | {chg >= 0 ? '+' : ''}${Math.round(chg * shares).toLocaleString()}</span>}</>}</div>
+                      <div className="spreadsheet-cell">{row.volume > 500000 ? (row.volume / 1000000).toFixed(0) + 'M' : '—'}</div>
+                      <div className={`spreadsheet-cell ${row.chg !== null ? (row.chg >= 0 ? 'positive' : 'negative') : ''}`}>{row.chg !== null ? `${row.chg >= 0 ? '+' : ''}${row.chg.toFixed(2)}` : '—'}</div>
+                      <div className="spreadsheet-cell value-cell">{value !== null && <>${value.toLocaleString()}{row.chg !== null && <span className={row.chg >= 0 ? 'positive' : 'negative'}> | {row.chg >= 0 ? '+' : ''}${Math.round(row.chg * shares).toLocaleString()}</span>}</>}</div>
                     </div>
                   );
                 })}
               </div>
             </div>
 
-            <div className="timestamp">Last updated: {new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', '')}</div>
+            <div className="timestamp">
+              Last updated: {new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', '')} 
+              <span style={{ marginLeft: '12px', opacity: 0.7 }}>Market: {currentMarketState.state}</span>
+            </div>
           </div>
         </div>
       );
