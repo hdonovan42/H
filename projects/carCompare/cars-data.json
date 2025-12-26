@@ -1,0 +1,122 @@
+[
+  {
+    "id": 1,
+    "make": "BMW",
+    "model": "M340i",
+    "aliases": [
+      "beemer",
+      "bimmer"
+    ],
+    "generation": "G20",
+    "modelYears": "2019-2025",
+    "year": 2023,
+    "hp": 382,
+    "zeroToSixty": 4.1,
+    "topSpeed": 155,
+    "cylinders": 6,
+    "displacement": 3,
+    "enginePlacement": "Front",
+    "drivetrain": "AWD",
+    "weight": 3909
+  },
+  {
+    "id": 2,
+    "make": "BMW",
+    "model": "M3 Competition",
+    "aliases": [
+      "beemer",
+      "bimmer"
+    ],
+    "generation": "G80",
+    "modelYears": "2021-2024",
+    "year": 2022,
+    "hp": 503,
+    "zeroToSixty": 3.8,
+    "topSpeed": 180,
+    "cylinders": 6,
+    "displacement": 3,
+    "enginePlacement": "Front",
+    "drivetrain": "RWD",
+    "weight": 3890
+  },
+  {
+    "id": 3,
+    "make": "BMW",
+    "model": "M550i xDrive",
+    "aliases": [
+      "beemer",
+      "bimmer"
+    ],
+    "generation": "G30 LCI",
+    "modelYears": "2020-2023",
+    "year": 2021,
+    "hp": 523,
+    "zeroToSixty": 3.6,
+    "topSpeed": 155,
+    "cylinders": 8,
+    "displacement": 4.4,
+    "enginePlacement": "Front",
+    "drivetrain": "AWD",
+    "weight": 4370
+  },
+  {
+    "id": 4,
+    "make": "Audi",
+    "model": "RS4",
+    "aliases": [
+      "RS4 Avant",
+      "RS4 Sedan"
+    ],
+    "generation": "B7",
+    "modelYears": "2006-2008",
+    "year": 2006,
+    "hp": 420,
+    "zeroToSixty": 4.8,
+    "topSpeed": 155,
+    "cylinders": 8,
+    "displacement": 4.2,
+    "enginePlacement": "Front",
+    "drivetrain": "AWD",
+    "weight": 3825
+  },
+  {
+    "id": 5,
+    "make": "Audi",
+    "model": "RS6 Avant Performance",
+    "aliases": [
+      "RS6 Avant",
+      "RS6"
+    ],
+    "generation": "C8",
+    "modelYears": "2020-2025",
+    "year": 2025,
+    "hp": 621,
+    "zeroToSixty": 3.3,
+    "topSpeed": 190,
+    "cylinders": 8,
+    "displacement": 4,
+    "enginePlacement": "Front",
+    "drivetrain": "AWD",
+    "weight": 4575
+  },
+  {
+    "id": 6,
+    "make": "Audi",
+    "model": "RS4 Avant",
+    "aliases": [
+      "RS4 B7",
+      "RS4 Avant B7"
+    ],
+    "generation": "B7",
+    "modelYears": "2006-2008",
+    "year": 2007,
+    "hp": 420,
+    "zeroToSixty": 4.8,
+    "topSpeed": 155,
+    "cylinders": 8,
+    "displacement": 4.2,
+    "enginePlacement": "Front",
+    "drivetrain": "AWD",
+    "weight": 3836
+  }
+]

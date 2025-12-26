@@ -6,13 +6,15 @@
  * - Structured Generation (JSON schema enforcement)
  * - RAG (Retrieval Augmented Generation via web search)
  * - Verification Pipeline (multi-source cross-checking)
- *  
- *  Configuration:
- *  Create a .env file with: ANTHROPIC_API_KEY=sk-ant-...
  * 
  * Usage:
- *   node populate-cars.js "Porsche 911 GT3 2024" "BMW M3 2024", (with file) node populate-cars.js --file cars.txt
+ *   node populate-cars.js "Porsche 911 GT3 2024" "BMW M3 2024"
+ *   
+ * Or with a file:
+ *   node populate-cars.js --file cars-to-lookup.txt
  * 
+ * Configuration:
+ *   Create a .env file with: ANTHROPIC_API_KEY=sk-ant-...
  */
 
 const https = require('https');
@@ -88,6 +90,7 @@ const CAR_SCHEMA = {
         id: { type: "integer", description: "Unique identifier" },
         make: { type: "string", description: "Car manufacturer (e.g., Porsche, BMW)" },
         model: { type: "string", description: "Model name (e.g., 911 GT3, M3 Competition)" },
+        aliases: { type: "array", items: { type: "string" }, description: "Common abbreviations/nicknames for searching. Usually brand-related (e.g., ['vw'] for Volkswagen, ['merc', 'benz'] for Mercedes-Benz, ['beemer', 'bimmer'] for BMW). Can include model nicknames too. Empty array if no common aliases." },
         generation: { type: "string", description: "Generation/chassis code (e.g., 992, 997, G80, W206). Use the manufacturer's internal code." },
         modelYears: { type: "string", description: "Production year range for this generation (e.g., '2019-2024', '2014-2019')" },
         year: { type: "integer", description: "Specific model year for these specs" },
@@ -108,7 +111,7 @@ const CAR_SCHEMA = {
         },
         weight: { type: "integer", description: "Curb weight in kilograms" }
     },
-    required: ["id", "make", "model", "generation", "year", "hp", "zeroToSixty", "topSpeed", 
+    required: ["id", "make", "model", "aliases", "generation", "year", "hp", "zeroToSixty", "topSpeed", 
                "cylinders", "enginePlacement", "drivetrain", "weight"]
 };
 
@@ -159,7 +162,8 @@ async function callAnthropicAPI(messages, systemPrompt, useTools = false, retryC
         if (useTools) {
             body.tools = [{
                 type: "web_search_20250305",
-                name: "web_search"
+                name: "web_search",
+                max_uses: 2  // Limit searches to reduce token usage while allowing refinement
             }];
         }
 
@@ -238,23 +242,11 @@ async function callAnthropicAPI(messages, systemPrompt, useTools = false, retryC
 async function ragSearch(carQuery) {
     log(`RAG: Searching for "${carQuery}" specifications...`, 'step');
     
-    const systemPrompt = `You are a car specification research assistant. Use web search to find accurate, verified specifications for cars. 
-
-IMPORTANT: Be concise. Return ONLY the key specifications in a brief summary format:
-- Generation/chassis code (e.g., 997.2, Mk7.5, E90 LCI)
-- Model years
-- Horsepower
-- 0-60 mph time  
-- Top speed (mph)
-- Engine (cylinders, displacement)
-- Drivetrain
-- Curb weight (kg)
-
-Do NOT include lengthy descriptions, reviews, or marketing text. Just the numbers.`;
+    const systemPrompt = `Find car specs. Return ONLY: generation code, model years, hp, 0-60, top speed, cylinders, displacement, drivetrain, weight (kg). Be brief.`;
 
     const messages = [{
         role: 'user',
-        content: `Find specifications for: ${carQuery}. Return ONLY a brief list of specs (hp, 0-60, top speed, weight, engine, drivetrain, generation code). Be concise.`
+        content: `Specs for: ${carQuery}`
     }];
 
     try {
@@ -327,6 +319,18 @@ Mercedes:
 - W205, W205 facelift
 
 General rule: If the facelift brought mechanical changes (engine, power, weight), treat it as a DISTINCT generation code. Use ".2", "LCI", ".5", or "facelift" suffix as appropriate for the brand.
+
+ALIASES - Include common abbreviations/nicknames for the brand (and sometimes model):
+- Volkswagen: ["vw"]
+- Mercedes-Benz: ["merc", "benz", "mercedes"]
+- BMW: ["beemer", "bimmer"]
+- Chevrolet: ["chevy"]
+- Alfa Romeo: ["alfa"]
+- Land Rover: ["landy"]
+- Porsche: [] (no common aliases)
+- Toyota: [] (no common aliases)
+- Some models have nicknames too, e.g., Nissan GT-R: ["godzilla"]
+- Use empty array [] if no common aliases exist
 
 If you cannot find a specific value, use reasonable estimates based on similar vehicles in the same class.`;
 
@@ -659,6 +663,32 @@ ${colors.yellow}Setup Instructions:${colors.reset}
     // Parse arguments
     const args = process.argv.slice(2);
     let carQueries = [];
+    let appendMode = false;
+    let existingCars = [];
+
+    // Check for --append flag
+    const appendIndex = args.indexOf('--append');
+    if (appendIndex !== -1) {
+        appendMode = true;
+        args.splice(appendIndex, 1); // Remove --append from args
+        
+        // Load existing data.js if it exists
+        if (fs.existsSync(CONFIG.outputFile)) {
+            try {
+                const existingContent = fs.readFileSync(CONFIG.outputFile, 'utf-8');
+                // Extract JSON array from the file
+                const match = existingContent.match(/const carsDatabase = (\[[\s\S]*?\]);/);
+                if (match) {
+                    existingCars = JSON.parse(match[1]);
+                    log(`Append mode: Loaded ${existingCars.length} existing cars from ${CONFIG.outputFile}`, 'success');
+                }
+            } catch (e) {
+                log(`Warning: Could not parse existing ${CONFIG.outputFile}, starting fresh`, 'warning');
+            }
+        } else {
+            log(`Append mode: No existing ${CONFIG.outputFile} found, will create new`, 'info');
+        }
+    }
 
     if (args.length === 0) {
         log('No cars specified. Using example cars...', 'warning');
@@ -677,18 +707,23 @@ ${colors.yellow}Setup Instructions:${colors.reset}
         const fileContent = fs.readFileSync(filePath, 'utf-8');
         carQueries = fileContent.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
     } else {
-        carQueries = args;
+        carQueries = args.filter(a => !a.startsWith('--'));
     }
 
     log(`Pipeline Configuration:`, 'info');
     log(`  RAG (Web Search): ${CONFIG.enableRag ? 'Enabled' : 'Disabled'}`, 'info');
     log(`  Verification: ${CONFIG.enableVerification ? 'Enabled' : 'Disabled'}`, 'info');
     log(`  Schema Validation: ${CONFIG.strictSchemaValidation ? 'Strict' : 'Relaxed'}`, 'info');
+    log(`  Append Mode: ${appendMode ? 'Yes' : 'No (overwrite)'}`, 'info');
     log(`  Cars to process: ${carQueries.length}`, 'info');
 
-    const results = [];
+    // Start with existing cars if in append mode
+    const results = [...existingCars];
     const skippedDuplicates = [];
-    let currentId = 1;
+    // Set currentId to next available ID
+    let currentId = existingCars.length > 0 
+        ? Math.max(...existingCars.map(c => c.id)) + 1 
+        : 1;
 
     for (const query of carQueries) {
         try {
@@ -770,8 +805,6 @@ ${colors.yellow}Setup Instructions:${colors.reset}
 // Pipeline: RAG=${CONFIG.enableRag}, Verification=${CONFIG.enableVerification}
 
 const carsDatabase = ${JSON.stringify(results, null, 4)};
-
-export default carsDatabase;
 `;
 
     fs.writeFileSync(CONFIG.outputFile, dataJsContent);

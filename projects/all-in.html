@@ -112,7 +112,11 @@
               preMarketChangePercent: meta.preMarketChangePercent,
               postMarketPrice: meta.postMarketPrice,
               postMarketChange: meta.postMarketChange,
-              postMarketChangePercent: meta.postMarketChangePercent
+              postMarketChangePercent: meta.postMarketChangePercent,
+              // Extract the trading day from the API response timestamp
+              tradingDay: result.timestamp && result.timestamp.length > 0 
+                ? new Date(result.timestamp[result.timestamp.length - 1] * 1000).toISOString().split('T')[0]
+                : null
             };
             
             return yahooQuote;
@@ -123,17 +127,14 @@
         return null;
       };
 
-      const getTradingDay = () => {
+      // Get today's date in EST (for display purposes only)
+      const getTodayEST = () => {
         const now = new Date();
         const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-        const estHour = estTime.getHours();
-        if (estHour < 9 || (estHour === 9 && estTime.getMinutes() < 30)) {
-          const yesterday = new Date(estTime);
-          yesterday.setDate(yesterday.getDate() - 1);
-          return yesterday.toISOString().split('T')[0];
-        }
         return estTime.toISOString().split('T')[0];
       };
+
+      // REMOVED: getTradingDay() - we now use the API as source of truth
 
       const isMarketOpen = () => {
         const now = new Date();
@@ -148,8 +149,7 @@
         return timeInMinutes >= marketOpen && timeInMinutes < marketClose;
       };
 
-      const fetchAlpacaIntradayBars = async (symbol) => {
-        const tradingDay = getTradingDay();
+      const fetchAlpacaIntradayBars = async (symbol, tradingDay) => {
         const res = await fetch(
           `${WORKER_URL}/bars/${symbol}?start=${tradingDay}T00:00:00Z&end=${new Date().toISOString()}&timeframe=1Min&feed=iex`
         );
@@ -253,7 +253,8 @@
               volume: yahooData.volume,
               source: 'yahoo',
               yahooData: yahooData,
-              isMarketOpen: true
+              isMarketOpen: true,
+              tradingDay: yahooData.tradingDay  // Pass through the API's trading day
             };
           }
           
@@ -299,7 +300,8 @@
                   volume: yahooData.volume,
                   source: 'alpaca-sip-premarket',
                   yahooData: updatedYahooData,
-                  isMarketOpen: false
+                  isMarketOpen: false,
+                  tradingDay: yahooData.tradingDay
                 };
               }
             } catch (e) {
@@ -328,7 +330,8 @@
                   volume: yahooData.volume,
                   source: 'alpaca-sip-postmarket',
                   yahooData: updatedYahooData,
-                  isMarketOpen: false
+                  isMarketOpen: false,
+                  tradingDay: yahooData.tradingDay
                 };
               }
             } catch (e) {
@@ -347,7 +350,8 @@
               volume: yahooData.volume,
               source: 'yahoo',
               yahooData: yahooData,
-              isMarketOpen: false
+              isMarketOpen: false,
+              tradingDay: yahooData.tradingDay
             };
           }
         }
@@ -424,7 +428,9 @@
                 close: currentPrice,
                 volume: dayVolume,
                 isOfficial: realTimeData?.source === 'yahoo'
-              }
+              },
+              // Store the API's trading day for use in spreadsheet logic
+              apiTradingDay: realTimeData?.tradingDay || null
             });
           }
 
@@ -474,7 +480,8 @@
                 low: dayLow,
                 close: currentPrice,
                 volume: realTimeData.volume || 0
-              }
+              },
+              apiTradingDay: realTimeData?.tradingDay || null
             });
             if (realTimeData.yahooData) setYahooData(realTimeData.yahooData);
             
@@ -601,16 +608,17 @@
         
         const connectWebSocket = () => {
           if (!checkMarketHours()) {
-            console.log('Market closed - WebSocket not connecting');
+            console.log('⏰ Outside market hours - WebSocket not connecting');
             return;
           }
           
+          console.log('🔌 Connecting to Finnhub WebSocket...');
           ws = new WebSocket(`wss://ws.finnhub.io?token=${FINNHUB_API_KEY}`);
-          wsRef.current = ws;
           
           ws.onopen = () => {
-            console.log('✓ Finnhub WebSocket connected (market hours)');
+            console.log('✓ Finnhub WebSocket connected');
             setWsConnected(true);
+            wsRef.current = ws;
             if (ticker) {
               ws.send(JSON.stringify({ type: 'subscribe', symbol: ticker }));
               currentSymbolRef.current = ticker;
@@ -619,80 +627,61 @@
           };
           
           ws.onmessage = (event) => {
-            // Double-check we're still in market hours before updating price
-            if (!checkMarketHours()) return;
-            
-            const message = JSON.parse(event.data);
-            
-            if (message.type === 'trade' && message.data && message.data.length > 0) {
-              // Use ref instead of ticker to avoid stale closure
-              const currentSymbol = currentSymbolRef.current;
-              const trades = message.data.filter(t => t.s === currentSymbol);
-              if (trades.length > 0) {
-                const latestTrade = trades[trades.length - 1];
+            try {
+              const msg = JSON.parse(event.data);
+              if (msg.type === 'trade' && msg.data && msg.data.length > 0) {
+                const latestTrade = msg.data[msg.data.length - 1];
                 const newPrice = latestTrade.p;
                 
-                if (lastPriceRef.current !== newPrice) {
-                  lastPriceRef.current = newPrice;
-                  
-                  // Only update price and change - leave OHLV data from Yahoo intact
-                  setQuote(prev => {
-                    if (!prev) return prev;
-                    const change = newPrice - prev.pc;
-                    const changePercent = (change / prev.pc) * 100;
-                    return {
-                      ...prev,
-                      c: newPrice,
-                      d: change,
-                      dp: changePercent
-                      // Do NOT update h, l, o, or todayBars - those come from Yahoo
-                    };
-                  });
-                  
-                  // Update 1D chart with latest price point
-                  setChartData(prev => {
-                    if (!prev || prev.length === 0) return prev;
-                    // Only update if viewing intraday chart
-                    const lastPoint = prev[prev.length - 1];
-                    const now = new Date();
-                    const lastPointTime = new Date(lastPoint.date);
-                    // If less than 5 minutes since last point, update it; otherwise this will refresh on next Yahoo fetch
-                    if ((now - lastPointTime) < 5 * 60 * 1000) {
-                      const updated = [...prev];
-                      updated[updated.length - 1] = {
-                        ...lastPoint,
-                        close: newPrice,
-                        high: Math.max(lastPoint.high, newPrice),
-                        low: Math.min(lastPoint.low, newPrice)
-                      };
-                      return updated;
-                    }
-                    return prev;
-                  });
+                if (lastPriceRef.current !== null && lastPriceRef.current === newPrice) {
+                  return;
                 }
+                
+                lastPriceRef.current = newPrice;
+                
+                setQuote(prev => {
+                  if (!prev) return prev;
+                  const change = newPrice - prev.pc;
+                  const changePercent = (change / prev.pc) * 100;
+                  return {
+                    ...prev,
+                    c: newPrice,
+                    d: change,
+                    dp: changePercent,
+                    h: Math.max(prev.h || newPrice, newPrice),
+                    l: Math.min(prev.l || newPrice, newPrice),
+                    todayBars: {
+                      ...prev.todayBars,
+                      close: newPrice,
+                      high: Math.max(prev.todayBars?.high || newPrice, newPrice),
+                      low: Math.min(prev.todayBars?.low || newPrice, newPrice)
+                    }
+                  };
+                });
+                
+                setPriceUpdating(true);
+                setTimeout(() => setPriceUpdating(false), 150);
               }
+            } catch (e) {
+              console.error('WebSocket message error:', e);
+            }
+          };
+          
+          ws.onclose = () => {
+            console.log('🔌 Finnhub WebSocket closed');
+            setWsConnected(false);
+            wsRef.current = null;
+            
+            if (checkMarketHours()) {
+              reconnectTimeout = setTimeout(connectWebSocket, 5000);
             }
           };
           
           ws.onerror = (error) => {
             console.error('WebSocket error:', error);
-            setWsConnected(false);
-          };
-          
-          ws.onclose = () => {
-            setWsConnected(false);
-            wsRef.current = null;
-            // Only reconnect if still market hours
-            if (checkMarketHours()) {
-              console.log('WebSocket disconnected, reconnecting in 3s...');
-              reconnectTimeout = setTimeout(connectWebSocket, 3000);
-            } else {
-              console.log('WebSocket closed - market now closed');
-            }
           };
         };
         
-        // Initial connection if market is open
         if (checkMarketHours()) {
           connectWebSocket();
         }
@@ -864,29 +853,46 @@
         setHoverData(null);
       };
 
+      // ===== FIXED TRADING DAY LOGIC =====
+      // Use the API as the source of truth for trading days
+      // Only add/update "today" row if:
+      // 1. The API returned data for today (proof the market traded/is trading)
+      // 2. OR if the market is currently open and we have a live quote
+      
       const dataWithToday = [...data];
-      const tradingDay = getTradingDay();
-      const lastDate = data.length > 0 ? data[data.length - 1].date : null;
-      const hasTodayData = lastDate === tradingDay;
-      const hasManualTodayRow = dataWithToday.some(d => d.date === tradingDay && d.isToday);
+      const todayEST = getTodayEST();  // Today's date in EST
+      const lastHistoricalDate = data.length > 0 ? data[data.length - 1].date : null;
       
-      // Check if current time is weekend in EST
-      const now = new Date();
-      const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-      const dayOfWeek = estTime.getDay();
-      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+      // Get the trading day from the API response (this is the authoritative source)
+      const apiTradingDay = quote?.apiTradingDay || yahooData?.tradingDay || null;
       
-      // Also check if tradingDay itself is a weekend date
-      const tradingDayDate = new Date(tradingDay + 'T12:00:00');
-      const tradingDayOfWeek = tradingDayDate.getDay();
-      const isTradingDayWeekend = tradingDayOfWeek === 0 || tradingDayOfWeek === 6;
+      // Check if the API confirms today is a trading day
+      const apiConfirmsTodayIsTradingDay = apiTradingDay === todayEST;
+      
+      // Check if historical data already includes today
+      const historicalDataHasToday = lastHistoricalDate === todayEST;
+      
+      // Only consider adding/updating today's row if:
+      // - The API confirms today is a trading day, OR
+      // - The market is currently open (real-time trading happening)
+      const shouldProcessTodayRow = apiConfirmsTodayIsTradingDay || isMarketOpen();
+      
+      // Debug logging for trading day logic
+      console.log('Trading Day Logic:', {
+        todayEST,
+        apiTradingDay,
+        lastHistoricalDate,
+        apiConfirmsTodayIsTradingDay,
+        historicalDataHasToday,
+        isMarketOpen: isMarketOpen(),
+        shouldProcessTodayRow
+      });
       
       // If today's data exists in historical data, update it with live data
-      if (!isWeekend && !isTradingDayWeekend && hasTodayData && quote?.c) {
-        const todayIndex = dataWithToday.findIndex(d => d.date === tradingDay);
+      if (shouldProcessTodayRow && historicalDataHasToday && quote?.c) {
+        const todayIndex = dataWithToday.findIndex(d => d.date === todayEST);
         if (todayIndex !== -1) {
           const isLiveData = isMarketOpen();
-          // Use Yahoo data for spreadsheet if available, otherwise use quote data
           const useYahoo = yahooData?.spreadsheetOpen;
           dataWithToday[todayIndex] = {
             ...dataWithToday[todayIndex],
@@ -900,12 +906,12 @@
         }
       }
       
-      // If today's data doesn't exist, add it
-      if (!isWeekend && !isTradingDayWeekend && !hasTodayData && !hasManualTodayRow && quote?.c) {
+      // If today's data doesn't exist but API confirms today is a trading day, add it
+      if (shouldProcessTodayRow && !historicalDataHasToday && quote?.c) {
         const isLiveData = isMarketOpen();
         const useYahoo = yahooData?.spreadsheetOpen;
         dataWithToday.push({
-          date: tradingDay,
+          date: todayEST,
           open: useYahoo ? yahooData.spreadsheetOpen : (quote.o || quote.c),
           high: useYahoo ? yahooData.spreadsheetHigh : (quote.h || quote.c),
           low: useYahoo ? yahooData.spreadsheetLow : (quote.l || quote.c),
@@ -913,9 +919,12 @@
           volume: useYahoo ? yahooData.spreadsheetVolume : (quote.todayBars?.volume || 0),
           isToday: isLiveData
         });
+        console.log('✓ Added today row (API confirmed trading day):', todayEST);
       }
+      
+      // Clean up any stale "isToday" rows that don't match the current trading day
       const cleanedData = dataWithToday.filter(d => {
-        if (d.isToday && d.date !== tradingDay) return false;
+        if (d.isToday && d.date !== todayEST) return false;
         return true;
       });
       
