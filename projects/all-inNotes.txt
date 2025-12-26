@@ -1,6 +1,13 @@
 MISSION - when i want to check tsla price i go to hjd.ai instead of yahoo or perplexity
 - price slightly off - not sure if this can be fixed for free - polygon.io/massive.com $200/month tier endgame.
 
+NEXT 3
+
+-favicon
+-avg volume - how is this gathered/calculated
+-bulletproof afterhours price - which is the best free source of this data - make sure the label is robust - confident it is 
+
+
 DATA
 Yahoo Finance - OHLCV data, quotes, 52-week range, pre/post prices 
 Alpaca - Extended hours bar, market clock/status 
@@ -28,7 +35,19 @@ Improvements
 - add eastern time indication to 1D ticker
 - date handling - should client based and manual calculations cause problems - use library
 
+- gathered/calculated
+    - which data is best to gathered, which calculated?
+    - opportunity to create my own spec format - each variable - seperation of open/close 
+
 - analyst info - price estmiate, eps estimate, price targets, etc 
+
+-graph - 1 day is fucked on market open - add ET label 
+-spd - why only 6 months - what to do here? - should scroll autoload - most of the time this is more than enough
+
+
+
+
+
 
 - how does data handle splits - do i need adjusted close - see yahoo's page 
 
