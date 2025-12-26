@@ -24,7 +24,7 @@ Finnhub - Real time price (through websocket) + forward p/e
 - gathered shares outstanding from FMP
 
 - changed button appearance
-- 
+- fixed label overlap
 
 
 

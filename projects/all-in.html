@@ -370,56 +370,82 @@
       const renderXAxisLabels = () => {
         if (!chartData.length) return null;
         
-        if (timeframe === '1D') {
-          return ['10:00','11:00','12:00','13:00','14:00','15:00','16:00'].map((label, idx) => (
-            <text key={idx} x={50 + ((0.5 + idx) / 6.5) * 720} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">
-              {label}
-            </text>
-          ));
-        }
+        // Max labels per timeframe
+        const maxLabels = {
+          '1D': 7,
+          '1W': 6,
+          '1M': 3,
+          '3M': 3,
+          '6M': 6,
+          'YTD': 12,
+          '1Y': 12,
+          '5Y': 5
+        };
         
-        if (timeframe === '1W') {
+        const limit = maxLabels[timeframe] || 6;
+        
+        // Helper to limit labels - removes from the start to avoid edge crowding
+        const spacedLabels = (labels) => {
+          if (labels.length <= limit) return labels;
+          return labels.slice(labels.length - limit);
+        };
+        
+        let allLabels = [];
+        
+        if (timeframe === '1D') {
+          allLabels = ['10:00','11:00','12:00','13:00','14:00','15:00','16:00'].map((label, idx) => ({
+            label,
+            x: 50 + ((0.5 + idx) / 6.5) * 720
+          }));
+        } else if (timeframe === '1W') {
           const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
           const seen = new Set();
-          return chartData.map((d, i) => {
+          chartData.forEach((d, i) => {
             const date = new Date(d.date).toDateString();
-            if (seen.has(date)) return null;
+            if (seen.has(date)) return;
             seen.add(date);
-            return (
-              <text key={i} x={50 + (i / (chartData.length - 1 || 1)) * 720} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">
-                {days[new Date(d.date).getDay()]}
-              </text>
-            );
+            allLabels.push({
+              label: days[new Date(d.date).getDay()],
+              x: 50 + (i / (chartData.length - 1 || 1)) * 720
+            });
           });
-        }
-        
-        if (timeframe === '5Y') {
+        } else if (timeframe === '5Y') {
           const seen = new Set();
-          return chartData.map((d, i) => {
+          chartData.forEach((d, i) => {
             const year = new Date(d.date).getFullYear();
-            if (seen.has(year)) return null;
+            if (seen.has(year)) return;
             seen.add(year);
-            return (
-              <text key={i} x={50 + (i / (chartData.length - 1 || 1)) * 720} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">
-                {String(year).slice(-2)}
-              </text>
-            );
+            allLabels.push({
+              label: String(year).slice(-2),
+              x: 50 + (i / (chartData.length - 1 || 1)) * 720
+            });
+          });
+        } else {
+          // Default: show months (for 1M, 3M, 6M, YTD, 1Y)
+          const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+          const seen = new Set();
+          chartData.forEach((d, i) => {
+            const key = `${new Date(d.date).getFullYear()}-${new Date(d.date).getMonth()}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            allLabels.push({
+              label: months[new Date(d.date).getMonth()],
+              x: 50 + (i / (chartData.length - 1 || 1)) * 720
+            });
           });
         }
         
-        // Default: show months (for 1M, 3M, 6M, YTD, 1Y)
-        const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-        const seen = new Set();
-        return chartData.map((d, i) => {
-          const key = `${new Date(d.date).getFullYear()}-${new Date(d.date).getMonth()}`;
-          if (seen.has(key)) return null;
-          seen.add(key);
-          return (
-            <text key={i} x={50 + (i / (chartData.length - 1 || 1)) * 720} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">
-              {months[new Date(d.date).getMonth()]}
-            </text>
-          );
-        });
+        const finalLabels = spacedLabels(allLabels);
+        
+        return (
+          <g>
+            {finalLabels.map((item, idx) => (
+              <text key={idx} x={item.x} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">
+                {item.label}
+              </text>
+            ))}
+          </g>
+        );
       };
 
       return (
@@ -455,7 +481,10 @@
             {areaPath && <path d={areaPath} fill="url(#grad)" />}
             {linePath && <path d={linePath} fill="none" stroke={chartColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
             
-            {renderXAxisLabels()}
+            {(() => {
+              const labels = renderXAxisLabels();
+              return labels;
+            })()}
             
             {hoverData && (
               <g pointerEvents="none">
