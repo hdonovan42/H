@@ -11,10 +11,9 @@
 <body>
   <div id="root"></div>
   <script type="text/babel">
-    const { useState, useEffect, useRef, useMemo } = React;
+    const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
     const WORKER_URL = 'https://dry-poetry-72b5.donovanh59.workers.dev';
-    const FINNHUB_API_KEY = 'd579r7pr01qrcrna7fqgd579r7pr01qrcrna7fr0';
     const CACHE_DURATION = 60 * 60 * 1000;
 
     /**
@@ -22,18 +21,16 @@
      * Both cached for 24 hours since they rarely change
      */
     const fetchSharesOutstanding = async (symbol) => {
-      // Check cache first (valid for 24 hours)
       const cacheKey = `shares_${symbol}`;
       const cached = localStorage.getItem(cacheKey);
       if (cached) {
         const { data, timestamp } = JSON.parse(cached);
-        if (Date.now() - timestamp < 24 * 60 * 60 * 1000) { // 24 hour cache
+        if (Date.now() - timestamp < 24 * 60 * 60 * 1000) {
           return data;
         }
       }
       
       try {
-        // Fetch shares from FMP and forward P/E from Finnhub in parallel
         const [floatRes, finnhubRes] = await Promise.all([
           fetch(`${WORKER_URL}/fmp/shares-float/${symbol}`),
           fetch(`${WORKER_URL}/finnhub/metric/${symbol}`)
@@ -45,11 +42,10 @@
         if (!floatData?.[0]?.outstandingShares) return null;
         
         const result = {
-          sharesOutstanding: floatData[0].outstandingShares, // raw number from FMP
-          forwardPE: finnhubData?.metric?.forwardPE || null  // from Finnhub
+          sharesOutstanding: floatData[0].outstandingShares,
+          forwardPE: finnhubData?.metric?.forwardPE || null
         };
         
-        // Cache the result
         localStorage.setItem(cacheKey, JSON.stringify({ data: result, timestamp: Date.now() }));
         
         return result;
@@ -64,17 +60,12 @@
     // ============================================================
     
     const MarketState = {
-      PRE_MARKET: 'pre-market',     // 4:00 AM - 9:30 AM EST
-      OPEN: 'open',                  // 9:30 AM - 4:00 PM EST
-      POST_MARKET: 'post-market',   // 4:00 PM - 8:00 PM EST
-      CLOSED: 'closed'              // 8:00 PM - 4:00 AM EST + weekends
+      PRE_MARKET: 'pre-market',
+      OPEN: 'open',
+      POST_MARKET: 'post-market',
+      CLOSED: 'closed'
     };
 
-    /**
-     * Get current market state based on EST time
-     * This is THE definitive function for determining market state
-     * @returns {Object} { state: MarketState, estTime: Date, isWeekend: boolean, timeInMinutes: number }
-     */
     const getMarketState = () => {
       const now = new Date();
       const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
@@ -85,11 +76,10 @@
       
       const isWeekend = day === 0 || day === 6;
       
-      // Market hours in minutes from midnight (EST)
-      const PRE_MARKET_START = 4 * 60;        // 4:00 AM = 240
-      const MARKET_OPEN = 9 * 60 + 30;        // 9:30 AM = 570
-      const MARKET_CLOSE = 16 * 60;           // 4:00 PM = 960
-      const POST_MARKET_END = 20 * 60;        // 8:00 PM = 1200
+      const PRE_MARKET_START = 4 * 60;
+      const MARKET_OPEN = 9 * 60 + 30;
+      const MARKET_CLOSE = 16 * 60;
+      const POST_MARKET_END = 20 * 60;
       
       let state;
       
@@ -116,9 +106,6 @@
       };
     };
 
-    /**
-     * Get today's date in EST timezone
-     */
     const getTodayEST = () => {
       const now = new Date();
       const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
@@ -126,13 +113,9 @@
     };
 
     // ============================================================
-    // DATA FETCHING - Separated by market state
+    // DATA FETCHING
     // ============================================================
 
-    /**
-     * Fetch quote data from Yahoo Finance
-     * Used in both open and closed market scenarios
-     */
     const fetchYahooQuote = async (symbol) => {
       const response = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=1d&includePrePost=true`);
       const data = await response.json();
@@ -143,8 +126,6 @@
       const meta = result.meta;
       const quote = result.indicators.quote[0];
       
-      // Yahoo provides regularMarketDayHigh/Low in meta which is more reliable
-      // quote.high/low arrays can be empty when market is closed
       const dayHigh = meta.regularMarketDayHigh || quote.high?.[0] || meta.regularMarketPrice;
       const dayLow = meta.regularMarketDayLow || quote.low?.[0] || meta.regularMarketPrice;
       const dayOpen = meta.regularMarketOpen || quote.open?.[0] || meta.previousClose;
@@ -162,21 +143,15 @@
         tradingDay: result.timestamp?.length > 0 
           ? new Date(result.timestamp[result.timestamp.length - 1] * 1000).toISOString().split('T')[0]
           : null,
-        // Additional stats from Yahoo meta
         fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh,
         fiftyTwoWeekLow: meta.fiftyTwoWeekLow
       };
     };
 
-    /**
-     * Fetch extended hours data from Alpaca
-     * Only used when market is closed
-     */
     const fetchAlpacaExtendedHours = async (symbol, marketState) => {
       const todayStr = getTodayEST();
       
       if (marketState.state === MarketState.PRE_MARKET) {
-        // Pre-market: 4:00 AM - 9:30 AM EST (08:00 - 13:30 UTC)
         const res = await fetch(
           `${WORKER_URL}/bars/${symbol}?start=${todayStr}T08:00:00Z&end=${todayStr}T13:30:00Z&timeframe=1Min&feed=sip`
         );
@@ -186,7 +161,6 @@
         }
       } 
       else if (marketState.state === MarketState.POST_MARKET) {
-        // Post-market: 4:00 PM - 8:00 PM EST (21:00 - 01:00 UTC)
         const now = new Date();
         let lastTradingDay = new Date(now);
         if (now.getDay() === 0) lastTradingDay.setDate(now.getDate() - 2);
@@ -208,12 +182,6 @@
       return null;
     };
 
-    // ============================================================
-    // MARKET OPEN: Data fetching strategy
-    // - Yahoo Finance for OHLCV data
-    // - Finnhub WebSocket for real-time price updates
-    // ============================================================
-
     const fetchMarketOpenData = async (symbol) => {
       const [yahooData, finnhubData] = await Promise.all([
         fetchYahooQuote(symbol),
@@ -234,16 +202,10 @@
         extendedHoursType: null,
         fiftyTwoWeekHigh: yahooData.fiftyTwoWeekHigh,
         fiftyTwoWeekLow: yahooData.fiftyTwoWeekLow,
-        sharesOutstanding: finnhubData?.sharesOutstanding, // in millions
+        sharesOutstanding: finnhubData?.sharesOutstanding,
         forwardPE: finnhubData?.forwardPE
       };
     };
-
-    // ============================================================
-    // MARKET CLOSED: Data fetching strategy  
-    // - Yahoo Finance for last regular market data
-    // - Alpaca SIP for pre/post market prices
-    // ============================================================
 
     const fetchMarketClosedData = async (symbol, marketState) => {
       const [yahooData, finnhubData] = await Promise.all([
@@ -252,7 +214,6 @@
       ]);
       if (!yahooData) return null;
       
-      // Start with Yahoo's extended hours data
       let extendedHoursPrice = null;
       let extendedHoursType = null;
       
@@ -264,7 +225,6 @@
         extendedHoursType = 'post';
       }
       
-      // Try to get fresher extended hours data from Alpaca
       if (marketState.isExtendedHours) {
         try {
           const alpacaData = await fetchAlpacaExtendedHours(symbol, marketState);
@@ -293,14 +253,10 @@
         extendedHoursType,
         fiftyTwoWeekHigh: yahooData.fiftyTwoWeekHigh,
         fiftyTwoWeekLow: yahooData.fiftyTwoWeekLow,
-        sharesOutstanding: finnhubData?.sharesOutstanding, // in millions
+        sharesOutstanding: finnhubData?.sharesOutstanding,
         forwardPE: finnhubData?.forwardPE
       };
     };
-
-    // ============================================================
-    // UNIFIED DATA FETCHER - Routes to correct strategy
-    // ============================================================
 
     const fetchPriceData = async (symbol) => {
       const marketState = getMarketState();
@@ -345,19 +301,16 @@
       
       const lastPriceRef = useRef(null);
       const wsRef = useRef(null);
-      const currentSymbolRef = useRef(null);
       const svgRef = useRef(null);
 
       // ============================================================
       // MARKET STATE MONITORING
-      // Update market state every minute to catch transitions
       // ============================================================
       
       useEffect(() => {
         const interval = setInterval(() => {
           const newState = getMarketState();
           setCurrentMarketState(prev => {
-            // Only update if state actually changed
             if (prev.state !== newState.state) {
               console.log(`Market state changed: ${prev.state} → ${newState.state}`);
               return newState;
@@ -396,14 +349,12 @@
         setCurrentMarketState(marketState);
         
         try {
-          // Fetch real-time price data (strategy depends on market state)
           const { data: priceData } = await fetchPriceData(symbol);
           
           if (priceData) {
             setCompanyName(priceData.shortName || symbol);
           }
 
-          // Fetch historical data (same regardless of market state)
           let historicalData = getCachedData(symbol);
           if (!historicalData) {
             const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=6mo&interval=1d`);
@@ -427,7 +378,6 @@
             }
           }
 
-          // Build quote object
           if (historicalData?.length >= 2 && priceData) {
             const previousClose = priceData.previousClose || historicalData[historicalData.length - 2].close;
             const change = priceData.currentPrice - previousClose;
@@ -446,7 +396,7 @@
               extendedHoursType: priceData.extendedHoursType,
               fiftyTwoWeekHigh: priceData.fiftyTwoWeekHigh,
               fiftyTwoWeekLow: priceData.fiftyTwoWeekLow,
-              sharesOutstanding: priceData.sharesOutstanding, // in millions, for dynamic market cap
+              sharesOutstanding: priceData.sharesOutstanding,
               forwardPE: priceData.forwardPE
             });
           }
@@ -462,12 +412,11 @@
       // CHART DATA FETCHER
       // ============================================================
 
-      const fetchChartData = async (symbol, tf) => {
+      const fetchChartData = useCallback(async (symbol, tf) => {
         setHoverData(null);
         const marketState = getMarketState();
         
         try {
-          // Use existing 6M data for smaller timeframes
           if (['1M', '3M', '6M'].includes(tf) && data.length > 0) {
             const months = { '1M': 1, '3M': 3, '6M': 6 }[tf];
             const cutoffDate = new Date();
@@ -476,7 +425,6 @@
             return;
           }
           
-          // Check cache (skip cache for 1D during market hours)
           const cacheKey = `${symbol}-${tf}`;
           const skipCache = tf === '1D' && marketState.isRegularHours;
           if (!skipCache && chartCache[cacheKey]) {
@@ -484,7 +432,6 @@
             return;
           }
           
-          // Fetch from API
           const params = {
             '1D': ['1d', '5m'], '1W': ['5d', '15m'], '1M': ['1mo', '1d'],
             '3M': ['3mo', '1d'], '6M': ['6mo', '1d'], 'YTD': ['ytd', '1d'],
@@ -517,7 +464,7 @@
         } catch (error) { 
           console.error('Error fetching chart data:', error); 
         }
-      };
+      }, [data, chartCache]);
 
       // ============================================================
       // EFFECTS: Initial load and ticker changes
@@ -531,37 +478,35 @@
       
       useEffect(() => { 
         if (ticker) fetchChartData(ticker, timeframe); 
-      }, [ticker, timeframe]);
+      }, [ticker, timeframe, fetchChartData]);
 
       // ============================================================
-      // MARKET OPEN ONLY: WebSocket for real-time prices
+      // CONSOLIDATED WEBSOCKET EFFECT
+      // Handles connection, reconnection, ticker changes, and cleanup
       // ============================================================
       
       useEffect(() => {
-        if (FINNHUB_API_KEY === 'YOUR_FINNHUB_API_KEY') return;
-        
         let ws = null;
         let reconnectTimeout = null;
         let reconnectAttempts = 0;
         let isConnecting = false;
-        const MAX_RECONNECT_ATTEMPTS = 10;
-        const BASE_RECONNECT_DELAY = 3000; // Start at 3s to avoid rate limiting
+        let currentSubscribedSymbol = null;
         
-        const connectWebSocket = () => {
+        const MAX_RECONNECT_ATTEMPTS = 10;
+        const BASE_RECONNECT_DELAY = 3000;
+        
+        const connectWebSocket = async () => {
           const marketState = getMarketState();
           
-          // Only connect during regular market hours
           if (!marketState.isRegularHours) {
             console.log(`WebSocket skipped: Market is ${marketState.state}`);
             return;
           }
           
-          // Prevent multiple simultaneous connection attempts
           if (isConnecting || wsRef.current?.readyState === WebSocket.OPEN) {
             return;
           }
           
-          // Clean up any existing connection
           if (ws) {
             ws.onclose = null;
             ws.onerror = null;
@@ -571,7 +516,11 @@
           isConnecting = true;
           
           try {
-            ws = new WebSocket(`wss://ws.finnhub.io?token=${FINNHUB_API_KEY}`);
+            // Fetch WebSocket URL from worker (keeps API key server-side)
+            const res = await fetch(`${WORKER_URL}/finnhub/ws-url`);
+            const { url: wsUrl } = await res.json();
+            
+            ws = new WebSocket(wsUrl);
           } catch (e) {
             console.error('WebSocket construction failed:', e);
             isConnecting = false;
@@ -584,9 +533,10 @@
             isConnecting = false;
             reconnectAttempts = 0;
             wsRef.current = ws;
+            
             if (ticker) {
               ws.send(JSON.stringify({ type: 'subscribe', symbol: ticker }));
-              currentSymbolRef.current = ticker;
+              currentSubscribedSymbol = ticker;
             }
           };
           
@@ -625,6 +575,7 @@
             console.log(`WebSocket closed (code: ${event.code})`);
             isConnecting = false;
             wsRef.current = null;
+            currentSubscribedSymbol = null;
             
             const marketState = getMarketState();
             if (marketState.isRegularHours) {
@@ -647,7 +598,6 @@
             return;
           }
           
-          // Exponential backoff: 1s, 2s, 4s, 8s... up to 30s max
           const delay = Math.min(BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts), 30000);
           reconnectAttempts++;
           
@@ -655,11 +605,25 @@
           reconnectTimeout = setTimeout(connectWebSocket, delay);
         };
         
-        // Initial connection attempt (with small delay to avoid rapid reconnects on page refresh)
+        // Handle ticker changes for existing connection
+        const updateSubscription = () => {
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            if (currentSubscribedSymbol && currentSubscribedSymbol !== ticker) {
+              wsRef.current.send(JSON.stringify({ type: 'unsubscribe', symbol: currentSubscribedSymbol }));
+            }
+            wsRef.current.send(JSON.stringify({ type: 'subscribe', symbol: ticker }));
+            currentSubscribedSymbol = ticker;
+          }
+        };
+        
+        // Initial connection with delay
         const marketState = getMarketState();
         if (marketState.isRegularHours) {
           setTimeout(connectWebSocket, 1500);
         }
+        
+        // Update subscription when ticker changes (if already connected)
+        updateSubscription();
         
         // Monitor for market open/close transitions
         const marketCheckInterval = setInterval(() => {
@@ -673,10 +637,11 @@
           } else if (!marketState.isRegularHours && hasConnection) {
             console.log('Market closed - disconnecting WebSocket');
             if (ws) {
-              ws.onclose = null; // Prevent reconnection attempt
+              ws.onclose = null;
               ws.close();
             }
             wsRef.current = null;
+            currentSubscribedSymbol = null;
           }
         }, 60000);
         
@@ -686,24 +651,13 @@
           if (ws) {
             ws.onclose = null;
             ws.onerror = null;
-            if (currentSymbolRef.current && ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ type: 'unsubscribe', symbol: currentSymbolRef.current }));
+            if (currentSubscribedSymbol && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'unsubscribe', symbol: currentSubscribedSymbol }));
             }
             ws.close();
           }
           wsRef.current = null;
         };
-      }, []);
-      
-      // Handle ticker changes for WebSocket
-      useEffect(() => {
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          if (currentSymbolRef.current && currentSymbolRef.current !== ticker) {
-            wsRef.current.send(JSON.stringify({ type: 'unsubscribe', symbol: currentSymbolRef.current }));
-          }
-          wsRef.current.send(JSON.stringify({ type: 'subscribe', symbol: ticker }));
-          currentSymbolRef.current = ticker;
-        }
       }, [ticker]);
 
       // ============================================================
@@ -724,7 +678,7 @@
         }, 60000);
         
         return () => clearInterval(interval);
-      }, [ticker, timeframe]);
+      }, [ticker, timeframe, fetchChartData]);
 
       // ============================================================
       // CHART HOVER HANDLER
@@ -837,7 +791,6 @@
       const avgVolume = data.length > 0 ? data.reduce((sum, d) => sum + d.volume, 0) / data.length : 0;
       const week52High = quote?.fiftyTwoWeekHigh || (data.length > 0 ? Math.max(...data.map(d => d.high)) : 0);
       const week52Low = quote?.fiftyTwoWeekLow || (data.length > 0 ? Math.min(...data.map(d => d.low)) : 0);
-      // Dynamic market cap: sharesOutstanding × currentPrice (FMP returns raw shares, convert to millions for display)
       const marketCap = quote?.sharesOutstanding ? (quote.sharesOutstanding * currentPrice) / 1e6 : 0;
       const forwardPE = quote?.forwardPE || 0;
 
@@ -866,7 +819,6 @@
         return { minPrice: min, maxPrice: max, priceRange: range, linePath: line, areaPath: area };
       }, [chartData, timeframe]);
 
-      // Chart color
       let isChartPositive = true;
       if (timeframe === '1D') {
         const baseline = quote?.pc || chartData[0]?.close || 0;
@@ -990,7 +942,6 @@
                   </div>
                 </div>
                 
-                {/* Extended Hours Bar - Only shown when market is closed and we have extended hours data */}
                 {!currentMarketState.isRegularHours && quote?.extendedHoursPrice && (() => {
                   const marketChange = quote.extendedHoursPrice - currentPrice;
                   const marketChangePercent = (marketChange / currentPrice) * 100;
@@ -1033,7 +984,6 @@
                       </linearGradient>
                     </defs>
                     
-                    {/* Y Axis */}
                     {(() => {
                       const min = Math.floor(minPrice / 20) * 20;
                       const max = Math.ceil(maxPrice / 20) * 20;
@@ -1046,7 +996,6 @@
                     {areaPath && <path d={areaPath} fill="url(#grad)" />}
                     {linePath && <path d={linePath} fill="none" stroke={CHART_COLOR} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
                     
-                    {/* X Axis */}
                     {chartData.length > 0 && (() => {
                       if (timeframe === '1D') {
                         return ['10:00','11:00','12:00','13:00','14:00','15:00','16:00'].map((label, idx) => (
@@ -1082,7 +1031,6 @@
                       });
                     })()}
                     
-                    {/* Hover */}
                     {hoverData && (
                       <g pointerEvents="none">
                         <line x1={hoverData.dataX} y1="20" x2={hoverData.dataX} y2="260" stroke="#666" strokeWidth="1" strokeDasharray="4" />
@@ -1092,7 +1040,6 @@
                     )}
                   </svg>
                   
-                  {/* Tooltip */}
                   {hoverData && (
                     <div style={{ position: 'absolute', left: `${(hoverData.dataX / 800) * 100}%`, top: `${(hoverData.y / 300) * 100}%`, transform: hoverData.dataX < 400 ? 'translate(10px, -50%)' : 'translate(-130px, -50%)', pointerEvents: 'none', zIndex: 10 }}>
                       <div style={{ background: 'rgba(26, 26, 26, 0.9)', padding: '8px 12px', borderRadius: '4px', minWidth: '80px', textAlign: 'center' }}>
