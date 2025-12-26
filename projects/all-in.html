@@ -274,6 +274,223 @@
       }
     };
 
+    // STOCK CHART COMPONENT
+    function StockChart({ chartData, timeframe, onTimeframeChange, previousClose }) {
+      const svgRef = useRef(null);
+      const [hoverData, setHoverData] = useState(null);
+      
+      // Calculate price range and paths
+      const { minPrice, maxPrice, priceRange, linePath, areaPath } = useMemo(() => {
+        if (!chartData?.length) return { minPrice: 0, maxPrice: 100, priceRange: 100, linePath: '', areaPath: '' };
+        
+        const min = Math.min(...chartData.map(d => d.low)) * 0.999;
+        const max = Math.max(...chartData.map(d => d.high)) * 1.001;
+        const range = (max - min) || 1;
+        const calcY = (price) => 260 - ((price - min) / range) * 240;
+        
+        const calcX = (d, i) => {
+          if (timeframe === '1D') {
+            const estTime = new Date(new Date(d.date).toLocaleString('en-US', { timeZone: 'America/New_York' }));
+            const timeInHours = Math.max(9.5, Math.min(16, estTime.getHours() + estTime.getMinutes() / 60));
+            return 50 + ((timeInHours - 9.5) / 6.5) * 720;
+          }
+          return 50 + (i / (chartData.length - 1 || 1)) * 720;
+        };
+        
+        const line = chartData.length > 1 ? chartData.map((d, i) => `${i === 0 ? 'M' : 'L'} ${calcX(d, i)} ${calcY(d.close)}`).join(' ') : '';
+        const area = line ? `${line} L ${calcX(chartData[chartData.length - 1], chartData.length - 1)} 260 L ${calcX(chartData[0], 0)} 260 Z` : '';
+        
+        return { minPrice: min, maxPrice: max, priceRange: range, linePath: line, areaPath: area };
+      }, [chartData, timeframe]);
+
+      // Determine chart color based on performance
+      let isChartPositive = true;
+      if (timeframe === '1D') {
+        const baseline = previousClose || chartData[0]?.close || 0;
+        isChartPositive = (chartData[chartData.length - 1]?.close || 0) >= baseline;
+      } else if (chartData.length > 0) {
+        isChartPositive = chartData[chartData.length - 1].close >= chartData[0].close;
+      }
+      const chartColor = isChartPositive ? '#137333' : '#a50e0e';
+
+      // Handle hover interactions
+      const handleMouseMove = useCallback((e) => {
+        if (!chartData?.length || !svgRef.current) return;
+        
+        const svgRect = svgRef.current.getBoundingClientRect();
+        const scaleX = 800 / svgRect.width;
+        let mouseX = Math.max(50, Math.min(770, (e.clientX - svgRect.left) * scaleX));
+
+        let index, dataX;
+        
+        if (timeframe === '1D') {
+          const mouseTimeHours = 9.5 + ((mouseX - 50) / 720) * 6.5;
+          let nearestIndex = 0, nearestDiff = Infinity;
+          
+          chartData.forEach((d, i) => {
+            const estTime = new Date(new Date(d.date).toLocaleString('en-US', { timeZone: 'America/New_York' }));
+            const timeInHours = estTime.getHours() + estTime.getMinutes() / 60;
+            const diff = Math.abs(timeInHours - mouseTimeHours);
+            if (diff < nearestDiff) { nearestDiff = diff; nearestIndex = i; }
+          });
+          
+          index = nearestIndex;
+          const point = chartData[index];
+          const estTime = new Date(new Date(point.date).toLocaleString('en-US', { timeZone: 'America/New_York' }));
+          const timeInHours = Math.max(9.5, Math.min(16, estTime.getHours() + estTime.getMinutes() / 60));
+          dataX = 50 + ((timeInHours - 9.5) / 6.5) * 720;
+        } else {
+          const ratio = (mouseX - 50) / 720;
+          index = Math.round(ratio * (chartData.length - 1));
+          dataX = 50 + (index / (chartData.length - 1)) * 720;
+        }
+        
+        if (index >= 0 && index < chartData.length) {
+          const point = chartData[index];
+          const yPos = 260 - ((point.close - minPrice) / priceRange) * 240;
+          setHoverData({ dataX, y: yPos, data: point });
+        }
+      }, [chartData, timeframe, minPrice, priceRange]);
+
+      // Render Y-axis labels
+      const renderYAxisLabels = () => {
+        const min = Math.floor(minPrice / 20) * 20;
+        const max = Math.ceil(maxPrice / 20) * 20;
+        const step = Math.ceil((max - min) / 5 / 20) * 20;
+        const steps = [];
+        for (let p = max; p >= min && steps.length < 6; p -= step) steps.push(p);
+        return steps.map(p => (
+          <text key={p} x="8" y={20 + ((max - p) / ((max - min) || 1)) * 240 + 4} fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">
+            ${p}
+          </text>
+        ));
+      };
+
+      // Render X-axis labels based on timeframe
+      const renderXAxisLabels = () => {
+        if (!chartData.length) return null;
+        
+        if (timeframe === '1D') {
+          return ['10:00','11:00','12:00','13:00','14:00','15:00','16:00'].map((label, idx) => (
+            <text key={idx} x={50 + ((0.5 + idx) / 6.5) * 720} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">
+              {label}
+            </text>
+          ));
+        }
+        
+        if (timeframe === '1W') {
+          const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+          const seen = new Set();
+          return chartData.map((d, i) => {
+            const date = new Date(d.date).toDateString();
+            if (seen.has(date)) return null;
+            seen.add(date);
+            return (
+              <text key={i} x={50 + (i / (chartData.length - 1 || 1)) * 720} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">
+                {days[new Date(d.date).getDay()]}
+              </text>
+            );
+          });
+        }
+        
+        if (timeframe === '5Y') {
+          const seen = new Set();
+          return chartData.map((d, i) => {
+            const year = new Date(d.date).getFullYear();
+            if (seen.has(year)) return null;
+            seen.add(year);
+            return (
+              <text key={i} x={50 + (i / (chartData.length - 1 || 1)) * 720} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">
+                {String(year).slice(-2)}
+              </text>
+            );
+          });
+        }
+        
+        // Default: show months (for 1M, 3M, 6M, YTD, 1Y)
+        const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const seen = new Set();
+        return chartData.map((d, i) => {
+          const key = `${new Date(d.date).getFullYear()}-${new Date(d.date).getMonth()}`;
+          if (seen.has(key)) return null;
+          seen.add(key);
+          return (
+            <text key={i} x={50 + (i / (chartData.length - 1 || 1)) * 720} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">
+              {months[new Date(d.date).getMonth()]}
+            </text>
+          );
+        });
+      };
+
+      return (
+        <div className="box chart-box">
+          <div className="timeframe-controls">
+            {['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', '5Y'].map((tf, idx, arr) => (
+              <React.Fragment key={tf}>
+                <button className={`timeframe-btn ${timeframe === tf ? 'active' : ''}`} onClick={() => onTimeframeChange(tf)}>
+                  {tf}
+                </button>
+                {idx < arr.length - 1 && <span className="timeframe-pipe">|</span>}
+              </React.Fragment>
+            ))}
+          </div>
+          
+          <svg 
+            ref={svgRef} 
+            viewBox="0 0 800 300" 
+            preserveAspectRatio="none" 
+            style={{ width: '100%', height: '100%', cursor: 'crosshair' }} 
+            onMouseMove={handleMouseMove} 
+            onMouseLeave={() => setHoverData(null)}
+          >
+            <defs>
+              <linearGradient id="grad" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor={isChartPositive ? 'rgba(19,115,51,0.2)' : 'rgba(165,14,14,0.2)'} />
+                <stop offset="100%" stopColor={isChartPositive ? 'rgba(19,115,51,0)' : 'rgba(165,14,14,0)'} />
+              </linearGradient>
+            </defs>
+            
+            {renderYAxisLabels()}
+            
+            {areaPath && <path d={areaPath} fill="url(#grad)" />}
+            {linePath && <path d={linePath} fill="none" stroke={chartColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
+            
+            {renderXAxisLabels()}
+            
+            {hoverData && (
+              <g pointerEvents="none">
+                <line x1={hoverData.dataX} y1="20" x2={hoverData.dataX} y2="260" stroke="#666" strokeWidth="1" strokeDasharray="4" />
+                <line x1="50" y1={hoverData.y} x2="770" y2={hoverData.y} stroke="#666" strokeWidth="1" strokeDasharray="4" />
+                <circle cx={hoverData.dataX} cy={hoverData.y} r="3.5" fill={chartColor} stroke="#fff" strokeWidth="2" />
+              </g>
+            )}
+          </svg>
+          
+          {hoverData && (
+            <div style={{ 
+              position: 'absolute', 
+              left: `${(hoverData.dataX / 800) * 100}%`, 
+              top: `${(hoverData.y / 300) * 100}%`, 
+              transform: hoverData.dataX < 400 ? 'translate(10px, -50%)' : 'translate(-130px, -50%)', 
+              pointerEvents: 'none', 
+              zIndex: 10 
+            }}>
+              <div style={{ background: 'rgba(26, 26, 26, 0.9)', padding: '8px 12px', borderRadius: '4px', minWidth: '80px', textAlign: 'center' }}>
+                <div style={{ color: '#fff', fontSize: '13px', fontWeight: 600, fontFamily: 'IBM Plex Mono', marginBottom: '4px' }}>
+                  ${hoverData.data.close.toFixed(2)}
+                </div>
+                <div style={{ color: '#ccc', fontSize: '10px', fontFamily: 'IBM Plex Mono' }}>
+                  {timeframe === '1D' 
+                    ? new Date(hoverData.data.date).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit', timeZone: 'America/New_York' })
+                    : new Date(hoverData.data.date).toLocaleDateString('en-US', { month:'short', day:'numeric', timeZone: 'America/New_York' })}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     // MAIN COMPONENT
     function StockTracker() {
       const [ticker, setTicker] = useState('TSLA');
@@ -288,12 +505,10 @@
       const [sharesCount, setSharesCount] = useState('');
       const [companyName, setCompanyName] = useState('');
       const [chartCache, setChartCache] = useState({});
-      const [hoverData, setHoverData] = useState(null);
       const [currentMarketState, setCurrentMarketState] = useState(getMarketState());
       
       const lastPriceRef = useRef(null);
       const wsRef = useRef(null);
-      const svgRef = useRef(null);
 
       // MARKET STATE MONITORING      
       useEffect(() => {
@@ -393,7 +608,6 @@
 
       // CHART DATA FETCHER
       const fetchChartData = useCallback(async (symbol, tf) => {
-        setHoverData(null);
         const marketState = getMarketState();
         
         try {
@@ -464,11 +678,21 @@
         let reconnectAttempts = 0;
         let isConnecting = false;
         let currentSubscribedSymbol = null;
+        let isMounted = true;
         
-        const MAX_RECONNECT_ATTEMPTS = 10;
-        const BASE_RECONNECT_DELAY = 3000;
+        const MAX_RECONNECT_ATTEMPTS = 15;
+        const INITIAL_RECONNECT_DELAY = 500;
+        const MAX_RECONNECT_DELAY = 30000;
+        
+        const getReconnectDelay = () => {
+          // Fast retries initially (500ms, 1s, 2s), then slow down
+          const delay = Math.min(INITIAL_RECONNECT_DELAY * Math.pow(2, reconnectAttempts), MAX_RECONNECT_DELAY);
+          return delay;
+        };
         
         const connectWebSocket = async () => {
+          if (!isMounted) return;
+          
           const marketState = getMarketState();
           
           if (!marketState.isRegularHours) {
@@ -476,149 +700,179 @@
             return;
           }
           
-          if (isConnecting || wsRef.current?.readyState === WebSocket.OPEN) {
+          if (isConnecting) {
+            console.log('WebSocket connection already in progress');
             return;
           }
           
+          // Close existing connection if any
           if (ws) {
             ws.onclose = null;
             ws.onerror = null;
             ws.close();
+            ws = null;
+          }
+          if (wsRef.current) {
+            wsRef.current.onclose = null;
+            wsRef.current.onerror = null;
+            wsRef.current.close();
+            wsRef.current = null;
           }
           
           isConnecting = true;
+          console.log(`WebSocket connecting... (attempt ${reconnectAttempts + 1})`);
           
           try {
             // Fetch WebSocket URL from worker (keeps API key server-side)
             const res = await fetch(`${WORKER_URL}/finnhub/ws-url`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const { url: wsUrl } = await res.json();
             
-            ws = new WebSocket(wsUrl);
-          } catch (e) {
-            console.error('WebSocket construction failed:', e);
-            isConnecting = false;
-            scheduleReconnect();
-            return;
-          }
-          
-          ws.onopen = () => {
-            console.log('WebSocket connected');
-            isConnecting = false;
-            reconnectAttempts = 0;
-            wsRef.current = ws;
-            
-            if (ticker) {
-              ws.send(JSON.stringify({ type: 'subscribe', symbol: ticker }));
-              currentSubscribedSymbol = ticker;
+            if (!isMounted) {
+              isConnecting = false;
+              return;
             }
-          };
-          
-          ws.onmessage = (event) => {
-            try {
-              const msg = JSON.parse(event.data);
-              if (msg.type === 'trade' && msg.data?.length > 0) {
-                const newPrice = msg.data[msg.data.length - 1].p;
-                if (lastPriceRef.current === newPrice) return;
-                lastPriceRef.current = newPrice;
-                
-                setQuote(prev => {
-                  if (!prev) return prev;
-                  const change = newPrice - prev.pc;
-                  return {
-                    ...prev,
-                    c: newPrice,
-                    d: change,
-                    dp: (change / prev.pc) * 100,
-                    h: Math.max(prev.h || newPrice, newPrice),
-                    l: Math.min(prev.l || newPrice, newPrice)
-                  };
-                });
-                setPriceUpdating(true);
-                setTimeout(() => setPriceUpdating(false), 150);
-              }
-            } catch (e) {}
-          };
-          
-          ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
-            isConnecting = false;
-          };
-          
-          ws.onclose = (event) => {
-            console.log(`WebSocket closed (code: ${event.code})`);
-            isConnecting = false;
-            wsRef.current = null;
-            currentSubscribedSymbol = null;
             
-            const marketState = getMarketState();
-            if (marketState.isRegularHours) {
+            ws = new WebSocket(wsUrl);
+            
+            // Set a connection timeout
+            const connectionTimeout = setTimeout(() => {
+              if (ws && ws.readyState !== WebSocket.OPEN) {
+                console.log('WebSocket connection timeout');
+                ws.close();
+              }
+            }, 10000);
+            
+            ws.onopen = () => {
+              clearTimeout(connectionTimeout);
+              if (!isMounted) {
+                ws.close();
+                return;
+              }
+              
+              console.log('WebSocket connected');
+              isConnecting = false;
+              reconnectAttempts = 0;
+              wsRef.current = ws;
+              
+              if (ticker) {
+                ws.send(JSON.stringify({ type: 'subscribe', symbol: ticker }));
+                currentSubscribedSymbol = ticker;
+                console.log(`Subscribed to ${ticker}`);
+              }
+            };
+            
+            ws.onmessage = (event) => {
+              try {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'trade' && msg.data?.length > 0) {
+                  const newPrice = msg.data[msg.data.length - 1].p;
+                  if (lastPriceRef.current === newPrice) return;
+                  lastPriceRef.current = newPrice;
+                  
+                  setQuote(prev => {
+                    if (!prev) return prev;
+                    const change = newPrice - prev.pc;
+                    return {
+                      ...prev,
+                      c: newPrice,
+                      d: change,
+                      dp: (change / prev.pc) * 100,
+                      h: Math.max(prev.h || newPrice, newPrice),
+                      l: Math.min(prev.l || newPrice, newPrice)
+                    };
+                  });
+                  setPriceUpdating(true);
+                  setTimeout(() => setPriceUpdating(false), 150);
+                }
+              } catch (e) {}
+            };
+            
+            ws.onerror = (error) => {
+              clearTimeout(connectionTimeout);
+              console.error('WebSocket error:', error);
+              isConnecting = false;
+            };
+            
+            ws.onclose = (event) => {
+              clearTimeout(connectionTimeout);
+              console.log(`WebSocket closed (code: ${event.code})`);
+              isConnecting = false;
+              wsRef.current = null;
+              currentSubscribedSymbol = null;
+              
+              if (isMounted) {
+                const marketState = getMarketState();
+                if (marketState.isRegularHours) {
+                  scheduleReconnect();
+                }
+              }
+            };
+            
+          } catch (e) {
+            console.error('WebSocket setup failed:', e);
+            isConnecting = false;
+            if (isMounted) {
               scheduleReconnect();
             }
-          };
+          }
         };
         
         const scheduleReconnect = () => {
           if (reconnectTimeout) {
             clearTimeout(reconnectTimeout);
+            reconnectTimeout = null;
           }
+          
+          if (!isMounted) return;
           
           const marketState = getMarketState();
           if (!marketState.isRegularHours) return;
           
           if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            console.log('Max reconnection attempts reached, will retry on next market check');
+            console.log('Max reconnection attempts reached, will retry in 60s');
             reconnectAttempts = 0;
+            reconnectTimeout = setTimeout(connectWebSocket, 60000);
             return;
           }
           
-          const delay = Math.min(BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts), 30000);
+          const delay = getReconnectDelay();
           reconnectAttempts++;
           
-          console.log(`WebSocket reconnecting in ${delay/1000}s (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+          console.log(`WebSocket reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
           reconnectTimeout = setTimeout(connectWebSocket, delay);
         };
         
-        // Handle ticker changes for existing connection
-        const updateSubscription = () => {
-          if (wsRef.current?.readyState === WebSocket.OPEN) {
-            if (currentSubscribedSymbol && currentSubscribedSymbol !== ticker) {
-              wsRef.current.send(JSON.stringify({ type: 'unsubscribe', symbol: currentSubscribedSymbol }));
-            }
-            wsRef.current.send(JSON.stringify({ type: 'subscribe', symbol: ticker }));
-            currentSubscribedSymbol = ticker;
-          }
-        };
-        
-        // Initial connection with delay
+        // Initial connection - start immediately if market is open
         const marketState = getMarketState();
         if (marketState.isRegularHours) {
-          setTimeout(connectWebSocket, 1500);
+          connectWebSocket();
         }
         
-        // Update subscription when ticker changes (if already connected)
-        updateSubscription();
-        
-        // Monitor for market open/close transitions
+        // Monitor for market open/close transitions and connection health
         const marketCheckInterval = setInterval(() => {
+          if (!isMounted) return;
+          
           const marketState = getMarketState();
           const hasConnection = wsRef.current?.readyState === WebSocket.OPEN;
           
           if (marketState.isRegularHours && !hasConnection && !isConnecting) {
-            console.log('Market is open - attempting WebSocket connection');
+            console.log('Market is open but no connection - reconnecting');
             reconnectAttempts = 0;
             connectWebSocket();
           } else if (!marketState.isRegularHours && hasConnection) {
             console.log('Market closed - disconnecting WebSocket');
-            if (ws) {
-              ws.onclose = null;
-              ws.close();
+            if (wsRef.current) {
+              wsRef.current.onclose = null;
+              wsRef.current.close();
             }
             wsRef.current = null;
             currentSubscribedSymbol = null;
           }
-        }, 60000);
+        }, 15000); // Check every 15s instead of 60s
         
         return () => {
+          isMounted = false;
           clearInterval(marketCheckInterval);
           if (reconnectTimeout) clearTimeout(reconnectTimeout);
           if (ws) {
@@ -628,6 +882,11 @@
               ws.send(JSON.stringify({ type: 'unsubscribe', symbol: currentSubscribedSymbol }));
             }
             ws.close();
+          }
+          if (wsRef.current) {
+            wsRef.current.onclose = null;
+            wsRef.current.onerror = null;
+            wsRef.current.close();
           }
           wsRef.current = null;
         };
@@ -649,45 +908,6 @@
         
         return () => clearInterval(interval);
       }, [ticker, timeframe, fetchChartData]);
-
-      // CHART HOVER HANDLER
-      const handleGraphHover = (e) => {
-        if (!chartData?.length || !svgRef.current) return;
-        
-        const svgRect = svgRef.current.getBoundingClientRect();
-        const scaleX = 800 / svgRect.width;
-        let mouseX = Math.max(50, Math.min(770, (e.clientX - svgRect.left) * scaleX));
-
-        let index, dataX;
-        
-        if (timeframe === '1D') {
-          const mouseTimeHours = 9.5 + ((mouseX - 50) / 720) * 6.5;
-          let nearestIndex = 0, nearestDiff = Infinity;
-          
-          chartData.forEach((d, i) => {
-            const estTime = new Date(new Date(d.date).toLocaleString('en-US', { timeZone: 'America/New_York' }));
-            const timeInHours = estTime.getHours() + estTime.getMinutes() / 60;
-            const diff = Math.abs(timeInHours - mouseTimeHours);
-            if (diff < nearestDiff) { nearestDiff = diff; nearestIndex = i; }
-          });
-          
-          index = nearestIndex;
-          const point = chartData[index];
-          const estTime = new Date(new Date(point.date).toLocaleString('en-US', { timeZone: 'America/New_York' }));
-          const timeInHours = Math.max(9.5, Math.min(16, estTime.getHours() + estTime.getMinutes() / 60));
-          dataX = 50 + ((timeInHours - 9.5) / 6.5) * 720;
-        } else {
-          const ratio = (mouseX - 50) / 720;
-          index = Math.round(ratio * (chartData.length - 1));
-          dataX = 50 + (index / (chartData.length - 1)) * 720;
-        }
-        
-        if (index >= 0 && index < chartData.length) {
-          const point = chartData[index];
-          const yPos = 260 - ((point.close - minPrice) / priceRange) * 240;
-          setHoverData({ dataX, y: yPos, data: point });
-        }
-      };
 
       // SPREADSHEET DATA PROCESSING
       const processSpreadsheetData = useMemo(() => {
@@ -756,36 +976,6 @@
       const forwardPE = quote?.forwardPE || 0;
 
       // CHART CALCULATIONS
-      const { minPrice, maxPrice, priceRange, linePath, areaPath } = useMemo(() => {
-        const min = chartData.length > 0 ? Math.min(...chartData.map(d => d.low)) * 0.999 : 0;
-        const max = chartData.length > 0 ? Math.max(...chartData.map(d => d.high)) * 1.001 : 100;
-        const range = (max - min) || 1;
-        const calcY = (price) => 260 - ((price - min) / range) * 240;
-        
-        const calcX = (d, i) => {
-          if (timeframe === '1D' && chartData.length > 0) {
-            const estTime = new Date(new Date(d.date).toLocaleString('en-US', { timeZone: 'America/New_York' }));
-            const timeInHours = Math.max(9.5, Math.min(16, estTime.getHours() + estTime.getMinutes() / 60));
-            return 50 + ((timeInHours - 9.5) / 6.5) * 720;
-          }
-          return 50 + (i / (chartData.length - 1 || 1)) * 720;
-        };
-        
-        const line = chartData.length > 1 ? chartData.map((d, i) => `${i === 0 ? 'M' : 'L'} ${calcX(d, i)} ${calcY(d.close)}`).join(' ') : '';
-        const area = line ? `${line} L ${calcX(chartData[chartData.length - 1], chartData.length - 1)} 260 L ${calcX(chartData[0], 0)} 260 Z` : '';
-        
-        return { minPrice: min, maxPrice: max, priceRange: range, linePath: line, areaPath: area };
-      }, [chartData, timeframe]);
-
-      let isChartPositive = true;
-      if (timeframe === '1D') {
-        const baseline = quote?.pc || chartData[0]?.close || 0;
-        isChartPositive = (chartData[chartData.length - 1]?.close || 0) >= baseline;
-      } else if (chartData.length > 0) {
-        isChartPositive = chartData[chartData.length - 1].close >= chartData[0].close;
-      }
-      const CHART_COLOR = isChartPositive ? '#137333' : '#a50e0e';
-
       // HANDLERS
       const handleTickerSubmit = (e) => {
         e.preventDefault();
@@ -922,93 +1112,12 @@
               </div>
               
               <div className="chart-wrapper">
-                <div className="box chart-box">
-                  <div className="timeframe-controls">
-                    {['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', '5Y'].map((tf, idx, arr) => (
-                      <React.Fragment key={tf}>
-                        <button className={`timeframe-btn ${timeframe === tf ? 'active' : ''}`} onClick={() => setTimeframe(tf)}>{tf}</button>
-                        {idx < arr.length - 1 && <span className="timeframe-pipe">|</span>}
-                      </React.Fragment>
-                    ))}
-                  </div>
-                  
-                  <svg ref={svgRef} viewBox="0 0 800 300" preserveAspectRatio="none" style={{ width: '100%', height: '100%', cursor: 'crosshair' }} onMouseMove={handleGraphHover} onMouseLeave={() => setHoverData(null)}>
-                    <defs>
-                      <linearGradient id="grad" x1="0" x2="0" y1="0" y2="1">
-                        <stop offset="0%" stopColor={isChartPositive ? 'rgba(19,115,51,0.2)' : 'rgba(165,14,14,0.2)'} />
-                        <stop offset="100%" stopColor={isChartPositive ? 'rgba(19,115,51,0)' : 'rgba(165,14,14,0)'} />
-                      </linearGradient>
-                    </defs>
-                    
-                    {(() => {
-                      const min = Math.floor(minPrice / 20) * 20;
-                      const max = Math.ceil(maxPrice / 20) * 20;
-                      const step = Math.ceil((max - min) / 5 / 20) * 20;
-                      const steps = [];
-                      for (let p = max; p >= min && steps.length < 6; p -= step) steps.push(p);
-                      return steps.map(p => <text key={p} x="8" y={20 + ((max - p) / ((max - min) || 1)) * 240 + 4} fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">${p}</text>);
-                    })()}
-                    
-                    {areaPath && <path d={areaPath} fill="url(#grad)" />}
-                    {linePath && <path d={linePath} fill="none" stroke={CHART_COLOR} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
-                    
-                    {chartData.length > 0 && (() => {
-                      if (timeframe === '1D') {
-                        return ['10:00','11:00','12:00','13:00','14:00','15:00','16:00'].map((label, idx) => (
-                          <text key={idx} x={50 + ((0.5 + idx) / 6.5) * 720} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{label}</text>
-                        ));
-                      }
-                      if (timeframe === '1W') {
-                        const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-                        const seen = new Set();
-                        return chartData.map((d, i) => {
-                          const date = new Date(d.date).toDateString();
-                          if (seen.has(date)) return null;
-                          seen.add(date);
-                          return <text key={i} x={50 + (i / (chartData.length - 1 || 1)) * 720} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{days[new Date(d.date).getDay()]}</text>;
-                        });
-                      }
-                      if (timeframe === '5Y') {
-                        const seen = new Set();
-                        return chartData.map((d, i) => {
-                          const year = new Date(d.date).getFullYear();
-                          if (seen.has(year)) return null;
-                          seen.add(year);
-                          return <text key={i} x={50 + (i / (chartData.length - 1 || 1)) * 720} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{String(year).slice(-2)}</text>;
-                        });
-                      }
-                      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-                      const seen = new Set();
-                      return chartData.map((d, i) => {
-                        const key = `${new Date(d.date).getFullYear()}-${new Date(d.date).getMonth()}`;
-                        if (seen.has(key)) return null;
-                        seen.add(key);
-                        return <text key={i} x={50 + (i / (chartData.length - 1 || 1)) * 720} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">{months[new Date(d.date).getMonth()]}</text>;
-                      });
-                    })()}
-                    
-                    {hoverData && (
-                      <g pointerEvents="none">
-                        <line x1={hoverData.dataX} y1="20" x2={hoverData.dataX} y2="260" stroke="#666" strokeWidth="1" strokeDasharray="4" />
-                        <line x1="50" y1={hoverData.y} x2="770" y2={hoverData.y} stroke="#666" strokeWidth="1" strokeDasharray="4" />
-                        <circle cx={hoverData.dataX} cy={hoverData.y} r="3.5" fill={CHART_COLOR} stroke="#fff" strokeWidth="2" />
-                      </g>
-                    )}
-                  </svg>
-                  
-                  {hoverData && (
-                    <div style={{ position: 'absolute', left: `${(hoverData.dataX / 800) * 100}%`, top: `${(hoverData.y / 300) * 100}%`, transform: hoverData.dataX < 400 ? 'translate(10px, -50%)' : 'translate(-130px, -50%)', pointerEvents: 'none', zIndex: 10 }}>
-                      <div style={{ background: 'rgba(26, 26, 26, 0.9)', padding: '8px 12px', borderRadius: '4px', minWidth: '80px', textAlign: 'center' }}>
-                        <div style={{ color: '#fff', fontSize: '13px', fontWeight: 600, fontFamily: 'IBM Plex Mono', marginBottom: '4px' }}>${hoverData.data.close.toFixed(2)}</div>
-                        <div style={{ color: '#ccc', fontSize: '10px', fontFamily: 'IBM Plex Mono' }}>
-                          {timeframe === '1D' 
-                            ? new Date(hoverData.data.date).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit', timeZone: 'America/New_York' })
-                            : new Date(hoverData.data.date).toLocaleDateString('en-US', { month:'short', day:'numeric', timeZone: 'America/New_York' })}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <StockChart 
+                  chartData={chartData}
+                  timeframe={timeframe}
+                  onTimeframeChange={setTimeframe}
+                  previousClose={quote?.pc}
+                />
               </div>
             </div>
 
