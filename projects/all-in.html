@@ -8,11 +8,19 @@
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/dayjs@1.11.10/dayjs.min.js"></script>
+  <script src="https://unpkg.com/dayjs@1.11.10/plugin/utc.js"></script>
+  <script src="https://unpkg.com/dayjs@1.11.10/plugin/timezone.js"></script>
 </head>
 <body>
   <div id="root"></div>
   <script type="text/babel">
     const { useState, useEffect, useRef, useMemo, useCallback } = React;
+    
+    // Initialize dayjs plugins
+    dayjs.extend(dayjs_plugin_utc);
+    dayjs.extend(dayjs_plugin_timezone);
+    const EST = 'America/New_York';
 
     const WORKER_URL = 'https://dry-poetry-72b5.donovanh59.workers.dev';
     const CACHE_DURATION = 60 * 60 * 1000;
@@ -65,12 +73,9 @@
     };
 
     const getMarketState = () => {
-      const now = new Date();
-      const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-      const day = estTime.getDay();
-      const hour = estTime.getHours();
-      const minute = estTime.getMinutes();
-      const timeInMinutes = hour * 60 + minute;
+      const now = dayjs().tz(EST);
+      const day = now.day();
+      const timeInMinutes = now.hour() * 60 + now.minute();
       
       const isWeekend = day === 0 || day === 6;
       
@@ -95,7 +100,7 @@
       
       return {
         state,
-        estTime,
+        estTime: now,
         isWeekend,
         timeInMinutes,
         isRegularHours: state === MarketState.OPEN,
@@ -105,9 +110,7 @@
     };
 
     const getTodayEST = () => {
-      const now = new Date();
-      const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-      return estTime.toISOString().split('T')[0];
+      return dayjs().tz(EST).format('YYYY-MM-DD');
     };
 
     // DATA FETCHING
@@ -136,7 +139,7 @@
         preMarketPrice: meta.preMarketPrice,
         postMarketPrice: meta.postMarketPrice,
         tradingDay: result.timestamp?.length > 0 
-          ? new Date(result.timestamp[result.timestamp.length - 1] * 1000).toISOString().split('T')[0]
+          ? dayjs.unix(result.timestamp[result.timestamp.length - 1]).format('YYYY-MM-DD')
           : null,
         fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh,
         fiftyTwoWeekLow: meta.fiftyTwoWeekLow
@@ -156,17 +159,15 @@
         }
       } 
       else if (marketState.state === MarketState.POST_MARKET) {
-        const now = new Date();
-        let lastTradingDay = new Date(now);
-        if (now.getDay() === 0) lastTradingDay.setDate(now.getDate() - 2);
-        else if (now.getDay() === 6) lastTradingDay.setDate(now.getDate() - 1);
+        let lastTradingDay = dayjs().tz(EST);
+        if (lastTradingDay.day() === 0) lastTradingDay = lastTradingDay.subtract(2, 'day');
+        else if (lastTradingDay.day() === 6) lastTradingDay = lastTradingDay.subtract(1, 'day');
         
-        const tradingDateStr = lastTradingDay.toISOString().split('T')[0];
-        const endDate = new Date(lastTradingDay);
-        endDate.setDate(endDate.getDate() + 1);
+        const tradingDateStr = lastTradingDay.format('YYYY-MM-DD');
+        const endDateStr = lastTradingDay.add(1, 'day').format('YYYY-MM-DD');
         
         const res = await fetch(
-          `${WORKER_URL}/bars/${symbol}?start=${tradingDateStr}T21:00:00Z&end=${endDate.toISOString().split('T')[0]}T01:00:00Z&timeframe=1Min&feed=sip`
+          `${WORKER_URL}/bars/${symbol}?start=${tradingDateStr}T21:00:00Z&end=${endDateStr}T01:00:00Z&timeframe=1Min&feed=sip`
         );
         const data = await res.json();
         if (data?.bars?.length > 0) {
@@ -290,8 +291,8 @@
         
         const calcX = (d, i) => {
           if (timeframe === '1D') {
-            const estTime = new Date(new Date(d.date).toLocaleString('en-US', { timeZone: 'America/New_York' }));
-            const timeInHours = Math.max(9.5, Math.min(16, estTime.getHours() + estTime.getMinutes() / 60));
+            const estTime = dayjs(d.date).tz(EST);
+            const timeInHours = Math.max(9.5, Math.min(16, estTime.hour() + estTime.minute() / 60));
             return 50 + ((timeInHours - 9.5) / 6.5) * 720;
           }
           return 50 + (i / (chartData.length - 1 || 1)) * 720;
@@ -328,16 +329,16 @@
           let nearestIndex = 0, nearestDiff = Infinity;
           
           chartData.forEach((d, i) => {
-            const estTime = new Date(new Date(d.date).toLocaleString('en-US', { timeZone: 'America/New_York' }));
-            const timeInHours = estTime.getHours() + estTime.getMinutes() / 60;
+            const estTime = dayjs(d.date).tz(EST);
+            const timeInHours = estTime.hour() + estTime.minute() / 60;
             const diff = Math.abs(timeInHours - mouseTimeHours);
             if (diff < nearestDiff) { nearestDiff = diff; nearestIndex = i; }
           });
           
           index = nearestIndex;
           const point = chartData[index];
-          const estTime = new Date(new Date(point.date).toLocaleString('en-US', { timeZone: 'America/New_York' }));
-          const timeInHours = Math.max(9.5, Math.min(16, estTime.getHours() + estTime.getMinutes() / 60));
+          const estTime = dayjs(point.date).tz(EST);
+          const timeInHours = Math.max(9.5, Math.min(16, estTime.hour() + estTime.minute() / 60));
           dataX = 50 + ((timeInHours - 9.5) / 6.5) * 720;
         } else {
           const ratio = (mouseX - 50) / 720;
@@ -401,18 +402,18 @@
           const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
           const seen = new Set();
           chartData.forEach((d, i) => {
-            const date = new Date(d.date).toDateString();
+            const date = dayjs(d.date).format('YYYY-MM-DD');
             if (seen.has(date)) return;
             seen.add(date);
             allLabels.push({
-              label: days[new Date(d.date).getDay()],
+              label: days[dayjs(d.date).day()],
               x: 50 + (i / (chartData.length - 1 || 1)) * 720
             });
           });
         } else if (timeframe === '5Y') {
           const seen = new Set();
           chartData.forEach((d, i) => {
-            const year = new Date(d.date).getFullYear();
+            const year = dayjs(d.date).year();
             if (seen.has(year)) return;
             seen.add(year);
             allLabels.push({
@@ -425,11 +426,12 @@
           const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
           const seen = new Set();
           chartData.forEach((d, i) => {
-            const key = `${new Date(d.date).getFullYear()}-${new Date(d.date).getMonth()}`;
+            const dt = dayjs(d.date);
+            const key = `${dt.year()}-${dt.month()}`;
             if (seen.has(key)) return;
             seen.add(key);
             allLabels.push({
-              label: months[new Date(d.date).getMonth()],
+              label: months[dt.month()],
               x: 50 + (i / (chartData.length - 1 || 1)) * 720
             });
           });
@@ -510,8 +512,8 @@
                 </div>
                 <div style={{ color: '#ccc', fontSize: '10px', fontFamily: 'IBM Plex Mono' }}>
                   {timeframe === '1D' 
-                    ? new Date(hoverData.data.date).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit', timeZone: 'America/New_York' })
-                    : new Date(hoverData.data.date).toLocaleDateString('en-US', { month:'short', day:'numeric', timeZone: 'America/New_York' })}
+                    ? dayjs(hoverData.data.date).tz(EST).format('HH:mm')
+                    : dayjs(hoverData.data.date).tz(EST).format('MMM D')}
                 </div>
               </div>
             </div>
@@ -592,14 +594,14 @@
               const quote = result.indicators.quote[0];
               if (timestamps && quote) {
                 historicalData = timestamps.map((t, i) => ({
-                  date: new Date(t * 1000).toISOString().split('T')[0],
+                  date: dayjs.unix(t).format('YYYY-MM-DD'),
                   open: quote.open[i],
                   high: quote.high[i],
                   low: quote.low[i],
                   close: quote.close[i],
                   volume: quote.volume[i] || 0
                 })).filter(day => day.close !== null)
-                   .sort((a, b) => new Date(a.date) - new Date(b.date));
+                   .sort((a, b) => dayjs(a.date).unix() - dayjs(b.date).unix());
                 setCachedData(symbol, historicalData);
               }
             }
@@ -642,9 +644,8 @@
         try {
           if (['1M', '3M', '6M'].includes(tf) && data.length > 0) {
             const months = { '1M': 1, '3M': 3, '6M': 6 }[tf];
-            const cutoffDate = new Date();
-            cutoffDate.setMonth(cutoffDate.getMonth() - months);
-            setChartData(data.filter(d => new Date(d.date) >= cutoffDate));
+            const cutoffDate = dayjs().subtract(months, 'month');
+            setChartData(data.filter(d => dayjs(d.date).isAfter(cutoffDate)));
             return;
           }
           
@@ -670,7 +671,7 @@
             const quote = result.indicators.quote[0];
             if (timestamps && quote) {
               const chartBars = timestamps.map((t, i) => ({
-                date: new Date(t * 1000).toISOString(),
+                date: dayjs.unix(t).toISOString(),
                 open: quote.open[i],
                 high: quote.high[i],
                 low: quote.low[i],
@@ -944,11 +945,14 @@
         const todayEST = getTodayEST();
         const apiTradingDay = quote?.tradingDay;
         const shouldProcessTodayRow = apiTradingDay === todayEST || currentMarketState.isRegularHours;
-        const historicalDataHasToday = data[data.length - 1]?.date === todayEST;
+        
+        // Normalize date comparison - handles both ISO strings and YYYY-MM-DD
+        const toDateStr = (d) => d ? dayjs(d).format('YYYY-MM-DD') : null;
+        const historicalDataHasToday = toDateStr(data[data.length - 1]?.date) === todayEST;
         
         if (shouldProcessTodayRow && quote?.c) {
           if (historicalDataHasToday) {
-            const todayIndex = dataWithToday.findIndex(d => d.date === todayEST);
+            const todayIndex = dataWithToday.findIndex(d => toDateStr(d.date) === todayEST);
             if (todayIndex !== -1) {
               dataWithToday[todayIndex] = {
                 ...dataWithToday[todayIndex],
@@ -973,7 +977,7 @@
           }
         }
         
-        const cleanedData = dataWithToday.filter(d => !(d.isToday && d.date !== todayEST));
+        const cleanedData = dataWithToday.filter(d => !(d.isToday && toDateStr(d.date) !== todayEST));
         
         const dataWithChange = cleanedData.map((row, index) => ({
           ...row,
@@ -1065,7 +1069,7 @@
             .header-input:focus { outline: none; border-bottom-color: #1a1a1a; }
             .header-input::placeholder { color: #999; }
             .sort-indicator { opacity: 0.5; font-size: 10px; margin-left: 4px; }
-            .spreadsheet-body { max-height: 380px; overflow-y: auto; } //edit max-height for n of rows
+            .spreadsheet-body { max-height: 380px; overflow-y: auto; }
             .spreadsheet-row { display: grid; grid-template-columns: 100px 80px 80px 80px 80px 70px 70px auto; border-bottom: 1px solid #e8e5dc; }
             .spreadsheet-row:hover { background: #f0ede4; }
             .spreadsheet-cell { padding: 10px; border-right: 1px solid #e8e5dc; font-size: 13px; white-space: nowrap; text-align: center; }
@@ -1169,7 +1173,7 @@
                   
                   return (
                     <div key={row.date} className="spreadsheet-row">
-                      <div className="spreadsheet-cell">{row.date.split('T')[0]}</div>
+                      <div className="spreadsheet-cell">{dayjs(row.date).format('YYYY-MM-DD')}</div>
                       <div className="spreadsheet-cell">${row.open.toFixed(2)}</div>
                       <div className="spreadsheet-cell">${row.high.toFixed(2)}</div>
                       <div className="spreadsheet-cell">${row.low.toFixed(2)}</div>
@@ -1184,7 +1188,7 @@
             </div>
 
             <div className="timestamp">
-              Last updated: {new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', '')} 
+              Last updated: {dayjs().format('MMM D, YY HH:mm')} 
               <span style={{ marginLeft: '12px', opacity: 0.7 }}>Market: {currentMarketState.state}</span>
             </div>
           </div>
