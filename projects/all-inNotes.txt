@@ -3,10 +3,11 @@ MISSION - when i want to check tsla price i go to hjd.ai instead of yahoo or per
 
 NEXT 3
 
--favicon
+-websocket connecting/reconnecting. exponential fallback?
 -avg volume - how is this gathered/calculated
 -bulletproof afterhours price - which is the best free source of this data - make sure the label is robust - confident it is 
 
+- scaling - when screen gets too narrow: graph buttons break, spd becomes double scrollable? + headers break
 
 DATA
 Yahoo Finance - OHLCV data, quotes, 52-week range, pre/post prices 

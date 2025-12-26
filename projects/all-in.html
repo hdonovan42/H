@@ -56,10 +56,7 @@
       }
     };
 
-    // ============================================================
     // MARKET STATE - Single source of truth for market hours
-    // ============================================================
-    
     const MarketState = {
       PRE_MARKET: 'pre-market',
       OPEN: 'open',
@@ -113,10 +110,7 @@
       return estTime.toISOString().split('T')[0];
     };
 
-    // ============================================================
     // DATA FETCHING
-    // ============================================================
-
     const fetchYahooQuote = async (symbol) => {
       const response = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=1d&includePrePost=true`);
       const data = await response.json();
@@ -280,10 +274,7 @@
       }
     };
 
-    // ============================================================
     // MAIN COMPONENT
-    // ============================================================
-
     function StockTracker() {
       const [ticker, setTicker] = useState('TSLA');
       const [inputTicker, setInputTicker] = useState('');
@@ -304,10 +295,7 @@
       const wsRef = useRef(null);
       const svgRef = useRef(null);
 
-      // ============================================================
-      // MARKET STATE MONITORING
-      // ============================================================
-      
+      // MARKET STATE MONITORING      
       useEffect(() => {
         const interval = setInterval(() => {
           const newState = getMarketState();
@@ -323,10 +311,7 @@
         return () => clearInterval(interval);
       }, []);
 
-      // ============================================================
       // CACHE HELPERS
-      // ============================================================
-
       const getCachedData = (symbol) => {
         const cached = localStorage.getItem(`stock_${symbol}`);
         if (cached) {
@@ -340,10 +325,7 @@
         localStorage.setItem(`stock_${symbol}`, JSON.stringify({ data, timestamp: Date.now() }));
       };
 
-      // ============================================================
       // MAIN DATA FETCHER
-      // ============================================================
-
       const fetchStockData = async (symbol) => {
         setLoading(true);
         const marketState = getMarketState();
@@ -409,10 +391,7 @@
         setLoading(false);
       };
 
-      // ============================================================
       // CHART DATA FETCHER
-      // ============================================================
-
       const fetchChartData = useCallback(async (symbol, tf) => {
         setHoverData(null);
         const marketState = getMarketState();
@@ -467,10 +446,7 @@
         }
       }, [data, chartCache]);
 
-      // ============================================================
       // EFFECTS: Initial load and ticker changes
-      // ============================================================
-
       useEffect(() => { 
         setChartCache({});
         lastPriceRef.current = null;
@@ -481,11 +457,7 @@
         if (ticker) fetchChartData(ticker, timeframe); 
       }, [ticker, timeframe, fetchChartData]);
 
-      // ============================================================
-      // CONSOLIDATED WEBSOCKET EFFECT
-      // Handles connection, reconnection, ticker changes, and cleanup
-      // ============================================================
-      
+      // CONSOLIDATED WEBSOCKET - Handles connection, reconnection, ticker changes, and cleanup
       useEffect(() => {
         let ws = null;
         let reconnectTimeout = null;
@@ -661,10 +633,7 @@
         };
       }, [ticker]);
 
-      // ============================================================
-      // MARKET OPEN ONLY: Periodic 1D chart refresh
-      // ============================================================
-      
+      // MARKET OPEN ONLY - Periodic 1D chart refresh      
       useEffect(() => {
         if (timeframe !== '1D') return;
         
@@ -681,10 +650,7 @@
         return () => clearInterval(interval);
       }, [ticker, timeframe, fetchChartData]);
 
-      // ============================================================
       // CHART HOVER HANDLER
-      // ============================================================
-
       const handleGraphHover = (e) => {
         if (!chartData?.length || !svgRef.current) return;
         
@@ -723,10 +689,7 @@
         }
       };
 
-      // ============================================================
       // SPREADSHEET DATA PROCESSING
-      // ============================================================
-
       const processSpreadsheetData = useMemo(() => {
         const dataWithToday = [...data];
         const todayEST = getTodayEST();
@@ -779,10 +742,7 @@
         });
       }, [processSpreadsheetData, sortConfig]);
 
-      // ============================================================
       // DERIVED VALUES
-      // ============================================================
-
       const currentPrice = quote?.c || data[data.length - 1]?.close || 0;
       const lastTwo = processSpreadsheetData.slice(-2);
       const todayChange = lastTwo.length === 2 ? lastTwo[1].close - lastTwo[0].close : 0;
@@ -795,10 +755,7 @@
       const marketCap = quote?.sharesOutstanding ? (quote.sharesOutstanding * currentPrice) / 1e6 : 0;
       const forwardPE = quote?.forwardPE || 0;
 
-      // ============================================================
       // CHART CALCULATIONS
-      // ============================================================
-
       const { minPrice, maxPrice, priceRange, linePath, areaPath } = useMemo(() => {
         const min = chartData.length > 0 ? Math.min(...chartData.map(d => d.low)) * 0.999 : 0;
         const max = chartData.length > 0 ? Math.max(...chartData.map(d => d.high)) * 1.001 : 100;
@@ -829,10 +786,7 @@
       }
       const CHART_COLOR = isChartPositive ? '#137333' : '#a50e0e';
 
-      // ============================================================
       // HANDLERS
-      // ============================================================
-
       const handleTickerSubmit = (e) => {
         e.preventDefault();
         if (inputTicker.trim()) {
@@ -846,10 +800,7 @@
         setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }));
       };
 
-      // ============================================================
       // RENDER
-      // ============================================================
-
       return (
         <div style={{ minHeight: '100vh', background: '#f4f1e8', fontFamily: '"IBM Plex Mono", monospace', color: '#1a1a1a', padding: '22px' }}> 
           <style>{`
