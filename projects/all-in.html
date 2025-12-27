@@ -170,7 +170,7 @@
         preMarketPrice,
         postMarketPrice,
         tradingDay: timestamps.length > 0 
-          ? dayjs.unix(timestamps[timestamps.length - 1]).format('YYYY-MM-DD')
+          ? dayjs.unix(timestamps[timestamps.length - 1]).tz(EST).format('YYYY-MM-DD')
           : null,
         fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh,
         fiftyTwoWeekLow: meta.fiftyTwoWeekLow
