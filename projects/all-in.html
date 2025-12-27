@@ -213,13 +213,16 @@
       let extendedHoursPrice = null;
       let extendedHoursType = null;
       
-      // Get extended hours data from Yahoo (now extracted from last bar)
+      // Get extended hours data from Yahoo (extracted from last bar)
       if (marketState.state === MarketState.PRE_MARKET && yahooData.preMarketPrice) {
         extendedHoursPrice = yahooData.preMarketPrice;
         extendedHoursType = 'pre';
-      } else if (marketState.state === MarketState.POST_MARKET && yahooData.postMarketPrice) {
-        extendedHoursPrice = yahooData.postMarketPrice;
-        extendedHoursType = 'post';
+      } else if (marketState.state === MarketState.POST_MARKET || marketState.state === MarketState.CLOSED) {
+        // Post-market or closed: show last available price
+        if (yahooData.postMarketPrice) {
+          extendedHoursPrice = yahooData.postMarketPrice;
+          extendedHoursType = 'post';
+        }
       }
       
       
@@ -581,7 +584,7 @@
               const quote = result.indicators.quote[0];
               if (timestamps && quote) {
                 historicalData = timestamps.map((t, i) => ({
-                  date: dayjs.unix(t).format('YYYY-MM-DD'),
+                  date: dayjs.unix(t).tz(EST).format('YYYY-MM-DD'),
                   open: quote.open[i],
                   high: quote.high[i],
                   low: quote.low[i],
