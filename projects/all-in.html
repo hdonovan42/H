@@ -664,7 +664,7 @@
             const quote = result.indicators.quote[0];
             if (timestamps && quote) {
               const chartBars = timestamps.map((t, i) => ({
-                date: dayjs.unix(t).toISOString(),
+                date: dayjs.unix(t).tz(EST).toISOString(),
                 open: quote.open[i],
                 high: quote.high[i],
                 low: quote.low[i],
@@ -1119,7 +1119,7 @@
             .loading-text { font-size: 14px; letter-spacing: 4px; text-transform: uppercase; animation: pulse 1.5s infinite; }
             @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
             .timestamp { font-size: 11px; color: #888; text-align: right; margin-top: 14px; letter-spacing: 1px; }
-            .extended-hours-bar { margin-top: 16px; padding: 8px 16px; background: #e8e5dc; border-left: 4px solid #b8860b; display: flex; justify-content: space-between; align-items: center; }
+            .extended-hours-bar { margin-top: 16px; padding: 10px 16px; background: #f5f3ed; border: 1px solid #d0cdc4; border-radius: 3px; display: flex; justify-content: space-between; align-items: center; }
             @media (max-width: 900px) {
               .top-row { flex-direction: column; }
               .top-row .price-section { width: 100%; }
