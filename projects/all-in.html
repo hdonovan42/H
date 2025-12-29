@@ -1098,7 +1098,7 @@
             .stat-label { font-size: 12px; color: #666; }
             .stat-value { font-size: 12px; font-weight: 500; }
             .chart-box { padding: 16px 12px; height: 100%; display: flex; flex-direction: column; justify-content: center; position: relative; }
-            .timeframe-controls { display: flex; align-items: center; position: absolute; top: 8px; right: 20px; z-index: 10; }
+            .timeframe-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; position: absolute; top: 4px; left: 12px; right: 12px; z-index: 10; }
             .timeframe-btn { background: transparent; border: none; padding: 6px 12px; font-family: inherit; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; transition: all 0.2s; font-weight: 500; color: #888; border-radius: 4px; }
             .timeframe-btn:hover { background: rgba(0,0,0,0.04); color: #555; }
             .timeframe-btn.active { background: #e0ddd4; color: #3a3a3a; font-weight: 600; }
@@ -1135,6 +1135,8 @@
               .price-section { padding: 28px 32px; }
               .stat-label, .stat-value { font-size: 13px; }
               .stat-row { padding: 10px 0; }
+              .timeframe-controls { gap: 0; justify-content: right; }
+              .timeframe-btn { padding: 0px 8px; font-size: 10px; letter-spacing: 0.5px; }
             }
           `}</style>
 
