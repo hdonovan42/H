@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Stock Tracker</title>
   <link rel="icon" type="image/png" href="https://hjd.ai/images/H-favicon.png">
-  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
   <script src="https://unpkg.com/dayjs@1.11.10/dayjs.min.js"></script>
   <script src="https://unpkg.com/dayjs@1.11.10/plugin/utc.js"></script>
   <script src="https://unpkg.com/dayjs@1.11.10/plugin/timezone.js"></script>
@@ -642,7 +642,7 @@
             return;
           }
           
-          const cacheKey = `${symbol}-${tf}`;
+          const cacheKey = tf === '1D' ? `${symbol}-${tf}-${getTodayEST()}` : `${symbol}-${tf}`;
           const skipCache = tf === '1D' && marketState.isRegularHours;
           if (!skipCache && chartCache[cacheKey]) {
             setChartData(chartCache[cacheKey]);
@@ -917,27 +917,28 @@
 
       // MARKET OPEN ONLY - Periodic 1D chart refresh      
       useEffect(() => {
+        if (!ticker) return;
         if (timeframe !== '1D') return;
+        if (!currentMarketState.isRegularHours) return;
         
-        const marketState = getMarketState();
-        if (!marketState.isRegularHours) return;
-        
-        const interval = setInterval(() => {
+        const pollIntraday = () => {
           const currentState = getMarketState();
           if (currentState.isRegularHours) {
             fetchChartData(ticker, '1D');
           }
-        }, 60000);
+        };
+        
+        // Immediate poll when regular hours start, then every minute
+        pollIntraday();
+        const interval = setInterval(pollIntraday, 60000);
         
         return () => clearInterval(interval);
-      }, [ticker, timeframe, fetchChartData]);
+      }, [ticker, timeframe, currentMarketState.state, fetchChartData]);
 
-      // EXTENDED HOURS ONLY - Poll for price updates every 30 seconds
+      // EXTENDED HOURS ONLY - Poll for price updates while marketState is extended
       useEffect(() => {
-        const marketState = getMarketState();
-        
-        // Only poll during pre-market or post-market
-        if (!marketState.isExtendedHours) return;
+        if (!ticker) return;
+        if (!currentMarketState.isExtendedHours) return;
         
         const pollExtendedHours = async () => {
           const currentState = getMarketState();
@@ -968,13 +969,15 @@
           }
         };
         
+        // Immediate fetch then interval until market state changes
+        pollExtendedHours();
         const interval = setInterval(pollExtendedHours, 5000);
         
         return () => {
           console.log('Extended hours polling stopped');
           clearInterval(interval);
         };
-      }, [ticker]);
+      }, [ticker, currentMarketState.state]);
 
       // SPREADSHEET DATA PROCESSING
       const processSpreadsheetData = useMemo(() => {

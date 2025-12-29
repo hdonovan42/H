@@ -15,7 +15,8 @@ xx - Price movement animation - coloured flash seems too jarring - current appro
     - fix bug with really narrow screens, buttons should never be wider than the box, buttonsMaxWidth=containerWidth
 
     
-
+-make mobile friendly
+-flash animation 
 
 DATA
 Yahoo Finance - OHLCV data, quotes, 52-week range, pre/post prices 
