@@ -1061,10 +1061,11 @@
 
       // RENDER
       return (
-        <div style={{ minHeight: '100vh', background: '#f4f1e8', fontFamily: '"IBM Plex Mono", monospace', color: '#1a1a1a', padding: '22px' }}> 
+        <div className="page-wrapper">
           <style>{`
             @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap');
             * { box-sizing: border-box; margin: 0; padding: 0; }
+            .page-wrapper { min-height: 100vh; background: #f4f1e8; font-family: 'IBM Plex Mono', monospace; color: #1a1a1a; padding: 22px; }
             .container { max-width: 1200px; margin: 0 auto; padding: 0px 28px; }
             .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px; padding-bottom: 20px; border-bottom: 2px solid #1a1a1a; }
             .ticker-display { font-size: 44px; font-weight: 600; letter-spacing: -1px; }
@@ -1139,8 +1140,8 @@
               .price-section { padding: 28px 32px; }
               .stat-label, .stat-value { font-size: 13px; }
               .stat-row { padding: 10px 0; }
-              .timeframe-controls { gap: 0; justify-content: right; }
-              .timeframe-btn { padding: 0px 8px; font-size: 11px; letter-spacing: 0.5px; }
+              .container { padding: 0 8px; }
+              .page-wrapper { padding: 12px; }
             }
           `}</style>
 
