@@ -530,6 +530,7 @@
       
       const lastPriceRef = useRef(null);
       const wsRef = useRef(null);
+      const isConnectingRef = useRef(false);
 
       // MARKET STATE MONITORING      
       useEffect(() => {
@@ -537,7 +538,6 @@
           const newState = getMarketState();
           setCurrentMarketState(prev => {
             if (prev.state !== newState.state) {
-              console.log(`Market state changed: ${prev.state} → ${newState.state}`);
               return newState;
             }
             return prev;
@@ -699,42 +699,44 @@
         let ws = null;
         let reconnectTimeout = null;
         let reconnectAttempts = 0;
-        let isConnecting = false;
         let currentSubscribedSymbol = null;
         let isMounted = true;
+        let abortController = null;
+        let lastMessageTime = Date.now();
+        let healthCheckInterval = null;
         
-        const MAX_RECONNECT_ATTEMPTS = 15;
-        const INITIAL_RECONNECT_DELAY = 500;
-        const MAX_RECONNECT_DELAY = 30000;
+        const MAX_RECONNECT_ATTEMPTS = 10;
+        const STALE_CONNECTION_MS = 60000; // Consider connection stale if no message for 60s
         
-        const getReconnectDelay = () => {
-          // Fast retries initially (500ms, 1s, 2s), then slow down
-          const delay = Math.min(INITIAL_RECONNECT_DELAY * Math.pow(2, reconnectAttempts), MAX_RECONNECT_DELAY);
-          return delay;
+        const getReconnectDelay = () => Math.min(500 * Math.pow(2, reconnectAttempts), 30000);
+        
+        const cleanup = (skipWsClose = false) => {
+          if (abortController) {
+            abortController.abort();
+            abortController = null;
+          }
+          if (!skipWsClose && ws) {
+            ws.onopen = null;
+            ws.onclose = null;
+            ws.onerror = null;
+            ws.onmessage = null;
+            if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+              ws.close();
+            }
+            ws = null;
+          }
         };
         
         const connectWebSocket = async () => {
           if (!isMounted) return;
           
           const marketState = getMarketState();
+          if (!marketState.isRegularHours) return;
           
-          if (!marketState.isRegularHours) {
-            console.log(`WebSocket skipped: Market is ${marketState.state}`);
-            return;
-          }
+          if (isConnectingRef.current) return;
           
-          if (isConnecting) {
-            console.log('WebSocket connection already in progress');
-            return;
-          }
-          
-          // Close existing connection if any
-          if (ws) {
-            ws.onclose = null;
-            ws.onerror = null;
-            ws.close();
-            ws = null;
-          }
+          // Clean up any existing connection
+          cleanup();
           if (wsRef.current) {
             wsRef.current.onclose = null;
             wsRef.current.onerror = null;
@@ -742,26 +744,26 @@
             wsRef.current = null;
           }
           
-          isConnecting = true;
-          console.log(`WebSocket connecting... (attempt ${reconnectAttempts + 1})`);
+          isConnectingRef.current = true;
+          abortController = new AbortController();
+          const fetchTimeout = setTimeout(() => abortController.abort(), 8000);
           
           try {
-            // Fetch WebSocket URL from worker (keeps API key server-side)
-            const res = await fetch(`${WORKER_URL}/finnhub/ws-url`);
+            // Fetch WebSocket URL with timeout
+            const res = await fetch(`${WORKER_URL}/finnhub/ws-url`, { signal: abortController.signal });
+            clearTimeout(fetchTimeout);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const { url: wsUrl } = await res.json();
             
             if (!isMounted) {
-              isConnecting = false;
+              isConnectingRef.current = false;
               return;
             }
             
             ws = new WebSocket(wsUrl);
             
-            // Set a connection timeout
             const connectionTimeout = setTimeout(() => {
               if (ws && ws.readyState !== WebSocket.OPEN) {
-                console.log('WebSocket connection timeout');
                 ws.close();
               }
             }, 10000);
@@ -774,18 +776,19 @@
               }
               
               console.log('WebSocket connected');
-              isConnecting = false;
+              isConnectingRef.current = false;
               reconnectAttempts = 0;
               wsRef.current = ws;
+              lastMessageTime = Date.now();
               
               if (ticker) {
                 ws.send(JSON.stringify({ type: 'subscribe', symbol: ticker }));
                 currentSubscribedSymbol = ticker;
-                console.log(`Subscribed to ${ticker}`);
               }
             };
             
             ws.onmessage = (event) => {
+              lastMessageTime = Date.now();
               try {
                 const msg = JSON.parse(event.data);
                 if (msg.type === 'trade' && msg.data?.length > 0) {
@@ -810,36 +813,35 @@
                   setPriceFlash(null);
                   requestAnimationFrame(() => setPriceFlash(direction));
                 }
-              } catch (e) {}
+              } catch (e) { /* ignore parse errors */ }
             };
             
-            ws.onerror = (error) => {
+            ws.onerror = () => {
               clearTimeout(connectionTimeout);
-              console.error('WebSocket error:', error);
-              isConnecting = false;
+              isConnectingRef.current = false;
             };
             
-            ws.onclose = (event) => {
+            ws.onclose = () => {
               clearTimeout(connectionTimeout);
-              console.log(`WebSocket closed (code: ${event.code})`);
-              isConnecting = false;
+              isConnectingRef.current = false;
               wsRef.current = null;
               currentSubscribedSymbol = null;
               
-              if (isMounted) {
-                const marketState = getMarketState();
-                if (marketState.isRegularHours) {
-                  scheduleReconnect();
-                }
+              if (isMounted && getMarketState().isRegularHours) {
+                scheduleReconnect();
               }
             };
             
           } catch (e) {
-            console.error('WebSocket setup failed:', e);
-            isConnecting = false;
-            if (isMounted) {
-              scheduleReconnect();
+            clearTimeout(fetchTimeout);
+            isConnectingRef.current = false;
+            if (e.name === 'AbortError') {
+              console.log('WebSocket URL fetch aborted (timeout)');
+              if (isMounted) scheduleReconnect();
+              return;
             }
+            console.log('WebSocket connection failed');
+            if (isMounted) scheduleReconnect();
           }
         };
         
@@ -849,13 +851,9 @@
             reconnectTimeout = null;
           }
           
-          if (!isMounted) return;
-          
-          const marketState = getMarketState();
-          if (!marketState.isRegularHours) return;
+          if (!isMounted || !getMarketState().isRegularHours) return;
           
           if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            console.log('Max reconnection attempts reached, will retry in 60s');
             reconnectAttempts = 0;
             reconnectTimeout = setTimeout(connectWebSocket, 60000);
             return;
@@ -863,30 +861,28 @@
           
           const delay = getReconnectDelay();
           reconnectAttempts++;
-          
-          console.log(`WebSocket reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
           reconnectTimeout = setTimeout(connectWebSocket, delay);
         };
         
-        // Initial connection - start immediately if market is open
-        const marketState = getMarketState();
-        if (marketState.isRegularHours) {
+        // Initial connection
+        if (getMarketState().isRegularHours) {
           connectWebSocket();
         }
         
-        // Monitor for market open/close transitions and connection health
-        const marketCheckInterval = setInterval(() => {
+        // Health check: detect stale connections and market transitions
+        healthCheckInterval = setInterval(() => {
           if (!isMounted) return;
           
           const marketState = getMarketState();
           const hasConnection = wsRef.current?.readyState === WebSocket.OPEN;
           
-          if (marketState.isRegularHours && !hasConnection && !isConnecting) {
-            console.log('Market is open but no connection - reconnecting');
+          // Market open but no connection
+          if (marketState.isRegularHours && !hasConnection && !isConnectingRef.current) {
             reconnectAttempts = 0;
             connectWebSocket();
-          } else if (!marketState.isRegularHours && hasConnection) {
-            console.log('Market closed - disconnecting WebSocket');
+          } 
+          // Market closed - disconnect
+          else if (!marketState.isRegularHours && hasConnection) {
             if (wsRef.current) {
               wsRef.current.onclose = null;
               wsRef.current.close();
@@ -894,26 +890,29 @@
             wsRef.current = null;
             currentSubscribedSymbol = null;
           }
-        }, 15000); // Check every 15s instead of 60s
+          // Connection stale (no messages for too long during market hours)
+          else if (marketState.isRegularHours && hasConnection && Date.now() - lastMessageTime > STALE_CONNECTION_MS) {
+            if (wsRef.current) {
+              wsRef.current.close(); // Will trigger onclose -> reconnect
+            }
+          }
+        }, 15000);
         
         return () => {
           isMounted = false;
-          clearInterval(marketCheckInterval);
+          cleanup();
+          clearInterval(healthCheckInterval);
           if (reconnectTimeout) clearTimeout(reconnectTimeout);
-          if (ws) {
-            ws.onclose = null;
-            ws.onerror = null;
-            if (currentSubscribedSymbol && ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ type: 'unsubscribe', symbol: currentSubscribedSymbol }));
-            }
-            ws.close();
-          }
           if (wsRef.current) {
+            if (currentSubscribedSymbol && wsRef.current.readyState === WebSocket.OPEN) {
+              try { wsRef.current.send(JSON.stringify({ type: 'unsubscribe', symbol: currentSubscribedSymbol })); } catch (e) {}
+            }
             wsRef.current.onclose = null;
             wsRef.current.onerror = null;
             wsRef.current.close();
+            wsRef.current = null;
           }
-          wsRef.current = null;
+          isConnectingRef.current = false;
         };
       }, [ticker]);
 
