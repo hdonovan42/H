@@ -3,21 +3,13 @@ MISSION - when i want to check tsla price i go to hjd.ai instead of yahoo or per
 
 NEXT 3
 
-xx - Price movement animation - coloured flash seems too jarring - current approach is boring - what options do i have???
-
-1. THIS WEEKEND - BULLETPROOF AFTER HOURS PRICE - test the yahoo bars approach thoroughly
-
-2 spreadsheet bugs - the headers aren't attached to the data - how ???
-
-3. graph - implement candles - 1d still buggy - market open for repeating it - sometimes draws funny - what is distinct here?
+1. graph - implement candles - 1d still buggy - market open for repeating it - sometimes draws funny - what is distinct here?
     - drag for returns in that period
 
-    - fix bug with really narrow screens, buttons should never be wider than the box, buttonsMaxWidth=containerWidth
+2. Drop Inline Babel - Break into smaller components with and build - reduce loading time
 
-    
--make mobile friendly
--flash animation 
--drop inline Babel
+4. Current websocket only supports one user - how to change to one per user 
+
 
 DATA
 Yahoo Finance - OHLCV data, quotes, 52-week range, pre/post prices 
@@ -42,6 +34,12 @@ Finnhub - Real time price (through websocket) + forward p/e
 - maxLabels
 
 - fixed ooh price - yahoo bars 
+
+29.12.25
+- price update animation 
+- scaling
+    - buttons on graph work on small screens
+    - fixed spd - double scroll, etc
 
 
 
