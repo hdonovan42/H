@@ -921,12 +921,7 @@
         if (timeframe !== '1D') return;
         if (!currentMarketState.isRegularHours) return;
         
-        const pollIntraday = () => {
-          const currentState = getMarketState();
-          if (currentState.isRegularHours) {
-            fetchChartData(ticker, '1D');
-          }
-        };
+        const pollIntraday = () => fetchChartData(ticker, '1D');
         
         // Immediate poll when regular hours start, then every minute
         pollIntraday();

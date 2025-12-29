@@ -17,6 +17,7 @@ xx - Price movement animation - coloured flash seems too jarring - current appro
     
 -make mobile friendly
 -flash animation 
+-drop inline Babel
 
 DATA
 Yahoo Finance - OHLCV data, quotes, 52-week range, pre/post prices 
