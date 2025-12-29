@@ -3,6 +3,8 @@ MISSION - when i want to check tsla price i go to hjd.ai instead of yahoo or per
 
 NEXT 3
 
+test 800px width for hiding columns - should show in horizontal, hide in vertical
+
 1. graph - implement candles - 1d still buggy - market open for repeating it - sometimes draws funny - what is distinct here?
     - drag for returns in that period
 
