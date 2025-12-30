@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TSLA News</title>
+  <link rel="icon" type="image/png" href="https://hjd.ai/images/H-favicon.png">
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback } = React;
+
+    const WORKER_URL = 'https://dry-poetry-72b5.donovanh59.workers.dev';
+
+    // Relative time helper
+    const getRelativeTime = (dateString) => {
+      const now = new Date();
+      const date = new Date(dateString);
+      const diffMs = now - date;
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMs / 3600000);
+      const diffDays = Math.floor(diffMs / 86400000);
+
+      if (diffMins < 1) return 'just now';
+      if (diffMins < 60) return `${diffMins}m ago`;
+      if (diffHours < 24) return `${diffHours}h ago`;
+      if (diffDays < 7) return `${diffDays}d ago`;
+      return date.toLocaleDateString();
+    };
+
+    // Source badge colors
+    const getSourceStyle = (source) => {
+      const s = (source || '').toLowerCase();
+      if (s === 'sec') return { background: '#1a4b8c', color: '#fff' };
+      if (s === 'x') return { background: '#000', color: '#fff' };
+      // All other news sources get green
+      return { background: '#2d5a3d', color: '#fff' };
+    };
+
+    function TeslaNews() {
+      const [articles, setArticles] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [activeFilter, setActiveFilter] = useState('all');
+      const [tweetUrl, setTweetUrl] = useState('');
+      const [submitting, setSubmitting] = useState(false);
+      const [submitError, setSubmitError] = useState(null);
+      const [lastUpdated, setLastUpdated] = useState(null);
+      const [updating, setUpdating] = useState(false);
+
+      const fetchNews = useCallback(async () => {
+        try {
+          setError(null);
+          const response = await fetch(`${WORKER_URL}/news/TSLA?limit=500`);
+          if (!response.ok) throw new Error('Failed to fetch news');
+          const data = await response.json();
+          setArticles(data.news || data.articles || []);
+          setLastUpdated(new Date());
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setLoading(false);
+        }
+      }, []);
+
+      const triggerUpdate = async () => {
+        setUpdating(true);
+        try {
+          const response = await fetch(`${WORKER_URL}/news/update`);
+          const data = await response.json();
+          console.log('Update result:', data);
+          await fetchNews();
+        } catch (err) {
+          console.error('Update failed:', err);
+        } finally {
+          setUpdating(false);
+        }
+      };
+
+      const handleAddTweet = async (e) => {
+        e.preventDefault();
+        if (!tweetUrl.trim()) return;
+
+        if (!tweetUrl.includes('x.com') && !tweetUrl.includes('twitter.com')) {
+          setSubmitError('Please enter a valid X/Twitter URL');
+          return;
+        }
+
+        setSubmitting(true);
+        setSubmitError(null);
+
+        try {
+          const response = await fetch(`${WORKER_URL}/news/tweet`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: tweetUrl, note: '' })
+          });
+          
+          if (!response.ok) throw new Error('Failed to add tweet');
+          
+          setTweetUrl('');
+          await fetchNews();
+        } catch (err) {
+          setSubmitError(err.message);
+        } finally {
+          setSubmitting(false);
+        }
+      };
+
+      useEffect(() => {
+        fetchNews();
+        const interval = setInterval(fetchNews, 5 * 60 * 1000); // Refresh every 5 minutes
+        return () => clearInterval(interval);
+      }, [fetchNews]);
+
+      // Filter articles
+      const filteredArticles = articles.filter(article => {
+        const src = (article.source || '').toUpperCase();
+        if (activeFilter === 'all') return true;
+        if (activeFilter === 'SEC') return src === 'SEC' || src.includes('SEC') || src.includes('EDGAR');
+        if (activeFilter === 'news') return !src.includes('SEC') && !src.includes('EDGAR') && src !== 'X';
+        if (activeFilter === 'X') return src === 'X';
+        return true;
+      });
+
+      const filters = [
+        { key: 'all', label: 'All' },
+        { key: 'SEC', label: 'SEC' },
+        { key: 'news', label: 'News' },
+        { key: 'X', label: 'X' }
+      ];
+
+      return (
+        <div className="page-wrapper">
+          <style>{`
+            @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            .page-wrapper { min-height: 100vh; background: #f4f1e8; font-family: 'IBM Plex Mono', monospace; color: #1a1a1a; padding: 22px; }
+            .container { max-width: 900px; margin: 0 auto; padding: 0px 28px; }
+            .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 20px; border-bottom: 2px solid #1a1a1a; }
+            .header-left { display: flex; align-items: center; gap: 16px; }
+            .title { font-size: clamp(28px, 5vw, 40px); font-weight: 600; letter-spacing: -1px; }
+            .back-link { font-size: 13px; color: #666; text-decoration: none; padding: 6px 12px; border: 1px solid #d0cdc4; border-radius: 4px; transition: all 0.2s; }
+            .back-link:hover { background: #e8e5dc; color: #1a1a1a; }
+            .box { background: #faf9f5; border: 1px solid #d0cdc4; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.5), 0 2px 8px rgba(0,0,0,0.08); }
+            
+            .controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+            .filters { display: flex; gap: 8px; }
+            .filter-btn { background: transparent; border: 1px solid #d0cdc4; padding: 8px 16px; font-family: inherit; font-size: 12px; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; transition: all 0.2s; font-weight: 500; color: #666; border-radius: 4px; }
+            .filter-btn:hover { background: #e8e5dc; color: #1a1a1a; }
+            .filter-btn.active { background: #1a1a1a; color: #faf9f5; border-color: #1a1a1a; }
+            
+            .update-btn { background: #2d5a3d; border: none; padding: 8px 16px; font-family: inherit; font-size: 12px; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; transition: all 0.2s; font-weight: 500; color: #fff; border-radius: 4px; }
+            .update-btn:hover { background: #1a4a2d; }
+            .update-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+            
+            .news-list { max-height: 70vh; overflow-y: auto; }
+            .news-item { padding: 16px 20px; border-bottom: 1px solid #e8e5dc; display: flex; gap: 12px; align-items: flex-start; transition: background 0.15s; }
+            .news-item:hover { background: #f0ede4; }
+            .news-item:last-child { border-bottom: none; }
+            
+            .source-badge { font-size: 10px; font-weight: 600; padding: 4px 8px; border-radius: 3px; letter-spacing: 0.5px; text-transform: uppercase; white-space: nowrap; flex-shrink: 0; }
+            
+            .news-content { flex: 1; min-width: 0; }
+            .news-title { font-size: 14px; font-weight: 500; color: #1a1a1a; text-decoration: none; line-height: 1.4; display: block; margin-bottom: 6px; }
+            .news-title:hover { color: #2d5a3d; }
+            .news-meta { font-size: 11px; color: #888; display: flex; gap: 12px; align-items: center; }
+            .news-source-detail { color: #666; }
+            
+            .tweet-form { padding: 16px 20px; border-top: 1px solid #d0cdc4; display: flex; gap: 12px; align-items: center; background: #f5f3ed; }
+            .tweet-input { flex: 1; background: #fff; border: 1px solid #d0cdc4; padding: 10px 14px; font-family: inherit; font-size: 13px; border-radius: 4px; }
+            .tweet-input:focus { outline: none; border-color: #1a1a1a; }
+            .tweet-input::placeholder { color: #999; }
+            .tweet-btn { background: #000; color: #fff; border: none; padding: 10px 20px; font-family: inherit; font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; border-radius: 4px; transition: all 0.2s; }
+            .tweet-btn:hover { background: #333; }
+            .tweet-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+            
+            .error-inline { color: #a50e0e; font-size: 12px; margin-left: 12px; }
+            
+            .loading-state, .error-state, .empty-state { padding: 60px 20px; text-align: center; color: #666; }
+            .loading-state { font-size: 14px; letter-spacing: 4px; text-transform: uppercase; animation: pulse 1.5s infinite; }
+            @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+            
+            .retry-btn { background: #1a1a1a; color: #fff; border: none; padding: 10px 24px; font-family: inherit; font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; border-radius: 4px; margin-top: 16px; }
+            .retry-btn:hover { background: #333; }
+            
+            .timestamp { font-size: 11px; color: #888; text-align: right; margin-top: 14px; letter-spacing: 1px; }
+            
+            .summary-badge { display: inline-block; font-size: 11px; color: #666; background: #e8e5dc; padding: 4px 10px; border-radius: 12px; margin-left: 8px; }
+
+            @media (max-width: 600px) {
+              .container { padding: 0 12px; }
+              .page-wrapper { padding: 12px; }
+              .controls { flex-direction: column; align-items: stretch; }
+              .filters { justify-content: center; }
+              .tweet-form { flex-direction: column; }
+              .tweet-input { width: 100%; }
+              .news-item { flex-direction: column; gap: 8px; }
+            }
+          `}</style>
+
+          <div className="container">
+            <header className="header">
+              <div className="header-left">
+                <div className="title">TSLA News</div>
+                <span className="summary-badge">{articles.length} articles</span>
+              </div>
+              <a href="all-in.html" className="back-link">← Stock Tracker</a>
+            </header>
+
+            <div className="controls">
+              <div className="filters">
+                {filters.map(f => (
+                  <button
+                    key={f.key}
+                    className={`filter-btn ${activeFilter === f.key ? 'active' : ''}`}
+                    onClick={() => setActiveFilter(f.key)}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+              <button 
+                className="update-btn" 
+                onClick={triggerUpdate}
+                disabled={updating}
+              >
+                {updating ? 'Updating...' : 'Refresh News'}
+              </button>
+            </div>
+
+            <div className="box">
+              {loading ? (
+                <div className="loading-state">Loading news...</div>
+              ) : error ? (
+                <div className="error-state">
+                  <div>Error: {error}</div>
+                  <button className="retry-btn" onClick={fetchNews}>Retry</button>
+                </div>
+              ) : filteredArticles.length === 0 ? (
+                <div className="empty-state">
+                  {articles.length === 0 
+                    ? 'No news yet. Click "Refresh News" to fetch articles.'
+                    : 'No articles match this filter.'}
+                </div>
+              ) : (
+                <div className="news-list">
+                  {filteredArticles.map((article, index) => (
+                    <div key={article.id || index} className="news-item">
+                      <span 
+                        className="source-badge" 
+                        style={getSourceStyle(article.source)}
+                      >
+                        {article.source}
+                      </span>
+                      <div className="news-content">
+                        <a 
+                          href={article.url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="news-title"
+                        >
+                          {article.title}
+                        </a>
+                        <div className="news-meta">
+                          <span>{getRelativeTime(article.publishedAt)}</span>
+                          {article.sourceDisplay && article.sourceDisplay !== article.source && (
+                            <span className="news-source-detail">{article.sourceDisplay}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <form className="tweet-form" onSubmit={handleAddTweet}>
+                <input
+                  type="text"
+                  className="tweet-input"
+                  placeholder="Paste X/Twitter URL to add manually..."
+                  value={tweetUrl}
+                  onChange={(e) => setTweetUrl(e.target.value)}
+                  disabled={submitting}
+                />
+                <button 
+                  type="submit" 
+                  className="tweet-btn"
+                  disabled={submitting || !tweetUrl.trim()}
+                >
+                  {submitting ? '...' : 'Add'}
+                </button>
+                {submitError && <span className="error-inline">{submitError}</span>}
+              </form>
+            </div>
+
+            {lastUpdated && (
+              <div className="timestamp">
+                Last refreshed: {lastUpdated.toLocaleTimeString()}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<TeslaNews />);
+  </script>
+</body>
+</html>
