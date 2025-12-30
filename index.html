@@ -11,11 +11,11 @@
     <link rel="stylesheet" href="styles.css">
     <script>
         function openX(e) {
-           e.preventDefault();
-           window.location.href = 'twitter://user?screen_name=fidybucks';
-           setTimeout(() => {
-               window.location.href = 'https://x.com/fidybucks';
-           }, 1000);
+           const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+           if (isMobile) {
+               e.preventDefault();
+               window.location.href = 'twitter://user?screen_name=fidybucks';
+           }
         }
     </script>  
 </head>
@@ -25,7 +25,7 @@
     <div class="button-container">
         <a href="writings/writings.html">writings</a>
         <span class="bullet">&bull;</span>
-        <a href="https://x.com/fidybucks" class="x-logo" onclick="openX(event)">
+        <a href="https://x.com/fidybucks" class="x-logo" target="_blank" rel="noopener noreferrer" onclick="openX(event)">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
             </svg>
@@ -37,10 +37,3 @@
 
 </body>
 </html>
-
-
-<!-- careful of the updates made to CSP to allow x app redirect,
- safer alternative includes moving JS to external file and update
- link to use a custom data attribute
- <a href="https://x.com/fidybucks" data-twitter-handle="fidybucks">...</a>
- -->

@@ -2,15 +2,12 @@ MISSION - when i want to check tsla price i go to hjd.ai instead of yahoo or per
 - price slightly off - not sure if this can be fixed for free - polygon.io/massive.com $200/month tier endgame.
 
 NEXT 3
+1. Drop Inline Babel - Break into smaller components with and build - reduce loading time
 
-test 800px width for hiding columns - should show in horizontal, hide in vertical
-
-1. graph - implement candles - 1d still buggy - market open for repeating it - sometimes draws funny - what is distinct here?
+2. graph - implement candles - 1d still buggy - market open for repeating it - sometimes draws funny - what is distinct here?
     - drag for returns in that period
 
-2. Drop Inline Babel - Break into smaller components with and build - reduce loading time
-
-4. Current websocket only supports one user - how to change to one per user 
+3. Current websocket only supports one user - how to change to one per user 
 
 
 DATA
