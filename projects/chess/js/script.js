@@ -6,6 +6,24 @@ const ANALYSIS_DEBOUNCE_TIME = 200;
 const ANALYSIS_DEPTH = 15;
 const MULTI_PV_LINES = 3;
 
+// Accuracy calculation constants
+// Formula based on Lichess/Chess.com approach using win probability
+const ACCURACY_COEFFICIENTS = {
+  a: 103.1668,
+  b: -0.04354,
+  c: -3.1669
+};
+
+// Move classification thresholds (in centipawns)
+const MOVE_CLASSIFICATION = {
+  BRILLIANT: { symbol: '!!', color: '#1baca6', minGain: 150 }, // Gains 1.5+ pawns unexpectedly
+  GREAT: { symbol: '!', color: '#5c8bb0', maxLoss: 0, minGain: 50 }, // Gains 0.5+ pawns
+  GOOD: { symbol: '', color: '#96bc4b', maxLoss: 10 }, // Loses less than 0.1 pawn
+  INACCURACY: { symbol: '?!', color: '#f7c631', maxLoss: 50 }, // Loses 0.1-0.5 pawns
+  MISTAKE: { symbol: '?', color: '#e6912c', maxLoss: 150 }, // Loses 0.5-1.5 pawns
+  BLUNDER: { symbol: '??', color: '#ca3431', maxLoss: Infinity } // Loses 1.5+ pawns
+};
+
 // Engine configurations
 const ENGINES = {
   lite: {
@@ -48,6 +66,7 @@ const AppState = {
   graphHoverIndex: -1,  // Currently hovered graph point (-1 = none)
   graphMainlineMoves: [], // Original PGN moves for graph display only
   graphEvalHistory: [],
+  moveClassifications: [], // Store classification for each move (index = move number)
   graphDrawn: false, // Whether the graph has been drawn (user clicked Draw button)
   // Analysis queue system - prevents engine crashes
   currentAnalysisId: 0,        // Increments for each request
@@ -495,6 +514,131 @@ function updateAnalysisOutput() {
     outputDiv.appendChild(statusDiv);
   }
 
+  // Show accuracy scores when game is loaded and we have eval data
+  if (AppState.gameLoaded && AppState.graphEvalHistory.some(e => e !== undefined)) {
+    const accuracy = calculateGameAccuracy();
+
+    if (accuracy.white !== null || accuracy.black !== null) {
+      const accuracyDiv = document.createElement('div');
+      accuracyDiv.style.cssText = `
+        display: flex;
+        justify-content: space-around;
+        padding: 10px;
+        margin-bottom: 10px;
+        background-color: #f5f5f5;
+        border-radius: 5px;
+        font-family: Arial, sans-serif;
+      `;
+
+      // White accuracy
+      const whiteDiv = document.createElement('div');
+      whiteDiv.style.cssText = 'text-align: center;';
+      const whiteLabel = document.createElement('div');
+      whiteLabel.style.cssText = 'font-size: 11px; color: #666; margin-bottom: 2px;';
+      whiteLabel.textContent = 'White';
+      const whiteScore = document.createElement('div');
+      whiteScore.style.cssText = 'font-size: 18px; font-weight: bold;';
+      if (accuracy.white !== null) {
+        const whiteRating = getAccuracyRating(accuracy.white);
+        whiteScore.style.color = whiteRating.color;
+        whiteScore.textContent = `${accuracy.white}%`;
+      } else {
+        whiteScore.style.color = '#999';
+        whiteScore.textContent = '...';
+      }
+      whiteDiv.appendChild(whiteLabel);
+      whiteDiv.appendChild(whiteScore);
+
+      // Accuracy label in center
+      const labelDiv = document.createElement('div');
+      labelDiv.style.cssText = 'text-align: center; display: flex; align-items: center;';
+      const labelText = document.createElement('div');
+      labelText.style.cssText = 'font-size: 12px; color: #888; font-weight: 500;';
+      labelText.textContent = 'Accuracy';
+      labelDiv.appendChild(labelText);
+
+      // Black accuracy
+      const blackDiv = document.createElement('div');
+      blackDiv.style.cssText = 'text-align: center;';
+      const blackLabel = document.createElement('div');
+      blackLabel.style.cssText = 'font-size: 11px; color: #666; margin-bottom: 2px;';
+      blackLabel.textContent = 'Black';
+      const blackScore = document.createElement('div');
+      blackScore.style.cssText = 'font-size: 18px; font-weight: bold;';
+      if (accuracy.black !== null) {
+        const blackRating = getAccuracyRating(accuracy.black);
+        blackScore.style.color = blackRating.color;
+        blackScore.textContent = `${accuracy.black}%`;
+      } else {
+        blackScore.style.color = '#999';
+        blackScore.textContent = '...';
+      }
+      blackDiv.appendChild(blackLabel);
+      blackDiv.appendChild(blackScore);
+
+      accuracyDiv.appendChild(whiteDiv);
+      accuracyDiv.appendChild(labelDiv);
+      accuracyDiv.appendChild(blackDiv);
+      outputDiv.appendChild(accuracyDiv);
+
+      // Count mistakes and blunders for each player
+      const errorCounts = { white: { inaccuracies: 0, mistakes: 0, blunders: 0 }, black: { inaccuracies: 0, mistakes: 0, blunders: 0 } };
+      for (let i = 1; i < AppState.moveClassifications.length; i++) {
+        const classification = AppState.moveClassifications[i];
+        if (!classification) continue;
+        const player = (i % 2 === 1) ? 'white' : 'black';
+        if (classification === MOVE_CLASSIFICATION.INACCURACY) errorCounts[player].inaccuracies++;
+        else if (classification === MOVE_CLASSIFICATION.MISTAKE) errorCounts[player].mistakes++;
+        else if (classification === MOVE_CLASSIFICATION.BLUNDER) errorCounts[player].blunders++;
+      }
+
+      // Only show error summary if there are any errors
+      const hasErrors = errorCounts.white.inaccuracies + errorCounts.white.mistakes + errorCounts.white.blunders +
+                       errorCounts.black.inaccuracies + errorCounts.black.mistakes + errorCounts.black.blunders > 0;
+
+      if (hasErrors) {
+        const errorDiv = document.createElement('div');
+        errorDiv.style.cssText = `
+          display: flex;
+          justify-content: space-around;
+          padding: 8px;
+          margin-bottom: 10px;
+          background-color: #fafafa;
+          border-radius: 5px;
+          font-family: Arial, sans-serif;
+          font-size: 11px;
+        `;
+
+        // White errors
+        const whiteErrorsDiv = document.createElement('div');
+        whiteErrorsDiv.style.cssText = 'text-align: center;';
+        let whiteErrorsHTML = '';
+        if (errorCounts.white.inaccuracies > 0) whiteErrorsHTML += `<span style="color: ${MOVE_CLASSIFICATION.INACCURACY.color}">${errorCounts.white.inaccuracies}?!</span> `;
+        if (errorCounts.white.mistakes > 0) whiteErrorsHTML += `<span style="color: ${MOVE_CLASSIFICATION.MISTAKE.color}">${errorCounts.white.mistakes}?</span> `;
+        if (errorCounts.white.blunders > 0) whiteErrorsHTML += `<span style="color: ${MOVE_CLASSIFICATION.BLUNDER.color}">${errorCounts.white.blunders}??</span>`;
+        whiteErrorsDiv.innerHTML = whiteErrorsHTML || '<span style="color: #96bc4b">Clean</span>';
+
+        // Spacer
+        const spacerDiv = document.createElement('div');
+        spacerDiv.style.cssText = 'width: 60px;';
+
+        // Black errors
+        const blackErrorsDiv = document.createElement('div');
+        blackErrorsDiv.style.cssText = 'text-align: center;';
+        let blackErrorsHTML = '';
+        if (errorCounts.black.inaccuracies > 0) blackErrorsHTML += `<span style="color: ${MOVE_CLASSIFICATION.INACCURACY.color}">${errorCounts.black.inaccuracies}?!</span> `;
+        if (errorCounts.black.mistakes > 0) blackErrorsHTML += `<span style="color: ${MOVE_CLASSIFICATION.MISTAKE.color}">${errorCounts.black.mistakes}?</span> `;
+        if (errorCounts.black.blunders > 0) blackErrorsHTML += `<span style="color: ${MOVE_CLASSIFICATION.BLUNDER.color}">${errorCounts.black.blunders}??</span>`;
+        blackErrorsDiv.innerHTML = blackErrorsHTML || '<span style="color: #96bc4b">Clean</span>';
+
+        errorDiv.appendChild(whiteErrorsDiv);
+        errorDiv.appendChild(spacerDiv);
+        errorDiv.appendChild(blackErrorsDiv);
+        outputDiv.appendChild(errorDiv);
+      }
+    }
+  }
+
   // Show engine status if disabled
   if (!AppState.engineEnabled) {
     const statusDiv = document.createElement('div');
@@ -553,36 +697,54 @@ function updateAnalysisOutput() {
     
     // White move
     const whiteMoveIndex = i + 1;
-    const isWhiteMainline = AppState.pgnMainlineMoves.length > i && 
+    const isWhiteMainline = AppState.pgnMainlineMoves.length > i &&
                           AppState.pgnMainlineMoves[i] === whiteMove;
     const isWhiteCurrent = whiteMoveIndex === AppState.currentIndex;
     const whiteClasses = ['move-link', 'white-move'];
-    
+
     if (!isWhiteMainline && AppState.gameLoaded) {
       whiteClasses.push('deviation');
     }
     if (isWhiteCurrent) {
       whiteClasses.push('current');
     }
-    
-    notationHTML += `<span class="${whiteClasses.join(' ')}" data-move-index="${whiteMoveIndex}">${whiteMove}${!isWhiteMainline && AppState.gameLoaded ? '*' : ''}</span>`;
-    
+
+    // Get move classification for white
+    const whiteClassification = AppState.moveClassifications[whiteMoveIndex];
+    let whiteMoveText = whiteMove;
+    let whiteStyle = '';
+    if (whiteClassification && whiteClassification.symbol) {
+      whiteMoveText += whiteClassification.symbol;
+      whiteStyle = `color: ${whiteClassification.color}; font-weight: bold;`;
+    }
+
+    notationHTML += `<span class="${whiteClasses.join(' ')}" data-move-index="${whiteMoveIndex}" style="${whiteStyle}">${whiteMoveText}${!isWhiteMainline && AppState.gameLoaded ? '*' : ''}</span>`;
+
   // Black move (if exists)
   if (blackMove) {
     const blackMoveIndex = i + 2;
-    const isBlackMainline = AppState.pgnMainlineMoves.length > (i + 1) && 
+    const isBlackMainline = AppState.pgnMainlineMoves.length > (i + 1) &&
                            AppState.pgnMainlineMoves[i + 1] === blackMove;
     const isBlackCurrent = blackMoveIndex === AppState.currentIndex;
     const blackClasses = ['move-link', 'black-move'];
-    
+
     if (!isBlackMainline && AppState.gameLoaded) {
       blackClasses.push('deviation');
     }
     if (isBlackCurrent) {
       blackClasses.push('current');
     }
-    
-    notationHTML += ` <span class="${blackClasses.join(' ')}" data-move-index="${blackMoveIndex}">${blackMove}${!isBlackMainline && AppState.gameLoaded ? '*' : ''}</span>`;
+
+    // Get move classification for black
+    const blackClassification = AppState.moveClassifications[blackMoveIndex];
+    let blackMoveText = blackMove;
+    let blackStyle = '';
+    if (blackClassification && blackClassification.symbol) {
+      blackMoveText += blackClassification.symbol;
+      blackStyle = `color: ${blackClassification.color}; font-weight: bold;`;
+    }
+
+    notationHTML += ` <span class="${blackClasses.join(' ')}" data-move-index="${blackMoveIndex}" style="${blackStyle}">${blackMoveText}${!isBlackMainline && AppState.gameLoaded ? '*' : ''}</span>`;
   }
   
   notationHTML += `</div>`;
@@ -1197,6 +1359,7 @@ function loadPGN() {
   // NEW: Store separate copy for graph (only addition)
   AppState.graphMainlineMoves = [...AppState.pgnMainlineMoves];
   AppState.graphEvalHistory = new Array(AppState.graphMainlineMoves.length + 1);
+  AppState.moveClassifications = new Array(AppState.graphMainlineMoves.length + 1);
   
   // Reset to starting position (ALL EXISTING CODE UNCHANGED)
   AppState.game.reset();
@@ -1301,7 +1464,11 @@ function analyzeGraphPositionQueued(fen, moveIndex, onComplete) {
         
         // Store in GRAPH eval history only
         AppState.graphEvalHistory[moveIndex] = evalScore;
+        // Update move classifications
+        updateMoveClassifications();
         drawEvalGraph();
+        // Update display to show live accuracy and classifications
+        updateAnalysisOutput();
       }
     }
   };
@@ -1381,6 +1548,9 @@ function resetBoard() {
   AppState.graphClickAreas = [];
   AppState.graphHoverIndex = -1;
   AppState.graphDrawn = false;
+  AppState.graphMainlineMoves = [];
+  AppState.graphEvalHistory = [];
+  AppState.moveClassifications = [];
   
   // Reset board
   AppState.game.reset();
@@ -1634,6 +1804,151 @@ function handleKeyPress(event) {
     event.preventDefault();
     event.stopPropagation();
     action();
+  }
+}
+
+// Accuracy calculation functions
+
+// Convert eval (in pawns) to win probability (0-1)
+function evalToWinProbability(evalScore) {
+  // Using the logistic function: 1 / (1 + 10^(-eval/4))
+  // Clamp eval to avoid extreme values
+  const clampedEval = Math.max(-10, Math.min(10, evalScore));
+  return 1 / (1 + Math.pow(10, -clampedEval / 4));
+}
+
+// Convert centipawn loss to accuracy (0-100)
+function cpLossToAccuracy(cpLoss) {
+  // Formula: a * exp(b * cpLoss) + c, clamped to 0-100
+  const { a, b, c } = ACCURACY_COEFFICIENTS;
+  const accuracy = a * Math.exp(b * cpLoss) + c;
+  return Math.max(0, Math.min(100, accuracy));
+}
+
+// Calculate accuracy for a single move based on win probability change
+function calculateMoveAccuracy(evalBefore, evalAfter, isWhiteMove) {
+  // Convert to the moving player's perspective
+  const playerEvalBefore = isWhiteMove ? evalBefore : -evalBefore;
+  const playerEvalAfter = isWhiteMove ? evalAfter : -evalAfter;
+
+  // Calculate win probability before and after
+  const winProbBefore = evalToWinProbability(playerEvalBefore);
+  const winProbAfter = evalToWinProbability(playerEvalAfter);
+
+  // Win probability loss (0-1 scale)
+  const wpLoss = Math.max(0, winProbBefore - winProbAfter);
+
+  // Convert to accuracy (100 = perfect, 0 = worst)
+  // Using: accuracy = 100 * (1 - wpLoss)^2 for smoother curve
+  // Or use centipawn-based formula
+  const cpLoss = Math.max(0, playerEvalBefore - playerEvalAfter) * 100; // Convert to centipawns
+  return cpLossToAccuracy(cpLoss);
+}
+
+// Calculate game accuracy for both players
+function calculateGameAccuracy() {
+  if (!AppState.graphEvalHistory || AppState.graphEvalHistory.length < 2) {
+    return { white: null, black: null };
+  }
+
+  const whiteAccuracies = [];
+  const blackAccuracies = [];
+
+  // graphEvalHistory[i] = eval after move i (from white's perspective)
+  // Index 0 = starting position
+  // Index 1 = after white's first move
+  // Index 2 = after black's first move
+  // etc.
+
+  for (let i = 1; i < AppState.graphEvalHistory.length; i++) {
+    const evalBefore = AppState.graphEvalHistory[i - 1];
+    const evalAfter = AppState.graphEvalHistory[i];
+
+    // Skip if either eval is undefined
+    if (evalBefore === undefined || evalAfter === undefined) continue;
+
+    const isWhiteMove = (i % 2 === 1); // Odd indices are white's moves
+    const accuracy = calculateMoveAccuracy(evalBefore, evalAfter, isWhiteMove);
+
+    if (isWhiteMove) {
+      whiteAccuracies.push(accuracy);
+    } else {
+      blackAccuracies.push(accuracy);
+    }
+  }
+
+  // Calculate average accuracy
+  const avgWhite = whiteAccuracies.length > 0
+    ? whiteAccuracies.reduce((a, b) => a + b, 0) / whiteAccuracies.length
+    : null;
+  const avgBlack = blackAccuracies.length > 0
+    ? blackAccuracies.reduce((a, b) => a + b, 0) / blackAccuracies.length
+    : null;
+
+  return {
+    white: avgWhite !== null ? Math.round(avgWhite * 10) / 10 : null,
+    black: avgBlack !== null ? Math.round(avgBlack * 10) / 10 : null
+  };
+}
+
+// Get accuracy rating text based on score
+function getAccuracyRating(accuracy) {
+  if (accuracy >= 95) return { text: 'Brilliant', color: '#1baca6' };
+  if (accuracy >= 85) return { text: 'Excellent', color: '#5c8bb0' };
+  if (accuracy >= 70) return { text: 'Good', color: '#96bc4b' };
+  if (accuracy >= 50) return { text: 'Inaccurate', color: '#e6912c' };
+  if (accuracy >= 30) return { text: 'Poor', color: '#ca3431' };
+  return { text: 'Very Poor', color: '#8b0000' };
+}
+
+// Classify a move based on centipawn change
+function classifyMove(evalBefore, evalAfter, isWhiteMove) {
+  // Convert to the moving player's perspective (in centipawns)
+  const playerEvalBefore = (isWhiteMove ? evalBefore : -evalBefore) * 100;
+  const playerEvalAfter = (isWhiteMove ? evalAfter : -evalAfter) * 100;
+
+  // Calculate centipawn change (positive = improvement, negative = loss)
+  const cpChange = playerEvalAfter - playerEvalBefore;
+
+  // Classify based on centipawn loss/gain
+  if (cpChange >= MOVE_CLASSIFICATION.BRILLIANT.minGain) {
+    return MOVE_CLASSIFICATION.BRILLIANT;
+  }
+  if (cpChange >= MOVE_CLASSIFICATION.GREAT.minGain) {
+    return MOVE_CLASSIFICATION.GREAT;
+  }
+  if (cpChange >= -MOVE_CLASSIFICATION.GOOD.maxLoss) {
+    return MOVE_CLASSIFICATION.GOOD;
+  }
+  if (cpChange >= -MOVE_CLASSIFICATION.INACCURACY.maxLoss) {
+    return MOVE_CLASSIFICATION.INACCURACY;
+  }
+  if (cpChange >= -MOVE_CLASSIFICATION.MISTAKE.maxLoss) {
+    return MOVE_CLASSIFICATION.MISTAKE;
+  }
+  return MOVE_CLASSIFICATION.BLUNDER;
+}
+
+// Update move classifications based on graph eval history
+function updateMoveClassifications() {
+  if (!AppState.graphEvalHistory || AppState.graphEvalHistory.length < 2) {
+    return;
+  }
+
+  // Initialize array if needed
+  if (AppState.moveClassifications.length !== AppState.graphEvalHistory.length) {
+    AppState.moveClassifications = new Array(AppState.graphEvalHistory.length);
+  }
+
+  for (let i = 1; i < AppState.graphEvalHistory.length; i++) {
+    const evalBefore = AppState.graphEvalHistory[i - 1];
+    const evalAfter = AppState.graphEvalHistory[i];
+
+    // Skip if either eval is undefined
+    if (evalBefore === undefined || evalAfter === undefined) continue;
+
+    const isWhiteMove = (i % 2 === 1);
+    AppState.moveClassifications[i] = classifyMove(evalBefore, evalAfter, isWhiteMove);
   }
 }
 

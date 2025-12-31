@@ -1,5 +1,26 @@
 EVALUATION ENGINE MAGNUS CARLSEN WOULD BE PROUD TO USE
 
+31.12.25
+  | Priority | Feature             | Rationale                                                          |
+  |----------|---------------------|--------------------------------------------------------------------|
+  | High     | FEN input           | Can't analyze arbitrary positions, only full PGNs                  |
+  | High     | Move classification | Show inaccuracies/mistakes/blunders with centipawn loss thresholds |
+  | High     | Configurable depth  | Fixed depth 15 is limiting; slider or presets (quick/normal/deep)  |
+  | Medium   | Position caching    | Re-analyzing same positions wastes compute; cache by FEN           |
+  | Medium   | Accuracy score      | Overall game accuracy % like Lichess/Chess.com                     |
+  | Medium   | Code modularization | 1700 lines in one file; split into engine/board/graph/ui modules   |
+  | Low      | Opening book        | Show opening name and theory for first ~15 moves                   |
+  | Low      | Tablebase           | 7-piece endgame tablebases for perfect play                        |
+  | Low      | Export analysis     | Download annotated PGN with engine evals                           |
+
+ Quick wins:
+  - Show current search depth in the UI (you already have it in the info)
+  - Add a "copy FEN" button for current position
+  - Keyboard shortcut to jump to biggest mistake
+
+  Bigger architectural thought:
+  The graph analysis spawns new workers per position. For a 40-move game that's 80+ worker instantiations. A persistent background worker with a job queue would be more efficient.
+
 metrics to track
 - needing to refresh the page - metric should approach 0
 - time to load first arrow (any engine allowed) - approaching 0
