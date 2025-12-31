@@ -1,5 +1,7 @@
 EVALUATION ENGINE MAGNUS CARLSEN WOULD BE PROUD TO USE
 
+delete space between top of analysis content box and the "Best Move: ...." text - suprisingly hard
+
 31.12.25
   | Priority | Feature             | Rationale                                                          |
   |----------|---------------------|--------------------------------------------------------------------|

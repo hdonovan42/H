@@ -54,7 +54,8 @@ const AppState = {
   evalHistory: [], // Store evaluation for each position
   gameLoaded: false,
   engineEnabled: true, // New state for engine toggle
-  selectedEngine: 'full', // Current engine selection
+  selectedEngine: 'lite', // Current engine selection
+  preloadedFullEngine: null, // Preloaded full engine worker
   gameStatus: 'ongoing', // 'ongoing', 'checkmate', 'draw'
   checkmateWinner: null, // 'white', 'black', or null
   isInCheck: false,
@@ -228,6 +229,12 @@ function handleStockfishReady() {
   AppState.engineBusy = false;
   AppState.stopRequested = false;
   document.getElementById('stockfish-loading').style.display = 'none';
+
+  // Preload full engine in background if we're using lite
+  if (AppState.selectedEngine === 'lite' && !AppState.preloadedFullEngine) {
+    setTimeout(preloadFullEngine, 1000); // Delay to not compete with initial analysis
+  }
+
   if (AppState.engineEnabled) {
     updateStockfishAnalysis();
   }
@@ -514,6 +521,15 @@ function updateAnalysisOutput() {
     outputDiv.appendChild(statusDiv);
   }
 
+  // Best Move at top
+  if (AppState.engineEnabled) {
+    const bestMoveDiv = document.createElement('div');
+    const bestMoveText = AppState.bestMoveInfo ? AppState.bestMoveInfo.bestMove : '...';
+    bestMoveDiv.style.cssText = 'font-weight: bold; margin-bottom: 5px;';
+    bestMoveDiv.textContent = `Best Move: ${bestMoveText}`;
+    outputDiv.appendChild(bestMoveDiv);
+  }
+
   // Show engine status if disabled
   if (!AppState.engineEnabled) {
     const statusDiv = document.createElement('div');
@@ -526,34 +542,43 @@ function updateAnalysisOutput() {
     outputDiv.appendChild(statusDiv);
   }
 
+  // MultiPV lines - fixed height container
   if (AppState.engineEnabled) {
-    const bestMoveDiv = document.createElement('div');
-    const bestMoveText = AppState.bestMoveInfo ? AppState.bestMoveInfo.bestMove : '...';
-    bestMoveDiv.textContent = `Best Move: ${bestMoveText}`;
-    outputDiv.appendChild(bestMoveDiv);
-  }
+    const linesContainer = document.createElement('div');
+    linesContainer.style.cssText = 'height: 168px; overflow: hidden;';
 
-  // Sorted by MultiPV index (1, 2, 3) - original format
-  if (AppState.engineEnabled) {
-    const sortedKeys = Object.keys(AppState.multipvResults).sort((a, b) => a - b);
-    sortedKeys.forEach(key => {
-      const info = AppState.multipvResults[key];
+    for (let lineNum = 1; lineNum <= MULTI_PV_LINES; lineNum++) {
+      const info = AppState.multipvResults[lineNum];
       const lineDiv = document.createElement('div');
-      
-      // Highlight mate lines
-      if (info.mate !== undefined) {
-        lineDiv.style.cssText = `
-          background-color: ${info.mate > 0 ? '#d4edda' : '#f8d7da'};
-          padding: 5px;
-          margin: 2px 0;
-          border-radius: 3px;
-          font-weight: bold;
-        `;
+      lineDiv.style.cssText = 'height: 54px; font-size: 13px; overflow: hidden;';
+
+      if (info) {
+        // Highlight mate lines
+        if (info.mate !== undefined) {
+          lineDiv.style.cssText += `
+            background-color: ${info.mate > 0 ? '#d4edda' : '#f8d7da'};
+            padding: 0 5px;
+            border-radius: 3px;
+            font-weight: bold;
+          `;
+        }
+        lineDiv.textContent = `${lineNum}. Score: ${info.scoreDisplay}\nLine: ${info.pv}`;
+      } else {
+        lineDiv.style.color = '#999';
+        lineDiv.textContent = `${lineNum}. ...`;
       }
-      
-      lineDiv.textContent = `${key}. Score: ${info.scoreDisplay}\nLine: ${info.pv}\n`;
-      outputDiv.appendChild(lineDiv);
-    });
+
+      linesContainer.appendChild(lineDiv);
+
+      // Add hr between lines (not after the last one)
+      if (lineNum < MULTI_PV_LINES) {
+        const hr = document.createElement('hr');
+        hr.style.cssText = 'border: none; border-top: 1px solid #eee; margin: 2px 0;';
+        linesContainer.appendChild(hr);
+      }
+    }
+
+    outputDiv.appendChild(linesContainer);
   }
 
   // Display current game notation - now interactive
@@ -826,6 +851,33 @@ function drawEvalGraph() {
   drawAnalysisEvalGraph();
 }
 
+// Preload full engine in background
+function preloadFullEngine() {
+  if (AppState.preloadedFullEngine) return; // Already preloading/preloaded
+
+  try {
+    const worker = new Worker(ENGINES.full.script);
+
+    worker.onmessage = function(e) {
+      if (e.data === 'uciok') {
+        console.log('Full Stockfish engine preloaded and ready');
+        worker.postMessage('isready');
+      } else if (e.data === 'readyok') {
+        // Engine is fully initialized and ready
+        AppState.preloadedFullEngine = worker;
+      }
+    };
+
+    worker.onerror = function(error) {
+      console.error('Error preloading full engine:', error);
+    };
+
+    worker.postMessage('uci');
+  } catch (error) {
+    console.error('Failed to preload full engine:', error);
+  }
+}
+
 // Switch to a different engine
 function switchEngine(engineKey) {
   if (!ENGINES[engineKey] || engineKey === AppState.selectedEngine) return;
@@ -854,6 +906,25 @@ function switchEngine(engineKey) {
 
   // Update selected engine
   AppState.selectedEngine = engineKey;
+
+  // Use preloaded full engine if available
+  if (engineKey === 'full' && AppState.preloadedFullEngine) {
+    console.log('Using preloaded full engine');
+    AppState.stockfish = AppState.preloadedFullEngine;
+    AppState.preloadedFullEngine = null;
+
+    // Set up message handler
+    AppState.stockfish.onmessage = function(event) {
+      handleStockfishMessage(event);
+    };
+    AppState.stockfish.postMessage('ucinewgame');
+    AppState.stockfish.postMessage(`setoption name MultiPV value ${MULTI_PV_LINES}`);
+    AppState.stockfish.postMessage('isready');
+    AppState.stockfishReady = true;
+    document.getElementById('stockfish-loading').style.display = 'none';
+    updateStockfishAnalysis();
+    return;
+  }
 
   // Show loading indicator
   document.getElementById('stockfish-loading').style.display = 'block';
