@@ -6,6 +6,18 @@ const ANALYSIS_DEBOUNCE_TIME = 200;
 const ANALYSIS_DEPTH = 15;
 const MULTI_PV_LINES = 3;
 
+// Engine configurations
+const ENGINES = {
+  lite: {
+    name: 'Stockfish 17 Lite',
+    script: 'js/stockfish-17-lite-single.js'
+  },
+  full: {
+    name: 'Stockfish 17',
+    script: 'js/stockfish-17-single.js'
+  }
+};
+
 // Application state
 const AppState = {
   board: null,
@@ -24,6 +36,7 @@ const AppState = {
   evalHistory: [], // Store evaluation for each position
   gameLoaded: false,
   engineEnabled: true, // New state for engine toggle
+  selectedEngine: 'full', // Current engine selection
   gameStatus: 'ongoing', // 'ongoing', 'checkmate', 'draw'
   checkmateWinner: null, // 'white', 'black', or null
   isInCheck: false,
@@ -86,7 +99,8 @@ function initializeStockfish() {
   AppState.currentAnalysisId = 0;
   
   try {
-    AppState.stockfish = new Worker('js/stockfish-17-lite-single.js');
+    const engineScript = ENGINES[AppState.selectedEngine].script;
+    AppState.stockfish = new Worker(engineScript);
     
     // Add error handler for the worker
     AppState.stockfish.onerror = function(error) {
@@ -774,6 +788,43 @@ function drawEvalGraph() {
   drawAnalysisEvalGraph();
 }
 
+// Switch to a different engine
+function switchEngine(engineKey) {
+  if (!ENGINES[engineKey] || engineKey === AppState.selectedEngine) return;
+
+  console.log(`Switching engine to ${ENGINES[engineKey].name}...`);
+
+  // Terminate existing worker
+  if (AppState.stockfish) {
+    try {
+      AppState.stockfish.postMessage('stop');
+      AppState.stockfish.terminate();
+    } catch (e) {
+      console.error('Error terminating old engine:', e);
+    }
+  }
+
+  // Reset state
+  AppState.stockfish = null;
+  AppState.stockfishReady = false;
+  AppState.engineBusy = false;
+  AppState.stopRequested = false;
+  AppState.multipvResults = {};
+  AppState.bestMoveInfo = null;
+  AppState.pendingAnalysisFen = null;
+  AppState.pendingAnalysisId = null;
+
+  // Update selected engine
+  AppState.selectedEngine = engineKey;
+
+  // Show loading indicator
+  document.getElementById('stockfish-loading').style.display = 'block';
+  document.getElementById('stockfish-loading').textContent = `Loading ${ENGINES[engineKey].name}...`;
+
+  // Initialize new engine
+  initializeStockfish();
+}
+
 // Toggle engine on/off
 function toggleEngine() {
   AppState.engineEnabled = !AppState.engineEnabled;
@@ -1108,79 +1159,6 @@ function handleGraphMouseLeave() {
   }
 }
 
-// Draw Graph Button Functions
-function showDrawGraphButton() {
-  // Remove existing button if present
-  hideDrawGraphButton();
-  
-  const graphContainer = document.getElementById('eval-graph-container');
-  if (!graphContainer) return;
-  
-  // Create overlay div for the button
-  const buttonOverlay = document.createElement('div');
-  buttonOverlay.id = 'draw-graph-overlay';
-  buttonOverlay.style.cssText = `
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background-color: rgba(248, 248, 248, 0.95);
-    z-index: 10;
-  `;
-  
-  // Create the Draw button
-  const drawButton = document.createElement('button');
-  drawButton.id = 'draw-graph-button';
-  drawButton.textContent = 'Draw';
-  drawButton.style.cssText = `
-    padding: 12px 32px;
-    font-size: 16px;
-    font-weight: bold;
-    background-color: #2196F3;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
-    font-family: Arial, sans-serif;
-  `;
-  
-  // Hover effects
-  drawButton.addEventListener('mouseenter', function() {
-    this.style.backgroundColor = '#1976D2';
-    this.style.transform = 'scale(1.05)';
-    this.style.boxShadow = '0 4px 12px rgba(33, 150, 243, 0.4)';
-  });
-  
-  drawButton.addEventListener('mouseleave', function() {
-    this.style.backgroundColor = '#2196F3';
-    this.style.transform = 'scale(1)';
-    this.style.boxShadow = '0 2px 8px rgba(33, 150, 243, 0.3)';
-  });
-  
-  // Click handler - trigger graph analysis
-  drawButton.addEventListener('click', function() {
-    hideDrawGraphButton();
-    AppState.graphDrawn = true;
-    analyzeGraphPositions();
-  });
-  
-  buttonOverlay.appendChild(drawButton);
-  graphContainer.appendChild(buttonOverlay);
-}
-
-function hideDrawGraphButton() {
-  const overlay = document.getElementById('draw-graph-overlay');
-  if (overlay) {
-    overlay.remove();
-  }
-}
-
 function rebuildGameFromMoves() {
   AppState.game.reset();
   
@@ -1229,9 +1207,9 @@ function loadPGN() {
   // NOTE: analyzeGamePositions() removed - evalHistory is not used since 
   // drawAnalysisEvalGraph uses graphEvalHistory instead
   
-  // NEW: Don't auto-analyze for graph - show Draw button instead
-  AppState.graphDrawn = false;
-  showDrawGraphButton();
+  // Auto-analyze graph positions (uses lite engine for speed/stability)
+  AppState.graphDrawn = true;
+  analyzeGraphPositions();
   
   if (AppState.engineEnabled) {
     updateStockfishAnalysis();
@@ -1243,37 +1221,40 @@ function loadPGN() {
 function analyzeGraphPositions() {
   const positions = [];
   const tempGame = new Chess();
-  
+
   // Analyze starting position for graph
   positions.push({ fen: tempGame.fen(), moveIndex: 0 });
-  
+
   // Build list of all positions for graph
   for (let i = 0; i < AppState.graphMainlineMoves.length; i++) {
     tempGame.move(AppState.graphMainlineMoves[i]);
     positions.push({ fen: tempGame.fen(), moveIndex: i + 1 });
   }
-  
+
   // Process positions sequentially to avoid overwhelming the browser
   let currentIndex = 0;
-  const maxConcurrent = 2; // Limit concurrent workers
+  const maxConcurrent = 1; // Use single worker to avoid overwhelming browser
   let activeWorkers = 0;
-  
+
   function processNext() {
     while (activeWorkers < maxConcurrent && currentIndex < positions.length) {
       const pos = positions[currentIndex++];
       activeWorkers++;
       analyzeGraphPositionQueued(pos.fen, pos.moveIndex, () => {
         activeWorkers--;
-        processNext();
+        // Small delay between positions for stability
+        setTimeout(processNext, 50);
       });
     }
   }
-  
-  processNext();
+
+  // Delay start to let main engine initialize first
+  setTimeout(processNext, 500);
 }
 
 function analyzeGraphPositionQueued(fen, moveIndex, onComplete) {
-  const tempStockfish = new Worker('js/stockfish-17-lite-single.js');
+  // Always use lite engine for graph analysis (faster, more stable, doesn't block main engine)
+  const tempStockfish = new Worker(ENGINES.lite.script);
   let completed = false;
   
   // Timeout to prevent hanging workers
@@ -1400,7 +1381,6 @@ function resetBoard() {
   AppState.graphClickAreas = [];
   AppState.graphHoverIndex = -1;
   AppState.graphDrawn = false;
-  hideDrawGraphButton();
   
   // Reset board
   AppState.game.reset();
@@ -1564,6 +1544,12 @@ function flipBoard() {
 
 // Event listener setup
 function setupEventListeners() {
+  // Engine selection dropdown
+  document.getElementById('engine-select').addEventListener('change', (e) => {
+    switchEngine(e.target.value);
+    e.target.blur();
+  });
+
   // Engine toggle
   document.getElementById('engine-toggle').addEventListener('change', (e) => {
     toggleEngine();
