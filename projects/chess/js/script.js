@@ -514,131 +514,6 @@ function updateAnalysisOutput() {
     outputDiv.appendChild(statusDiv);
   }
 
-  // Show accuracy scores when game is loaded and we have eval data
-  if (AppState.gameLoaded && AppState.graphEvalHistory.some(e => e !== undefined)) {
-    const accuracy = calculateGameAccuracy();
-
-    if (accuracy.white !== null || accuracy.black !== null) {
-      const accuracyDiv = document.createElement('div');
-      accuracyDiv.style.cssText = `
-        display: flex;
-        justify-content: space-around;
-        padding: 10px;
-        margin-bottom: 10px;
-        background-color: #f5f5f5;
-        border-radius: 5px;
-        font-family: Arial, sans-serif;
-      `;
-
-      // White accuracy
-      const whiteDiv = document.createElement('div');
-      whiteDiv.style.cssText = 'text-align: center;';
-      const whiteLabel = document.createElement('div');
-      whiteLabel.style.cssText = 'font-size: 11px; color: #666; margin-bottom: 2px;';
-      whiteLabel.textContent = 'White';
-      const whiteScore = document.createElement('div');
-      whiteScore.style.cssText = 'font-size: 18px; font-weight: bold;';
-      if (accuracy.white !== null) {
-        const whiteRating = getAccuracyRating(accuracy.white);
-        whiteScore.style.color = whiteRating.color;
-        whiteScore.textContent = `${accuracy.white}%`;
-      } else {
-        whiteScore.style.color = '#999';
-        whiteScore.textContent = '...';
-      }
-      whiteDiv.appendChild(whiteLabel);
-      whiteDiv.appendChild(whiteScore);
-
-      // Accuracy label in center
-      const labelDiv = document.createElement('div');
-      labelDiv.style.cssText = 'text-align: center; display: flex; align-items: center;';
-      const labelText = document.createElement('div');
-      labelText.style.cssText = 'font-size: 12px; color: #888; font-weight: 500;';
-      labelText.textContent = 'Accuracy';
-      labelDiv.appendChild(labelText);
-
-      // Black accuracy
-      const blackDiv = document.createElement('div');
-      blackDiv.style.cssText = 'text-align: center;';
-      const blackLabel = document.createElement('div');
-      blackLabel.style.cssText = 'font-size: 11px; color: #666; margin-bottom: 2px;';
-      blackLabel.textContent = 'Black';
-      const blackScore = document.createElement('div');
-      blackScore.style.cssText = 'font-size: 18px; font-weight: bold;';
-      if (accuracy.black !== null) {
-        const blackRating = getAccuracyRating(accuracy.black);
-        blackScore.style.color = blackRating.color;
-        blackScore.textContent = `${accuracy.black}%`;
-      } else {
-        blackScore.style.color = '#999';
-        blackScore.textContent = '...';
-      }
-      blackDiv.appendChild(blackLabel);
-      blackDiv.appendChild(blackScore);
-
-      accuracyDiv.appendChild(whiteDiv);
-      accuracyDiv.appendChild(labelDiv);
-      accuracyDiv.appendChild(blackDiv);
-      outputDiv.appendChild(accuracyDiv);
-
-      // Count mistakes and blunders for each player
-      const errorCounts = { white: { inaccuracies: 0, mistakes: 0, blunders: 0 }, black: { inaccuracies: 0, mistakes: 0, blunders: 0 } };
-      for (let i = 1; i < AppState.moveClassifications.length; i++) {
-        const classification = AppState.moveClassifications[i];
-        if (!classification) continue;
-        const player = (i % 2 === 1) ? 'white' : 'black';
-        if (classification === MOVE_CLASSIFICATION.INACCURACY) errorCounts[player].inaccuracies++;
-        else if (classification === MOVE_CLASSIFICATION.MISTAKE) errorCounts[player].mistakes++;
-        else if (classification === MOVE_CLASSIFICATION.BLUNDER) errorCounts[player].blunders++;
-      }
-
-      // Only show error summary if there are any errors
-      const hasErrors = errorCounts.white.inaccuracies + errorCounts.white.mistakes + errorCounts.white.blunders +
-                       errorCounts.black.inaccuracies + errorCounts.black.mistakes + errorCounts.black.blunders > 0;
-
-      if (hasErrors) {
-        const errorDiv = document.createElement('div');
-        errorDiv.style.cssText = `
-          display: flex;
-          justify-content: space-around;
-          padding: 8px;
-          margin-bottom: 10px;
-          background-color: #fafafa;
-          border-radius: 5px;
-          font-family: Arial, sans-serif;
-          font-size: 11px;
-        `;
-
-        // White errors
-        const whiteErrorsDiv = document.createElement('div');
-        whiteErrorsDiv.style.cssText = 'text-align: center;';
-        let whiteErrorsHTML = '';
-        if (errorCounts.white.inaccuracies > 0) whiteErrorsHTML += `<span style="color: ${MOVE_CLASSIFICATION.INACCURACY.color}">${errorCounts.white.inaccuracies}?!</span> `;
-        if (errorCounts.white.mistakes > 0) whiteErrorsHTML += `<span style="color: ${MOVE_CLASSIFICATION.MISTAKE.color}">${errorCounts.white.mistakes}?</span> `;
-        if (errorCounts.white.blunders > 0) whiteErrorsHTML += `<span style="color: ${MOVE_CLASSIFICATION.BLUNDER.color}">${errorCounts.white.blunders}??</span>`;
-        whiteErrorsDiv.innerHTML = whiteErrorsHTML || '<span style="color: #96bc4b">Clean</span>';
-
-        // Spacer
-        const spacerDiv = document.createElement('div');
-        spacerDiv.style.cssText = 'width: 60px;';
-
-        // Black errors
-        const blackErrorsDiv = document.createElement('div');
-        blackErrorsDiv.style.cssText = 'text-align: center;';
-        let blackErrorsHTML = '';
-        if (errorCounts.black.inaccuracies > 0) blackErrorsHTML += `<span style="color: ${MOVE_CLASSIFICATION.INACCURACY.color}">${errorCounts.black.inaccuracies}?!</span> `;
-        if (errorCounts.black.mistakes > 0) blackErrorsHTML += `<span style="color: ${MOVE_CLASSIFICATION.MISTAKE.color}">${errorCounts.black.mistakes}?</span> `;
-        if (errorCounts.black.blunders > 0) blackErrorsHTML += `<span style="color: ${MOVE_CLASSIFICATION.BLUNDER.color}">${errorCounts.black.blunders}??</span>`;
-        blackErrorsDiv.innerHTML = blackErrorsHTML || '<span style="color: #96bc4b">Clean</span>';
-
-        errorDiv.appendChild(whiteErrorsDiv);
-        errorDiv.appendChild(spacerDiv);
-        errorDiv.appendChild(blackErrorsDiv);
-        outputDiv.appendChild(errorDiv);
-      }
-    }
-  }
-
   // Show engine status if disabled
   if (!AppState.engineEnabled) {
     const statusDiv = document.createElement('div');
@@ -1302,7 +1177,7 @@ function drawAnalysisEvalGraph() {
   // Hover effect (unchanged)
   if (AppState.graphHoverIndex >= 0 && AppState.graphHoverIndex < AppState.graphClickAreas.length) {
     const area = AppState.graphClickAreas[AppState.graphHoverIndex];
-    
+
     ctx.save();
     ctx.shadowColor = '#2196F3';
     ctx.shadowBlur = 8;
@@ -1311,6 +1186,28 @@ function drawAnalysisEvalGraph() {
     ctx.arc(area.x, area.y, 5, 0, 2 * Math.PI);
     ctx.fill();
     ctx.restore();
+  }
+
+  // Draw accuracy scores on graph
+  if (AppState.gameLoaded && AppState.graphEvalHistory.some(e => e !== undefined)) {
+    const accuracy = calculateGameAccuracy();
+
+    ctx.font = 'bold 12px Arial';
+    ctx.fillStyle = '#000';
+
+    // White accuracy - top left
+    if (accuracy.white !== null) {
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(`${accuracy.white}%`, margin.left + 5, margin.top + 3);
+    }
+
+    // Black accuracy - bottom left
+    if (accuracy.black !== null) {
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(`${accuracy.black}%`, margin.left + 5, height - margin.bottom - 3);
+    }
   }
 }
 
