@@ -526,9 +526,10 @@ function updateAnalysisOutput() {
     outputDiv.appendChild(statusDiv);
   }
 
-  if (AppState.bestMoveInfo && AppState.engineEnabled) {
+  if (AppState.engineEnabled) {
     const bestMoveDiv = document.createElement('div');
-    bestMoveDiv.textContent = `Best Move: ${AppState.bestMoveInfo.bestMove}\n`;
+    const bestMoveText = AppState.bestMoveInfo ? AppState.bestMoveInfo.bestMove : '...';
+    bestMoveDiv.textContent = `Best Move: ${bestMoveText}`;
     outputDiv.appendChild(bestMoveDiv);
   }
 
