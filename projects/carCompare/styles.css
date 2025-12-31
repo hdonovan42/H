@@ -138,6 +138,7 @@ input[type="text"]:focus {
     text-align: center;
     padding-bottom: 1rem;
     border-bottom: 3px solid #d4cfc4;
+    height: 5.5rem;
 }
 
 .car-name {

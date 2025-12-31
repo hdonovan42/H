@@ -1,0 +1,58 @@
+name: Deploy Site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: projects/all-in/package-lock.json
+
+      # Build all-in React app
+      - name: Build all-in
+        working-directory: projects/all-in
+        run: |
+          npm ci
+          npm run build
+
+      # Replace all-in source with built output
+      - name: Prepare site
+        run: |
+          # Remove source files, keep dist
+          cd projects/all-in
+          mv dist ../all-in-dist
+          cd ..
+          rm -rf all-in
+          mv all-in-dist all-in
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

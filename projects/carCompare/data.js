@@ -122,5 +122,26 @@ const carsDatabase = [
         "enginePlacement": "Front",
         "drivetrain": "AWD",
         "weight": 3836
+    },
+    {
+        "id": 7,
+        "make": "Mercedes-Benz",
+        "model": "E63 S Estate",
+        "aliases": [
+            "merc",
+            "benz",
+            "mercedes"
+        ],
+        "generation": "S213",
+        "modelYears": "2017-2020",
+        "year": 2019,
+        "hp": 603,
+        "zeroToSixty": 3,
+        "topSpeed": 186,
+        "cylinders": 8,
+        "displacement": 4,
+        "enginePlacement": "Front",
+        "drivetrain": "AWD",
+        "weight": 2045
     }
 ];
