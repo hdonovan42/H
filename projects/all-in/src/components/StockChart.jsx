@@ -76,21 +76,21 @@ export default function StockChart({ chartData, timeframe, onTimeframeChange, pr
     }
   }, [chartData, timeframe, minPrice, priceRange]);
 
-  const renderYAxisLabels = () => {
+  const getYAxisLabels = () => {
     const min = Math.floor(minPrice / 20) * 20;
     const max = Math.ceil(maxPrice / 20) * 20;
     const step = Math.ceil((max - min) / 5 / 20) * 20;
     const steps = [];
     for (let p = max; p >= min && steps.length < 6; p -= step) steps.push(p);
-    return steps.map(p => (
-      <text key={p} x="8" y={20 + ((max - p) / ((max - min) || 1)) * 240 + 4} fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">
-        ${p}
-      </text>
-    ));
+    // Convert SVG Y coordinates to percentages (chart area: Y 20-260 out of 300)
+    return steps.map(p => ({
+      label: `$${p}`,
+      top: ((20 + ((max - p) / ((max - min) || 1)) * 240) / 300) * 100
+    }));
   };
 
-  const renderXAxisLabels = () => {
-    if (!chartData.length) return null;
+  const getXAxisLabels = () => {
+    if (!chartData.length) return [];
 
     const maxLabels = {
       '1D': 7, '1W': 6, '1M': 3, '3M': 3, '6M': 6, 'YTD': 12, '1Y': 12, '5Y': 5
@@ -148,18 +148,15 @@ export default function StockChart({ chartData, timeframe, onTimeframeChange, pr
       });
     }
 
-    const finalLabels = spacedLabels(allLabels);
-
-    return (
-      <g>
-        {finalLabels.map((item, idx) => (
-          <text key={idx} x={item.x} y="290" textAnchor="middle" fontSize="11" fill="#80868b" fontFamily="IBM Plex Mono">
-            {item.label}
-          </text>
-        ))}
-      </g>
-    );
+    // Convert SVG X coordinates to percentages (chart area: X 50-770 out of 800)
+    return spacedLabels(allLabels).map(item => ({
+      label: item.label,
+      left: (item.x / 800) * 100
+    }));
   };
+
+  const yLabels = getYAxisLabels();
+  const xLabels = getXAxisLabels();
 
   return (
     <div className="box chart-box">
@@ -173,6 +170,22 @@ export default function StockChart({ chartData, timeframe, onTimeframeChange, pr
           </span>
         ))}
       </div>
+
+      {/* Y-axis labels (HTML, won't stretch) */}
+      {yLabels.map((item, idx) => (
+        <div key={idx} style={{
+          position: 'absolute',
+          left: '8px',
+          top: `${item.top}%`,
+          transform: 'translateY(-50%)',
+          fontSize: '11px',
+          color: '#80868b',
+          fontFamily: 'IBM Plex Mono',
+          pointerEvents: 'none'
+        }}>
+          {item.label}
+        </div>
+      ))}
 
       <svg
         ref={svgRef}
@@ -189,12 +202,8 @@ export default function StockChart({ chartData, timeframe, onTimeframeChange, pr
           </linearGradient>
         </defs>
 
-        {renderYAxisLabels()}
-
         {areaPath && <path d={areaPath} fill="url(#grad)" />}
         {linePath && <path d={linePath} fill="none" stroke={chartColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
-
-        {renderXAxisLabels()}
 
         {hoverData && (
           <g pointerEvents="none">
@@ -204,6 +213,22 @@ export default function StockChart({ chartData, timeframe, onTimeframeChange, pr
           </g>
         )}
       </svg>
+
+      {/* X-axis labels (HTML, won't stretch) */}
+      {xLabels.map((item, idx) => (
+        <div key={idx} style={{
+          position: 'absolute',
+          left: `${item.left}%`,
+          bottom: '8px',
+          transform: 'translateX(-50%)',
+          fontSize: '11px',
+          color: '#80868b',
+          fontFamily: 'IBM Plex Mono',
+          pointerEvents: 'none'
+        }}>
+          {item.label}
+        </div>
+      ))}
 
       {hoverData && (
         <div style={{
