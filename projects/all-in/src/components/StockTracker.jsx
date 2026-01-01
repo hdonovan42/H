@@ -33,8 +33,8 @@ export default function StockTracker() {
     const loadClock = async () => {
       const clock = await fetchMarketClock();
       if (clock) {
+        clockDataRef.current = clock; // Update ref immediately (before state triggers effects)
         setClockData(clock);
-        console.log('Market clock loaded:', clock.isOpen ? 'OPEN' : 'CLOSED');
       }
     };
 
@@ -43,11 +43,6 @@ export default function StockTracker() {
 
     return () => clearInterval(clockInterval);
   }, []);
-
-  // Keep ref in sync for callbacks
-  useEffect(() => {
-    clockDataRef.current = clockData;
-  }, [clockData]);
 
   // Market state monitoring - uses clock data for accuracy
   useEffect(() => {
@@ -121,7 +116,9 @@ export default function StockTracker() {
           forwardPE: priceData.forwardPE
         });
 
-        console.log(`Market: ${marketState.state.toUpperCase()} | ${symbol}: $${priceData.currentPrice.toFixed(2)}${priceData.extendedHoursPrice ? ` | Extended: $${priceData.extendedHoursPrice.toFixed(2)}` : ''}`);
+        if (marketState.usingApi) {
+          console.log(`Market: ${marketState.state.toUpperCase()} | ${symbol}: $${priceData.currentPrice.toFixed(2)}${priceData.extendedHoursPrice ? ` | Extended: $${priceData.extendedHoursPrice.toFixed(2)}` : ''}`);
+        }
       }
 
       if (historicalData?.length > 0) setData(historicalData);
@@ -190,6 +187,13 @@ export default function StockTracker() {
     lastPriceRef.current = null;
     fetchStockData(ticker);
   }, [ticker]);
+
+  // Re-fetch when clock data first loads (fixes race condition)
+  useEffect(() => {
+    if (clockData && ticker) {
+      fetchStockData(ticker);
+    }
+  }, [clockData]);
 
   useEffect(() => {
     if (ticker) fetchChartData(ticker, timeframe);

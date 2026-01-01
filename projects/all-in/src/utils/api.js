@@ -91,7 +91,8 @@ export const fetchYahooQuote = async (symbol) => {
 
     if (timeInMinutes >= PRE_MARKET_START && timeInMinutes < MARKET_OPEN) {
       preMarketPrice = lastClose;
-    } else if (timeInMinutes >= MARKET_CLOSE && timeInMinutes < POST_MARKET_END) {
+    } else if (timeInMinutes >= MARKET_CLOSE) {
+      // Capture any price after market close as post-market (including at/after 8pm)
       postMarketPrice = lastClose;
     }
   }
