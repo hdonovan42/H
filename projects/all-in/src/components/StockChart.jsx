@@ -1,13 +1,30 @@
-import { useState, useRef, useMemo, useCallback } from 'react';
+import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { dayjs } from '../utils/marketState';
 import { EST } from '../utils/config';
 
 export default function StockChart({ chartData, timeframe, onTimeframeChange, previousClose }) {
   const svgRef = useRef(null);
+  const containerRef = useRef(null);
   const [hoverData, setHoverData] = useState(null);
+  const [chartType, setChartType] = useState('line'); // 'line' or 'candle'
 
-  const { minPrice, maxPrice, priceRange, linePath, areaPath } = useMemo(() => {
-    if (!chartData?.length) return { minPrice: 0, maxPrice: 100, priceRange: 100, linePath: '', areaPath: '' };
+  // Toggle chart type with 's' key when focused
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 's' || e.key === 'S') {
+        setChartType(prev => prev === 'line' ? 'candle' : 'line');
+      }
+    };
+
+    const container = containerRef.current;
+    if (container) {
+      container.addEventListener('keydown', handleKeyDown);
+      return () => container.removeEventListener('keydown', handleKeyDown);
+    }
+  }, []);
+
+  const { minPrice, maxPrice, priceRange, linePath, areaPath, candles } = useMemo(() => {
+    if (!chartData?.length) return { minPrice: 0, maxPrice: 100, priceRange: 100, linePath: '', areaPath: '', candles: [] };
 
     const min = Math.min(...chartData.map(d => d.low)) * 0.999;
     const max = Math.max(...chartData.map(d => d.high)) * 1.001;
@@ -26,7 +43,27 @@ export default function StockChart({ chartData, timeframe, onTimeframeChange, pr
     const line = chartData.length > 1 ? chartData.map((d, i) => `${i === 0 ? 'M' : 'L'} ${calcX(d, i)} ${calcY(d.close)}`).join(' ') : '';
     const area = line ? `${line} L ${calcX(chartData[chartData.length - 1], chartData.length - 1)} 260 L ${calcX(chartData[0], 0)} 260 Z` : '';
 
-    return { minPrice: min, maxPrice: max, priceRange: range, linePath: line, areaPath: area };
+    // Calculate candlestick data
+    const candleWidth = Math.max(2, Math.min(8, 600 / chartData.length));
+    const candleData = chartData.map((d, i) => {
+      const x = calcX(d, i);
+      const isGreen = d.close >= d.open;
+      const bodyTop = calcY(Math.max(d.open, d.close));
+      const bodyBottom = calcY(Math.min(d.open, d.close));
+      const bodyHeight = Math.max(1, bodyBottom - bodyTop);
+
+      return {
+        x,
+        wickTop: calcY(d.high),
+        wickBottom: calcY(d.low),
+        bodyTop,
+        bodyHeight,
+        width: candleWidth,
+        isGreen
+      };
+    });
+
+    return { minPrice: min, maxPrice: max, priceRange: range, linePath: line, areaPath: area, candles: candleData };
   }, [chartData, timeframe]);
 
   let isChartPositive = true;
@@ -159,7 +196,7 @@ export default function StockChart({ chartData, timeframe, onTimeframeChange, pr
   const xLabels = getXAxisLabels();
 
   return (
-    <div className="box chart-box">
+    <div className="box chart-box" ref={containerRef} tabIndex={0} style={{ outline: 'none' }}>
       <div className="timeframe-controls">
         {['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', '5Y'].map((tf, idx, arr) => (
           <span key={tf}>
@@ -202,8 +239,36 @@ export default function StockChart({ chartData, timeframe, onTimeframeChange, pr
           </linearGradient>
         </defs>
 
-        {areaPath && <path d={areaPath} fill="url(#grad)" />}
-        {linePath && <path d={linePath} fill="none" stroke={chartColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
+        {chartType === 'line' ? (
+          <>
+            {areaPath && <path d={areaPath} fill="url(#grad)" />}
+            {linePath && <path d={linePath} fill="none" stroke={chartColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
+          </>
+        ) : (
+          <g>
+            {candles.map((candle, i) => (
+              <g key={i}>
+                {/* Wick */}
+                <line
+                  x1={candle.x}
+                  y1={candle.wickTop}
+                  x2={candle.x}
+                  y2={candle.wickBottom}
+                  stroke={candle.isGreen ? '#137333' : '#a50e0e'}
+                  strokeWidth="1"
+                />
+                {/* Body */}
+                <rect
+                  x={candle.x - candle.width / 2}
+                  y={candle.bodyTop}
+                  width={candle.width}
+                  height={candle.bodyHeight}
+                  fill={candle.isGreen ? '#137333' : '#a50e0e'}
+                />
+              </g>
+            ))}
+          </g>
+        )}
 
         {hoverData && (
           <g pointerEvents="none">
