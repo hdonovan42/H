@@ -2,6 +2,25 @@ import { WORKER_URL } from './config';
 import { dayjs, getMarketState, MarketState } from './marketState';
 import { EST } from './config';
 
+// Fetch market clock from Alpaca - authoritative source for holidays
+export const fetchMarketClock = async () => {
+  try {
+    const response = await fetch(`${WORKER_URL}/clock`);
+    if (!response.ok) throw new Error('Clock fetch failed');
+    const data = await response.json();
+
+    return {
+      isOpen: data.is_open,
+      nextOpen: data.next_open ? dayjs(data.next_open).tz(EST) : null,
+      nextClose: data.next_close ? dayjs(data.next_close).tz(EST) : null,
+      timestamp: dayjs(data.timestamp).tz(EST)
+    };
+  } catch (error) {
+    console.error('Market clock fetch error:', error);
+    return null;
+  }
+};
+
 export const fetchSharesOutstanding = async (symbol) => {
   const cacheKey = `shares_${symbol}`;
   const cached = localStorage.getItem(cacheKey);
@@ -158,8 +177,8 @@ export const fetchMarketClosedData = async (symbol, marketState) => {
   };
 };
 
-export const fetchPriceData = async (symbol) => {
-  const marketState = getMarketState();
+export const fetchPriceData = async (symbol, clockData = null) => {
+  const marketState = getMarketState(clockData);
 
   try {
     if (marketState.isRegularHours) {

@@ -3,7 +3,7 @@ import StockChart from './StockChart';
 import { WORKER_URL } from '../utils/config';
 import { dayjs, getMarketState, getTodayEST, MarketState } from '../utils/marketState';
 import { getCachedData, setCachedData } from '../utils/cache';
-import { fetchPriceData } from '../utils/api';
+import { fetchPriceData, fetchMarketClock } from '../utils/api';
 import { EST } from '../utils/config';
 import '../styles/stock-tracker.css';
 
@@ -21,34 +21,56 @@ export default function StockTracker() {
   const [companyName, setCompanyName] = useState('');
   const [chartCache, setChartCache] = useState({});
   const [currentMarketState, setCurrentMarketState] = useState(getMarketState());
+  const [clockData, setClockData] = useState(null);
 
   const lastPriceRef = useRef(null);
   const wsRef = useRef(null);
   const isConnectingRef = useRef(false);
+  const clockDataRef = useRef(null);
 
-  // Market state monitoring
+  // Fetch market clock on mount and every 5 minutes
+  useEffect(() => {
+    const loadClock = async () => {
+      const clock = await fetchMarketClock();
+      if (clock) {
+        setClockData(clock);
+        console.log('Market clock loaded:', clock.isOpen ? 'OPEN' : 'CLOSED');
+      }
+    };
+
+    loadClock();
+    const clockInterval = setInterval(loadClock, 5 * 60 * 1000); // Refresh every 5 min
+
+    return () => clearInterval(clockInterval);
+  }, []);
+
+  // Keep ref in sync for callbacks
+  useEffect(() => {
+    clockDataRef.current = clockData;
+  }, [clockData]);
+
+  // Market state monitoring - uses clock data for accuracy
   useEffect(() => {
     const interval = setInterval(() => {
-      const newState = getMarketState();
+      const newState = getMarketState(clockData);
       setCurrentMarketState(prev => {
         if (prev.state !== newState.state) {
           return newState;
         }
         return prev;
       });
-    }, 60000);
+    }, 1000); // Check every second for instant state changes
 
     return () => clearInterval(interval);
-  }, []);
+  }, [clockData]);
 
   // Main data fetcher
   const fetchStockData = async (symbol) => {
     setLoading(true);
-    const marketState = getMarketState();
-    setCurrentMarketState(marketState);
+    const marketState = getMarketState(clockDataRef.current);
 
     try {
-      const { data: priceData } = await fetchPriceData(symbol);
+      const { data: priceData } = await fetchPriceData(symbol, clockDataRef.current);
 
       if (priceData) {
         setCompanyName(priceData.shortName || symbol);
@@ -111,7 +133,7 @@ export default function StockTracker() {
 
   // Chart data fetcher
   const fetchChartData = useCallback(async (symbol, tf) => {
-    const marketState = getMarketState();
+    const marketState = getMarketState(clockDataRef.current);
 
     try {
       if (['1M', '3M', '6M'].includes(tf) && data.length > 0) {
@@ -209,7 +231,7 @@ export default function StockTracker() {
     const connectWebSocket = async () => {
       if (!isMounted) return;
 
-      const marketState = getMarketState();
+      const marketState = getMarketState(clockDataRef.current);
       if (!marketState.isRegularHours) return;
 
       if (isConnectingRef.current) return;
@@ -304,7 +326,7 @@ export default function StockTracker() {
           wsRef.current = null;
           currentSubscribedSymbol = null;
 
-          if (isMounted && getMarketState().isRegularHours) {
+          if (isMounted && getMarketState(clockDataRef.current).isRegularHours) {
             scheduleReconnect();
           }
         };
@@ -328,7 +350,7 @@ export default function StockTracker() {
         reconnectTimeout = null;
       }
 
-      if (!isMounted || !getMarketState().isRegularHours) return;
+      if (!isMounted || !getMarketState(clockDataRef.current).isRegularHours) return;
 
       if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
         reconnectAttempts = 0;
@@ -341,14 +363,14 @@ export default function StockTracker() {
       reconnectTimeout = setTimeout(connectWebSocket, delay);
     };
 
-    if (getMarketState().isRegularHours) {
+    if (getMarketState(clockDataRef.current).isRegularHours) {
       connectWebSocket();
     }
 
     healthCheckInterval = setInterval(() => {
       if (!isMounted) return;
 
-      const marketState = getMarketState();
+      const marketState = getMarketState(clockDataRef.current);
       const hasConnection = wsRef.current?.readyState === WebSocket.OPEN;
 
       if (marketState.isRegularHours && !hasConnection && !isConnectingRef.current) {
@@ -408,7 +430,7 @@ export default function StockTracker() {
     if (!currentMarketState.isExtendedHours) return;
 
     const pollExtendedHours = async () => {
-      const currentState = getMarketState();
+      const currentState = getMarketState(clockDataRef.current);
 
       if (!currentState.isExtendedHours) {
         console.log('Extended hours ended, stopping poll');
@@ -416,7 +438,7 @@ export default function StockTracker() {
       }
 
       try {
-        const { data: priceData } = await fetchPriceData(ticker);
+        const { data: priceData } = await fetchPriceData(ticker, clockDataRef.current);
 
         if (priceData && priceData.extendedHoursPrice) {
           setQuote(prev => {
@@ -632,7 +654,9 @@ export default function StockTracker() {
 
         <div className="timestamp">
           Last updated: {dayjs().format('HH:mm MMM D.')}
-          <span style={{ marginLeft: '12px', opacity: 0.7 }}>Market: {currentMarketState.state}</span>
+          <span style={{ marginLeft: '12px', opacity: 0.7 }}>
+            Market: {currentMarketState.state}{currentMarketState.isHoliday ? ' (Holiday)' : ''}
+          </span>
         </div>
       </div>
     </div>
