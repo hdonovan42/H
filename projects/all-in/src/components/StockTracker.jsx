@@ -12,6 +12,9 @@ export default function StockTracker() {
   const [inputTicker, setInputTicker] = useState('');
   const [data, setData] = useState([]);
   const [chartData, setChartData] = useState([]);
+  const [intradayData, setIntradayData] = useState([]);
+  const [weeklyData, setWeeklyData] = useState([]);
+  const [monthlyData, setMonthlyData] = useState([]);
   const [timeframe, setTimeframe] = useState('6M');
   const [quote, setQuote] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -128,32 +131,18 @@ export default function StockTracker() {
     setLoading(false);
   };
 
-  // Chart data fetcher
-  const fetchChartData = useCallback(async (symbol, tf) => {
-    const marketState = getMarketState(clockDataRef.current);
+  // Chart data fetcher - always fetches 5Y data for continuous zoom
+  const fetchChartData = useCallback(async (symbol) => {
+    const cacheKey = `${symbol}-5Y`;
+
+    // Return cached 5Y data if available
+    if (chartCache[cacheKey]) {
+      setChartData(chartCache[cacheKey]);
+      return;
+    }
 
     try {
-      if (['1M', '3M', '6M'].includes(tf) && data.length > 0) {
-        const months = { '1M': 1, '3M': 3, '6M': 6 }[tf];
-        const cutoffDate = dayjs().subtract(months, 'month');
-        setChartData(data.filter(d => dayjs(d.date).isAfter(cutoffDate)));
-        return;
-      }
-
-      const cacheKey = tf === '1D' ? `${symbol}-${tf}-${getTodayEST()}` : `${symbol}-${tf}`;
-      const skipCache = tf === '1D' && marketState.isRegularHours;
-      if (!skipCache && chartCache[cacheKey]) {
-        setChartData(chartCache[cacheKey]);
-        return;
-      }
-
-      const params = {
-        '1D': ['1d', '5m'], '1W': ['5d', '15m'], '1M': ['1mo', '1d'],
-        '3M': ['3mo', '1d'], '6M': ['6mo', '1d'], 'YTD': ['ytd', '1d'],
-        '1Y': ['1y', '1d'], '5Y': ['5y', '1d']
-      }[tf] || ['6mo', '1d'];
-
-      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=${params[0]}&interval=${params[1]}`);
+      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=5y&interval=1d`);
       const barsData = await barsRes.json();
 
       if (barsData?.chart?.result?.[0]) {
@@ -171,15 +160,97 @@ export default function StockTracker() {
           })).filter(b => b.close !== null);
 
           setChartData(chartBars);
-          if (!skipCache) {
-            setChartCache(prev => ({ ...prev, [cacheKey]: chartBars }));
-          }
+          setChartCache(prev => ({ ...prev, [cacheKey]: chartBars }));
         }
       }
     } catch (error) {
       console.error('Error fetching chart data:', error);
     }
-  }, [data, chartCache]);
+  }, [chartCache]);
+
+  // Intraday data fetcher for 1D view (5-min intervals)
+  const fetchIntradayData = useCallback(async (symbol) => {
+    try {
+      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=5m`);
+      const barsData = await barsRes.json();
+
+      if (barsData?.chart?.result?.[0]) {
+        const result = barsData.chart.result[0];
+        const timestamps = result.timestamp;
+        const quote = result.indicators.quote[0];
+        if (timestamps && quote) {
+          const intradayBars = timestamps.map((t, i) => ({
+            date: dayjs.unix(t).tz(EST).toISOString(),
+            open: quote.open[i],
+            high: quote.high[i],
+            low: quote.low[i],
+            close: quote.close[i],
+            volume: quote.volume[i] || 0
+          })).filter(b => b.close !== null);
+
+          setIntradayData(intradayBars);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching intraday data:', error);
+    }
+  }, []);
+
+  // Weekly data fetcher for 1W view (15-min intervals)
+  const fetchWeeklyData = useCallback(async (symbol) => {
+    try {
+      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=5d&interval=15m`);
+      const barsData = await barsRes.json();
+
+      if (barsData?.chart?.result?.[0]) {
+        const result = barsData.chart.result[0];
+        const timestamps = result.timestamp;
+        const quote = result.indicators.quote[0];
+        if (timestamps && quote) {
+          const weeklyBars = timestamps.map((t, i) => ({
+            date: dayjs.unix(t).tz(EST).toISOString(),
+            open: quote.open[i],
+            high: quote.high[i],
+            low: quote.low[i],
+            close: quote.close[i],
+            volume: quote.volume[i] || 0
+          })).filter(b => b.close !== null);
+
+          setWeeklyData(weeklyBars);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching weekly data:', error);
+    }
+  }, []);
+
+  // Monthly data fetcher for 6D-60D view (1-hour intervals)
+  const fetchMonthlyData = useCallback(async (symbol) => {
+    try {
+      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=60d&interval=1h`);
+      const barsData = await barsRes.json();
+
+      if (barsData?.chart?.result?.[0]) {
+        const result = barsData.chart.result[0];
+        const timestamps = result.timestamp;
+        const quote = result.indicators.quote[0];
+        if (timestamps && quote) {
+          const monthlyBars = timestamps.map((t, i) => ({
+            date: dayjs.unix(t).tz(EST).toISOString(),
+            open: quote.open[i],
+            high: quote.high[i],
+            low: quote.low[i],
+            close: quote.close[i],
+            volume: quote.volume[i] || 0
+          })).filter(b => b.close !== null);
+
+          setMonthlyData(monthlyBars);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching monthly data:', error);
+    }
+  }, []);
 
   // Initial load and ticker changes
   useEffect(() => {
@@ -196,8 +267,8 @@ export default function StockTracker() {
   }, [clockData]);
 
   useEffect(() => {
-    if (ticker) fetchChartData(ticker, timeframe);
-  }, [ticker, timeframe, fetchChartData]);
+    if (ticker) fetchChartData(ticker);
+  }, [ticker, fetchChartData]);
 
   // WebSocket connection
   useEffect(() => {
@@ -414,19 +485,26 @@ export default function StockTracker() {
     };
   }, [ticker]);
 
-  // Periodic 1D chart refresh during market hours
+  // Fetch intraday, weekly, and monthly data on load and refresh during market hours
   useEffect(() => {
     if (!ticker) return;
-    if (timeframe !== '1D') return;
+
+    // Always fetch on load
+    fetchIntradayData(ticker);
+    fetchWeeklyData(ticker);
+    fetchMonthlyData(ticker);
+
+    // Poll during market hours
     if (!currentMarketState.isRegularHours) return;
 
-    const pollIntraday = () => fetchChartData(ticker, '1D');
-
-    pollIntraday();
-    const interval = setInterval(pollIntraday, 60000);
+    const interval = setInterval(() => {
+      fetchIntradayData(ticker);
+      fetchWeeklyData(ticker);
+      fetchMonthlyData(ticker);
+    }, 60000);
 
     return () => clearInterval(interval);
-  }, [ticker, timeframe, currentMarketState.state, fetchChartData]);
+  }, [ticker, currentMarketState.state, fetchIntradayData, fetchWeeklyData, fetchMonthlyData]);
 
   // Extended hours polling
   useEffect(() => {
@@ -612,6 +690,9 @@ export default function StockTracker() {
           <div className="chart-wrapper">
             <StockChart
               chartData={chartData}
+              intradayData={intradayData}
+              weeklyData={weeklyData}
+              monthlyData={monthlyData}
               timeframe={timeframe}
               onTimeframeChange={setTimeframe}
               previousClose={quote?.pc}

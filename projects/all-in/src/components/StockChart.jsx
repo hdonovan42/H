@@ -1,12 +1,38 @@
 import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { dayjs } from '../utils/marketState';
+import weekOfYear from 'dayjs/plugin/weekOfYear';
 import { EST } from '../utils/config';
 
-export default function StockChart({ chartData, timeframe, onTimeframeChange, previousClose }) {
+dayjs.extend(weekOfYear);
+
+const MIN_DAYS = 1;
+const MAX_DAYS = 1825; // 5 years
+
+// Map timeframe buttons to days
+const TIMEFRAME_DAYS = {
+  '1D': 1,
+  '1W': 7,
+  '1M': 30,
+  '3M': 90,
+  '6M': 180,
+  'YTD': null, // Calculate dynamically
+  '1Y': 365,
+  '5Y': 1825
+};
+
+export default function StockChart({ chartData, intradayData, weeklyData, monthlyData, timeframe, onTimeframeChange, previousClose }) {
   const svgRef = useRef(null);
   const containerRef = useRef(null);
   const [hoverData, setHoverData] = useState(null);
   const [chartType, setChartType] = useState('line'); // 'line' or 'candle'
+  const [visibleDays, setVisibleDays] = useState(180); // Default ~6 months
+
+  // Calculate YTD days
+  const getYTDDays = () => {
+    const now = dayjs();
+    const startOfYear = now.startOf('year');
+    return now.diff(startOfYear, 'day') + 1;
+  };
 
   // Toggle chart type with 's' key when focused
   useEffect(() => {
@@ -23,29 +49,114 @@ export default function StockChart({ chartData, timeframe, onTimeframeChange, pr
     }
   }, []);
 
-  const { minPrice, maxPrice, priceRange, linePath, areaPath, candles } = useMemo(() => {
-    if (!chartData?.length) return { minPrice: 0, maxPrice: 100, priceRange: 100, linePath: '', areaPath: '', candles: [] };
+  // Sync visibleDays when timeframe button is clicked
+  useEffect(() => {
+    const days = timeframe === 'YTD' ? getYTDDays() : TIMEFRAME_DAYS[timeframe];
+    if (days) setVisibleDays(days);
+  }, [timeframe]);
 
-    const min = Math.min(...chartData.map(d => d.low)) * 0.999;
-    const max = Math.max(...chartData.map(d => d.high)) * 1.001;
+  // Continuous wheel zoom handler with proper scroll prevention
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setVisibleDays(prev => {
+        // Use floor for zoom in, ceil for zoom out to ensure we always change
+        if (e.deltaY > 0) {
+          // Zoom out
+          const next = Math.ceil(prev * 1.15);
+          return Math.min(MAX_DAYS, next === prev ? prev + 1 : next);
+        } else {
+          // Zoom in
+          const next = Math.floor(prev * 0.85);
+          return Math.max(MIN_DAYS, next === prev ? prev - 1 : next);
+        }
+      });
+    };
+
+    // Use { passive: false } to allow preventDefault
+    container.addEventListener('wheel', handleWheel, { passive: false });
+
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, []);
+
+  // Helper: slice data to show last N trading days
+  const sliceByTradingDays = useCallback((data, numDays) => {
+    if (!data?.length) return [];
+    const days = [...new Set(data.map(d => dayjs(d.date).format('YYYY-MM-DD')))].sort();
+    const cutoffDays = new Set(days.slice(-numDays));
+    return data.filter(d => cutoffDays.has(dayjs(d.date).format('YYYY-MM-DD')));
+  }, []);
+
+  // Determine which data source to use and slice appropriately
+  const visibleData = useMemo(() => {
+    // 1D: intraday (5-min intervals)
+    if (visibleDays <= 1) {
+      if (intradayData?.length) return intradayData;
+      // Fallback to weekly data
+      if (weeklyData?.length) return sliceByTradingDays(weeklyData, 1);
+    }
+
+    // 2-5D: weekly (15-min intervals)
+    if (visibleDays <= 5 && weeklyData?.length) {
+      const result = sliceByTradingDays(weeklyData, visibleDays);
+      if (result.length) return result;
+    }
+
+    // 6-60D: monthly (1-hour intervals)
+    if (visibleDays <= 60 && monthlyData?.length) {
+      const result = sliceByTradingDays(monthlyData, visibleDays);
+      if (result.length) return result;
+    }
+
+    // 61D+: daily data
+    if (chartData?.length) {
+      return chartData.slice(-visibleDays);
+    }
+
+    return [];
+  }, [chartData, intradayData, weeklyData, monthlyData, visibleDays, sliceByTradingDays]);
+
+  // Calculate chart paths and candles from visible data
+  const { minPrice, maxPrice, priceRange, linePath, areaPath, candles } = useMemo(() => {
+    if (!visibleData?.length) return { minPrice: 0, maxPrice: 100, priceRange: 100, linePath: '', areaPath: '', candles: [] };
+
+    // Filter out any data points with null/undefined values
+    const validData = visibleData.filter(d =>
+      d.low != null && d.high != null && d.close != null && d.open != null &&
+      isFinite(d.low) && isFinite(d.high) && isFinite(d.close) && isFinite(d.open)
+    );
+    if (validData.length < 2) return { minPrice: 0, maxPrice: 100, priceRange: 100, linePath: '', areaPath: '', candles: [] };
+
+    const min = Math.min(...validData.map(d => d.low)) * 0.999;
+    const max = Math.max(...validData.map(d => d.high)) * 1.001;
     const range = (max - min) || 1;
     const calcY = (price) => 260 - ((price - min) / range) * 240;
 
     const calcX = (d, i) => {
-      if (timeframe === '1D') {
+      // For intraday (1D), use time-based positioning
+      if (visibleDays <= 1) {
         const estTime = dayjs(d.date).tz(EST);
         const timeInHours = Math.max(9.5, Math.min(16, estTime.hour() + estTime.minute() / 60));
         return 50 + ((timeInHours - 9.5) / 6.5) * 720;
       }
-      return 50 + (i / (chartData.length - 1 || 1)) * 720;
+      // For longer periods, use index-based positioning
+      return 50 + (i / (validData.length - 1 || 1)) * 720;
     };
 
-    const line = chartData.length > 1 ? chartData.map((d, i) => `${i === 0 ? 'M' : 'L'} ${calcX(d, i)} ${calcY(d.close)}`).join(' ') : '';
-    const area = line ? `${line} L ${calcX(chartData[chartData.length - 1], chartData.length - 1)} 260 L ${calcX(chartData[0], 0)} 260 Z` : '';
+    const line = validData.length > 1
+      ? validData.map((d, i) => `${i === 0 ? 'M' : 'L'} ${calcX(d, i)} ${calcY(d.close)}`).join(' ')
+      : '';
+    const area = line
+      ? `${line} L ${calcX(validData[validData.length - 1], validData.length - 1)} 260 L ${calcX(validData[0], 0)} 260 Z`
+      : '';
 
     // Calculate candlestick data
-    const candleWidth = Math.max(2, Math.min(8, 600 / chartData.length));
-    const candleData = chartData.map((d, i) => {
+    const candleWidth = Math.max(2, Math.min(8, 600 / validData.length));
+    const candleData = validData.map((d, i) => {
       const x = calcX(d, i);
       const isGreen = d.close >= d.open;
       const bodyTop = calcY(Math.max(d.open, d.close));
@@ -64,19 +175,23 @@ export default function StockChart({ chartData, timeframe, onTimeframeChange, pr
     });
 
     return { minPrice: min, maxPrice: max, priceRange: range, linePath: line, areaPath: area, candles: candleData };
-  }, [chartData, timeframe]);
+  }, [visibleData, visibleDays]);
 
+  // Determine chart color based on price movement
   let isChartPositive = true;
-  if (timeframe === '1D') {
-    const baseline = previousClose || chartData[0]?.close || 0;
-    isChartPositive = (chartData[chartData.length - 1]?.close || 0) >= baseline;
-  } else if (chartData.length > 0) {
-    isChartPositive = chartData[chartData.length - 1].close >= chartData[0].close;
+  if (visibleData?.length > 0) {
+    if (visibleDays <= 1) {
+      const baseline = previousClose || visibleData[0]?.close || 0;
+      isChartPositive = (visibleData[visibleData.length - 1]?.close || 0) >= baseline;
+    } else {
+      isChartPositive = (visibleData[visibleData.length - 1]?.close || 0) >= (visibleData[0]?.close || 0);
+    }
   }
   const chartColor = isChartPositive ? '#137333' : '#a50e0e';
 
+  // Mouse move handler for hover data
   const handleMouseMove = useCallback((e) => {
-    if (!chartData?.length || !svgRef.current) return;
+    if (!visibleData?.length || !svgRef.current) return;
 
     const svgRect = svgRef.current.getBoundingClientRect();
     const scaleX = 800 / svgRect.width;
@@ -84,11 +199,12 @@ export default function StockChart({ chartData, timeframe, onTimeframeChange, pr
 
     let index, dataX;
 
-    if (timeframe === '1D') {
+    if (visibleDays <= 1) {
+      // Intraday: find nearest point by time
       const mouseTimeHours = 9.5 + ((mouseX - 50) / 720) * 6.5;
       let nearestIndex = 0, nearestDiff = Infinity;
 
-      chartData.forEach((d, i) => {
+      visibleData.forEach((d, i) => {
         const estTime = dayjs(d.date).tz(EST);
         const timeInHours = estTime.hour() + estTime.minute() / 60;
         const diff = Math.abs(timeInHours - mouseTimeHours);
@@ -96,111 +212,172 @@ export default function StockChart({ chartData, timeframe, onTimeframeChange, pr
       });
 
       index = nearestIndex;
-      const point = chartData[index];
+      const point = visibleData[index];
+      if (!point) return;
       const estTime = dayjs(point.date).tz(EST);
       const timeInHours = Math.max(9.5, Math.min(16, estTime.hour() + estTime.minute() / 60));
       dataX = 50 + ((timeInHours - 9.5) / 6.5) * 720;
     } else {
+      // Longer periods: find by position
       const ratio = (mouseX - 50) / 720;
-      index = Math.round(ratio * (chartData.length - 1));
-      dataX = 50 + (index / (chartData.length - 1)) * 720;
+      const dataLength = visibleData.length - 1 || 1;
+      index = Math.min(Math.max(0, Math.round(ratio * dataLength)), visibleData.length - 1);
+      dataX = 50 + (index / dataLength) * 720;
     }
 
-    if (index >= 0 && index < chartData.length) {
-      const point = chartData[index];
-      const yPos = 260 - ((point.close - minPrice) / priceRange) * 240;
-      setHoverData({ dataX, y: yPos, data: point });
+    if (index >= 0 && index < visibleData.length) {
+      const point = visibleData[index];
+      if (point?.close != null) {
+        const yPos = 260 - ((point.close - minPrice) / (priceRange || 1)) * 240;
+        setHoverData({ dataX, y: yPos, data: point });
+      }
     }
-  }, [chartData, timeframe, minPrice, priceRange]);
+  }, [visibleData, visibleDays, minPrice, priceRange]);
 
+  // Y-axis labels
   const getYAxisLabels = () => {
+    if (!minPrice || !maxPrice || !isFinite(minPrice) || !isFinite(maxPrice)) return [];
     const min = Math.floor(minPrice / 20) * 20;
     const max = Math.ceil(maxPrice / 20) * 20;
-    const step = Math.ceil((max - min) / 5 / 20) * 20;
+    const step = Math.ceil((max - min) / 5 / 20) * 20 || 20;
     const steps = [];
     for (let p = max; p >= min && steps.length < 6; p -= step) steps.push(p);
-    // Convert SVG Y coordinates to percentages (chart area: Y 20-260 out of 300)
     return steps.map(p => ({
       label: `$${p}`,
       top: ((20 + ((max - p) / ((max - min) || 1)) * 240) / 300) * 100
     }));
   };
 
+  // Dynamic X-axis labels based on visible range
   const getXAxisLabels = () => {
-    if (!chartData.length) return [];
-
-    const maxLabels = {
-      '1D': 7, '1W': 6, '1M': 3, '3M': 3, '6M': 6, 'YTD': 12, '1Y': 12, '5Y': 5
-    };
-
-    const limit = maxLabels[timeframe] || 6;
-
-    const spacedLabels = (labels) => {
-      if (labels.length <= limit) return labels;
-      return labels.slice(labels.length - limit);
-    };
+    if (!visibleData?.length) return [];
+    try {
 
     let allLabels = [];
 
-    if (timeframe === '1D') {
+    if (visibleDays <= 1) {
+      // Intraday: show hours
       allLabels = ['10:00','11:00','12:00','13:00','14:00','15:00','16:00'].map((label, idx) => ({
         label,
         x: 50 + ((0.5 + idx) / 6.5) * 720
       }));
-    } else if (timeframe === '1W') {
+    } else if (visibleDays <= 7) {
+      // Week or less: show day names
       const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
       const seen = new Set();
-      chartData.forEach((d, i) => {
+      visibleData.forEach((d, i) => {
         const date = dayjs(d.date).format('YYYY-MM-DD');
         if (seen.has(date)) return;
         seen.add(date);
         allLabels.push({
           label: days[dayjs(d.date).day()],
-          x: 50 + (i / (chartData.length - 1 || 1)) * 720
+          x: 50 + (i / (visibleData.length - 1 || 1)) * 720
         });
       });
-    } else if (timeframe === '5Y') {
+    } else if (visibleDays <= 60) {
+      // Up to 2 months: show week markers or specific dates
       const seen = new Set();
-      chartData.forEach((d, i) => {
-        const year = dayjs(d.date).year();
-        if (seen.has(year)) return;
-        seen.add(year);
+      visibleData.forEach((d, i) => {
+        const dt = dayjs(d.date);
+        const weekKey = `${dt.year()}-W${dt.week()}`;
+        if (seen.has(weekKey)) return;
+        seen.add(weekKey);
         allLabels.push({
-          label: String(year).slice(-2),
-          x: 50 + (i / (chartData.length - 1 || 1)) * 720
+          label: dt.format('M/D'),
+          x: 50 + (i / (visibleData.length - 1 || 1)) * 720
         });
       });
-    } else {
+      // Limit to ~6 labels
+      if (allLabels.length > 6) {
+        const step = Math.ceil(allLabels.length / 6);
+        allLabels = allLabels.filter((_, i) => i % step === 0);
+      }
+    } else if (visibleDays <= 365) {
+      // Up to 1 year: show months
       const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       const seen = new Set();
-      chartData.forEach((d, i) => {
+      visibleData.forEach((d, i) => {
         const dt = dayjs(d.date);
         const key = `${dt.year()}-${dt.month()}`;
         if (seen.has(key)) return;
         seen.add(key);
         allLabels.push({
           label: months[dt.month()],
-          x: 50 + (i / (chartData.length - 1 || 1)) * 720
+          x: 50 + (i / (visibleData.length - 1 || 1)) * 720
+        });
+      });
+    } else {
+      // Multi-year: show years
+      const seen = new Set();
+      visibleData.forEach((d, i) => {
+        const year = dayjs(d.date).year();
+        if (seen.has(year)) return;
+        seen.add(year);
+        allLabels.push({
+          label: String(year).slice(-2),
+          x: 50 + (i / (visibleData.length - 1 || 1)) * 720
         });
       });
     }
 
-    // Convert SVG X coordinates to percentages (chart area: X 50-770 out of 800)
-    return spacedLabels(allLabels).map(item => ({
+    // Convert to percentages
+    return allLabels.map(item => ({
       label: item.label,
       left: (item.x / 800) * 100
     }));
+    } catch (e) {
+      console.error('Error generating X-axis labels:', e);
+      return [];
+    }
   };
 
   const yLabels = getYAxisLabels();
   const xLabels = getXAxisLabels();
+
+  // Determine which timeframe button is "active" (closest match)
+  const getActiveTimeframe = () => {
+    const ytdDays = getYTDDays();
+    const thresholds = [
+      { tf: '1D', days: 1 },
+      { tf: '1W', days: 7 },
+      { tf: '1M', days: 30 },
+      { tf: '3M', days: 90 },
+      { tf: '6M', days: 180 },
+      { tf: 'YTD', days: ytdDays },
+      { tf: '1Y', days: 365 },
+      { tf: '5Y', days: 1825 }
+    ];
+
+    // Find closest match
+    let closest = thresholds[0];
+    let minDiff = Math.abs(visibleDays - thresholds[0].days);
+    for (const t of thresholds) {
+      const diff = Math.abs(visibleDays - t.days);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closest = t;
+      }
+    }
+    // Only highlight if within 10% of the preset
+    if (minDiff / closest.days < 0.1) return closest.tf;
+    return null;
+  };
+
+  const activeTimeframe = getActiveTimeframe();
 
   return (
     <div className="box chart-box" ref={containerRef} tabIndex={0} style={{ outline: 'none' }}>
       <div className="timeframe-controls">
         {['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', '5Y'].map((tf, idx, arr) => (
           <span key={tf}>
-            <button className={`timeframe-btn ${timeframe === tf ? 'active' : ''}`} onClick={() => onTimeframeChange(tf)}>
+            <button
+              className={`timeframe-btn ${activeTimeframe === tf ? 'active' : ''}`}
+              onClick={() => {
+                const days = tf === 'YTD' ? getYTDDays() : TIMEFRAME_DAYS[tf];
+                setVisibleDays(days);
+                onTimeframeChange(tf);
+              }}
+            >
               {tf}
             </button>
             {idx < arr.length - 1 && <span className="timeframe-pipe">|</span>}
@@ -208,7 +385,7 @@ export default function StockChart({ chartData, timeframe, onTimeframeChange, pr
         ))}
       </div>
 
-      {/* Y-axis labels (HTML, won't stretch) */}
+      {/* Y-axis labels */}
       {yLabels.map((item, idx) => (
         <div key={idx} style={{
           position: 'absolute',
@@ -248,7 +425,6 @@ export default function StockChart({ chartData, timeframe, onTimeframeChange, pr
           <g>
             {candles.map((candle, i) => (
               <g key={i}>
-                {/* Wick */}
                 <line
                   x1={candle.x}
                   y1={candle.wickTop}
@@ -257,7 +433,6 @@ export default function StockChart({ chartData, timeframe, onTimeframeChange, pr
                   stroke={candle.isGreen ? '#137333' : '#a50e0e'}
                   strokeWidth="1"
                 />
-                {/* Body */}
                 <rect
                   x={candle.x - candle.width / 2}
                   y={candle.bodyTop}
@@ -279,7 +454,7 @@ export default function StockChart({ chartData, timeframe, onTimeframeChange, pr
         )}
       </svg>
 
-      {/* X-axis labels (HTML, won't stretch) */}
+      {/* X-axis labels */}
       {xLabels.map((item, idx) => (
         <div key={idx} style={{
           position: 'absolute',
@@ -309,7 +484,7 @@ export default function StockChart({ chartData, timeframe, onTimeframeChange, pr
               ${hoverData.data.close.toFixed(2)}
             </div>
             <div style={{ color: '#ccc', fontSize: '10px', fontFamily: 'IBM Plex Mono' }}>
-              {timeframe === '1D'
+              {visibleDays <= 1
                 ? dayjs(hoverData.data.date).tz(EST).format('HH:mm')
                 : dayjs(hoverData.data.date).tz(EST).format('MMM D')}
             </div>
