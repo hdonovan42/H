@@ -2,10 +2,22 @@ import { WORKER_URL } from './config';
 import { dayjs, getMarketState, MarketState } from './marketState';
 import { EST } from './config';
 
+// Fetch with timeout to prevent indefinite hangs
+const fetchWithTimeout = async (url, options = {}, timeout = 10000) => {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    return response;
+  } finally {
+    clearTimeout(id);
+  }
+};
+
 // Fetch market clock from Alpaca - authoritative source for holidays
 export const fetchMarketClock = async () => {
   try {
-    const response = await fetch(`${WORKER_URL}/clock`);
+    const response = await fetchWithTimeout(`${WORKER_URL}/clock`);
     if (!response.ok) throw new Error('Clock fetch failed');
     const data = await response.json();
 
@@ -25,16 +37,21 @@ export const fetchSharesOutstanding = async (symbol) => {
   const cacheKey = `shares_${symbol}`;
   const cached = localStorage.getItem(cacheKey);
   if (cached) {
-    const { data, timestamp } = JSON.parse(cached);
-    if (Date.now() - timestamp < 24 * 60 * 60 * 1000) {
-      return data;
+    try {
+      const { data, timestamp } = JSON.parse(cached);
+      if (Date.now() - timestamp < 24 * 60 * 60 * 1000) {
+        return data;
+      }
+    } catch (e) {
+      console.warn('Clearing corrupted shares cache for', symbol);
+      localStorage.removeItem(cacheKey);
     }
   }
 
   try {
     const [floatRes, finnhubRes] = await Promise.all([
-      fetch(`${WORKER_URL}/fmp/shares-float/${symbol}`),
-      fetch(`${WORKER_URL}/finnhub/metric/${symbol}`)
+      fetchWithTimeout(`${WORKER_URL}/fmp/shares-float/${symbol}`),
+      fetchWithTimeout(`${WORKER_URL}/finnhub/metric/${symbol}`)
     ]);
 
     const floatData = await floatRes.json();
@@ -57,7 +74,7 @@ export const fetchSharesOutstanding = async (symbol) => {
 };
 
 export const fetchYahooQuote = async (symbol) => {
-  const response = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=5m&includePrePost=true`);
+  const response = await fetchWithTimeout(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=5m&includePrePost=true`);
   const data = await response.json();
 
   if (!data?.chart?.result?.[0]) return null;

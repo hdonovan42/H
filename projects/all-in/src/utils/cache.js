@@ -1,10 +1,16 @@
 import { CACHE_DURATION } from './config';
 
 export const getCachedData = (symbol) => {
-  const cached = localStorage.getItem(`stock_${symbol}`);
+  const key = `stock_${symbol}`;
+  const cached = localStorage.getItem(key);
   if (cached) {
-    const { data, timestamp } = JSON.parse(cached);
-    if (Date.now() - timestamp < CACHE_DURATION) return data;
+    try {
+      const { data, timestamp } = JSON.parse(cached);
+      if (Date.now() - timestamp < CACHE_DURATION) return data;
+    } catch (e) {
+      console.warn('Clearing corrupted cache for', symbol);
+      localStorage.removeItem(key);
+    }
   }
   return null;
 };

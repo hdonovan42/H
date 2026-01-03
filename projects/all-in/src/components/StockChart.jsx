@@ -283,7 +283,7 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
         if (seen.has(weekKey)) return;
         seen.add(weekKey);
         allLabels.push({
-          label: dt.format('M/D'),
+          label: dt.format('MMM D'),
           x: 50 + (i / (visibleData.length - 1 || 1)) * 720
         });
       });

@@ -366,7 +366,8 @@ export default function StockTracker() {
           try {
             const msg = JSON.parse(event.data);
             if (msg.type === 'trade' && msg.data?.length > 0) {
-              const newPrice = msg.data[msg.data.length - 1].p;
+              const newPrice = msg.data[msg.data.length - 1]?.p;
+              if (newPrice == null) return;
               if (lastPriceRef.current === newPrice) return;
               const oldPrice = lastPriceRef.current;
               const direction = oldPrice === null || newPrice >= oldPrice ? 'up' : 'down';
@@ -387,7 +388,9 @@ export default function StockTracker() {
               setPriceFlash(null);
               requestAnimationFrame(() => setPriceFlash(direction));
             }
-          } catch (e) { /* ignore parse errors */ }
+          } catch (e) {
+            console.warn('WebSocket message parse error:', e.message);
+          }
         };
 
         ws.onerror = () => {
