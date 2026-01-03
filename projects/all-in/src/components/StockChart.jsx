@@ -304,11 +304,14 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
     let allLabels = [];
 
     if (visibleDays <= 1) {
-      // Intraday: show hours
-      allLabels = ['10:00','11:00','12:00','13:00','14:00','15:00','16:00'].map((label, idx) => ({
-        label,
-        x: 50 + ((0.5 + idx) / 6.5) * 720
-      }));
+      // Intraday: show hours from 9:30 to 16:00
+      allLabels = ['10:00','11:00','12:00','13:00','14:00','15:00','16:00'].map((label, idx, arr) => {
+        const hour = parseInt(label.split(':')[0]);
+        let x = 50 + ((hour - 9.5) / 6.5) * 720;
+        if (idx === 0) x += 15;
+        if (idx === arr.length - 1) x -= 15;
+        return { label, x };
+      });
     } else if (visibleDays <= 7) {
       // Week or less: show day names
       const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -368,11 +371,8 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
       });
     }
 
-    // Convert to percentages
-    return allLabels.map(item => ({
-      label: item.label,
-      left: (item.x / 800) * 100
-    }));
+    // Return with x coordinates for SVG positioning
+    return allLabels;
     } catch (e) {
       console.error('Error generating X-axis labels:', e);
       return [];
@@ -518,20 +518,26 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
             <circle cx={hoverData.dataX} cy={hoverData.y} r="3.5" fill={chartColor} stroke="#fff" strokeWidth="2" />
           </g>
         )}
+
       </svg>
 
       {/* X-axis labels */}
       {xLabels.map((item, idx) => (
-        <span key={idx} style={{
-          position: 'absolute',
-          left: `${item.left}%`,
-          bottom: '4%',
-          fontSize: '11px',
-          color: '#80868b',
-          fontFamily: 'IBM Plex Mono',
-          pointerEvents: 'none',
-          transform: 'translateX(-50%)'
-        }}>
+        <span
+          key={idx}
+          style={{
+            position: 'absolute',
+            left: `${(item.x / 800) * 100}%`,
+            bottom: '4%',
+            transform: 'translateX(-50%)',
+            fontSize: '11px',
+            color: '#80868b',
+            fontFamily: 'IBM Plex Mono',
+            pointerEvents: 'none',
+            whiteSpace: 'nowrap',
+            display: 'inline-block'
+          }}
+        >
           {item.label}
         </span>
       ))}
