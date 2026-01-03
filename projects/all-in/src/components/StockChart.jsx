@@ -113,9 +113,10 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
       if (result.length) return result;
     }
 
-    // 61D+: daily data
+    // 61D+: daily data - filter by calendar days from today
     if (chartData?.length) {
-      return chartData.slice(-visibleDays);
+      const cutoffDate = dayjs().subtract(visibleDays, 'day').format('YYYY-MM-DD');
+      return chartData.filter(d => dayjs(d.date).format('YYYY-MM-DD') >= cutoffDate);
     }
 
     return [];
@@ -465,6 +466,9 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
           </linearGradient>
         </defs>
 
+        {/* X-axis line */}
+        <line x1="50" y1="280" x2="770" y2="280" stroke="#ccc" strokeWidth="1" />
+
         {chartType === 'line' ? (
           <>
             {areaPath && <path d={areaPath} fill="url(#grad)" />}
@@ -518,18 +522,18 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
 
       {/* X-axis labels */}
       {xLabels.map((item, idx) => (
-        <div key={idx} style={{
+        <span key={idx} style={{
           position: 'absolute',
           left: `${item.left}%`,
-          bottom: '8px',
-          transform: 'translateX(-50%)',
+          bottom: '4%',
           fontSize: '11px',
           color: '#80868b',
           fontFamily: 'IBM Plex Mono',
-          pointerEvents: 'none'
+          pointerEvents: 'none',
+          transform: 'translateX(-50%)'
         }}>
           {item.label}
-        </div>
+        </span>
       ))}
 
       {hoverData && (
@@ -562,7 +566,13 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
               })()
             ) : (
               <div style={{ fontSize: '12px', fontWeight: 500, fontFamily: '"Google Sans", "Product Sans", "Inter", system-ui, sans-serif', whiteSpace: 'nowrap' }}>
-                <span style={{ color: '#333' }}>${hoverData.data.close.toFixed(2)}</span> <span style={{ color: '#666' }}>{visibleDays <= 1 ? dayjs(hoverData.data.date).tz(EST).format('HH:mm') : dayjs(hoverData.data.date).tz(EST).format('MMM D')}</span>
+                <span style={{ color: '#000' }}>${hoverData.data.close.toFixed(2)}</span> <span style={{ color: '#666' }}>{(() => {
+                  if (visibleDays <= 1) return dayjs(hoverData.data.date).tz(EST).format('HH:mm');
+                  const firstYear = visibleData[0] ? dayjs(visibleData[0].date).tz(EST).year() : null;
+                  const lastYear = visibleData[visibleData.length - 1] ? dayjs(visibleData[visibleData.length - 1].date).tz(EST).year() : null;
+                  const multiYear = firstYear !== lastYear;
+                  return dayjs(hoverData.data.date).tz(EST).format(multiYear ? 'D MMM YYYY' : 'D MMM');
+                })()}</span>
               </div>
             )}
           </div>
