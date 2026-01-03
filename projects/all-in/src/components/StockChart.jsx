@@ -26,6 +26,7 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
   const [hoverData, setHoverData] = useState(null);
   const [chartType, setChartType] = useState('line'); // 'line' or 'candle'
   const [visibleDays, setVisibleDays] = useState(180); // Default ~6 months
+  const [dragStart, setDragStart] = useState(null); // For drag selection
 
   // Calculate YTD days
   const getYTDDays = () => {
@@ -234,6 +235,52 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
     }
   }, [visibleData, visibleDays, minPrice, priceRange]);
 
+  // Mouse down handler for drag selection
+  const handleMouseDown = useCallback((e) => {
+    if (!visibleData?.length || !svgRef.current) return;
+
+    const svgRect = svgRef.current.getBoundingClientRect();
+    const scaleX = 800 / svgRect.width;
+    let mouseX = Math.max(50, Math.min(770, (e.clientX - svgRect.left) * scaleX));
+
+    let index, dataX;
+
+    if (visibleDays <= 1) {
+      const mouseTimeHours = 9.5 + ((mouseX - 50) / 720) * 6.5;
+      let nearestIndex = 0, nearestDiff = Infinity;
+      visibleData.forEach((d, i) => {
+        const estTime = dayjs(d.date).tz(EST);
+        const timeInHours = estTime.hour() + estTime.minute() / 60;
+        const diff = Math.abs(timeInHours - mouseTimeHours);
+        if (diff < nearestDiff) { nearestDiff = diff; nearestIndex = i; }
+      });
+      index = nearestIndex;
+      const point = visibleData[index];
+      if (!point) return;
+      const estTime = dayjs(point.date).tz(EST);
+      const timeInHours = Math.max(9.5, Math.min(16, estTime.hour() + estTime.minute() / 60));
+      dataX = 50 + ((timeInHours - 9.5) / 6.5) * 720;
+    } else {
+      const ratio = (mouseX - 50) / 720;
+      const dataLength = visibleData.length - 1 || 1;
+      index = Math.min(Math.max(0, Math.round(ratio * dataLength)), visibleData.length - 1);
+      dataX = 50 + (index / dataLength) * 720;
+    }
+
+    if (index >= 0 && index < visibleData.length) {
+      const point = visibleData[index];
+      if (point?.close != null) {
+        const yPos = 260 - ((point.close - minPrice) / (priceRange || 1)) * 240;
+        setDragStart({ dataX, y: yPos, data: point });
+      }
+    }
+  }, [visibleData, visibleDays, minPrice, priceRange]);
+
+  // Mouse up handler to clear drag selection
+  const handleMouseUp = useCallback(() => {
+    setDragStart(null);
+  }, []);
+
   // Y-axis labels
   const getYAxisLabels = () => {
     if (!minPrice || !maxPrice || !isFinite(minPrice) || !isFinite(maxPrice)) return [];
@@ -407,7 +454,9 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
         preserveAspectRatio="none"
         style={{ width: '100%', height: '100%', cursor: 'crosshair' }}
         onMouseMove={handleMouseMove}
-        onMouseLeave={() => setHoverData(null)}
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={() => { setHoverData(null); setDragStart(null); }}
       >
         <defs>
           <linearGradient id="grad" x1="0" x2="0" y1="0" y2="1">
@@ -445,6 +494,19 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
           </g>
         )}
 
+        {dragStart && (
+          <line
+            x1={dragStart.dataX}
+            y1="20"
+            x2={dragStart.dataX}
+            y2="260"
+            stroke="#666"
+            strokeWidth="1"
+            strokeDasharray="4"
+            pointerEvents="none"
+          />
+        )}
+
         {hoverData && (
           <g pointerEvents="none">
             <line x1={hoverData.dataX} y1="20" x2={hoverData.dataX} y2="260" stroke="#666" strokeWidth="1" strokeDasharray="4" />
@@ -479,15 +541,30 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
           pointerEvents: 'none',
           zIndex: 10
         }}>
-          <div style={{ background: 'rgba(26, 26, 26, 0.9)', padding: '8px 12px', borderRadius: '4px', minWidth: '80px', textAlign: 'center' }}>
-            <div style={{ color: '#fff', fontSize: '13px', fontWeight: 600, fontFamily: 'IBM Plex Mono', marginBottom: '4px' }}>
-              ${hoverData.data.close.toFixed(2)}
-            </div>
-            <div style={{ color: '#ccc', fontSize: '10px', fontFamily: 'IBM Plex Mono' }}>
-              {visibleDays <= 1
-                ? dayjs(hoverData.data.date).tz(EST).format('HH:mm')
-                : dayjs(hoverData.data.date).tz(EST).format('MMM D')}
-            </div>
+          <div style={{ background: 'rgba(255, 255, 255, 0.75)', padding: '8px 12px', borderRadius: '4px', minWidth: '80px', textAlign: 'center', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)' }}>
+            {dragStart ? (
+              (() => {
+                const startPrice = dragStart.data.close;
+                const currentPrice = hoverData.data.close;
+                const absReturn = currentPrice - startPrice;
+                const pctReturn = (absReturn / startPrice) * 100;
+                const isPositive = absReturn >= 0;
+                const color = isPositive ? '#137333' : '#a50e0e';
+                const sign = isPositive ? '+' : '';
+                const startDate = dayjs(dragStart.data.date).tz(EST).format('D MMM YYYY');
+                const endDate = dayjs(hoverData.data.date).tz(EST).format('D MMM YYYY');
+
+                return (
+                  <div style={{ fontSize: '12px', fontWeight: 500, fontFamily: '"Google Sans", "Product Sans", "Inter", system-ui, sans-serif', whiteSpace: 'nowrap' }}>
+                    <span style={{ color }}>{sign}${absReturn.toFixed(2)} ({sign}{pctReturn.toFixed(2)}%)</span> <span style={{ color: '#666' }}>{startDate}-{endDate}</span>
+                  </div>
+                );
+              })()
+            ) : (
+              <div style={{ fontSize: '12px', fontWeight: 500, fontFamily: '"Google Sans", "Product Sans", "Inter", system-ui, sans-serif', whiteSpace: 'nowrap' }}>
+                <span style={{ color: '#333' }}>${hoverData.data.close.toFixed(2)}</span> <span style={{ color: '#666' }}>{visibleDays <= 1 ? dayjs(hoverData.data.date).tz(EST).format('HH:mm') : dayjs(hoverData.data.date).tz(EST).format('MMM D')}</span>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -743,7 +743,7 @@ export default function StockTracker() {
         <div className="timestamp">
           Last updated: {dayjs().format('HH:mm MMM D.')}
           <span style={{ marginLeft: '12px', opacity: 0.7 }}>
-            Market: {currentMarketState.state}{currentMarketState.isHoliday ? ' (Holiday)' : ''}
+            Market: {currentMarketState.isRegularHours ? 'Open' : 'Closed'}
           </span>
         </div>
       </div>
