@@ -30,6 +30,7 @@ export default function StockTracker() {
   const wsRef = useRef(null);
   const isConnectingRef = useRef(false);
   const clockDataRef = useRef(null);
+  const [wsAvailable, setWsAvailable] = useState(true);
 
   // Fetch market clock on mount and every 5 minutes
   useEffect(() => {
@@ -281,7 +282,7 @@ export default function StockTracker() {
     let lastMessageTime = Date.now();
     let healthCheckInterval = null;
 
-    const MAX_RECONNECT_ATTEMPTS = 10;
+    const MAX_RECONNECT_ATTEMPTS = 3;  // Cap at ~1 min before falling back to polling
     const STALE_CONNECTION_MS = 60000;
 
     const getReconnectDelay = () => Math.min(500 * Math.pow(2, reconnectAttempts), 30000);
@@ -354,6 +355,7 @@ export default function StockTracker() {
           reconnectAttempts = 0;
           wsRef.current = ws;
           lastMessageTime = Date.now();
+          setWsAvailable(true);
 
           if (ticker) {
             ws.send(JSON.stringify({ type: 'subscribe', symbol: ticker }));
@@ -396,6 +398,7 @@ export default function StockTracker() {
         ws.onerror = () => {
           clearTimeout(connectionTimeout);
           isConnectingRef.current = false;
+          setWsAvailable(false);
         };
 
         ws.onclose = () => {
@@ -403,6 +406,7 @@ export default function StockTracker() {
           isConnectingRef.current = false;
           wsRef.current = null;
           currentSubscribedSymbol = null;
+          setWsAvailable(false);
 
           if (isMounted && getMarketState(clockDataRef.current).isRegularHours) {
             scheduleReconnect();
@@ -412,6 +416,7 @@ export default function StockTracker() {
       } catch (e) {
         clearTimeout(fetchTimeout);
         isConnectingRef.current = false;
+        setWsAvailable(false);
         if (e.name === 'AbortError') {
           console.log('WebSocket URL fetch aborted (timeout)');
           if (isMounted) scheduleReconnect();
@@ -550,6 +555,46 @@ export default function StockTracker() {
       clearInterval(interval);
     };
   }, [ticker, currentMarketState.state]);
+
+  // WebSocket fallback polling - when WebSocket unavailable during market hours
+  useEffect(() => {
+    if (!ticker) return;
+    if (wsAvailable) return;  // WebSocket working, no need to poll
+    if (!currentMarketState.isRegularHours) return;  // Only poll during market hours
+
+    const pollFallback = async () => {
+      try {
+        const { data: priceData } = await fetchPriceData(ticker, clockDataRef.current);
+
+        if (priceData && priceData.currentPrice) {
+          setQuote(prev => {
+            if (!prev) return prev;
+            const newPrice = priceData.currentPrice;
+            return {
+              ...prev,
+              c: newPrice,
+              d: newPrice - prev.pc,
+              dp: ((newPrice - prev.pc) / prev.pc) * 100,
+              h: Math.max(prev.h || newPrice, newPrice),
+              l: Math.min(prev.l || newPrice, newPrice),
+              volume: priceData.volume || prev.volume
+            };
+          });
+        }
+      } catch (error) {
+        console.error('Fallback poll error:', error);
+      }
+    };
+
+    console.log('WebSocket unavailable, starting fallback polling');
+    pollFallback();  // Immediate first poll
+    const interval = setInterval(pollFallback, 5000);
+
+    return () => {
+      console.log('Fallback polling stopped');
+      clearInterval(interval);
+    };
+  }, [ticker, wsAvailable, currentMarketState.isRegularHours]);
 
   // Spreadsheet data processing
   const processSpreadsheetData = useMemo(() => {

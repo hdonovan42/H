@@ -24,7 +24,7 @@ npm run preview      # Preview production build
 | Yahoo Finance | OHLCV, quotes, 52-week range, pre/post prices | Use bars not price for OOH |
 | Alpaca | Market clock/status, extended hours bars | Authoritative for market state |
 | FMP | Shares outstanding | |
-| Finnhub | Real-time price (WebSocket), forward P/E | WebSocket currently supports one user |
+| Finnhub | Real-time price (WebSocket), forward P/E | Free tier: 1 concurrent connection |
 
 ## Key Files
 
@@ -67,12 +67,23 @@ const shouldProcessTodayRow = regularHoursToday;
 
 Do NOT rely on Yahoo's `tradingDay` field - it returns today's date during pre-market due to intraday timestamps.
 
+## Real-Time Price Updates
+
+During market hours, uses Finnhub WebSocket for instant price updates. If WebSocket fails (e.g., connection limit reached), falls back to REST polling every 5 seconds:
+
+```
+WebSocket connects → instant updates
+WebSocket fails → polling starts (5s interval)
+WebSocket reconnects → polling stops
+```
+
+The `wsAvailable` state tracks WebSocket status. Health check runs every 15s to attempt reconnection. See `StockTracker.jsx` lines 275-500 for WebSocket logic and lines 559-597 for fallback polling.
+
 ## Technical Conventions
 
 - All market times are **EST** (America/New_York timezone)
 - Uses `dayjs` with timezone plugins for date handling
 - Mobile breakpoint at 700px
-- WebSocket has reconnection logic for real-time updates
 
 ## Known Issues
 
@@ -82,4 +93,4 @@ Do NOT rely on Yahoo's `tradingDay` field - it returns today's date during pre-m
 
 ## Current Priorities
 
-1. WebSocket: currently only supports one user - needs fix for multi-user
+(none currently)
