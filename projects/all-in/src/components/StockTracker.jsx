@@ -555,8 +555,10 @@ export default function StockTracker() {
   const processSpreadsheetData = useMemo(() => {
     const dataWithToday = [...data];
     const todayEST = getTodayEST();
-    const apiTradingDay = quote?.tradingDay;
-    const shouldProcessTodayRow = apiTradingDay === todayEST || currentMarketState.isRegularHours;
+    // Show today's row only when regular trading has occurred/is occurring today
+    const regularHoursToday = currentMarketState.isRegularHours ||
+      currentMarketState.state === MarketState.POST_MARKET;
+    const shouldProcessTodayRow = regularHoursToday;
 
     const toDateStr = (d) => d ? dayjs(d).format('YYYY-MM-DD') : null;
     const historicalDataHasToday = toDateStr(data[data.length - 1]?.date) === todayEST;
