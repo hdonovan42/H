@@ -10,6 +10,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         tsla: resolve(__dirname, 'tsla.html'),
+        earnings: resolve(__dirname, 'earnings.html'),
       },
     },
   },

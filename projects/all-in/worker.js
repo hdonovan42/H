@@ -419,6 +419,26 @@ export default {
         return response;
       }
 
+      // GET /finnhub/earnings/:symbol - Earnings data (estimates & actuals)
+      if (path.startsWith('/finnhub/earnings/')) {
+        const symbol = path.split('/')[3];
+        const cache = caches.default;
+        let response = await cache.match(request);
+
+        if (!response) {
+          targetUrl = `https://finnhub.io/api/v1/stock/earnings?symbol=${symbol}&token=${FINNHUB_KEY}`;
+          response = await fetch(targetUrl);
+
+          if (response.ok) {
+            response = new Response(response.body, {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' },
+            });
+            ctx.waitUntil(cache.put(request, response.clone()));
+          }
+        }
+        return response;
+      }
+
       // ============================================================
       // FMP ROUTES
       // ============================================================

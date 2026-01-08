@@ -1,0 +1,496 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  min-height: 100vh;
+  background: #1a1a1a;
+  font-family: 'IBM Plex Mono', monospace;
+  color: #e8e5dc;
+}
+
+.earnings-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  font-size: 18px;
+  color: #888;
+}
+
+.earnings-container {
+  max-width: 1800px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.earnings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0 16px;
+  border-bottom: 1px solid #333;
+  margin-bottom: 16px;
+}
+
+.earnings-header h1 {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+}
+
+.market-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.status-dot.open { background: #4ade80; box-shadow: 0 0 8px rgba(74, 222, 128, 0.6); }
+.status-dot.closed { background: #f87171; box-shadow: 0 0 8px rgba(248, 113, 113, 0.6); }
+
+/* Grid Layout */
+.earnings-grid {
+  display: grid;
+  grid-template-columns: 320px 1fr 360px;
+  gap: 16px;
+  height: calc(100vh - 100px);
+}
+
+.earnings-left,
+.earnings-middle,
+.earnings-right {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
+}
+
+/* Section styling */
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.section-header h3 {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #888;
+}
+
+/* Video Embed */
+.video-embed {
+  background: #222;
+  border: 1px solid #333;
+  border-radius: 4px;
+  overflow: hidden;
+  flex: 1;
+  min-height: 300px;
+}
+
+.video-embed iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+.video-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.placeholder-content {
+  text-align: center;
+  padding: 40px;
+}
+
+.placeholder-content h3 {
+  font-size: 16px;
+  margin-bottom: 8px;
+  color: #666;
+}
+
+.placeholder-content p {
+  font-size: 12px;
+  color: #555;
+}
+
+.placeholder-hint {
+  margin-top: 12px;
+  font-size: 11px;
+  color: #444;
+}
+
+/* Transcript Embed */
+.transcript-embed {
+  background: #222;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 12px;
+  flex: 1;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+}
+
+.transcript-embed iframe {
+  flex: 1;
+  width: 100%;
+  border: none;
+  border-radius: 4px;
+  background: #1a1a1a;
+}
+
+.external-link {
+  font-size: 11px;
+  color: #6b9fff;
+  text-decoration: none;
+}
+
+.external-link:hover {
+  text-decoration: underline;
+}
+
+/* Price Display */
+.price-display {
+  background: #222;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 16px;
+}
+
+.price-label {
+  font-size: 11px;
+  color: #666;
+  text-transform: uppercase;
+}
+
+.price-main {
+  margin: 12px 0;
+}
+
+.price-value {
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: -1px;
+}
+
+.price-change {
+  display: block;
+  font-size: 14px;
+  margin-top: 4px;
+}
+
+.price-change.positive { color: #4ade80; }
+.price-change.negative { color: #f87171; }
+
+.price-extended {
+  padding: 8px 0;
+  border-top: 1px solid #333;
+  margin-top: 8px;
+}
+
+.extended-label {
+  font-size: 11px;
+  color: #666;
+}
+
+.extended-change {
+  font-size: 13px;
+  margin-left: 8px;
+}
+
+.extended-change.positive { color: #4ade80; }
+.extended-change.negative { color: #f87171; }
+
+.price-details {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #333;
+}
+
+.price-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  padding: 4px 0;
+  color: #888;
+}
+
+/* Earnings Data */
+.earnings-data {
+  background: #222;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 16px;
+  flex: 1;
+}
+
+.earnings-period {
+  font-size: 11px;
+  color: #666;
+}
+
+.earnings-loading-msg,
+.earnings-pending {
+  font-size: 12px;
+  color: #666;
+  padding: 20px 0;
+}
+
+.earnings-grid-data {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.earnings-metric {
+  padding: 12px;
+  background: #1a1a1a;
+  border-radius: 4px;
+}
+
+.metric-label {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #e8e5dc;
+}
+
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  padding: 4px 0;
+}
+
+.metric-sublabel {
+  color: #666;
+}
+
+.metric-value {
+  font-weight: 500;
+}
+
+.metric-result {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.metric-result.beat {
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+}
+
+.metric-result.miss {
+  background: rgba(248, 113, 113, 0.15);
+  color: #f87171;
+}
+
+.metric-pending {
+  font-size: 11px;
+  color: #666;
+  font-style: italic;
+  margin-top: 8px;
+}
+
+.earnings-history {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #333;
+}
+
+.history-label {
+  font-size: 11px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.history-items {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.history-item {
+  font-size: 11px;
+  padding: 4px 8px;
+  background: #1a1a1a;
+  border-radius: 4px;
+}
+
+.history-period {
+  color: #888;
+  margin-right: 6px;
+}
+
+.history-result.beat { color: #4ade80; }
+.history-result.miss { color: #f87171; }
+
+/* News Feed */
+.news-feed {
+  background: #222;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 12px;
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.news-loading,
+.news-empty {
+  font-size: 12px;
+  color: #666;
+  padding: 20px 0;
+  text-align: center;
+}
+
+.news-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.news-item {
+  display: block;
+  padding: 10px 0;
+  border-bottom: 1px solid #333;
+  text-decoration: none;
+  color: inherit;
+  transition: background 0.2s;
+}
+
+.news-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.news-item:last-child {
+  border-bottom: none;
+}
+
+.news-source {
+  font-size: 10px;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.news-title {
+  font-size: 12px;
+  line-height: 1.4;
+  color: #e8e5dc;
+}
+
+.news-time {
+  font-size: 10px;
+  color: #555;
+  margin-top: 4px;
+}
+
+/* Twitter Embed */
+.twitter-embed {
+  background: #222;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 12px;
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.twitter-accounts {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.twitter-account-link {
+  font-size: 10px;
+  color: #6b9fff;
+  text-decoration: none;
+}
+
+.twitter-account-link:hover {
+  text-decoration: underline;
+}
+
+.twitter-timeline-container {
+  flex: 1;
+  overflow: hidden;
+  margin-top: 12px;
+}
+
+.twitter-timeline {
+  display: block;
+}
+
+.twitter-placeholder {
+  font-size: 12px;
+  color: #666;
+  padding: 20px;
+}
+
+.twitter-placeholder ul {
+  margin: 8px 0 8px 20px;
+}
+
+.twitter-placeholder li {
+  margin: 4px 0;
+}
+
+/* Responsive */
+@media (max-width: 1400px) {
+  .earnings-grid {
+    grid-template-columns: 280px 1fr 320px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .earnings-grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+  }
+
+  .earnings-middle {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+}
+
+@media (max-width: 700px) {
+  .earnings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .earnings-left,
+  .earnings-middle,
+  .earnings-right {
+    grid-column: 1;
+  }
+
+  .earnings-header {
+    flex-direction: column;
+    gap: 12px;
+    text-align: center;
+  }
+}
