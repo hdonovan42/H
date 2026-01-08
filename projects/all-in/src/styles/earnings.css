@@ -100,7 +100,8 @@ body {
   min-height: 300px;
 }
 
-.video-embed iframe {
+.video-embed iframe,
+.video-embed .youtube-player {
   width: 100%;
   height: 100%;
   border: none;
@@ -144,14 +145,150 @@ body {
   min-height: 200px;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
-.transcript-embed iframe {
+/* Live mode (no transcript available) */
+.transcript-live-content {
   flex: 1;
-  width: 100%;
-  border: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 20px;
+}
+
+.transcript-live-content p {
+  font-size: 13px;
+  color: #888;
+  margin-bottom: 8px;
+}
+
+.transcript-hint {
+  font-size: 11px;
+  color: #666;
+}
+
+.transcript-link {
+  margin-top: 16px;
+  padding: 8px 16px;
+  background: #333;
   border-radius: 4px;
+  color: #6b9fff;
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.transcript-link:hover {
+  background: #3a3a3a;
+}
+
+/* Available mode (searchable transcript) */
+.transcript-meta {
+  font-size: 11px;
+  color: #666;
+}
+
+.transcript-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.transcript-search {
+  flex: 1;
   background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  color: #e8e5dc;
+}
+
+.transcript-search:focus {
+  outline: none;
+  border-color: #555;
+}
+
+.transcript-search::placeholder {
+  color: #555;
+}
+
+.transcript-speaker-filter {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  color: #e8e5dc;
+  cursor: pointer;
+}
+
+.transcript-speaker-filter:focus {
+  outline: none;
+  border-color: #555;
+}
+
+.transcript-results {
+  font-size: 11px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.transcript-segments {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.transcript-segment {
+  padding: 10px;
+  border-bottom: 1px solid #333;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.transcript-segment:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.transcript-segment:last-child {
+  border-bottom: none;
+}
+
+.segment-header {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.segment-time {
+  font-size: 11px;
+  color: #6b9fff;
+  font-weight: 500;
+}
+
+.segment-speaker {
+  font-size: 11px;
+  color: #888;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.segment-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #ccc;
+}
+
+.segment-text mark {
+  background: rgba(251, 191, 36, 0.3);
+  color: #fbbf24;
+  padding: 1px 2px;
+  border-radius: 2px;
 }
 
 .external-link {

@@ -12,18 +12,66 @@ import '../styles/earnings.css';
 
 // Configuration - update these before each earnings call
 const CONFIG = {
-  youtubeUrl: '', // e.g., 'https://www.youtube.com/embed/LIVE_STREAM_ID'
-  quartrUrl: 'https://quartr.com/companies/tesla-inc',
-  ticker: 'TSLA'
+  youtubeUrl: '', // e.g., 'https://www.youtube.com/watch?v=VIDEO_ID'
+  quartrUrl: 'https://quartr.com/companies/tesla-inc_3706',
+  ticker: 'TSLA',
+  // Set to null during live call, populate after call ends
+  transcriptUrl: null // e.g., '/transcripts/tsla-q4-2025.json'
 };
+
+// Sample transcript structure (for testing - remove in production)
+// In production, this would be fetched from CONFIG.transcriptUrl or a worker endpoint
+const SAMPLE_TRANSCRIPT = null; // Set to null to show "live mode"
+/* Example transcript structure:
+{
+  segments: [
+    { start: 0, end: 45, speaker: "Operator", text: "Good day, and thank you for standing by..." },
+    { start: 45, end: 120, speaker: "Elon Musk", text: "Thanks for joining us today..." },
+  ],
+  metadata: {
+    ticker: "TSLA",
+    quarter: "Q4 2025",
+    date: "2026-01-28",
+    source: "fool.com"
+  }
+}
+*/
 
 export default function EarningsControlCentre() {
   const [quote, setQuote] = useState(null);
   const [currentMarketState, setCurrentMarketState] = useState(getMarketState());
   const [clockData, setClockData] = useState(null);
   const [earningsData, setEarningsData] = useState(null);
+  const [transcript, setTranscript] = useState(SAMPLE_TRANSCRIPT);
   const [loading, setLoading] = useState(true);
+
   const clockDataRef = useRef(null);
+  const videoRef = useRef(null);
+
+  // Handle seek from transcript click
+  const handleTranscriptSeek = (seconds) => {
+    if (videoRef.current) {
+      videoRef.current.seekTo(seconds);
+    }
+  };
+
+  // Fetch transcript if URL is configured
+  useEffect(() => {
+    if (!CONFIG.transcriptUrl) return;
+
+    const fetchTranscript = async () => {
+      try {
+        const res = await fetch(CONFIG.transcriptUrl);
+        if (res.ok) {
+          const data = await res.json();
+          setTranscript(data);
+        }
+      } catch (error) {
+        console.error('Error fetching transcript:', error);
+      }
+    };
+    fetchTranscript();
+  }, []);
 
   // Fetch market clock
   useEffect(() => {
@@ -118,8 +166,12 @@ export default function EarningsControlCentre() {
 
         {/* Middle Column: Video & Transcript */}
         <div className="earnings-middle">
-          <VideoEmbed url={CONFIG.youtubeUrl} />
-          <TranscriptEmbed url={CONFIG.quartrUrl} />
+          <VideoEmbed ref={videoRef} url={CONFIG.youtubeUrl} />
+          <TranscriptEmbed
+            transcript={transcript}
+            onSeek={handleTranscriptSeek}
+            liveUrl={CONFIG.quartrUrl}
+          />
         </div>
 
         {/* Right Column: News & Twitter */}
