@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { getMarketState, getTodayEST, MarketState } from '../utils/marketState';
+import { getMarketState, getTodayEST, MarketState, dayjs } from '../utils/marketState';
 import { fetchPriceData, fetchMarketClock } from '../utils/api';
-import { WORKER_URL } from '../utils/config';
+import { WORKER_URL, EST } from '../utils/config';
 import VideoEmbed from './earnings/VideoEmbed';
 import TranscriptEmbed from './earnings/TranscriptEmbed';
 import PriceDisplay from './earnings/PriceDisplay';
@@ -42,6 +42,8 @@ export default function EarningsControlCentre() {
   const [currentMarketState, setCurrentMarketState] = useState(getMarketState());
   const [clockData, setClockData] = useState(null);
   const [earningsData, setEarningsData] = useState(null);
+  const [revenueData, setRevenueData] = useState(null);
+  const [postMarketData, setPostMarketData] = useState([]);
   const [transcript, setTranscript] = useState(SAMPLE_TRANSCRIPT);
   const [loading, setLoading] = useState(true);
 
@@ -143,6 +145,56 @@ export default function EarningsControlCentre() {
     return () => clearInterval(interval);
   }, []);
 
+  // Fetch revenue estimates
+  useEffect(() => {
+    const fetchRevenue = async () => {
+      try {
+        const res = await fetch(`${WORKER_URL}/finnhub/revenue-estimate/${CONFIG.ticker}`);
+        if (res.ok) {
+          const data = await res.json();
+          setRevenueData(data);
+        }
+      } catch (error) {
+        console.error('Error fetching revenue estimates:', error);
+      }
+    };
+    fetchRevenue();
+  }, []);
+
+  // Fetch post-market chart data (1-minute bars for earnings night)
+  useEffect(() => {
+    const fetchPostMarket = async () => {
+      try {
+        const res = await fetch(`${WORKER_URL}/yahoo/${CONFIG.ticker}?range=1d&interval=1m&includePrePost=true`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.chart?.result?.[0]) {
+            const result = data.chart.result[0];
+            const timestamps = result.timestamp || [];
+            const quote = result.indicators.quote[0];
+
+            const bars = timestamps.map((t, i) => ({
+              date: dayjs.unix(t).tz(EST).toISOString(),
+              open: quote.open[i],
+              high: quote.high[i],
+              low: quote.low[i],
+              close: quote.close[i],
+              volume: quote.volume[i] || 0
+            })).filter(b => b.close !== null);
+
+            setPostMarketData(bars);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching post-market data:', error);
+      }
+    };
+
+    fetchPostMarket();
+    const interval = setInterval(fetchPostMarket, 10000); // Refresh every 10s for earnings night
+    return () => clearInterval(interval);
+  }, []);
+
   if (loading) {
     return <div className="earnings-loading">Loading...</div>;
   }
@@ -160,8 +212,8 @@ export default function EarningsControlCentre() {
       <div className="earnings-grid">
         {/* Left Column: Price & Earnings Data */}
         <div className="earnings-left">
-          <PriceDisplay quote={quote} marketState={currentMarketState} />
-          <EarningsData data={earningsData} />
+          <PriceDisplay quote={quote} marketState={currentMarketState} postMarketData={postMarketData} />
+          <EarningsData data={earningsData} revenueData={revenueData} />
         </div>
 
         {/* Middle Column: Video & Transcript */}

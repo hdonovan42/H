@@ -1,4 +1,12 @@
-export default function EarningsData({ data }) {
+// Convert period date to quarter format (e.g., "2025-09-30" -> "Q3 2025")
+const formatPeriod = (dateStr) => {
+  if (!dateStr) return '';
+  const [year, month] = dateStr.split('-');
+  const quarter = Math.ceil(parseInt(month) / 3);
+  return `Q${quarter} ${year}`;
+};
+
+export default function EarningsData({ data, revenueData }) {
   if (!data || !data.length) {
     return (
       <div className="earnings-data">
@@ -18,11 +26,14 @@ export default function EarningsData({ data }) {
   const epsBeat = hasActual && latest.estimate ? latest.actual - latest.estimate : null;
   const epsBeatPercent = hasActual && latest.estimate ? (epsBeat / Math.abs(latest.estimate)) * 100 : null;
 
+  // Get revenue estimate for the matching period
+  const revenueEstimate = revenueData?.data?.find(r => r.period === latest.period);
+
   return (
     <div className="earnings-data">
       <div className="section-header">
         <h3>Earnings</h3>
-        <span className="earnings-period">{latest.period}</span>
+        <span className="earnings-period">{formatPeriod(latest.period)}</span>
       </div>
 
       <div className="earnings-grid-data">
@@ -50,23 +61,15 @@ export default function EarningsData({ data }) {
         </div>
 
         {/* Revenue Section - if available */}
-        {latest.revenueEstimate && (
+        {revenueEstimate?.revenueAvg && (
           <div className="earnings-metric">
             <div className="metric-label">Revenue</div>
             <div className="metric-row">
               <span className="metric-sublabel">Estimate</span>
-              <span className="metric-value">${(latest.revenueEstimate / 1e9).toFixed(2)}B</span>
+              <span className="metric-value">${(revenueEstimate.revenueAvg / 1e9).toFixed(2)}B</span>
             </div>
-            {latest.revenueActual && (
-              <>
-                <div className="metric-row">
-                  <span className="metric-sublabel">Actual</span>
-                  <span className="metric-value">${(latest.revenueActual / 1e9).toFixed(2)}B</span>
-                </div>
-                <div className={`metric-result ${latest.revenueActual >= latest.revenueEstimate ? 'beat' : 'miss'}`}>
-                  {latest.revenueActual >= latest.revenueEstimate ? 'BEAT' : 'MISS'}
-                </div>
-              </>
+            {!hasActual && (
+              <div className="metric-pending">Awaiting results...</div>
             )}
           </div>
         )}
@@ -79,7 +82,7 @@ export default function EarningsData({ data }) {
           <div className="history-items">
             {data.slice(1, 5).map((q, i) => (
               <div key={i} className="history-item">
-                <span className="history-period">{q.period}</span>
+                <span className="history-period">{formatPeriod(q.period)}</span>
                 <span className={`history-result ${q.surprise >= 0 ? 'beat' : 'miss'}`}>
                   {q.surprise >= 0 ? '+' : ''}{q.surprise?.toFixed(2)}
                 </span>

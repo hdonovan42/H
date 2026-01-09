@@ -319,51 +319,82 @@ body {
   margin: 12px 0;
 }
 
-.price-value {
-  font-size: 32px;
-  font-weight: 600;
-  letter-spacing: -1px;
-}
-
-.price-change {
-  display: block;
-  font-size: 14px;
-  margin-top: 4px;
-}
-
-.price-change.positive { color: #4ade80; }
-.price-change.negative { color: #f87171; }
-
 .price-extended {
   padding: 8px 0;
   border-top: 1px solid #333;
   margin-top: 8px;
 }
 
-.extended-label {
-  font-size: 11px;
-  color: #666;
-}
-
-.extended-change {
+.price-post {
   font-size: 13px;
-  margin-left: 8px;
 }
 
-.extended-change.positive { color: #4ade80; }
-.extended-change.negative { color: #f87171; }
+.price-post.positive { color: #4ade80; }
+.price-post.negative { color: #f87171; }
 
-.price-details {
+.price-close {
+  font-size: 13px;
+  color: #888;
+  padding-top: 8px;
+  margin-top: 8px;
+  border-top: 1px solid #333;
+}
+
+.price-value {
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: -1px;
+}
+
+.price-value.positive { color: #4ade80; }
+.price-value.negative { color: #f87171; }
+
+/* Post-Market Chart */
+.post-market-chart {
+  position: relative;
+  height: 150px;
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid #333;
 }
 
-.price-row {
+.post-market-chart .chart-placeholder {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #666;
   font-size: 12px;
-  padding: 4px 0;
+}
+
+.post-market-chart .chart-x-label {
+  position: absolute;
+  bottom: 2px;
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: #666;
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.post-market-chart .chart-tooltip {
+  position: absolute;
+  background: rgba(34, 34, 34, 0.95);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  pointer-events: none;
+  z-index: 10;
+  white-space: nowrap;
+  border: 1px solid #444;
+}
+
+.post-market-chart .tooltip-price {
+  color: #e8e5dc;
+  font-weight: 500;
+  margin-right: 6px;
+}
+
+.post-market-chart .tooltip-time {
   color: #888;
 }
 

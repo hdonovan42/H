@@ -1,15 +1,16 @@
 import { MarketState } from '../../utils/marketState';
+import PostMarketChart from './PostMarketChart';
 
-export default function PriceDisplay({ quote, marketState }) {
+export default function PriceDisplay({ quote, marketState, postMarketData }) {
   if (!quote) return null;
-
-  const isPositive = quote.d >= 0;
-  const changeClass = isPositive ? 'positive' : 'negative';
-  const sign = isPositive ? '+' : '';
 
   // Determine which price to show prominently
   const showExtended = marketState.state === MarketState.POST_MARKET && quote.extendedHoursPrice;
   const displayPrice = showExtended ? quote.extendedHoursPrice : quote.c;
+
+  // Show today's close if market has closed, otherwise show yesterday's close
+  const marketClosed = marketState.state === MarketState.POST_MARKET || marketState.state === MarketState.CLOSED;
+  const closePrice = marketClosed ? quote.c : quote.pc;
 
   // Calculate extended hours change from close
   const extendedChange = showExtended ? quote.extendedHoursPrice - quote.c : 0;
@@ -26,39 +27,20 @@ export default function PriceDisplay({ quote, marketState }) {
       </div>
 
       <div className="price-main">
-        <span className="price-value">${displayPrice?.toFixed(2)}</span>
-        <span className={`price-change ${changeClass}`}>
-          {sign}${quote.d?.toFixed(2)} ({sign}{quote.dp?.toFixed(2)}%)
-        </span>
+        <span className={`price-value ${displayPrice >= closePrice ? 'positive' : 'negative'}`}>${displayPrice?.toFixed(2)}</span>
       </div>
 
       {showExtended && (
         <div className="price-extended">
-          <span className="extended-label">Change from close:</span>
-          <span className={`extended-change ${extendedPositive ? 'positive' : 'negative'}`}>
-            {extendedPositive ? '+' : ''}${extendedChange.toFixed(2)} ({extendedPositive ? '+' : ''}{extendedChangePercent.toFixed(2)}%)
+          <span className={`price-post ${extendedPositive ? 'positive' : 'negative'}`}>
+            Post: {extendedPositive ? '+' : ''}${Math.abs(extendedChange).toFixed(2)} {extendedPositive ? '+' : ''}{extendedChangePercent.toFixed(2)}%
           </span>
         </div>
       )}
 
-      <div className="price-details">
-        <div className="price-row">
-          <span>Open</span>
-          <span>${quote.o?.toFixed(2)}</span>
-        </div>
-        <div className="price-row">
-          <span>High</span>
-          <span>${quote.h?.toFixed(2)}</span>
-        </div>
-        <div className="price-row">
-          <span>Low</span>
-          <span>${quote.l?.toFixed(2)}</span>
-        </div>
-        <div className="price-row">
-          <span>Prev Close</span>
-          <span>${quote.pc?.toFixed(2)}</span>
-        </div>
-      </div>
+      <div className="price-close">Close: ${closePrice?.toFixed(2)}</div>
+
+      <PostMarketChart data={postMarketData} closePrice={closePrice} />
     </div>
   );
 }
