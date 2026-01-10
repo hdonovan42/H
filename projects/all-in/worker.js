@@ -474,6 +474,28 @@ export default {
         });
       }
 
+      // GET /fmp/analyst-estimates/:symbol - EPS & Revenue estimates
+      if (path.startsWith('/fmp/analyst-estimates/')) {
+        const symbol = path.split('/')[3];
+        targetUrl = `https://financialmodelingprep.com/stable/analyst-estimates?symbol=${symbol}&period=quarter&limit=5&apikey=${FMP_KEY}`;
+
+        const response = await fetch(targetUrl);
+        return new Response(response.body, {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // GET /fmp/earnings-surprises/:symbol - Actual earnings results
+      if (path.startsWith('/fmp/earnings-surprises/')) {
+        const symbol = path.split('/')[3];
+        targetUrl = `https://financialmodelingprep.com/api/v3/earnings-surprises/${symbol}?apikey=${FMP_KEY}`;
+
+        const response = await fetch(targetUrl);
+        return new Response(response.body, {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       // ============================================================
       // YAHOO ROUTES
       // ============================================================

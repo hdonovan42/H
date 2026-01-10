@@ -42,7 +42,6 @@ export default function EarningsControlCentre() {
   const [currentMarketState, setCurrentMarketState] = useState(getMarketState());
   const [clockData, setClockData] = useState(null);
   const [earningsData, setEarningsData] = useState(null);
-  const [revenueData, setRevenueData] = useState(null);
   const [postMarketData, setPostMarketData] = useState([]);
   const [transcript, setTranscript] = useState(SAMPLE_TRANSCRIPT);
   const [loading, setLoading] = useState(true);
@@ -127,7 +126,7 @@ export default function EarningsControlCentre() {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch earnings estimates
+  // Fetch earnings data from Finnhub
   useEffect(() => {
     const fetchEarnings = async () => {
       try {
@@ -143,22 +142,6 @@ export default function EarningsControlCentre() {
     fetchEarnings();
     const interval = setInterval(fetchEarnings, 30000); // Poll for actuals
     return () => clearInterval(interval);
-  }, []);
-
-  // Fetch revenue estimates
-  useEffect(() => {
-    const fetchRevenue = async () => {
-      try {
-        const res = await fetch(`${WORKER_URL}/finnhub/revenue-estimate/${CONFIG.ticker}`);
-        if (res.ok) {
-          const data = await res.json();
-          setRevenueData(data);
-        }
-      } catch (error) {
-        console.error('Error fetching revenue estimates:', error);
-      }
-    };
-    fetchRevenue();
   }, []);
 
   // Fetch post-market chart data (1-minute bars for earnings night)
@@ -213,7 +196,7 @@ export default function EarningsControlCentre() {
         {/* Left Column: Price & Earnings Data */}
         <div className="earnings-left">
           <PriceDisplay quote={quote} marketState={currentMarketState} postMarketData={postMarketData} />
-          <EarningsData data={earningsData} revenueData={revenueData} />
+          <EarningsData data={earningsData} />
         </div>
 
         {/* Middle Column: Video & Transcript */}

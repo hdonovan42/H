@@ -4,8 +4,8 @@ import PostMarketChart from './PostMarketChart';
 export default function PriceDisplay({ quote, marketState, postMarketData }) {
   if (!quote) return null;
 
-  // Determine which price to show prominently
-  const showExtended = marketState.state === MarketState.POST_MARKET && quote.extendedHoursPrice;
+  // Determine which price to show prominently (keep post-market visible after close)
+  const showExtended = (marketState.state === MarketState.POST_MARKET || marketState.state === MarketState.CLOSED) && quote.extendedHoursPrice;
   const displayPrice = showExtended ? quote.extendedHoursPrice : quote.c;
 
   // Show today's close if market has closed, otherwise show yesterday's close
