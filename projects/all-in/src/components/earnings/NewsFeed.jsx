@@ -8,7 +8,7 @@ export default function NewsFeed({ ticker }) {
   useEffect(() => {
     const fetchNews = async () => {
       try {
-        const res = await fetch(`${WORKER_URL}/news/google/${ticker}`);
+        const res = await fetch(`${WORKER_URL}/news/cnbc/${ticker}`);
         if (res.ok) {
           const data = await res.json();
           setNews(data.slice(0, 10)); // Show top 10 articles
@@ -21,7 +21,7 @@ export default function NewsFeed({ ticker }) {
     };
 
     fetchNews();
-    const interval = setInterval(fetchNews, 60000); // Refresh every minute
+    const interval = setInterval(fetchNews, 15000); // Refresh every 15s for earnings
     return () => clearInterval(interval);
   }, [ticker]);
 
@@ -41,7 +41,7 @@ export default function NewsFeed({ ticker }) {
   return (
     <div className="news-feed">
       <div className="section-header">
-        <h3>News</h3>
+        <h3>CNBC</h3>
       </div>
 
       {loading && <div className="news-loading">Loading news...</div>}

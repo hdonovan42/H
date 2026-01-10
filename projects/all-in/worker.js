@@ -308,6 +308,50 @@ export default {
       // NEWS ROUTES
       // ============================================================
 
+      // GET /news/cnbc/:ticker - CNBC headlines via Google News
+      if (path.startsWith('/news/cnbc/')) {
+        const ticker = path.split('/')[3];
+        const items = [];
+
+        try {
+          const query = encodeURIComponent(`${ticker} earnings site:cnbc.com`);
+          const rssUrl = `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`;
+
+          const response = await fetch(rssUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; TeslaNewsBot/1.0)' }
+          });
+
+          if (response.ok) {
+            const xml = await response.text();
+            const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+            const titleRegex = /<title><!\[CDATA\[(.*?)\]\]><\/title>|<title>(.*?)<\/title>/;
+            const linkRegex = /<link>(.*?)<\/link>/;
+            const pubDateRegex = /<pubDate>(.*?)<\/pubDate>/;
+
+            let match;
+            while ((match = itemRegex.exec(xml)) !== null && items.length < 10) {
+              const itemXml = match[1];
+              const titleMatch = itemXml.match(titleRegex);
+              const linkMatch = itemXml.match(linkRegex);
+              const pubDateMatch = itemXml.match(pubDateRegex);
+
+              items.push({
+                source: 'CNBC',
+                title: titleMatch ? (titleMatch[1] || titleMatch[2]) : '',
+                url: linkMatch ? linkMatch[1] : '',
+                publishedAt: pubDateMatch ? new Date(pubDateMatch[1]).toISOString() : new Date().toISOString()
+              });
+            }
+          }
+        } catch (error) {
+          console.error('CNBC news fetch error:', error);
+        }
+
+        return new Response(JSON.stringify(items), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       // GET /news/TSLA - Retrieve stored news
       if (path === '/news/TSLA' || path === '/news/TSLA/') {
         const allNews = await getStoredNews(env, 'TSLA');

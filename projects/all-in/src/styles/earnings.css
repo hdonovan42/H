@@ -96,8 +96,8 @@ body {
   border: 1px solid #333;
   border-radius: 4px;
   overflow: hidden;
-  flex: 1;
-  min-height: 300px;
+  aspect-ratio: 16 / 9;
+  flex-shrink: 0;
 }
 
 .video-embed iframe,
@@ -142,7 +142,7 @@ body {
   border-radius: 4px;
   padding: 12px;
   flex: 1;
-  min-height: 200px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -506,6 +506,7 @@ body {
   border-radius: 4px;
   padding: 12px;
   flex: 1;
+  min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -522,6 +523,12 @@ body {
 .news-list {
   flex: 1;
   overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.news-list::-webkit-scrollbar {
+  display: none;
 }
 
 .news-item {
@@ -568,6 +575,7 @@ body {
   border-radius: 4px;
   padding: 12px;
   flex: 1;
+  min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
