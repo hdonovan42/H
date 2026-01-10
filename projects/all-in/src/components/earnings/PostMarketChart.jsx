@@ -130,7 +130,12 @@ export default function PostMarketChart({ data, closePrice }) {
 
         {/* Close price reference line */}
         {closeLineY != null && (
-          <line x1="30" y1={closeLineY} x2="270" y2={closeLineY} stroke="#555" strokeWidth="1" strokeDasharray="4" />
+          <>
+            <line x1="30" y1={closeLineY} x2="270" y2={closeLineY} stroke="#555" strokeWidth="1" strokeDasharray="4" />
+            <text x="270" y={closeLineY - 4} fill="#555" fontSize="10" textAnchor="end">
+              ${closePrice.toFixed(2)}
+            </text>
+          </>
         )}
 
         {/* Chart area and line */}

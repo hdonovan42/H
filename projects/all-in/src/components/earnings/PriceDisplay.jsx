@@ -28,17 +28,12 @@ export default function PriceDisplay({ quote, marketState, postMarketData }) {
 
       <div className="price-main">
         <span className={`price-value ${displayPrice >= closePrice ? 'positive' : 'negative'}`}>${displayPrice?.toFixed(2)}</span>
-      </div>
-
-      {showExtended && (
-        <div className="price-extended">
+        {showExtended && (
           <span className={`price-post ${extendedPositive ? 'positive' : 'negative'}`}>
             Post: {extendedPositive ? '+' : ''}${Math.abs(extendedChange).toFixed(2)} {extendedPositive ? '+' : ''}{extendedChangePercent.toFixed(2)}%
           </span>
-        </div>
-      )}
-
-      <div className="price-close">Close: ${closePrice?.toFixed(2)}</div>
+        )}
+      </div>
 
       <PostMarketChart data={postMarketData} closePrice={closePrice} />
     </div>

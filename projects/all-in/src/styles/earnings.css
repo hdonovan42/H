@@ -319,26 +319,14 @@ body {
   margin: 12px 0;
 }
 
-.price-extended {
-  padding: 8px 0;
-  border-top: 1px solid #333;
-  margin-top: 8px;
-}
-
 .price-post {
+  display: block;
   font-size: 13px;
+  margin-top: 4px;
 }
 
 .price-post.positive { color: #4ade80; }
 .price-post.negative { color: #f87171; }
-
-.price-close {
-  font-size: 13px;
-  color: #888;
-  padding-top: 8px;
-  margin-top: 8px;
-  border-top: 1px solid #333;
-}
 
 .price-value {
   font-size: 32px;
@@ -352,10 +340,9 @@ body {
 /* Post-Market Chart */
 .post-market-chart {
   position: relative;
-  height: 150px;
+  width: 100%;
+  aspect-ratio: 2 / 1;
   margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #333;
 }
 
 .post-market-chart .chart-placeholder {
