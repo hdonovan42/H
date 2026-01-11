@@ -308,48 +308,78 @@ export default {
       // NITTER/TWITTER ROUTES
       // ============================================================
 
-      // GET /nitter/:username - Fetch tweets from Nitter RSS
+      // GET /nitter/:username - Fetch tweets from Nitter HTML page
       if (path.startsWith('/nitter/')) {
         const username = path.split('/')[2];
         const tweets = [];
 
         try {
           const instances = ['nitter.net', 'nitter.privacydev.net', 'nitter.poast.org'];
-          let rssXml = null;
+          let html = null;
+
+          // Browser-like headers
+          const browserHeaders = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0'
+          };
 
           for (const instance of instances) {
             try {
-              const res = await fetch(`https://${instance}/${username}/rss`, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (compatible; TeslaNewsBot/1.0)' }
+              // Try HTML page scraping
+              const res = await fetch(`https://${instance}/${username}`, {
+                headers: browserHeaders
               });
               if (res.ok) {
-                rssXml = await res.text();
-                if (rssXml && rssXml.includes('<item>')) break;
+                html = await res.text();
+                if (html && html.includes('timeline-item')) break;
               }
             } catch {}
           }
 
-          if (rssXml) {
-            const itemRegex = /<item>([\s\S]*?)<\/item>/g;
-            const titleRegex = /<title><!\[CDATA\[(.*?)\]\]><\/title>|<title>(.*?)<\/title>/;
-            const linkRegex = /<link>(.*?)<\/link>/;
-            const pubDateRegex = /<pubDate>(.*?)<\/pubDate>/;
-            const descRegex = /<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/;
+          if (html) {
+            // Parse timeline items from HTML
+            // Nitter structure: <div class="timeline-item"> contains each tweet
+            const timelineItemRegex = /<div class="timeline-item[^"]*">([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/g;
+            const contentRegex = /<div class="tweet-content[^"]*"[^>]*>([\s\S]*?)<\/div>/;
+            const linkRegex = /<a class="tweet-link"[^>]*href="([^"]+)"/;
+            const dateRegex = /<span class="tweet-date"[^>]*><a[^>]*title="([^"]+)"/;
 
             let match;
-            while ((match = itemRegex.exec(rssXml)) !== null && tweets.length < 10) {
-              const itemXml = match[1];
-              const titleMatch = itemXml.match(titleRegex);
-              const linkMatch = itemXml.match(linkRegex);
-              const pubDateMatch = itemXml.match(pubDateRegex);
-              const descMatch = itemXml.match(descRegex);
+            while ((match = timelineItemRegex.exec(html)) !== null && tweets.length < 15) {
+              const itemHtml = match[1];
+              const contentMatch = itemHtml.match(contentRegex);
+              const linkMatch = itemHtml.match(linkRegex);
+              const dateMatch = itemHtml.match(dateRegex);
 
-              tweets.push({
-                text: titleMatch ? (titleMatch[1] || titleMatch[2]) : '',
-                url: linkMatch ? linkMatch[1].replace(/nitter\.[^/]+/, 'x.com') : '',
-                date: pubDateMatch ? new Date(pubDateMatch[1]).toISOString() : null,
-                html: descMatch ? descMatch[1] : ''
-              });
+              if (contentMatch) {
+                // Strip HTML tags from content
+                const text = contentMatch[1]
+                  .replace(/<[^>]+>/g, ' ')
+                  .replace(/&amp;/g, '&')
+                  .replace(/&lt;/g, '<')
+                  .replace(/&gt;/g, '>')
+                  .replace(/&quot;/g, '"')
+                  .replace(/&#39;/g, "'")
+                  .replace(/\s+/g, ' ')
+                  .trim();
+
+                if (text) {
+                  tweets.push({
+                    text: text,
+                    url: linkMatch ? `https://x.com${linkMatch[1].replace(/^\/[^/]+/, '')}` : '',
+                    date: dateMatch ? new Date(dateMatch[1]).toISOString() : null
+                  });
+                }
+              }
             }
           }
         } catch (error) {

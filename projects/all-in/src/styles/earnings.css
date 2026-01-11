@@ -581,57 +581,38 @@ body {
   flex-direction: column;
 }
 
-.twitter-loading,
-.twitter-empty {
-  font-size: 12px;
-  color: #666;
-  padding: 20px 0;
-  text-align: center;
-}
-
-.tweet-list {
+.nitter-wrapper {
   flex: 1;
-  overflow-y: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+  position: relative;
+  overflow: hidden;
+  border-radius: 4px;
+  min-height: 0;
 }
 
-.tweet-list::-webkit-scrollbar {
-  display: none;
+.nitter-iframe {
+  position: absolute;
+  border: none;
+  background: #000;
+  width: 500px;
+  height: 1200px;
+  top: 0;
+  left: 5px;
+  transform: scale(0.65);
+  transform-origin: 0 -1000px;
 }
 
-.tweet-item {
-  display: block;
-  padding: 10px 0;
-  border-bottom: 1px solid #333;
-  text-decoration: none;
-}
-
-.tweet-item:hover {
-  background: #2a2a2a;
-}
-
-.tweet-text {
-  color: #e8e5dc;
-  font-size: 13px;
-  line-height: 1.4;
-}
-
-.tweet-time {
-  color: #666;
-  font-size: 11px;
-  margin-top: 4px;
+.nitter-iframe-loading {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .twitter-fallback-link {
   display: block;
-  padding: 10px 0;
+  padding: 8px 0;
   color: #6b9fff;
   text-decoration: none;
   font-size: 12px;
   text-align: center;
-  border-top: 1px solid #333;
-  margin-top: 8px;
 }
 
 .twitter-fallback-link:hover {
