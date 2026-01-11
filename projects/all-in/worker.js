@@ -305,6 +305,63 @@ export default {
       let targetUrl;
 
       // ============================================================
+      // NITTER/TWITTER ROUTES
+      // ============================================================
+
+      // GET /nitter/:username - Fetch tweets from Nitter RSS
+      if (path.startsWith('/nitter/')) {
+        const username = path.split('/')[2];
+        const tweets = [];
+
+        try {
+          const instances = ['nitter.net', 'nitter.privacydev.net', 'nitter.poast.org'];
+          let rssXml = null;
+
+          for (const instance of instances) {
+            try {
+              const res = await fetch(`https://${instance}/${username}/rss`, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (compatible; TeslaNewsBot/1.0)' }
+              });
+              if (res.ok) {
+                rssXml = await res.text();
+                if (rssXml && rssXml.includes('<item>')) break;
+              }
+            } catch {}
+          }
+
+          if (rssXml) {
+            const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+            const titleRegex = /<title><!\[CDATA\[(.*?)\]\]><\/title>|<title>(.*?)<\/title>/;
+            const linkRegex = /<link>(.*?)<\/link>/;
+            const pubDateRegex = /<pubDate>(.*?)<\/pubDate>/;
+            const descRegex = /<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/;
+
+            let match;
+            while ((match = itemRegex.exec(rssXml)) !== null && tweets.length < 10) {
+              const itemXml = match[1];
+              const titleMatch = itemXml.match(titleRegex);
+              const linkMatch = itemXml.match(linkRegex);
+              const pubDateMatch = itemXml.match(pubDateRegex);
+              const descMatch = itemXml.match(descRegex);
+
+              tweets.push({
+                text: titleMatch ? (titleMatch[1] || titleMatch[2]) : '',
+                url: linkMatch ? linkMatch[1].replace(/nitter\.[^/]+/, 'x.com') : '',
+                date: pubDateMatch ? new Date(pubDateMatch[1]).toISOString() : null,
+                html: descMatch ? descMatch[1] : ''
+              });
+            }
+          }
+        } catch (error) {
+          console.error('Nitter fetch error:', error);
+        }
+
+        return new Response(JSON.stringify(tweets), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // ============================================================
       // NEWS ROUTES
       // ============================================================
 

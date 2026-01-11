@@ -581,26 +581,61 @@ body {
   flex-direction: column;
 }
 
-.twitter-accounts {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+.twitter-loading,
+.twitter-empty {
+  font-size: 12px;
+  color: #666;
+  padding: 20px 0;
+  text-align: center;
 }
 
-.twitter-account-link {
-  font-size: 10px;
-  color: #6b9fff;
+.tweet-list {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.tweet-list::-webkit-scrollbar {
+  display: none;
+}
+
+.tweet-item {
+  display: block;
+  padding: 10px 0;
+  border-bottom: 1px solid #333;
   text-decoration: none;
 }
 
-.twitter-account-link:hover {
-  text-decoration: underline;
+.tweet-item:hover {
+  background: #2a2a2a;
 }
 
-.twitter-timeline-container {
-  flex: 1;
-  overflow: hidden;
-  margin-top: 12px;
+.tweet-text {
+  color: #e8e5dc;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.tweet-time {
+  color: #666;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.twitter-fallback-link {
+  display: block;
+  padding: 10px 0;
+  color: #6b9fff;
+  text-decoration: none;
+  font-size: 12px;
+  text-align: center;
+  border-top: 1px solid #333;
+  margin-top: 8px;
+}
+
+.twitter-fallback-link:hover {
+  text-decoration: underline;
 }
 
 .twitter-timeline {
