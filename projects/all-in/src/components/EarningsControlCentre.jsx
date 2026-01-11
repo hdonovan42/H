@@ -185,7 +185,7 @@ export default function EarningsControlCentre() {
   return (
     <div className="earnings-container">
       <header className="earnings-header">
-        <h1>TSLA Earnings Control Centre</h1>
+        <h1>TSLA Earnings</h1>
         <div className="market-status">
           <span className={`status-dot ${currentMarketState.isRegularHours ? 'open' : 'closed'}`}></span>
           <span>{currentMarketState.state.replace('-', ' ').toUpperCase()}</span>

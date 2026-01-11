@@ -24,7 +24,7 @@ export default function TwitterEmbed() {
   return (
     <div className="twitter-embed">
       <div className="section-header">
-        <h3>@SawyerMerritt</h3>
+        <h3>X</h3>
       </div>
       <div className="nitter-wrapper">
         {/* Active iframe */}
