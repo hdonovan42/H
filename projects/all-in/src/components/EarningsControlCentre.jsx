@@ -12,7 +12,7 @@ import '../styles/earnings.css';
 
 // Configuration - update these before each earnings call
 const CONFIG = {
-  youtubeUrl: '', // e.g., 'https://www.youtube.com/watch?v=VIDEO_ID'
+  youtubeUrl: 'https://www.youtube.com/watch?v=GQ9S7xbkGAY&t=80s', // e.g., 'https://www.youtube.com/watch?v=VIDEO_ID'
   quartrUrl: 'https://quartr.com/companies/tesla-inc_3706',
   ticker: 'TSLA',
   // Set to null during live call, populate after call ends
