@@ -1,0 +1,7 @@
+- cnbc news seemingly not in chronological order 
+
+- need better x.com integration - current nitter.net iframe is crap
+    - need to store the tweets server side so they can be displayed in cnbc style 
+
+- what should happen to the price box in pre and open markets ?
+    - not the point of this page but should never 'break' the page 

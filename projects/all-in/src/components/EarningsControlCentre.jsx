@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { getMarketState, getTodayEST, MarketState, dayjs } from '../utils/marketState';
 import { fetchPriceData, fetchMarketClock } from '../utils/api';
 import { WORKER_URL, EST } from '../utils/config';
+import { useEarningsData } from '../hooks/useEarningsData';
 import VideoEmbed from './earnings/VideoEmbed';
 import TranscriptEmbed from './earnings/TranscriptEmbed';
 import PriceDisplay from './earnings/PriceDisplay';
@@ -16,8 +17,39 @@ const CONFIG = {
   quartrUrl: 'https://quartr.com/companies/tesla-inc_3706',
   ticker: 'TSLA',
   // Set to null during live call, populate after call ends
-  transcriptUrl: null // e.g., '/transcripts/tsla-q4-2025.json'
+  transcriptUrl: null, // e.g., '/transcripts/tsla-q4-2025.json'
+  // Earnings schedule - update before each earnings
+  // TODO: Share this config between all-in.html and earnings.html
+  earningsDate: '2026-01-28', // TSLA Q4 2025 earnings
+  earningsTime: 'aftermarket' // 'premarket' | 'aftermarket'
 };
+
+/**
+ * Determine if it's currently earnings night based on CONFIG
+ * @param {Object} clockData - Market clock data from Alpaca
+ * @returns {boolean}
+ */
+function isEarningsNight(clockData) {
+  if (!CONFIG.earningsDate) return false;
+
+  const now = dayjs().tz(EST);
+  const earningsDay = dayjs(CONFIG.earningsDate).tz(EST);
+
+  // Must be same calendar day
+  if (!now.isSame(earningsDay, 'day')) return false;
+
+  const hour = now.hour();
+
+  if (CONFIG.earningsTime === 'aftermarket') {
+    // Aftermarket earnings: 4 PM - 11 PM EST
+    return hour >= 16 && hour < 23;
+  } else if (CONFIG.earningsTime === 'premarket') {
+    // Premarket earnings: 5 AM - 9:30 AM EST
+    return hour >= 5 && (hour < 9 || (hour === 9 && now.minute() < 30));
+  }
+
+  return false;
+}
 
 // Sample transcript structure (for testing - remove in production)
 // In production, this would be fetched from CONFIG.transcriptUrl or a worker endpoint
@@ -41,13 +73,26 @@ export default function EarningsControlCentre() {
   const [quote, setQuote] = useState(null);
   const [currentMarketState, setCurrentMarketState] = useState(getMarketState());
   const [clockData, setClockData] = useState(null);
-  const [earningsData, setEarningsData] = useState(null);
   const [postMarketData, setPostMarketData] = useState([]);
   const [transcript, setTranscript] = useState(SAMPLE_TRANSCRIPT);
   const [loading, setLoading] = useState(true);
 
   const clockDataRef = useRef(null);
   const videoRef = useRef(null);
+
+  // Determine if it's earnings night
+  const earningsNight = useMemo(() => isEarningsNight(clockData), [clockData]);
+
+  // Use the new earnings data hook with multi-source racing
+  const {
+    current: earningsData,
+    availableQuarters,
+    isLoading: earningsLoading,
+    selectQuarter
+  } = useEarningsData(CONFIG.ticker, {
+    isEarningsNight: earningsNight,
+    enabled: true
+  });
 
   // Handle seek from transcript click
   const handleTranscriptSeek = (seconds) => {
@@ -126,23 +171,8 @@ export default function EarningsControlCentre() {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch earnings data from Finnhub
-  useEffect(() => {
-    const fetchEarnings = async () => {
-      try {
-        const res = await fetch(`${WORKER_URL}/finnhub/earnings/${CONFIG.ticker}`);
-        if (res.ok) {
-          const data = await res.json();
-          setEarningsData(data);
-        }
-      } catch (error) {
-        console.error('Error fetching earnings:', error);
-      }
-    };
-    fetchEarnings();
-    const interval = setInterval(fetchEarnings, 30000); // Poll for actuals
-    return () => clearInterval(interval);
-  }, []);
+  // Note: Earnings data is now fetched via useEarningsData hook above
+  // which handles multi-source racing, KV storage, and adaptive polling
 
   // Fetch post-market chart data (1-minute bars for earnings night)
   useEffect(() => {
@@ -196,7 +226,12 @@ export default function EarningsControlCentre() {
         {/* Left Column: Price & Earnings Data */}
         <div className="earnings-left">
           <PriceDisplay quote={quote} marketState={currentMarketState} postMarketData={postMarketData} />
-          <EarningsData data={earningsData} />
+          <EarningsData
+            data={earningsData}
+            availableQuarters={availableQuarters}
+            onQuarterSelect={selectQuarter}
+            isEarningsNight={earningsNight}
+          />
         </div>
 
         {/* Middle Column: Video & Transcript */}

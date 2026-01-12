@@ -628,6 +628,807 @@ export default {
       }
 
       // ============================================================
+      // ALPHAVANTAGE ROUTES
+      // ============================================================
+
+      // GET /alphavantage/earnings/:symbol - EPS data with estimates
+      if (path.startsWith('/alphavantage/earnings/')) {
+        const symbol = path.split('/')[3];
+        const ALPHAVANTAGE_KEY = env.ALPHA_VANTAGE_KEY_ENV;
+
+        if (!ALPHAVANTAGE_KEY) {
+          return new Response(JSON.stringify({ error: 'AlphaVantage API key not configured' }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const cache = caches.default;
+        let response = await cache.match(request);
+
+        if (!response) {
+          targetUrl = `https://www.alphavantage.co/query?function=EARNINGS&symbol=${symbol}&apikey=${ALPHAVANTAGE_KEY}`;
+          const avResponse = await fetch(targetUrl);
+
+          if (avResponse.ok) {
+            const data = await avResponse.json();
+
+            // Check for API limit message
+            if (data['Note'] || data['Information']) {
+              return new Response(JSON.stringify({
+                error: 'API rate limit',
+                message: data['Note'] || data['Information'],
+                source: 'alphavantage'
+              }), {
+                status: 429,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+              });
+            }
+
+            // Transform to normalized format
+            const normalized = {
+              source: 'alphavantage',
+              ticker: symbol,
+              quarterlyEarnings: (data.quarterlyEarnings || []).slice(0, 12).map(q => ({
+                fiscalDateEnding: q.fiscalDateEnding,
+                reportedEPS: q.reportedEPS !== 'None' ? parseFloat(q.reportedEPS) : null,
+                estimatedEPS: q.estimatedEPS !== 'None' ? parseFloat(q.estimatedEPS) : null,
+                surprise: q.surprise !== 'None' ? parseFloat(q.surprise) : null,
+                surprisePercentage: q.surprisePercentage !== 'None' ? parseFloat(q.surprisePercentage) : null,
+                reportedDate: q.reportedDate
+              }))
+            };
+
+            response = new Response(JSON.stringify(normalized), {
+              headers: {
+                ...corsHeaders,
+                'Content-Type': 'application/json',
+                'Cache-Control': 'public, max-age=60'
+              }
+            });
+            ctx.waitUntil(cache.put(request, response.clone()));
+          } else {
+            return new Response(JSON.stringify({ error: `AlphaVantage returned ${avResponse.status}` }), {
+              status: avResponse.status,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+        }
+        return response;
+      }
+
+      // ============================================================
+      // EDGAR XBRL ROUTES
+      // ============================================================
+
+      // CIK lookup map
+      const CIK_MAP = {
+        'TSLA': '0001318605',
+        'AAPL': '0000320193',
+        'MSFT': '0000789019',
+        'GOOGL': '0001652044',
+        'GOOG': '0001652044',
+        'AMZN': '0001018724',
+        'META': '0001326801',
+        'NVDA': '0001045810',
+      };
+
+      // GET /edgar/earnings/:symbol - Parse XBRL for EPS and revenue
+      if (path.startsWith('/edgar/earnings/')) {
+        const symbol = path.split('/')[3].toUpperCase();
+        const cik = CIK_MAP[symbol];
+
+        if (!cik) {
+          return new Response(JSON.stringify({ error: 'CIK not found for symbol', symbol }), {
+            status: 404,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const cache = caches.default;
+        let response = await cache.match(request);
+
+        if (!response) {
+          try {
+            // Fetch company facts (contains all XBRL data)
+            const factsUrl = `https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`;
+            const factsRes = await fetch(factsUrl, {
+              headers: {
+                'User-Agent': 'EarningsDashboard/1.0 (contact@hjd.ai)',
+                'Accept': 'application/json'
+              }
+            });
+
+            if (!factsRes.ok) {
+              throw new Error(`SEC API returned ${factsRes.status}`);
+            }
+
+            const facts = await factsRes.json();
+            const usGaap = facts.facts?.['us-gaap'] || {};
+
+            // Extract EPS (basic diluted) - try multiple possible keys
+            const epsData = usGaap['EarningsPerShareDiluted']?.units?.['USD/shares'] ||
+                            usGaap['EarningsPerShareBasic']?.units?.['USD/shares'] ||
+                            usGaap['EarningsPerShareBasicAndDiluted']?.units?.['USD/shares'] || [];
+
+            // Extract Revenue - try multiple possible keys
+            const revenueData = usGaap['Revenues']?.units?.USD ||
+                                usGaap['RevenueFromContractWithCustomerExcludingAssessedTax']?.units?.USD ||
+                                usGaap['SalesRevenueNet']?.units?.USD ||
+                                usGaap['RevenueFromContractWithCustomerIncludingAssessedTax']?.units?.USD || [];
+
+            // Filter to quarterly (10-Q) and annual (10-K) filings, recent first
+            const filterAndSort = (data) => {
+              return data
+                .filter(f => f.form === '10-Q' || f.form === '10-K' || f.form === '8-K')
+                .filter(f => f.fp && f.fy) // Must have fiscal period info
+                .sort((a, b) => {
+                  // Sort by fiscal year desc, then by quarter desc
+                  if (b.fy !== a.fy) return b.fy - a.fy;
+                  const qOrder = { 'FY': 5, 'Q4': 4, 'Q3': 3, 'Q2': 2, 'Q1': 1 };
+                  return (qOrder[b.fp] || 0) - (qOrder[a.fp] || 0);
+                });
+            };
+
+            const sortedEps = filterAndSort(epsData);
+            const sortedRevenue = filterAndSort(revenueData);
+
+            // Transform to normalized format
+            const normalized = {
+              source: 'edgar',
+              ticker: symbol,
+              cik: cik,
+              earnings: sortedEps.slice(0, 20).map(e => ({
+                fiscalPeriod: e.fp,       // Q1, Q2, Q3, Q4, FY
+                fiscalYear: e.fy,
+                value: e.val,
+                filed: e.filed,
+                form: e.form,
+                accn: e.accn,
+                start: e.start,
+                end: e.end
+              })),
+              revenue: sortedRevenue.slice(0, 20).map(r => ({
+                fiscalPeriod: r.fp,
+                fiscalYear: r.fy,
+                value: r.val,
+                filed: r.filed,
+                form: r.form,
+                accn: r.accn,
+                start: r.start,
+                end: r.end
+              }))
+            };
+
+            response = new Response(JSON.stringify(normalized), {
+              headers: {
+                ...corsHeaders,
+                'Content-Type': 'application/json',
+                'Cache-Control': 'public, max-age=300'
+              }
+            });
+            ctx.waitUntil(cache.put(request, response.clone()));
+
+          } catch (error) {
+            console.error('EDGAR earnings fetch error:', error);
+            return new Response(JSON.stringify({ error: error.message, source: 'edgar' }), {
+              status: 500,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+        }
+        return response;
+      }
+
+      // ============================================================
+      // UNIFIED EARNINGS (RACING) ROUTES
+      // ============================================================
+
+      // Helper: Extract quarter from date string
+      function extractQuarterFromDate(dateStr) {
+        if (!dateStr) return null;
+        const date = new Date(dateStr);
+        const month = date.getMonth() + 1;
+        const year = date.getFullYear();
+        let quarter;
+        if (month <= 3) quarter = 1;
+        else if (month <= 6) quarter = 2;
+        else if (month <= 9) quarter = 3;
+        else quarter = 4;
+        return { year, quarter, key: `${year}-Q${quarter}` };
+      }
+
+      // Helper: Normalize earnings data from different sources
+      function normalizeEarningsData(result) {
+        const { source, data } = result;
+
+        if (!data) return null;
+
+        switch (source) {
+          case 'fmp': {
+            // FMP analyst-estimates format
+            const estimates = Array.isArray(data) ? data : [];
+            const latest = estimates[0];
+            if (!latest) return null;
+
+            const qInfo = extractQuarterFromDate(latest.date);
+            return {
+              quarter: qInfo?.key || 'Unknown',
+              fiscalYear: qInfo?.year,
+              fiscalQuarter: qInfo?.quarter,
+              eps: {
+                estimate: latest.estimatedEpsAvg || latest.estimatedEpsHigh || null,
+                actual: null
+              },
+              revenue: {
+                estimate: latest.estimatedRevenueAvg || latest.estimatedRevenueHigh || null,
+                actual: null
+              },
+              source: 'fmp'
+            };
+          }
+
+          case 'fmp-surprises': {
+            // FMP earnings-surprises format (actuals)
+            const surprises = Array.isArray(data) ? data : [];
+            const latest = surprises[0];
+            if (!latest) return null;
+
+            const qInfo = extractQuarterFromDate(latest.date);
+            return {
+              quarter: qInfo?.key || 'Unknown',
+              fiscalYear: qInfo?.year,
+              fiscalQuarter: qInfo?.quarter,
+              eps: {
+                estimate: latest.estimatedEarning,
+                actual: latest.actualEarningResult
+              },
+              revenue: {
+                estimate: null,
+                actual: null
+              },
+              source: 'fmp'
+            };
+          }
+
+          case 'alphavantage': {
+            const latest = data.quarterlyEarnings?.[0];
+            if (!latest) return null;
+
+            const qInfo = extractQuarterFromDate(latest.fiscalDateEnding);
+            return {
+              quarter: qInfo?.key || 'Unknown',
+              fiscalYear: qInfo?.year,
+              fiscalQuarter: qInfo?.quarter,
+              eps: {
+                estimate: latest.estimatedEPS,
+                actual: latest.reportedEPS
+              },
+              revenue: {
+                estimate: null,
+                actual: null
+              },
+              source: 'alphavantage'
+            };
+          }
+
+          case 'finnhub': {
+            // Finnhub returns array: [{ actual, estimate, period, quarter, year, surprise, surprisePercent }]
+            const earnings = Array.isArray(data) ? data : [];
+            const latest = earnings[0];
+            if (!latest) return null;
+
+            return {
+              quarter: `${latest.year}-Q${latest.quarter}`,
+              fiscalYear: latest.year,
+              fiscalQuarter: latest.quarter,
+              eps: {
+                estimate: latest.estimate,
+                actual: latest.actual
+              },
+              revenue: {
+                estimate: null,
+                actual: null
+              },
+              source: 'finnhub'
+            };
+          }
+
+          case 'finnhub-revenue': {
+            // Finnhub revenue estimate: { data: [{ period, revenueAvg, revenueHigh, revenueLow }], freq, symbol }
+            const estimates = data?.data;
+            if (!Array.isArray(estimates) || estimates.length === 0) return null;
+            const latest = estimates[0];
+            if (!latest) return null;
+
+            const qInfo = extractQuarterFromDate(latest.period);
+            return {
+              quarter: qInfo?.key || 'Unknown',
+              fiscalYear: qInfo?.year,
+              fiscalQuarter: qInfo?.quarter,
+              eps: {
+                estimate: null,
+                actual: null
+              },
+              revenue: {
+                estimate: latest.revenueAvg || latest.revenueHigh || null,
+                actual: null
+              },
+              source: 'finnhub'
+            };
+          }
+
+          case 'edgar': {
+            // EDGAR is used for REVENUE only - Finnhub is authoritative for EPS
+            const latestRevenue = data.revenue?.[0];
+            if (!latestRevenue) return null;
+
+            const fp = latestRevenue.fiscalPeriod || latestRevenue.fp;
+            const fy = latestRevenue.fiscalYear || latestRevenue.fy;
+            const revVal = latestRevenue.value ?? latestRevenue.val ?? null;
+
+            return {
+              quarter: `${fy}-${fp}`,
+              fiscalYear: fy,
+              fiscalQuarter: fp === 'FY' ? 4 : parseInt(String(fp).replace('Q', '')),
+              eps: {
+                estimate: null,
+                actual: null  // Don't use EDGAR for EPS - Finnhub is authoritative
+              },
+              revenue: {
+                estimate: null,
+                actual: revVal
+              },
+              source: 'edgar'
+            };
+          }
+
+          default:
+            return null;
+        }
+      }
+
+      // Helper: Merge results from multiple sources
+      function mergeEarningsResults(results) {
+        const merged = {
+          eps: { estimate: null, actual: null, surprise: null, surprisePercent: null },
+          revenue: { estimate: null, actual: null, surprise: null, surprisePercent: null },
+          sources: {
+            eps: { estimate: [], actual: [] },
+            revenue: { estimate: [], actual: [] }
+          },
+          fiscalYear: null,
+          fiscalQuarter: null,
+          quarter: null
+        };
+        const discrepancies = [];
+
+        for (const result of results) {
+          const normalized = normalizeEarningsData(result);
+          if (!normalized) continue;
+
+          // Set quarter info from first valid result
+          if (!merged.quarter && normalized.quarter) {
+            merged.quarter = normalized.quarter;
+            merged.fiscalYear = normalized.fiscalYear;
+            merged.fiscalQuarter = normalized.fiscalQuarter;
+          }
+
+          // EPS estimate
+          if (normalized.eps?.estimate != null) {
+            if (merged.eps.estimate != null &&
+                Math.abs(merged.eps.estimate - normalized.eps.estimate) > 0.02) {
+              discrepancies.push({
+                field: 'eps.estimate',
+                existing: merged.eps.estimate,
+                existingSource: merged.sources.eps.estimate[0],
+                new: normalized.eps.estimate,
+                newSource: normalized.source
+              });
+            }
+            if (merged.eps.estimate == null) {
+              merged.eps.estimate = normalized.eps.estimate;
+            }
+            merged.sources.eps.estimate.push(normalized.source);
+          }
+
+          // EPS actual
+          if (normalized.eps?.actual != null) {
+            if (merged.eps.actual != null &&
+                Math.abs(merged.eps.actual - normalized.eps.actual) > 0.02) {
+              discrepancies.push({
+                field: 'eps.actual',
+                existing: merged.eps.actual,
+                existingSource: merged.sources.eps.actual[0],
+                new: normalized.eps.actual,
+                newSource: normalized.source
+              });
+            }
+            // Prefer EDGAR for actuals (official filings)
+            if (merged.eps.actual == null || normalized.source === 'edgar') {
+              merged.eps.actual = normalized.eps.actual;
+            }
+            merged.sources.eps.actual.push(normalized.source);
+          }
+
+          // Revenue estimate
+          if (normalized.revenue?.estimate != null) {
+            if (merged.revenue.estimate == null) {
+              merged.revenue.estimate = normalized.revenue.estimate;
+            }
+            merged.sources.revenue.estimate.push(normalized.source);
+          }
+
+          // Revenue actual
+          if (normalized.revenue?.actual != null) {
+            // Prefer EDGAR for actuals
+            if (merged.revenue.actual == null || normalized.source === 'edgar') {
+              merged.revenue.actual = normalized.revenue.actual;
+            }
+            merged.sources.revenue.actual.push(normalized.source);
+          }
+        }
+
+        // Calculate surprises
+        if (merged.eps.estimate != null && merged.eps.actual != null) {
+          merged.eps.surprise = merged.eps.actual - merged.eps.estimate;
+          merged.eps.surprisePercent = (merged.eps.surprise / Math.abs(merged.eps.estimate)) * 100;
+        }
+
+        if (merged.revenue.estimate != null && merged.revenue.actual != null) {
+          merged.revenue.surprise = merged.revenue.actual - merged.revenue.estimate;
+          merged.revenue.surprisePercent = (merged.revenue.surprise / merged.revenue.estimate) * 100;
+        }
+
+        // Calculate confidence
+        const allSources = new Set([
+          ...merged.sources.eps.estimate,
+          ...merged.sources.eps.actual,
+          ...merged.sources.revenue.estimate,
+          ...merged.sources.revenue.actual
+        ]);
+
+        let confidence = 'single';
+        if (allSources.size >= 2 && discrepancies.length === 0) {
+          confidence = 'validated';
+        } else if (allSources.size >= 2) {
+          confidence = 'partial';
+        }
+
+        return { data: merged, confidence, discrepancies };
+      }
+
+      // GET /earnings/unified/:symbol - Race or merge all sources
+      if (path.startsWith('/earnings/unified/')) {
+        const symbol = path.split('/')[3];
+        const mode = url.searchParams.get('mode') || 'race';
+        const ALPHAVANTAGE_KEY = env.ALPHA_VANTAGE_KEY_ENV;
+
+        // CIK for EDGAR lookup
+        const cikMap = {
+          'TSLA': '0001318605',
+          'AAPL': '0000320193',
+          'MSFT': '0000789019',
+          'GOOGL': '0001652044',
+          'AMZN': '0001018724',
+          'META': '0001326801',
+          'NVDA': '0001045810',
+        };
+
+        // Direct API fetch functions (not self-referential)
+        const fetchEdgar = async () => {
+          try {
+            const cik = cikMap[symbol.toUpperCase()];
+            if (!cik) return { source: 'edgar', error: 'CIK not found', timestamp: Date.now() };
+
+            const factsUrl = `https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`;
+            const res = await fetch(factsUrl, {
+              headers: {
+                'User-Agent': 'EarningsDashboard/1.0 (contact@hjd.ai)',
+                'Accept': 'application/json'
+              }
+            });
+
+            if (!res.ok) return { source: 'edgar', error: `HTTP ${res.status}`, timestamp: Date.now() };
+
+            const facts = await res.json();
+            const usGaap = facts.facts?.['us-gaap'] || {};
+
+            const epsData = usGaap['EarningsPerShareDiluted']?.units?.['USD/shares'] ||
+                            usGaap['EarningsPerShareBasic']?.units?.['USD/shares'] || [];
+            const revenueData = usGaap['Revenues']?.units?.USD ||
+                                usGaap['RevenueFromContractWithCustomerExcludingAssessedTax']?.units?.USD || [];
+
+            // Filter to quarterly data only (not YTD cumulative), most recent first
+            const filterQuarterly = (data) => data
+              .filter(f => {
+                if (!f.fp || !f.fy || !f.start || !f.end) return false;
+                // Skip annual/FY entries
+                if (f.fp === 'FY') return false;
+
+                const startDate = new Date(f.start);
+                const endDate = new Date(f.end);
+                const daysDiff = (endDate - startDate) / (1000 * 60 * 60 * 24);
+
+                // Quarterly = ~90 days. Skip YTD cumulative (180, 270, 365 days)
+                if (daysDiff > 100) return false;
+
+                return true;
+              })
+              .sort((a, b) => new Date(b.end) - new Date(a.end));
+
+            return {
+              source: 'edgar',
+              data: {
+                source: 'edgar',
+                ticker: symbol,
+                earnings: [],  // Don't use EDGAR for EPS
+                revenue: filterQuarterly(revenueData).slice(0, 12)
+              },
+              timestamp: Date.now()
+            };
+          } catch (e) {
+            return { source: 'edgar', error: e.message, timestamp: Date.now() };
+          }
+        };
+
+        const fetchFmpEstimates = async () => {
+          try {
+            const res = await fetch(`https://financialmodelingprep.com/stable/analyst-estimates?symbol=${symbol}&period=quarter&limit=5&apikey=${FMP_KEY}`);
+            if (!res.ok) return { source: 'fmp', error: `HTTP ${res.status}`, timestamp: Date.now() };
+            const data = await res.json();
+            if (typeof data === 'string' || data.error) return { source: 'fmp', error: data.error || 'Invalid response', timestamp: Date.now() };
+            return { source: 'fmp', data, timestamp: Date.now() };
+          } catch (e) {
+            return { source: 'fmp', error: e.message, timestamp: Date.now() };
+          }
+        };
+
+        const fetchFmpSurprises = async () => {
+          try {
+            const res = await fetch(`https://financialmodelingprep.com/api/v3/earnings-surprises/${symbol}?apikey=${FMP_KEY}`);
+            if (!res.ok) return { source: 'fmp-surprises', error: `HTTP ${res.status}`, timestamp: Date.now() };
+            const data = await res.json();
+            if (typeof data === 'string' || data.error) return { source: 'fmp-surprises', error: data.error || 'Invalid response', timestamp: Date.now() };
+            return { source: 'fmp-surprises', data, timestamp: Date.now() };
+          } catch (e) {
+            return { source: 'fmp-surprises', error: e.message, timestamp: Date.now() };
+          }
+        };
+
+        const fetchAlphaVantage = async () => {
+          try {
+            if (!ALPHAVANTAGE_KEY) return { source: 'alphavantage', error: 'API key not configured', timestamp: Date.now() };
+            const res = await fetch(`https://www.alphavantage.co/query?function=EARNINGS&symbol=${symbol}&apikey=${ALPHAVANTAGE_KEY}`);
+            if (!res.ok) return { source: 'alphavantage', error: `HTTP ${res.status}`, timestamp: Date.now() };
+            const data = await res.json();
+            if (data['Note'] || data['Information']) return { source: 'alphavantage', error: 'Rate limited', timestamp: Date.now() };
+            const normalized = {
+              source: 'alphavantage',
+              ticker: symbol,
+              quarterlyEarnings: (data.quarterlyEarnings || []).slice(0, 12).map(q => ({
+                fiscalDateEnding: q.fiscalDateEnding,
+                reportedEPS: q.reportedEPS !== 'None' ? parseFloat(q.reportedEPS) : null,
+                estimatedEPS: q.estimatedEPS !== 'None' ? parseFloat(q.estimatedEPS) : null,
+                surprise: q.surprise !== 'None' ? parseFloat(q.surprise) : null,
+                surprisePercentage: q.surprisePercentage !== 'None' ? parseFloat(q.surprisePercentage) : null,
+              }))
+            };
+            return { source: 'alphavantage', data: normalized, timestamp: Date.now() };
+          } catch (e) {
+            return { source: 'alphavantage', error: e.message, timestamp: Date.now() };
+          }
+        };
+
+        // Finnhub - reliable free source for EPS estimates
+        const fetchFinnhub = async () => {
+          try {
+            const res = await fetch(`https://finnhub.io/api/v1/stock/earnings?symbol=${symbol}&token=${FINNHUB_KEY}`);
+            if (!res.ok) return { source: 'finnhub', error: `HTTP ${res.status}`, timestamp: Date.now() };
+            const data = await res.json();
+            if (!Array.isArray(data)) return { source: 'finnhub', error: 'Invalid response', timestamp: Date.now() };
+            return { source: 'finnhub', data, timestamp: Date.now() };
+          } catch (e) {
+            return { source: 'finnhub', error: e.message, timestamp: Date.now() };
+          }
+        };
+
+        // Finnhub revenue estimates
+        const fetchFinnhubRevenue = async () => {
+          try {
+            const res = await fetch(`https://finnhub.io/api/v1/stock/revenue-estimate?symbol=${symbol}&freq=quarterly&token=${FINNHUB_KEY}`);
+            if (!res.ok) return { source: 'finnhub-revenue', error: `HTTP ${res.status}`, timestamp: Date.now() };
+            const data = await res.json();
+            return { source: 'finnhub-revenue', data, timestamp: Date.now() };
+          } catch (e) {
+            return { source: 'finnhub-revenue', error: e.message, timestamp: Date.now() };
+          }
+        };
+
+        // Build source array - Finnhub is primary for EPS estimates
+        // Note: Finnhub revenue-estimate requires paid subscription, so we skip it
+        const sources = [
+          fetchFinnhub(),
+          fetchEdgar(),
+          fetchFmpSurprises()
+        ];
+
+        // Only add AlphaVantage if key is configured (as backup)
+        if (ALPHAVANTAGE_KEY) {
+          sources.push(fetchAlphaVantage());
+        }
+
+        if (mode === 'race') {
+          // Return first successful result
+          try {
+            const results = await Promise.all(sources);
+            const successful = results.filter(r => !r.error && r.data);
+
+            if (successful.length === 0) {
+              return new Response(JSON.stringify({
+                error: 'All sources failed',
+                details: results.map(r => ({ source: r.source, error: r.error }))
+              }), {
+                status: 500,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+              });
+            }
+
+            // Get first result
+            const first = successful[0];
+            const normalized = normalizeEarningsData(first);
+
+            // Store merged results in background if we have EARNINGS_STORE
+            if (env.EARNINGS_STORE && successful.length > 1) {
+              ctx.waitUntil((async () => {
+                const merged = mergeEarningsResults(successful);
+                if (merged.data.quarter) {
+                  const key = `earnings:${symbol}:${merged.data.quarter}`;
+                  const record = {
+                    ticker: symbol,
+                    ...merged.data,
+                    confidence: merged.confidence,
+                    discrepancies: merged.discrepancies,
+                    lastUpdated: new Date().toISOString()
+                  };
+                  await env.EARNINGS_STORE.put(key, JSON.stringify(record), {
+                    expirationTtl: 60 * 60 * 24 * 365
+                  });
+                  // Update latest pointer
+                  await env.EARNINGS_STORE.put(`earnings:${symbol}:latest`, key);
+                  // Update history index
+                  const historyKey = `earnings:${symbol}:history`;
+                  const history = await env.EARNINGS_STORE.get(historyKey, { type: 'json' }) || [];
+                  if (!history.includes(merged.data.quarter)) {
+                    history.unshift(merged.data.quarter);
+                    await env.EARNINGS_STORE.put(historyKey, JSON.stringify(history.slice(0, 20)));
+                  }
+                }
+              })());
+            }
+
+            return new Response(JSON.stringify({
+              mode: 'race',
+              winner: first.source,
+              data: normalized,
+              confidence: 'single',
+              pendingSources: results.filter(r => r.source !== first.source).map(r => r.source),
+              allResults: successful.length
+            }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+
+          } catch (error) {
+            return new Response(JSON.stringify({ error: error.message }), {
+              status: 500,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+
+        } else {
+          // Merge mode: wait for all and cross-validate
+          const results = await Promise.all(sources);
+          const successful = results.filter(r => !r.error && r.data);
+
+          if (successful.length === 0) {
+            return new Response(JSON.stringify({
+              error: 'All sources failed',
+              details: results.map(r => ({ source: r.source, error: r.error }))
+            }), {
+              status: 500,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+
+          const merged = mergeEarningsResults(successful);
+
+          // Store in KV if available
+          if (env.EARNINGS_STORE && merged.data.quarter) {
+            const key = `earnings:${symbol}:${merged.data.quarter}`;
+            const record = {
+              ticker: symbol,
+              ...merged.data,
+              confidence: merged.confidence,
+              discrepancies: merged.discrepancies,
+              lastUpdated: new Date().toISOString()
+            };
+            await env.EARNINGS_STORE.put(key, JSON.stringify(record), {
+              expirationTtl: 60 * 60 * 24 * 365
+            });
+            // Update latest pointer
+            await env.EARNINGS_STORE.put(`earnings:${symbol}:latest`, key);
+            // Update history index
+            const historyKey = `earnings:${symbol}:history`;
+            const history = await env.EARNINGS_STORE.get(historyKey, { type: 'json' }) || [];
+            if (!history.includes(merged.data.quarter)) {
+              history.unshift(merged.data.quarter);
+              await env.EARNINGS_STORE.put(historyKey, JSON.stringify(history.slice(0, 20)));
+            }
+          }
+
+          return new Response(JSON.stringify({
+            mode: 'merge',
+            sources: successful.map(s => s.source),
+            failed: results.filter(r => r.error).map(r => ({ source: r.source, error: r.error })),
+            data: merged.data,
+            confidence: merged.confidence,
+            discrepancies: merged.discrepancies
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+      }
+
+      // GET /earnings/stored/:symbol/:quarter? - Retrieve from KV
+      if (path.startsWith('/earnings/stored/')) {
+        const parts = path.split('/').filter(p => p);
+        const symbol = parts[2];
+        const quarter = parts[3]; // Optional, e.g., "2025-Q4"
+
+        if (!env.EARNINGS_STORE) {
+          return new Response(JSON.stringify({ error: 'EARNINGS_STORE KV not configured' }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        if (quarter) {
+          // Get specific quarter
+          const key = `earnings:${symbol}:${quarter}`;
+          const data = await env.EARNINGS_STORE.get(key, { type: 'json' });
+
+          if (!data) {
+            return new Response(JSON.stringify({ error: 'Quarter not found', quarter }), {
+              status: 404,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+
+          return new Response(JSON.stringify(data), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+
+        } else {
+          // Get latest + history index
+          const latestKey = await env.EARNINGS_STORE.get(`earnings:${symbol}:latest`);
+          const historyKey = `earnings:${symbol}:history`;
+          const history = await env.EARNINGS_STORE.get(historyKey, { type: 'json' }) || [];
+
+          let latest = null;
+          if (latestKey) {
+            latest = await env.EARNINGS_STORE.get(latestKey, { type: 'json' });
+          }
+
+          return new Response(JSON.stringify({
+            latest,
+            availableQuarters: history
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+      }
+
+      // ============================================================
       // YAHOO ROUTES
       // ============================================================
 

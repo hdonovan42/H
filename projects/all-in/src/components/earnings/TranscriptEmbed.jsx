@@ -94,12 +94,17 @@ export default function TranscriptEmbed({ transcript, onSeek, liveUrl }) {
         {filteredSegments.map((segment, index) => (
           <div
             key={index}
-            className="transcript-segment"
-            onClick={() => onSeek && onSeek(segment.start)}
+            className={`transcript-segment ${segment.start !== null ? 'clickable' : ''}`}
+            onClick={() => segment.start !== null && onSeek && onSeek(segment.start)}
           >
             <div className="segment-header">
-              <span className="segment-time">{formatTime(segment.start)}</span>
+              {segment.start !== null && (
+                <span className="segment-time">{formatTime(segment.start)}</span>
+              )}
               <span className="segment-speaker">{segment.speaker}</span>
+              {segment.role && (
+                <span className="segment-role">{segment.role}</span>
+              )}
             </div>
             <div className="segment-text">
               {searchQuery ? (
