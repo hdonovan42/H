@@ -85,9 +85,11 @@ The `wsAvailable` state tracks WebSocket status. Health check runs every 15s to 
 - Uses `dayjs` with timezone plugins for date handling
 - Mobile breakpoint at 700px
 
-## Known Issues
+## Code Quality Rules
 
-- Avg volume calculation differs from Yahoo's methodology
+**Clean up failed attempts immediately.** If an approach doesn't work (e.g., an API field doesn't exist, a method fails), revert ALL changes from that attempt before trying an alternative. Never leave dead code, unused imports, or superfluous additions from failed attempts in the codebase. The user should not need to prompt for cleanup.
+
+## Known Issues
 - 1D graph sometimes draws incorrectly on market open
 - Could localStorage fill up with many stock searches? (needs try/catch)
 

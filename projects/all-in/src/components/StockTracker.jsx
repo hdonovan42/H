@@ -663,7 +663,8 @@ export default function StockTracker() {
   const todayChangePercent = lastTwo.length === 2 ? (todayChange / lastTwo[0].close) * 100 : 0;
   const dayHigh = quote?.h || data[data.length - 1]?.high || 0;
   const dayLow = quote?.l || data[data.length - 1]?.low || 0;
-  const avgVolume = data.length > 0 ? data.reduce((sum, d) => sum + d.volume, 0) / data.length : 0;
+  const recentData = data.slice(-65);
+  const avgVolume = recentData.length > 0 ? recentData.reduce((sum, d) => sum + d.volume, 0) / recentData.length : 0;
   const week52High = quote?.fiftyTwoWeekHigh || (data.length > 0 ? Math.max(...data.map(d => d.high)) : 0);
   const week52Low = quote?.fiftyTwoWeekLow || (data.length > 0 ? Math.min(...data.map(d => d.low)) : 0);
   const marketCap = quote?.sharesOutstanding ? (quote.sharesOutstanding * currentPrice) / 1e6 : 0;
