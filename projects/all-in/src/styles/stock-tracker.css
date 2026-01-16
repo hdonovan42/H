@@ -44,7 +44,6 @@
 .timeframe-btn:hover { background: rgba(0,0,0,0.04); color: #555; }
 .timeframe-btn.active { background: #e0ddd4; color: #3a3a3a; font-weight: 600; }
 .timeframe-pipe { color: #c8c5bc; font-size: 14px; user-select: none; font-weight: 300; }
-.spreadsheet { }
 .spreadsheet-scroll { overflow-x: auto; }
 .spreadsheet-inner { display: flex; flex-direction: column; min-width: 100%; width: max-content; }
 .spreadsheet-header { display: grid; grid-template-columns: 100px 80px 80px 80px 80px 70px 70px minmax(150px, 1fr); background: #e8e5dc; border-bottom: 1px solid #d0cdc4; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; font-weight: 600; }
