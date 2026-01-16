@@ -100,6 +100,6 @@
   .spreadsheet-row { grid-template-columns: 100px 80px 70px minmax(150px, 1fr); }
 
   .spreadsheet-scroll { overflow: auto; -webkit-overflow-scrolling: touch; max-height: 400px; }
-  .spreadsheet-inner { min-width: 400px; }
+  .spreadsheet-inner { min-width: max(100%, 400px); }
   .spreadsheet-body { overflow: visible; max-height: none; }
 }
