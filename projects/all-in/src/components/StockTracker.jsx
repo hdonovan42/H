@@ -15,7 +15,10 @@ export default function StockTracker() {
   const [intradayData, setIntradayData] = useState([]);
   const [weeklyData, setWeeklyData] = useState([]);
   const [monthlyData, setMonthlyData] = useState([]);
-  const [timeframe, setTimeframe] = useState('6M');
+  const [timeframe, setTimeframe] = useState(() => {
+    const initialState = getMarketState();
+    return initialState.isRegularHours ? '1D' : '6M';
+  });
   const [quote, setQuote] = useState(null);
   const [loading, setLoading] = useState(true);
   const [priceFlash, setPriceFlash] = useState(null);

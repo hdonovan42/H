@@ -57,6 +57,7 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
   }, [timeframe]);
 
   // Continuous wheel zoom handler with proper scroll prevention
+  // Zoom only works for 1W-5Y range; 1D is fixed and not zoomable
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -65,15 +66,18 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
       e.preventDefault();
       e.stopPropagation();
       setVisibleDays(prev => {
+        // Don't zoom if on 1D view
+        if (prev <= 1) return prev;
+
         // Use floor for zoom in, ceil for zoom out to ensure we always change
         if (e.deltaY > 0) {
           // Zoom out
           const next = Math.ceil(prev * 1.15);
           return Math.min(MAX_DAYS, next === prev ? prev + 1 : next);
         } else {
-          // Zoom in
+          // Zoom in - minimum is 1W (7 days)
           const next = Math.floor(prev * 0.85);
-          return Math.max(MIN_DAYS, next === prev ? prev - 1 : next);
+          return Math.max(7, next === prev ? prev - 1 : next);
         }
       });
     };
@@ -468,6 +472,31 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
 
         {/* X-axis line */}
         <line x1="50" y1="280" x2="770" y2="280" stroke="#ccc" strokeWidth="1" />
+
+        {/* Previous close reference line for 1D view */}
+        {visibleDays <= 1 && previousClose && minPrice && maxPrice && priceRange > 0 && (
+          <g>
+            <line
+              x1="50"
+              y1={260 - ((previousClose - minPrice) / priceRange) * 240}
+              x2="770"
+              y2={260 - ((previousClose - minPrice) / priceRange) * 240}
+              stroke="#333"
+              strokeWidth="1"
+              strokeDasharray="8 6"
+            />
+            <text
+              x="770"
+              y={260 - ((previousClose - minPrice) / priceRange) * 240 - 5}
+              textAnchor="end"
+              fill="#333"
+              fontSize="11"
+              fontFamily="IBM Plex Mono"
+            >
+              ${previousClose.toFixed(2)}
+            </text>
+          </g>
+        )}
 
         {chartType === 'line' ? (
           <>
