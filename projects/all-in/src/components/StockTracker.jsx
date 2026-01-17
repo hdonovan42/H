@@ -35,20 +35,53 @@ export default function StockTracker() {
   const clockDataRef = useRef(null);
   const [wsAvailable, setWsAvailable] = useState(true);
 
-  // Fetch market clock on mount and every 5 minutes
+  // Fetch market clock on mount, every 30 sec, and schedule exact transition fetches
   useEffect(() => {
+    let openTimeout = null;
+    let closeTimeout = null;
+
+    const scheduleTransitionFetch = (clock) => {
+      // Clear any existing scheduled fetches
+      if (openTimeout) clearTimeout(openTimeout);
+      if (closeTimeout) clearTimeout(closeTimeout);
+
+      const now = dayjs();
+      const maxScheduleAhead = 12 * 60 * 60 * 1000; // Only schedule within 12 hours
+
+      // Schedule fetch 1 second after market open
+      if (clock.nextOpen) {
+        const msUntilOpen = dayjs(clock.nextOpen).diff(now);
+        if (msUntilOpen > 0 && msUntilOpen < maxScheduleAhead) {
+          openTimeout = setTimeout(() => loadClock(), msUntilOpen + 1000);
+        }
+      }
+
+      // Schedule fetch 1 second after market close
+      if (clock.nextClose) {
+        const msUntilClose = dayjs(clock.nextClose).diff(now);
+        if (msUntilClose > 0 && msUntilClose < maxScheduleAhead) {
+          closeTimeout = setTimeout(() => loadClock(), msUntilClose + 1000);
+        }
+      }
+    };
+
     const loadClock = async () => {
       const clock = await fetchMarketClock();
       if (clock) {
-        clockDataRef.current = clock; // Update ref immediately (before state triggers effects)
+        clockDataRef.current = clock;
         setClockData(clock);
+        scheduleTransitionFetch(clock);
       }
     };
 
     loadClock();
-    const clockInterval = setInterval(loadClock, 5 * 60 * 1000); // Refresh every 5 min
+    const clockInterval = setInterval(loadClock, 30 * 1000); // Refresh every 30 sec
 
-    return () => clearInterval(clockInterval);
+    return () => {
+      clearInterval(clockInterval);
+      if (openTimeout) clearTimeout(openTimeout);
+      if (closeTimeout) clearTimeout(closeTimeout);
+    };
   }, []);
 
   // Market state monitoring - uses clock data for accuracy
