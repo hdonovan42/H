@@ -34,6 +34,8 @@ export default function StockTracker() {
   const isConnectingRef = useRef(false);
   const clockDataRef = useRef(null);
   const [wsAvailable, setWsAvailable] = useState(true);
+  const [currency, setCurrency] = useState('USD');
+  const [exchangeRate, setExchangeRate] = useState(null);
 
   // Fetch market clock on mount, every 30 sec, and schedule exact transition fetches
   useEffect(() => {
@@ -632,6 +634,24 @@ export default function StockTracker() {
     };
   }, [ticker, wsAvailable, currentMarketState.isRegularHours]);
 
+  // Fetch exchange rate for currency toggle
+  useEffect(() => {
+    const fetchExchangeRate = async () => {
+      try {
+        const res = await fetch(`${WORKER_URL}/exchange-rate`);
+        if (res.ok) {
+          const data = await res.json();
+          setExchangeRate(data.rate);
+        }
+      } catch (error) {
+        console.error('Exchange rate fetch error:', error);
+        setExchangeRate(0.79); // Fallback rate
+      }
+    };
+
+    fetchExchangeRate();
+  }, []);
+
   // Spreadsheet data processing
   const processSpreadsheetData = useMemo(() => {
     const dataWithToday = [...data];
@@ -716,6 +736,18 @@ export default function StockTracker() {
   const handleSort = (key) => {
     setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }));
   };
+
+  const handleCurrencyToggle = useCallback(() => {
+    setCurrency(prev => prev === 'USD' ? 'GBP' : 'USD');
+  }, []);
+
+  const currencySymbol = currency === 'USD' ? '$' : '£';
+  const convertValue = useCallback((usdValue) => {
+    if (usdValue === null || usdValue === undefined) return null;
+    return currency === 'GBP' && exchangeRate
+      ? Math.round(usdValue * exchangeRate)
+      : usdValue;
+  }, [currency, exchangeRate]);
 
   return (
     <div className="page-wrapper">
@@ -815,7 +847,7 @@ export default function StockTracker() {
                       <div className={`spreadsheet-cell ${isLivePrice ? 'live-price' : ''}`}>${row.close.toFixed(2)}</div>
                       <div className="spreadsheet-cell">{row.volume > 500000 ? (row.volume / 1000000).toFixed(0) + 'M' : '—'}</div>
                       <div className={`spreadsheet-cell ${row.chg !== null ? (row.chg >= 0 ? 'positive' : 'negative') : ''}`}>{row.chg !== null ? `${row.chg >= 0 ? '+' : ''}${row.chg.toFixed(2)}` : '—'}</div>
-                      <div className="spreadsheet-cell value-cell">{value !== null && <>${value.toLocaleString()}{row.chg !== null && <span className={row.chg >= 0 ? 'positive' : 'negative'}> | {row.chg >= 0 ? '+' : ''}${Math.round(row.chg * shares).toLocaleString()}</span>}</>}</div>
+                      <div className="spreadsheet-cell value-cell">{value !== null && <><span className="currency-toggle" onClick={handleCurrencyToggle} title={`Click to show in ${currency === 'USD' ? 'GBP' : 'USD'}`}>{currencySymbol}</span>{convertValue(value).toLocaleString()}{row.chg !== null && <span className={row.chg >= 0 ? 'positive' : 'negative'}> | {row.chg >= 0 ? '+' : ''}<span className="currency-toggle" onClick={handleCurrencyToggle}>{currencySymbol}</span>{convertValue(Math.round(row.chg * shares)).toLocaleString()}</span>}</>}</div>
                     </div>
                   );
                 })}

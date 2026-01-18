@@ -102,3 +102,17 @@
   .spreadsheet-inner { min-width: max(100%, 400px); }
   .spreadsheet-body { overflow: visible; max-height: none; }
 }
+
+/* Currency toggle button */
+.currency-toggle {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s ease;
+}
+
+.currency-toggle:hover {
+  color: #137333;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}

@@ -1517,6 +1517,46 @@ export default {
       }
 
       // ============================================================
+      // EXCHANGE RATE - USD to GBP
+      // ============================================================
+
+      // GET /exchange-rate - USD to GBP exchange rate
+      if (path === '/exchange-rate' || path === '/exchange-rate/') {
+        const cache = caches.default;
+        const cacheKey = new Request('https://exchange-rate-cache/usd-gbp', request);
+        let response = await cache.match(cacheKey);
+
+        if (!response) {
+          const fxRes = await fetch('https://api.frankfurter.app/latest?from=USD&to=GBP');
+
+          if (fxRes.ok) {
+            const fxData = await fxRes.json();
+            const rate = fxData.rates?.GBP;
+
+            response = new Response(JSON.stringify({
+              rate: rate,
+              base: 'USD',
+              target: 'GBP',
+              timestamp: new Date().toISOString()
+            }), {
+              headers: {
+                ...corsHeaders,
+                'Content-Type': 'application/json',
+                'Cache-Control': 'public, max-age=3600'
+              }
+            });
+            ctx.waitUntil(cache.put(cacheKey, response.clone()));
+          } else {
+            return new Response(JSON.stringify({ error: 'Exchange rate fetch failed' }), {
+              status: 500,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+        }
+        return response;
+      }
+
+      // ============================================================
       // 404 - Not Found
       // ============================================================
 
