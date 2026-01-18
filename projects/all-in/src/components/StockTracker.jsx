@@ -102,8 +102,8 @@ export default function StockTracker() {
   }, [clockData]);
 
   // Main data fetcher
-  const fetchStockData = async (symbol) => {
-    setLoading(true);
+  const fetchStockData = async (symbol, showLoading = false) => {
+    if (showLoading) setLoading(true);
     const marketState = getMarketState(clockDataRef.current);
 
     try {
@@ -295,7 +295,7 @@ export default function StockTracker() {
   useEffect(() => {
     setChartCache({});
     lastPriceRef.current = null;
-    fetchStockData(ticker);
+    fetchStockData(ticker, true);
   }, [ticker]);
 
   // Re-fetch when clock data first loads (fixes race condition)
