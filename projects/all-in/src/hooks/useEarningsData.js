@@ -54,7 +54,8 @@ export function useEarningsData(ticker, options = {}) {
     try {
       const url = `${WORKER_URL}/earnings/unified/${ticker}?mode=${mode}`;
       const response = await fetch(url, {
-        signal: abortControllerRef.current.signal
+        signal: abortControllerRef.current.signal,
+        cache: 'no-store'
       });
 
       if (!response.ok) {

@@ -1126,7 +1126,8 @@ export default {
               headers: {
                 'User-Agent': 'EarningsDashboard/1.0 (contact@hjd.ai)',
                 'Accept': 'application/json'
-              }
+              },
+              cf: { cacheTtl: 0 }
             });
 
             if (!res.ok) return { source: 'edgar', error: `HTTP ${res.status}`, timestamp: Date.now() };
@@ -1174,7 +1175,7 @@ export default {
 
         const fetchFmpEstimates = async () => {
           try {
-            const res = await fetch(`https://financialmodelingprep.com/stable/analyst-estimates?symbol=${symbol}&period=quarter&limit=5&apikey=${FMP_KEY}`);
+            const res = await fetch(`https://financialmodelingprep.com/stable/analyst-estimates?symbol=${symbol}&period=quarter&limit=5&apikey=${FMP_KEY}`, { cf: { cacheTtl: 0 } });
             if (!res.ok) return { source: 'fmp', error: `HTTP ${res.status}`, timestamp: Date.now() };
             const data = await res.json();
             if (typeof data === 'string' || data.error) return { source: 'fmp', error: data.error || 'Invalid response', timestamp: Date.now() };
@@ -1186,7 +1187,7 @@ export default {
 
         const fetchFmpSurprises = async () => {
           try {
-            const res = await fetch(`https://financialmodelingprep.com/api/v3/earnings-surprises/${symbol}?apikey=${FMP_KEY}`);
+            const res = await fetch(`https://financialmodelingprep.com/api/v3/earnings-surprises/${symbol}?apikey=${FMP_KEY}`, { cf: { cacheTtl: 0 } });
             if (!res.ok) return { source: 'fmp-surprises', error: `HTTP ${res.status}`, timestamp: Date.now() };
             const data = await res.json();
             if (typeof data === 'string' || data.error) return { source: 'fmp-surprises', error: data.error || 'Invalid response', timestamp: Date.now() };
@@ -1199,7 +1200,7 @@ export default {
         const fetchAlphaVantage = async () => {
           try {
             if (!ALPHAVANTAGE_KEY) return { source: 'alphavantage', error: 'API key not configured', timestamp: Date.now() };
-            const res = await fetch(`https://www.alphavantage.co/query?function=EARNINGS&symbol=${symbol}&apikey=${ALPHAVANTAGE_KEY}`);
+            const res = await fetch(`https://www.alphavantage.co/query?function=EARNINGS&symbol=${symbol}&apikey=${ALPHAVANTAGE_KEY}`, { cf: { cacheTtl: 0 } });
             if (!res.ok) return { source: 'alphavantage', error: `HTTP ${res.status}`, timestamp: Date.now() };
             const data = await res.json();
             if (data['Note'] || data['Information']) return { source: 'alphavantage', error: 'Rate limited', timestamp: Date.now() };
@@ -1223,7 +1224,7 @@ export default {
         // Finnhub - reliable free source for EPS estimates
         const fetchFinnhub = async () => {
           try {
-            const res = await fetch(`https://finnhub.io/api/v1/stock/earnings?symbol=${symbol}&token=${FINNHUB_KEY}`);
+            const res = await fetch(`https://finnhub.io/api/v1/stock/earnings?symbol=${symbol}&token=${FINNHUB_KEY}`, { cf: { cacheTtl: 0 } });
             if (!res.ok) return { source: 'finnhub', error: `HTTP ${res.status}`, timestamp: Date.now() };
             const data = await res.json();
             if (!Array.isArray(data)) return { source: 'finnhub', error: 'Invalid response', timestamp: Date.now() };
@@ -1236,7 +1237,7 @@ export default {
         // Finnhub revenue estimates
         const fetchFinnhubRevenue = async () => {
           try {
-            const res = await fetch(`https://finnhub.io/api/v1/stock/revenue-estimate?symbol=${symbol}&freq=quarterly&token=${FINNHUB_KEY}`);
+            const res = await fetch(`https://finnhub.io/api/v1/stock/revenue-estimate?symbol=${symbol}&freq=quarterly&token=${FINNHUB_KEY}`, { cf: { cacheTtl: 0 } });
             if (!res.ok) return { source: 'finnhub-revenue', error: `HTTP ${res.status}`, timestamp: Date.now() };
             const data = await res.json();
             return { source: 'finnhub-revenue', data, timestamp: Date.now() };
@@ -1315,7 +1316,7 @@ export default {
               pendingSources: results.filter(r => r.source !== first.source).map(r => r.source),
               allResults: successful.length
             }), {
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+              headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
             });
 
           } catch (error) {
@@ -1374,7 +1375,7 @@ export default {
             confidence: merged.confidence,
             discrepancies: merged.discrepancies
           }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
           });
         }
       }
