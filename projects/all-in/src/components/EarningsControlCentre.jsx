@@ -225,7 +225,7 @@ export default function EarningsControlCentre() {
       <div className="earnings-grid">
         {/* Left Column: Price & Earnings Data */}
         <div className="earnings-left">
-          <PriceDisplay quote={quote} marketState={currentMarketState} postMarketData={postMarketData} />
+          <PriceDisplay quote={quote} marketState={currentMarketState} postMarketData={postMarketData} earningsData={earningsData} />
           <EarningsData
             data={earningsData}
             availableQuarters={availableQuarters}

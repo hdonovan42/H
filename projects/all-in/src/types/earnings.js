@@ -93,9 +93,9 @@ export const DEFAULT_EARNINGS_STATE = {
  */
 export function formatRevenue(value) {
   if (value == null) return 'N/A';
-  if (value >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
-  if (value >= 1e6) return `$${(value / 1e6).toFixed(2)}M`;
-  if (value >= 1e3) return `$${(value / 1e3).toFixed(2)}K`;
+  if (value >= 1e9) return `$${(value / 1e9).toPrecision(3)}B`;
+  if (value >= 1e6) return `$${(value / 1e6).toPrecision(3)}M`;
+  if (value >= 1e3) return `$${(value / 1e3).toPrecision(3)}K`;
   return `$${value.toLocaleString()}`;
 }
 

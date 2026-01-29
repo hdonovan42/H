@@ -434,6 +434,8 @@ export default {
           console.error('CNBC news fetch error:', error);
         }
 
+        items.sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+
         return new Response(JSON.stringify(items), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
@@ -934,6 +936,27 @@ export default {
             };
           }
 
+          case 'finnhub-calendar': {
+            // Finnhub earnings calendar format - fastest source after release
+            // { date, epsActual, epsEstimate, hour, quarter, revenueActual, revenueEstimate, symbol, year }
+            if (!data || !data.year || !data.quarter) return null;
+
+            return {
+              quarter: `${data.year}-Q${data.quarter}`,
+              fiscalYear: data.year,
+              fiscalQuarter: data.quarter,
+              eps: {
+                estimate: data.epsEstimate ?? null,
+                actual: data.epsActual ?? null
+              },
+              revenue: {
+                estimate: data.revenueEstimate ?? null,
+                actual: data.revenueActual ?? null
+              },
+              source: 'finnhub'
+            };
+          }
+
           case 'finnhub-revenue': {
             // Finnhub revenue estimate: { data: [{ period, revenueAvg, revenueHigh, revenueLow }], freq, symbol }
             const estimates = data?.data;
@@ -1012,6 +1035,11 @@ export default {
             merged.quarter = normalized.quarter;
             merged.fiscalYear = normalized.fiscalYear;
             merged.fiscalQuarter = normalized.fiscalQuarter;
+          }
+
+          // Skip sources from a different quarter to avoid stale data contamination
+          if (merged.quarter && normalized.quarter && normalized.quarter !== merged.quarter) {
+            continue;
           }
 
           // EPS estimate
@@ -1103,6 +1131,26 @@ export default {
         const symbol = path.split('/')[3];
         const mode = url.searchParams.get('mode') || 'race';
         const ALPHAVANTAGE_KEY = env.ALPHA_VANTAGE_KEY_ENV;
+
+        // Check KV first for manually-pushed or recently-merged data
+        if (env.EARNINGS_STORE) {
+          const latestKey = await env.EARNINGS_STORE.get(`earnings:${symbol}:latest`);
+          if (latestKey) {
+            const stored = await env.EARNINGS_STORE.get(latestKey, { type: 'json' });
+            if (stored && stored.manual) {
+              // Manual data takes priority - serve it immediately
+              return new Response(JSON.stringify({
+                mode: 'kv',
+                source: 'manual',
+                data: stored,
+                confidence: stored.confidence || 'single',
+                discrepancies: stored.discrepancies || []
+              }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+              });
+            }
+          }
+        }
 
         // CIK for EDGAR lookup
         const cikMap = {
@@ -1246,12 +1294,33 @@ export default {
           }
         };
 
-        // Build source array - Finnhub is primary for EPS estimates
-        // Note: Finnhub revenue-estimate requires paid subscription, so we skip it
+        // Finnhub earnings calendar - updates fastest after earnings release
+        const fetchFinnhubCalendar = async () => {
+          try {
+            const today = new Date().toISOString().split('T')[0];
+            const from = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+            const res = await fetch(`https://finnhub.io/api/v1/calendar/earnings?from=${from}&to=${today}&symbol=${symbol}&token=${FINNHUB_KEY}`, { cf: { cacheTtl: 0 } });
+            if (!res.ok) return { source: 'finnhub-calendar', error: `HTTP ${res.status}`, timestamp: Date.now() };
+            const data = await res.json();
+            const entries = data?.earningsCalendar || [];
+            const match = entries.find(e => e.symbol === symbol.toUpperCase());
+            if (!match) return { source: 'finnhub-calendar', error: 'No calendar entry found', timestamp: Date.now() };
+            // Only use if it has actual data (not just estimates)
+            if (match.epsActual == null && match.revenueActual == null) {
+              return { source: 'finnhub-calendar', error: 'Calendar entry has no actuals yet', timestamp: Date.now() };
+            }
+            return { source: 'finnhub-calendar', data: match, timestamp: Date.now() };
+          } catch (e) {
+            return { source: 'finnhub-calendar', error: e.message, timestamp: Date.now() };
+          }
+        };
+
+        // Build source array - Calendar first (fastest for fresh earnings), then history + EDGAR
+        // Note: FMP v3 endpoints are deprecated (legacy), removed
         const sources = [
+          fetchFinnhubCalendar(),
           fetchFinnhub(),
-          fetchEdgar(),
-          fetchFmpSurprises()
+          fetchEdgar()
         ];
 
         // Only add AlphaVantage if key is configured (as backup)
@@ -1376,6 +1445,80 @@ export default {
             discrepancies: merged.discrepancies
           }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+          });
+        }
+      }
+
+      // POST /earnings/manual/:symbol - Manually push earnings data to KV
+      if (request.method === 'POST' && path.startsWith('/earnings/manual/')) {
+        const symbol = path.split('/')[3];
+        if (!env.EARNINGS_STORE) {
+          return new Response(JSON.stringify({ error: 'EARNINGS_STORE KV not configured' }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        try {
+          const body = await request.json();
+          const { quarter, year, epsActual, epsEstimate, revenueActual, revenueEstimate } = body;
+          if (!quarter || !year) {
+            return new Response(JSON.stringify({ error: 'quarter and year are required' }), {
+              status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+
+          const quarterKey = `${year}-Q${quarter}`;
+          const key = `earnings:${symbol}:${quarterKey}`;
+
+          const epsEst = epsEstimate ?? null;
+          const epsAct = epsActual ?? null;
+          const revEst = revenueEstimate ?? null;
+          const revAct = revenueActual ?? null;
+
+          const record = {
+            ticker: symbol,
+            fiscalYear: year,
+            fiscalQuarter: quarter,
+            quarter: quarterKey,
+            eps: {
+              estimate: epsEst,
+              actual: epsAct,
+              surprise: (epsAct != null && epsEst != null) ? epsAct - epsEst : null,
+              surprisePercent: (epsAct != null && epsEst != null) ? ((epsAct - epsEst) / Math.abs(epsEst)) * 100 : null
+            },
+            revenue: {
+              estimate: revEst,
+              actual: revAct,
+              surprise: (revAct != null && revEst != null) ? revAct - revEst : null,
+              surprisePercent: (revAct != null && revEst != null) ? ((revAct - revEst) / revEst) * 100 : null
+            },
+            sources: {
+              eps: { estimate: epsEst != null ? ['manual'] : [], actual: epsAct != null ? ['manual'] : [] },
+              revenue: { estimate: revEst != null ? ['manual'] : [], actual: revAct != null ? ['manual'] : [] }
+            },
+            confidence: 'single',
+            discrepancies: [],
+            lastUpdated: new Date().toISOString(),
+            manual: true
+          };
+
+          await env.EARNINGS_STORE.put(key, JSON.stringify(record), { expirationTtl: 60 * 60 * 24 * 365 });
+          await env.EARNINGS_STORE.put(`earnings:${symbol}:latest`, key);
+
+          // Update history index
+          const historyKey = `earnings:${symbol}:history`;
+          const history = await env.EARNINGS_STORE.get(historyKey, { type: 'json' }) || [];
+          if (!history.includes(quarterKey)) {
+            history.unshift(quarterKey);
+            await env.EARNINGS_STORE.put(historyKey, JSON.stringify(history.slice(0, 20)));
+          }
+
+          return new Response(JSON.stringify({ success: true, key, record }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        } catch (e) {
+          return new Response(JSON.stringify({ error: e.message }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           });
         }
       }

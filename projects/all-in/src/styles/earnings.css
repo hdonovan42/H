@@ -307,6 +307,110 @@ body {
   border: 1px solid #333;
   border-radius: 4px;
   padding: 16px;
+  cursor: default;
+  user-select: none;
+}
+
+.price-display--fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #111;
+  border: none;
+  border-radius: 0;
+  padding: 16px 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+.price-display--fullscreen .section-header {
+  flex-shrink: 0;
+}
+
+.price-display--fullscreen .section-header h3 {
+  font-size: 16px;
+}
+
+.price-display--fullscreen .price-label {
+  font-size: 12px;
+}
+
+.price-display--fullscreen .price-main {
+  flex-shrink: 0;
+  margin: 4px 0 8px;
+}
+
+.price-display--fullscreen .price-value {
+  font-size: 48px;
+}
+
+.price-display--fullscreen .price-post {
+  font-size: 16px;
+  margin-top: 2px;
+}
+
+/* Fullscreen top row: price left, earnings right */
+.fs-top-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-shrink: 0;
+  gap: 24px;
+}
+
+.fs-earnings-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 4px;
+}
+
+.fs-metric-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: monospace;
+  font-size: 16px;
+}
+
+.fs-metric-label {
+  color: #888;
+  width: 32px;
+}
+
+.fs-metric-actual {
+  color: #fff;
+  font-weight: 600;
+}
+
+.fs-metric-vs {
+  color: #666;
+}
+
+.fs-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 3px;
+  letter-spacing: 0.5px;
+}
+
+.fs-badge--beat {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+
+.fs-badge--miss {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+.price-display--fullscreen .post-market-chart {
+  flex: 1;
+  width: 100%;
+  aspect-ratio: auto;
+  min-height: 0;
+  margin-top: 8px;
 }
 
 .price-label {
