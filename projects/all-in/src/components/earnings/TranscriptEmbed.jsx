@@ -101,10 +101,9 @@ export default function TranscriptEmbed({ transcript, onSeek, liveUrl }) {
               {segment.start !== null && (
                 <span className="segment-time">{formatTime(segment.start)}</span>
               )}
-              <span className="segment-speaker">{segment.speaker}</span>
-              {segment.role && (
-                <span className="segment-role">{segment.role}</span>
-              )}
+              <span className="segment-speaker">
+                {segment.speaker}{segment.role ? ` - ${segment.role}` : ''}
+              </span>
             </div>
             <div className="segment-text">
               {searchQuery ? (

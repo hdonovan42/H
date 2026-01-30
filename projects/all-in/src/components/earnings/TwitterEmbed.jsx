@@ -141,8 +141,18 @@ export default function TwitterEmbed() {
               <div className="tweet-media">
                 {tweet.media.map((m, i) => (
                   <div key={i} className="tweet-media-item">
-                    <img src={m.url} alt="" loading="lazy" />
-                    {m.type === 'video' && <div className="tweet-media-play">▶</div>}
+                    {m.type === 'video' && m.videoUrl ? (
+                      <video
+                        src={m.videoUrl}
+                        poster={m.url}
+                        controls
+                        preload="none"
+                        playsInline
+                        onClick={e => e.preventDefault()}
+                      />
+                    ) : (
+                      <img src={m.url} alt="" loading="lazy" />
+                    )}
                   </div>
                 ))}
               </div>

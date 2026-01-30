@@ -16,8 +16,7 @@ const CONFIG = {
   youtubeUrl: 'https://www.youtube.com/watch?v=oK0UZEE9GPo', // e.g., 'https://www.youtube.com/watch?v=VIDEO_ID'
   quartrUrl: 'https://quartr.com/companies/tesla-inc_3706',
   ticker: 'TSLA',
-  // Set to null during live call, populate after call ends
-  transcriptUrl: null, // e.g., '/transcripts/tsla-q4-2025.json'
+  transcriptUrl: `${WORKER_URL}/transcripts/TSLA/Q4-2025`,
   // Earnings schedule - update before each earnings
   // TODO: Share this config between all-in.html and earnings.html
   earningsDate: '2026-01-28', // TSLA Q4 2025 earnings

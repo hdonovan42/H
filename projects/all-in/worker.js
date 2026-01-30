@@ -305,6 +305,35 @@ export default {
       let targetUrl;
 
       // ============================================================
+      // TRANSCRIPT ROUTES (served from KV)
+      // ============================================================
+
+      // GET /transcripts/:ticker/:quarter - Serve transcript from KV
+      if (path.startsWith('/transcripts/')) {
+        const parts = path.split('/');
+        const ticker = parts[2]?.toUpperCase();
+        const quarter = parts[3]?.toUpperCase();
+        const kvKey = `transcript:${ticker}:${quarter}`;
+
+        try {
+          const stored = await env.EARNINGS_STORE.get(kvKey);
+          if (!stored) {
+            return new Response(JSON.stringify({ error: 'Transcript not found', ticker, quarter }), {
+              status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+
+          return new Response(stored, {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' }
+          });
+        } catch (error) {
+          return new Response(JSON.stringify({ error: error.message }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+      }
+
+      // ============================================================
       // TWITTER ROUTES (served from KV, populated by Bird cron)
       // ============================================================
 
