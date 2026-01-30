@@ -1014,6 +1014,7 @@ body {
 
 .tweet-media-item {
   position: relative;
+  cursor: pointer;
 }
 
 .tweet-media-item img,
@@ -1023,6 +1024,42 @@ body {
   object-fit: cover;
   display: block;
   border-radius: 4px;
+}
+
+/* Media modal */
+.media-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.media-modal-backdrop img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.media-modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 4px 10px;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+
+.media-modal-close:hover {
+  opacity: 1;
 }
 
 /* Metrics */

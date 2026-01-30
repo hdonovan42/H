@@ -77,6 +77,7 @@ export default function TwitterEmbed() {
   const [tweets, setTweets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [modalMedia, setModalMedia] = useState(null);
 
   const fetchTweets = useCallback(async () => {
     try {
@@ -103,7 +104,15 @@ export default function TwitterEmbed() {
     return () => clearInterval(interval);
   }, [fetchTweets]);
 
+  useEffect(() => {
+    if (!modalMedia) return;
+    const onKey = e => { if (e.key === 'Escape') setModalMedia(null); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [modalMedia]);
+
   return (
+    <>
     <div className="twitter-embed">
       <div className="section-header">
         <h3>X</h3>
@@ -140,19 +149,16 @@ export default function TwitterEmbed() {
             {tweet.media?.length > 0 && (
               <div className="tweet-media">
                 {tweet.media.map((m, i) => (
-                  <div key={i} className="tweet-media-item">
-                    {m.type === 'video' && m.videoUrl ? (
-                      <video
-                        src={m.videoUrl}
-                        poster={m.url}
-                        controls
-                        preload="none"
-                        playsInline
-                        onClick={e => e.preventDefault()}
-                      />
-                    ) : (
-                      <img src={m.url} alt="" loading="lazy" />
-                    )}
+                  <div
+                    key={i}
+                    className="tweet-media-item"
+                    onClick={e => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setModalMedia({ type: 'image', url: m.url });
+                    }}
+                  >
+                    <img src={m.url} alt="" loading="lazy" />
                   </div>
                 ))}
               </div>
@@ -176,5 +182,17 @@ export default function TwitterEmbed() {
         ))}
       </div>
     </div>
+
+    {modalMedia && (
+      <div className="media-modal-backdrop" onClick={() => setModalMedia(null)}>
+        <button className="media-modal-close" onClick={() => setModalMedia(null)}>✕</button>
+        <img
+          src={modalMedia.url}
+          alt=""
+          onClick={e => e.stopPropagation()}
+        />
+      </div>
+    )}
+    </>
   );
 }
