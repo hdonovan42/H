@@ -305,90 +305,30 @@ export default {
       let targetUrl;
 
       // ============================================================
-      // NITTER/TWITTER ROUTES
+      // TWITTER ROUTES (served from KV, populated by Bird cron)
       // ============================================================
 
-      // GET /nitter/:username - Fetch tweets from Nitter HTML page
-      if (path.startsWith('/nitter/')) {
+      // GET /tweets/:username - Serve tweets from KV
+      if (path.startsWith('/tweets/')) {
         const username = path.split('/')[2];
-        const tweets = [];
+        const kvKey = `tweets:${username}`;
 
         try {
-          const instances = ['nitter.net', 'nitter.privacydev.net', 'nitter.poast.org'];
-          let html = null;
-
-          // Browser-like headers
-          const browserHeaders = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Cache-Control': 'max-age=0'
-          };
-
-          for (const instance of instances) {
-            try {
-              // Try HTML page scraping
-              const res = await fetch(`https://${instance}/${username}`, {
-                headers: browserHeaders
-              });
-              if (res.ok) {
-                html = await res.text();
-                if (html && html.includes('timeline-item')) break;
-              }
-            } catch {}
+          const stored = await env.NEWS_STORE.get(kvKey);
+          if (!stored) {
+            return new Response(JSON.stringify({ error: 'No tweets cached', username }), {
+              status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
           }
 
-          if (html) {
-            // Parse timeline items from HTML
-            // Nitter structure: <div class="timeline-item"> contains each tweet
-            const timelineItemRegex = /<div class="timeline-item[^"]*">([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/g;
-            const contentRegex = /<div class="tweet-content[^"]*"[^>]*>([\s\S]*?)<\/div>/;
-            const linkRegex = /<a class="tweet-link"[^>]*href="([^"]+)"/;
-            const dateRegex = /<span class="tweet-date"[^>]*><a[^>]*title="([^"]+)"/;
-
-            let match;
-            while ((match = timelineItemRegex.exec(html)) !== null && tweets.length < 15) {
-              const itemHtml = match[1];
-              const contentMatch = itemHtml.match(contentRegex);
-              const linkMatch = itemHtml.match(linkRegex);
-              const dateMatch = itemHtml.match(dateRegex);
-
-              if (contentMatch) {
-                // Strip HTML tags from content
-                const text = contentMatch[1]
-                  .replace(/<[^>]+>/g, ' ')
-                  .replace(/&amp;/g, '&')
-                  .replace(/&lt;/g, '<')
-                  .replace(/&gt;/g, '>')
-                  .replace(/&quot;/g, '"')
-                  .replace(/&#39;/g, "'")
-                  .replace(/\s+/g, ' ')
-                  .trim();
-
-                if (text) {
-                  tweets.push({
-                    text: text,
-                    url: linkMatch ? `https://x.com${linkMatch[1].replace(/^\/[^/]+/, '')}` : '',
-                    date: dateMatch ? new Date(dateMatch[1]).toISOString() : null
-                  });
-                }
-              }
-            }
-          }
+          return new Response(stored, {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+          });
         } catch (error) {
-          console.error('Nitter fetch error:', error);
+          return new Response(JSON.stringify({ error: error.message }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
         }
-
-        return new Response(JSON.stringify(tweets), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
       }
 
       // ============================================================

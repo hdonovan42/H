@@ -1,0 +1,27 @@
+name = "dry-poetry-72b5"
+main = "worker.js"
+compatibility_date = "2025-12-19"
+preview_urls = false
+
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+
+# KV Namespace bindings
+[[kv_namespaces]]
+binding = "NEWS_STORE"
+id = "48e05a1c2cf2498683a67a492d530a0e"
+
+[[kv_namespaces]]
+binding = "EARNINGS_STORE"
+id = "7f1d36f4917f4c709e8aa974b06a7e35"
+
+[[kv_namespaces]]
+binding = "SEEN_URLS"
+id = "d21288429cdc4d86a7848af00bba04d5"
+
+# Cron trigger for scheduled news collection
+[triggers]
+crons = ["*/30 * * * *"]
