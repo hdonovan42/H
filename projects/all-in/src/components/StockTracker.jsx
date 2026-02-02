@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import StockChart from './StockChart';
-import { WORKER_URL } from '../utils/config';
+import { WORKER_URL, EST, EARNINGS_DATE } from '../utils/config';
 import { dayjs, getMarketState, getTodayEST, MarketState } from '../utils/marketState';
 import { getCachedData, setCachedData } from '../utils/cache';
 import { fetchPriceData, fetchMarketClock } from '../utils/api';
-import { EST } from '../utils/config';
 import '../styles/stock-tracker.css';
 
 export default function StockTracker() {
@@ -803,6 +802,10 @@ export default function StockTracker() {
               <div className="stat-row"><span className="stat-label">Avg. Volume</span><span className="stat-value">{Math.floor(avgVolume).toLocaleString()}</span></div>
               <div className="stat-row"><span className="stat-label">Market Cap</span><span className="stat-value">{marketCap <= 0 ? 'N/A' : marketCap >= 1000000 ? (marketCap/1000000).toPrecision(3)+'T' : marketCap >= 1000 ? (marketCap/1000).toPrecision(3)+'B' : marketCap.toPrecision(3)+'M'}</span></div>
               <div className="stat-row"><span className="stat-label">Forward P/E</span><span className="stat-value">{forwardPE > 0 ? forwardPE.toFixed(2) : 'N/A'}</span></div>
+              <div className="stat-row">
+                {ticker === 'TSLA' ? <a href="earnings.html" className="stat-label earnings-link">Earnings Date</a> : <span className="stat-label">Earnings Date</span>}
+                <span className="stat-value">{dayjs(EARNINGS_DATE).format('MMM D, YYYY')}</span>
+              </div>
             </div>
           </div>
 

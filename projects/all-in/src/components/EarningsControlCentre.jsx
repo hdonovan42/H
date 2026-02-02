@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { getMarketState, getTodayEST, MarketState, dayjs } from '../utils/marketState';
 import { fetchPriceData, fetchMarketClock } from '../utils/api';
-import { WORKER_URL, EST } from '../utils/config';
+import { WORKER_URL, EST, EARNINGS_DATE, EARNINGS_TIME } from '../utils/config';
 import { useEarningsData } from '../hooks/useEarningsData';
 import VideoEmbed from './earnings/VideoEmbed';
 import TranscriptEmbed from './earnings/TranscriptEmbed';
@@ -17,10 +17,8 @@ const CONFIG = {
   quartrUrl: 'https://quartr.com/companies/tesla-inc_3706',
   ticker: 'TSLA',
   transcriptUrl: `${WORKER_URL}/transcripts/TSLA/Q4-2025`,
-  // Earnings schedule - update before each earnings
-  // TODO: Share this config between all-in.html and earnings.html
-  earningsDate: '2026-01-28', // TSLA Q4 2025 earnings
-  earningsTime: 'aftermarket' // 'premarket' | 'aftermarket'
+  earningsDate: EARNINGS_DATE,
+  earningsTime: EARNINGS_TIME
 };
 
 /**

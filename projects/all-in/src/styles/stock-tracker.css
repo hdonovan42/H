@@ -37,6 +37,8 @@
 .stat-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #ebe8df; }
 .stat-row:last-child { border-bottom: none; }
 .stat-label { font-size: 12px; color: #666; }
+a.earnings-link { text-decoration: none; color: #666; }
+a.earnings-link:hover { text-decoration: underline; }
 .stat-value { font-size: 12px; font-weight: 500; }
 .chart-box { padding: 24px 12px 16px 12px; height: 100%; display: flex; flex-direction: column; justify-content: center; position: relative; }
 .timeframe-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; position: absolute; top: 4px; left: 12px; right: 12px; z-index: 10; }
