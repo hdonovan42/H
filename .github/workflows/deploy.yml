@@ -27,10 +27,11 @@ jobs:
           cache-dependency-path: projects/all-in/package-lock.json
 
       # Build all-in React app
+      # Skip wrangler (has heavy native deps via sharp) - only needed for worker deploys
       - name: Build all-in
         working-directory: projects/all-in
         run: |
-          npm ci
+          npm install --ignore-scripts react react-dom dayjs vite @vitejs/plugin-react
           npm run build
 
       # Replace all-in source with built output
