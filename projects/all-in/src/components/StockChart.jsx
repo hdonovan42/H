@@ -485,16 +485,6 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
               strokeWidth="1"
               strokeDasharray="8 6"
             />
-            <text
-              x="770"
-              y={260 - ((previousClose - minPrice) / priceRange) * 240 - 5}
-              textAnchor="end"
-              fill="#333"
-              fontSize="11"
-              fontFamily="IBM Plex Mono"
-            >
-              ${previousClose.toFixed(2)}
-            </text>
           </g>
         )}
 
@@ -549,6 +539,24 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
         )}
 
       </svg>
+
+      {/* Previous close price label (HTML to avoid SVG text squashing) */}
+      {visibleDays <= 1 && previousClose && minPrice && maxPrice && priceRange > 0 && (
+        <span
+          style={{
+            position: 'absolute',
+            right: '12px',
+            top: `${((260 - ((previousClose - minPrice) / priceRange) * 240) / 300) * 100}%`,
+            fontSize: '11px',
+            fontFamily: 'IBM Plex Mono',
+            color: '#333',
+            pointerEvents: 'none',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          ${previousClose.toFixed(2)}
+        </span>
+      )}
 
       {/* X-axis labels */}
       {xLabels.map((item, idx) => (
