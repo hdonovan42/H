@@ -254,12 +254,22 @@ export default function HierarchyTree({ units, onUnitClick }) {
     const swarmWidth = 50
     const swarmHeight = 25
 
-    // Generate deterministic dot positions based on officer id
+    // Seeded PRNG (mulberry32) for consistent random distribution
+    const seededRandom = (seed) => {
+      return () => {
+        seed |= 0; seed = seed + 0x6D2B79F5 | 0
+        let t = Math.imul(seed ^ seed >>> 15, 1 | seed)
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t
+        return ((t ^ t >>> 14) >>> 0) / 4294967296
+      }
+    }
+    const rand = seededRandom(officer.id.charCodeAt(officer.id.length - 1) * 9999)
+
     const dots = []
-    const seed = officer.id.charCodeAt(officer.id.length - 1)
-    for (let i = 0; i < 20; i++) {
-      const x = ((seed * (i + 1) * 7) % 100) / 100 * swarmWidth - swarmWidth / 2
-      const y = ((seed * (i + 1) * 13) % 100) / 100 * swarmHeight - swarmHeight / 2
+    const dotCount = Math.floor(swarmSize / 4)
+    for (let i = 0; i < dotCount; i++) {
+      const x = (rand() - 0.5) * swarmWidth
+      const y = (rand() - 0.5) * swarmHeight
       dots.push({ x, y })
     }
 
