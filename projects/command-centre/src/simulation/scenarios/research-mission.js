@@ -322,5 +322,170 @@ export const bugFixMission = {
   ]
 }
 
-export const scenarios = [researchMission, codeReviewMission, bugFixMission]
+export const dynamicMission = {
+  id: 'dynamic-mission',
+  name: 'Dynamic Task: Full Pipeline',
+  description: 'Demonstrates automatic task routing across all generals based on keyword analysis',
+  objective: 'Show intelligent task delegation using keyword-based routing',
+
+  steps: [
+    // Chief announces the dynamic mission
+    {
+      type: 'order',
+      from: 'chief',
+      to: 'chief',
+      message: 'Initiating dynamic routing demonstration',
+      delay: 600
+    },
+
+    // Auto-routed to Research (keywords: search, find, gather)
+    {
+      type: 'order',
+      from: 'chief',
+      to: 'auto',
+      message: 'Search for best practices on error handling and gather documentation',
+      delay: 700
+    },
+
+    // Research swarm executes
+    {
+      type: 'swarm',
+      officerId: 'officer-0',
+      task: 'Searching documentation, Stack Overflow, and official guides',
+      workersDeployed: 75,
+      duration: 1400,
+      tokens: 420,
+      result: 'Found 28 relevant sources on error handling patterns'
+    },
+
+    {
+      type: 'report',
+      from: 'gen-research',
+      to: 'chief',
+      message: 'Research complete: Best practices documented from 28 sources',
+      delay: 500
+    },
+
+    // Auto-routed to Planning (keywords: design, strategy)
+    {
+      type: 'order',
+      from: 'chief',
+      to: 'auto',
+      message: 'Design a strategy for implementing retry logic with proper approach',
+      delay: 700
+    },
+
+    // Planning executes
+    {
+      type: 'execute',
+      unitId: 'gen-planning',
+      task: 'Analyzing requirements and designing retry architecture',
+      duration: 1200,
+      tokens: 350,
+      result: 'Strategy defined: Exponential backoff with jitter, max 5 retries'
+    },
+
+    {
+      type: 'swarm',
+      officerId: 'officer-2',
+      task: 'Creating detailed implementation plan and test cases',
+      workersDeployed: 65,
+      duration: 1100,
+      tokens: 280,
+      result: 'Plan complete: 4 phases identified, 12 test cases defined'
+    },
+
+    {
+      type: 'report',
+      from: 'gen-planning',
+      to: 'chief',
+      message: 'Planning complete: Retry strategy designed with 4-phase implementation plan',
+      delay: 500
+    },
+
+    // Auto-routed to Execution (keywords: implement, build, code)
+    {
+      type: 'order',
+      from: 'chief',
+      to: 'auto',
+      message: 'Implement and build the retry mechanism with exponential backoff code',
+      delay: 700
+    },
+
+    // K9 monitors the execution phase
+    {
+      type: 'dogTask',
+      dogId: 'dog-monitor',
+      task: 'Monitoring code quality metrics during implementation',
+      duration: 800
+    },
+
+    // Execution swarms work in parallel
+    {
+      type: 'parallel',
+      steps: [
+        {
+          type: 'swarm',
+          officerId: 'officer-4',
+          task: 'Implementing core retry logic and backoff algorithm',
+          workersDeployed: 110,
+          duration: 1800,
+          tokens: 520,
+          result: 'Core implementation complete: RetryManager class ready'
+        },
+        {
+          type: 'swarm',
+          officerId: 'officer-5',
+          task: 'Writing unit tests and integration tests',
+          workersDeployed: 85,
+          duration: 1600,
+          tokens: 380,
+          result: 'Tests complete: 12/12 passing, 94% coverage'
+        }
+      ]
+    },
+
+    // K9 cleanup
+    {
+      type: 'dogTask',
+      dogId: 'dog-cleanup',
+      task: 'Formatting code and preparing final deliverables',
+      duration: 600
+    },
+
+    // Reports flow back up
+    {
+      type: 'report',
+      from: 'officer-4',
+      to: 'gen-execution',
+      message: 'Echo Company: Implementation complete, code reviewed',
+      delay: 400
+    },
+    {
+      type: 'report',
+      from: 'officer-5',
+      to: 'gen-execution',
+      message: 'Foxtrot Company: All tests passing, ready for merge',
+      delay: 400
+    },
+
+    {
+      type: 'report',
+      from: 'gen-execution',
+      to: 'chief',
+      message: 'Execution complete: Retry mechanism implemented and tested',
+      delay: 600
+    },
+
+    // Final summary from K9 logger
+    {
+      type: 'dogTask',
+      dogId: 'dog-logger',
+      task: 'Compiling mission summary: 3 generals engaged via auto-routing',
+      duration: 500
+    }
+  ]
+}
+
+export const scenarios = [researchMission, codeReviewMission, bugFixMission, dynamicMission]
 export default scenarios

@@ -23,6 +23,46 @@ export const MessageType = {
   INFO: 'info'
 }
 
+// Keyword-based routing configuration for auto-delegation
+const ROUTING_CONFIG = {
+  'gen-research': {
+    name: 'Research',
+    keywords: ['search', 'find', 'gather', 'analyze', 'investigate', 'read', 'documentation', 'learn', 'explore', 'discover'],
+    priority: 1
+  },
+  'gen-planning': {
+    name: 'Planning',
+    keywords: ['plan', 'design', 'strategy', 'approach', 'architect', 'organize', 'structure', 'outline', 'prepare'],
+    priority: 2
+  },
+  'gen-execution': {
+    name: 'Execution',
+    keywords: ['implement', 'fix', 'build', 'write', 'deploy', 'test', 'run', 'execute', 'create', 'code', 'develop'],
+    priority: 3
+  }
+}
+
+// Router function - analyzes task message and returns best matching general
+function routeTask(taskMessage) {
+  const lowerMessage = taskMessage.toLowerCase()
+  let bestMatch = { id: null, score: 0, name: null, matchedKeywords: [] }
+
+  for (const [generalId, config] of Object.entries(ROUTING_CONFIG)) {
+    const matchedKeywords = config.keywords.filter(kw => lowerMessage.includes(kw))
+    const score = matchedKeywords.length
+    if (score > bestMatch.score) {
+      bestMatch = { id: generalId, score, name: config.name, matchedKeywords }
+    }
+  }
+
+  // Default to research if no keywords matched
+  if (!bestMatch.id) {
+    bestMatch = { id: 'gen-research', score: 0, name: 'Research', matchedKeywords: ['(default)'] }
+  }
+
+  return bestMatch
+}
+
 // Unit factory
 export function createUnit(id, name, rank, parentId = null) {
   return {
@@ -348,19 +388,39 @@ export class AgentSimulator {
   }
 
   async handleOrder(step) {
+    let targetId = step.to
+    let routingInfo = null
+
+    // Auto-route if target is 'auto'
+    if (step.to === 'auto') {
+      routingInfo = routeTask(step.message)
+      targetId = routingInfo.id
+    }
+
     this.updateUnit(step.from, { status: UnitStatus.ACTIVE })
+
+    // Log routing decision if auto-routed
+    if (routingInfo) {
+      this.addMessage(createMessage(
+        MessageType.INFO,
+        step.from,
+        null,
+        `[Routing] Task assigned to ${routingInfo.name} (matched: ${routingInfo.matchedKeywords.join(', ')})`
+      ))
+      await this.wait(300)
+    }
 
     this.addMessage(createMessage(
       MessageType.ORDER,
       step.from,
-      step.to,
+      targetId,
       step.message
     ))
 
     await this.wait(step.delay || 500)
 
     this.updateUnit(step.from, { status: UnitStatus.IDLE })
-    this.updateUnit(step.to, { status: UnitStatus.ACTIVE, currentTask: step.message })
+    this.updateUnit(targetId, { status: UnitStatus.ACTIVE, currentTask: step.message })
   }
 
   async handleDelegation(step) {
