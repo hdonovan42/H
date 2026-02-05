@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, memo } from 'react'
 import { MessageType, UnitRank } from '../simulation/AgentSimulator'
 
 function formatTimestamp(timestamp) {
@@ -36,6 +36,37 @@ function getUnitDisplayName(unitId, units) {
   const unit = units.get(unitId)
   return unit?.name || unitId
 }
+
+// Memoized log entry to prevent re-renders of non-streaming messages
+const LogEntry = memo(function LogEntry({ message, index, units }) {
+  return (
+    <div
+      className={`log-entry ${message.type}${message.streaming ? ' streaming' : ''} slide-in`}
+      style={{ animationDelay: `${Math.min(index * 0.05, 1)}s` }}
+    >
+      <div className="log-header">
+        <div className="log-source">
+          <span className={`log-rank ${getRankClass(message.sourceId, units)}`}>
+            {getUnitDisplayName(message.sourceId, units)}
+          </span>
+          <span>{getMessageTypeIcon(message.type)}</span>
+        </div>
+        <span className="log-timestamp">
+          {formatTimestamp(message.timestamp)}
+        </span>
+      </div>
+      <div className="log-message">
+        {message.content}
+        {message.streaming && <span className="streaming-cursor">▌</span>}
+      </div>
+      {message.targetId && (
+        <div className="log-target">
+          → {getUnitDisplayName(message.targetId, units)}
+        </div>
+      )}
+    </div>
+  )
+})
 
 export default function OperationsLog({ messages, units }) {
   const logEndRef = useRef(null)
@@ -75,29 +106,12 @@ export default function OperationsLog({ messages, units }) {
       </div>
       <div className="panel-content">
         {messages.map((message, index) => (
-          <div
+          <LogEntry
             key={message.id || index}
-            className={`log-entry ${message.type} slide-in`}
-            style={{ animationDelay: `${index * 0.05}s` }}
-          >
-            <div className="log-header">
-              <div className="log-source">
-                <span className={`log-rank ${getRankClass(message.sourceId, units)}`}>
-                  {getUnitDisplayName(message.sourceId, units)}
-                </span>
-                <span>{getMessageTypeIcon(message.type)}</span>
-              </div>
-              <span className="log-timestamp">
-                {formatTimestamp(message.timestamp)}
-              </span>
-            </div>
-            <div className="log-message">{message.content}</div>
-            {message.targetId && (
-              <div className="log-target">
-                → {getUnitDisplayName(message.targetId, units)}
-              </div>
-            )}
-          </div>
+            message={message}
+            index={index}
+            units={units}
+          />
         ))}
         <div ref={logEndRef} />
       </div>

@@ -109,6 +109,10 @@ body {
     justify-content: center;
   }
 
+  .chief-panel .mode-toggle {
+    justify-content: center;
+  }
+
   .hierarchy-panel {
     grid-area: hierarchy;
     min-height: 0;
@@ -235,6 +239,67 @@ body {
   color: var(--text-primary);
   font-family: inherit;
   font-size: 11px;
+}
+
+/* Mode Control */
+.mode-control {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--green-border);
+}
+
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mode-toggle label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.mode-toggle select {
+  background: var(--bg-input);
+  border: 1px solid var(--green-border);
+  padding: 4px 8px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.mode-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.mode-status-dot.connected {
+  background: var(--status-complete);
+  box-shadow: 0 0 4px var(--status-complete);
+}
+
+.mode-status-dot.checking {
+  background: var(--status-warning);
+  animation: pulse-amber 1s ease-in-out infinite;
+}
+
+.mode-status-dot.error {
+  background: var(--status-error);
+}
+
+.api-error {
+  font-size: 10px;
+  color: var(--status-error);
+  margin-top: 4px;
+}
+
+.api-connected {
+  font-size: 10px;
+  color: var(--status-complete);
+  margin-top: 4px;
 }
 
 /* Stats */
@@ -521,6 +586,24 @@ body {
 .log-message {
   color: var(--text-primary);
   line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Streaming cursor for real-time responses */
+.streaming-cursor {
+  display: inline;
+  color: var(--green-accent);
+  animation: blink-cursor 0.8s step-end infinite;
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.log-entry.streaming {
+  border-left-color: var(--status-active);
 }
 
 .log-target {

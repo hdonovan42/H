@@ -623,5 +623,119 @@ export const chiefInterventionDemo = {
   ]
 }
 
-export const scenarios = [researchMission, codeReviewMission, bugFixMission, dynamicMission, escalationChainDemo, chiefInterventionDemo]
+// Live Research Mission — uses real web search tools in Real mode
+export const liveResearchMission = {
+  id: 'live-research',
+  name: 'Live Research Mission',
+  description: 'Real web research with AI agents using web search tools',
+  objective: 'Research the current state of AI agent frameworks using live web search',
+
+  steps: [
+    // Chief issues the mission
+    {
+      type: 'order',
+      from: 'chief',
+      to: 'gen-research',
+      message: 'Initiate live research: Current state of AI agent frameworks and orchestration tools',
+      delay: 800
+    },
+
+    // General delegates to officers
+    {
+      type: 'delegate',
+      from: 'gen-research',
+      targets: ['officer-0', 'officer-1'],
+      tasks: ['Search for AI agent frameworks', 'Search for benchmarks and comparisons'],
+      delay: 500
+    },
+
+    // K9 Recon starts logging
+    {
+      type: 'dogTask',
+      dogId: 'dog-logger',
+      task: 'Deploying recon units for live web research',
+      duration: 400
+    },
+
+    // Officers deploy swarms WITH web search tools — parallel
+    {
+      type: 'parallel',
+      steps: [
+        {
+          type: 'swarm',
+          officerId: 'officer-0',
+          task: 'Search for the latest AI agent frameworks in 2025-2026: LangChain, CrewAI, AutoGen, OpenAI Swarm, Claude tool use. Find key features, pricing, and adoption.',
+          workersDeployed: 90,
+          duration: 2000,
+          tokens: 600,
+          result: 'Found key frameworks: LangChain, CrewAI, AutoGen, OpenAI Swarm',
+          tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }]
+        },
+        {
+          type: 'swarm',
+          officerId: 'officer-1',
+          task: 'Search for AI agent benchmarks, performance comparisons, and real-world case studies from 2025-2026. Focus on multi-agent orchestration patterns.',
+          workersDeployed: 70,
+          duration: 2000,
+          tokens: 550,
+          result: 'Found benchmarks and comparisons across major frameworks',
+          tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }]
+        }
+      ]
+    },
+
+    // K9 Overwatch checks progress
+    {
+      type: 'dogTask',
+      dogId: 'dog-monitor',
+      task: 'Verifying all search tasks completed',
+      duration: 300
+    },
+
+    // Officers report to General
+    {
+      type: 'report',
+      from: 'officer-0',
+      to: 'gen-research',
+      message: 'Alpha Company: Framework search complete',
+      delay: 400
+    },
+    {
+      type: 'report',
+      from: 'officer-1',
+      to: 'gen-research',
+      message: 'Bravo Company: Benchmark search complete',
+      delay: 400
+    },
+
+    // General synthesises findings (no tools, just reasoning with context from officers)
+    {
+      type: 'execute',
+      unitId: 'gen-research',
+      task: 'Synthesise the research findings from both officers into a comprehensive briefing. Compare frameworks, identify trends, and recommend the best approaches for multi-agent orchestration.',
+      duration: 2500,
+      tokens: 800,
+      result: 'Synthesis complete: AI agent frameworks briefing ready'
+    },
+
+    // K9 Support finalizes
+    {
+      type: 'dogTask',
+      dogId: 'dog-cleanup',
+      task: 'Formatting final research briefing',
+      duration: 400
+    },
+
+    // Final report to Chief
+    {
+      type: 'report',
+      from: 'gen-research',
+      to: 'chief',
+      message: 'Live research mission complete. Comprehensive AI agent frameworks briefing prepared.',
+      delay: 600
+    }
+  ]
+}
+
+export const scenarios = [researchMission, codeReviewMission, bugFixMission, dynamicMission, escalationChainDemo, chiefInterventionDemo, liveResearchMission]
 export default scenarios

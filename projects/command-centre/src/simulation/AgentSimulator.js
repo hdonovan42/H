@@ -125,6 +125,10 @@ export class AgentSimulator {
     this.pendingEscalation = null  // Stores escalation awaiting Chief decision
     this.escalationResolvers = new Map()  // Maps escalation IDs to resolve functions
 
+    // Mission context (Step 5) — stores results from each unit for context threading
+    this.missionId = null
+    this.missionContext = new Map()  // unitId → latest result text
+
     this.initializeHierarchy()
   }
 
@@ -228,6 +232,25 @@ export class AgentSimulator {
     this.notify()
   }
 
+  // Update an existing message in-place (for streaming)
+  updateMessage(messageId, contentUpdate) {
+    const msg = this.messages.find(m => m.id === messageId)
+    if (msg) {
+      Object.assign(msg, contentUpdate)
+      this.notify()
+    }
+  }
+
+  // Mode control — switch between simulation and real API
+  setMode(mode, adapter = null) {
+    this.mode = mode
+    this.apiAdapter = adapter
+  }
+
+  getMode() {
+    return this.mode
+  }
+
   // Speed control
   setSpeed(multiplier) {
     this.speedMultiplier = multiplier
@@ -237,6 +260,36 @@ export class AgentSimulator {
     return baseDelay / this.speedMultiplier
   }
 
+  // Build previous context for a unit from its parent's officer results
+  _buildPreviousContext(unitId) {
+    const unit = this.units.get(unitId)
+    if (!unit) return ''
+
+    const contextParts = []
+
+    // For generals: gather results from their officers
+    if (unit.rank === UnitRank.GENERAL) {
+      for (const childId of unit.childrenIds) {
+        const childResult = this.missionContext.get(childId)
+        if (childResult) {
+          const child = this.units.get(childId)
+          contextParts.push(`[${child?.name || childId}]: ${childResult}`)
+        }
+      }
+    }
+
+    // For officers: include their general's orders context
+    if (unit.rank === UnitRank.OFFICER && unit.parentId) {
+      const parentResult = this.missionContext.get(unit.parentId)
+      if (parentResult) {
+        const parent = this.units.get(unit.parentId)
+        contextParts.push(`[${parent?.name || unit.parentId}]: ${parentResult}`)
+      }
+    }
+
+    return contextParts.join('\n\n')
+  }
+
   // Simulation control
   async start(scenario) {
     if (this.isRunning) return
@@ -244,6 +297,16 @@ export class AgentSimulator {
     this.reset()
     this.isRunning = true
     this.currentScenario = scenario
+
+    // Generate mission ID for context threading
+    this.missionId = `mission-${Date.now()}`
+    this.missionContext.clear()
+
+    // Notify backend of new mission if in real mode
+    if (this.mode === 'real' && this.apiAdapter) {
+      this.apiAdapter.startMission(this.missionId, scenario.objective || scenario.description)
+    }
+
     this.notify()
 
     try {
@@ -282,6 +345,8 @@ export class AgentSimulator {
     this.currentScenario = null
     this.pendingEscalation = null
     this.escalationResolvers.clear()
+    this.missionId = null
+    this.missionContext.clear()
 
     // Reset all units
     this.units.forEach(unit => {
@@ -309,17 +374,74 @@ export class AgentSimulator {
     }
   }
 
-  // Execute a task (simulation or real API)
+  // Execute a task (simulation or real API) — with streaming support
   async executeTask(unit, task) {
-    if (this.mode === 'simulation') {
-      return this.simulateExecution(unit, task)
+    if (this.mode === 'real' && this.apiAdapter) {
+      // Inject mission context
+      task.missionId = this.missionId
+      task.previousContext = task.previousContext || this._buildPreviousContext(unit.id)
+
+      // Real mode: set unit active, call API (streaming or non-streaming), update stats
+      this.updateUnit(unit.id, {
+        status: UnitStatus.ACTIVE,
+        currentTask: task.description
+      })
+
+      // Create a streaming placeholder message
+      const streamMsgId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      const streamMsg = {
+        id: streamMsgId,
+        timestamp: Date.now(),
+        type: MessageType.INFO,
+        sourceId: unit.id,
+        targetId: null,
+        content: '',
+        streaming: true
+      }
+      this.messages.push(streamMsg)
+      this.notify()
+
+      // Use streaming adapter
+      const result = await this.apiAdapter.executeStream(
+        unit,
+        task,
+        // onDelta — update message content progressively
+        (delta, fullText) => {
+          this.updateMessage(streamMsgId, { content: fullText })
+        },
+        // onToolUse
+        (toolName, input) => {
+          this.addMessage(createMessage(
+            MessageType.INFO,
+            unit.id,
+            null,
+            `[Tool: ${toolName}] ${input?.query || JSON.stringify(input)}`
+          ))
+        }
+      )
+
+      // Finalise the streaming message
+      this.updateMessage(streamMsgId, {
+        content: result.result || result.error || 'No response',
+        streaming: false
+      })
+
+      if (result.success) {
+        this.updateUnit(unit.id, { status: UnitStatus.COMPLETED, currentTask: null })
+        unit.stats.tasksCompleted++
+        unit.stats.tokensUsed += result.tokens || 0
+        // Store in mission context
+        this.missionContext.set(unit.id, result.result)
+      } else {
+        this.updateUnit(unit.id, { status: UnitStatus.FAILED, currentTask: null })
+        unit.stats.tasksFailed++
+      }
+
+      return result
     }
 
-    if (this.apiAdapter) {
-      return this.apiAdapter.execute(unit, task)
-    }
-
-    throw new Error('No execution mode configured')
+    // Simulation mode (default)
+    return this.simulateExecution(unit, task)
   }
 
   async simulateExecution(unit, task) {
@@ -351,9 +473,13 @@ export class AgentSimulator {
     unit.stats.tasksCompleted++
     unit.stats.tokensUsed += task.tokens || Math.floor(100 + Math.random() * 400)
 
+    const resultText = task.result || `Completed: ${task.description}`
+    // Store in mission context even in simulation mode
+    this.missionContext.set(unit.id, resultText)
+
     return {
       success: true,
-      result: task.result || `Completed: ${task.description}`
+      result: resultText
     }
   }
 
@@ -413,19 +539,46 @@ export class AgentSimulator {
 
     // Auto-route if target is 'auto'
     if (step.to === 'auto') {
-      routingInfo = routeTask(step.message)
-      targetId = routingInfo.id
+      if (this.mode === 'real' && this.apiAdapter) {
+        // LLM-based routing in real mode
+        const llmRoute = await this.apiAdapter.route(step.message)
+        if (llmRoute) {
+          routingInfo = {
+            id: llmRoute.generalId,
+            name: this.units.get(llmRoute.generalId)?.name || llmRoute.generalId,
+            matchedKeywords: [llmRoute.reasoning],
+            llmRouted: llmRoute.llmRouted,
+            confidence: llmRoute.confidence
+          }
+          targetId = llmRoute.generalId
+        } else {
+          // Fallback to local routing if API fails
+          routingInfo = routeTask(step.message)
+          targetId = routingInfo.id
+        }
+      } else {
+        routingInfo = routeTask(step.message)
+        targetId = routingInfo.id
+      }
     }
 
     this.updateUnit(step.from, { status: UnitStatus.ACTIVE })
 
     // Log routing decision if auto-routed
     if (routingInfo) {
+      const routeMethod = routingInfo.llmRouted ? 'LLM' : 'Keywords'
+      const detail = routingInfo.llmRouted
+        ? routingInfo.matchedKeywords[0]  // LLM reasoning string
+        : `matched: ${routingInfo.matchedKeywords.join(', ')}`
+      const confidence = routingInfo.confidence
+        ? ` (${Math.round(routingInfo.confidence * 100)}%)`
+        : ''
+
       this.addMessage(createMessage(
         MessageType.INFO,
         step.from,
         null,
-        `[Routing] Task assigned to ${routingInfo.name} (matched: ${routingInfo.matchedKeywords.join(', ')})`
+        `[Routing: ${routeMethod}] Task assigned to ${routingInfo.name}${confidence} — ${detail}`
       ))
       await this.wait(300)
     }
@@ -469,19 +622,24 @@ export class AgentSimulator {
       duration: step.duration,
       tokens: step.tokens,
       shouldFail: step.shouldFail,
-      result: step.result
+      result: step.result,
+      tools: step.tools,
+      context: step.context
     })
 
     if (result.success) {
       this.completedTasks++
     }
 
-    this.addMessage(createMessage(
-      result.success ? MessageType.INFO : MessageType.ALERT,
-      step.unitId,
-      null,
-      result.success ? result.result : `Failed: ${step.task}`
-    ))
+    // Only add a summary message if not in real mode (streaming already created it)
+    if (this.mode !== 'real' || !this.apiAdapter) {
+      this.addMessage(createMessage(
+        result.success ? MessageType.INFO : MessageType.ALERT,
+        step.unitId,
+        null,
+        result.success ? result.result : `Failed: ${step.task}`
+      ))
+    }
 
     this.notify()
   }
@@ -541,12 +699,71 @@ export class AgentSimulator {
       `Deploying ${workersDeployed} workers: ${step.task}`
     ))
 
-    // Simulate swarm execution
-    await this.wait(step.duration || 1500)
+    let resultText = step.result || 'Task complete'
+    let tokensUsed = step.tokens || Math.floor(200 + Math.random() * 500)
+
+    if (this.mode === 'real' && this.apiAdapter) {
+      // Real mode: call Claude API via the adapter with streaming
+      const streamMsgId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      const streamMsg = {
+        id: streamMsgId,
+        timestamp: Date.now(),
+        type: MessageType.INFO,
+        sourceId: step.officerId,
+        targetId: null,
+        content: '',
+        streaming: true
+      }
+      this.messages.push(streamMsg)
+      this.notify()
+
+      const result = await this.apiAdapter.executeStream(
+        officer,
+        {
+          description: step.task,
+          context: step.context || '',
+          tools: step.tools,
+          missionId: this.missionId,
+          previousContext: this._buildPreviousContext(officer.id)
+        },
+        // onDelta
+        (delta, fullText) => {
+          this.updateMessage(streamMsgId, { content: fullText })
+        },
+        // onToolUse
+        (toolName, input) => {
+          this.addMessage(createMessage(
+            MessageType.INFO,
+            step.officerId,
+            null,
+            `[Tool: ${toolName}] ${input?.query || JSON.stringify(input)}`
+          ))
+        }
+      )
+
+      if (result.success) {
+        resultText = result.result
+        tokensUsed = result.tokens || 0
+        this.missionContext.set(officer.id, resultText)
+      } else {
+        resultText = `[API Error] ${result.error}`
+      }
+
+      // Finalise streaming message
+      this.updateMessage(streamMsgId, {
+        content: resultText,
+        streaming: false
+      })
+    } else {
+      // Simulation mode: fake delay
+      await this.wait(step.duration || 1500)
+      // Store in mission context
+      this.missionContext.set(officer.id, resultText)
+    }
 
     // Update stats
     officer.stats.tasksCompleted++
-    officer.stats.tokensUsed += step.tokens || Math.floor(200 + Math.random() * 500)
+    officer.stats.tokensUsed += tokensUsed
 
     this.updateUnit(step.officerId, {
       status: UnitStatus.COMPLETED,
@@ -554,12 +771,15 @@ export class AgentSimulator {
       activeWorkers: 0
     })
 
-    this.addMessage(createMessage(
-      MessageType.INFO,
-      step.officerId,
-      null,
-      `${workersDeployed} workers returned: ${step.result || 'Task complete'}`
-    ))
+    // Only add summary message in simulation mode (real mode already has streaming message)
+    if (this.mode !== 'real' || !this.apiAdapter) {
+      this.addMessage(createMessage(
+        MessageType.INFO,
+        step.officerId,
+        null,
+        `${workersDeployed} workers returned: ${resultText}`
+      ))
+    }
 
     this.completedTasks++
     this.notify()
