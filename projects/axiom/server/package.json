@@ -1,0 +1,21 @@
+{
+  "name": "axiom-api",
+  "version": "1.0.0",
+  "description": "AXIOM backend - Claude API orchestration for actuator research",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "cli": "node axiom-cli.js --verbose",
+    "cli:dry": "node axiom-cli.js --verbose --dry-run",
+    "cron:setup": "bash axiom-launch.sh",
+    "cron:status": "crontab -l 2>/dev/null | grep axiom-launch || echo 'No AXIOM cron job installed'"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.72.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}
