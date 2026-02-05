@@ -67,35 +67,18 @@ const RankIcon = ({ rank, x, y, size }) => {
         </g>
       )
     case UnitRank.DOG:
-      // Alsatian/German Shepherd silhouette
-      const ds = s * 1.2
+      // Aggressive wolf
       return (
-        <g transform={`translate(${x - ds * 0.3}, ${y})`}>
-          <path
-            d={`
-              M${ds * 0.1},${-ds * 0.1}
-              L${ds * 0.25},${-ds * 0.5}
-              L${ds * 0.35},${-ds * 0.55}
-              L${ds * 0.4},${-ds * 0.35}
-              L${ds * 0.5},${-ds * 0.3}
-              L${ds * 0.9},${-ds * 0.25}
-              L${ds},${-ds * 0.15}
-              L${ds * 0.95},${ds * 0.1}
-              L${ds * 0.85},${ds * 0.15}
-              L${ds * 0.9},${ds * 0.45}
-              L${ds * 0.8},${ds * 0.45}
-              L${ds * 0.75},${ds * 0.2}
-              L${ds * 0.5},${ds * 0.25}
-              L${ds * 0.35},${ds * 0.45}
-              L${ds * 0.25},${ds * 0.45}
-              L${ds * 0.3},${ds * 0.2}
-              L${ds * 0.1},${ds * 0.15}
-              L${-ds * 0.05},${ds * 0.1}
-              Z
-            `}
-            fill={color}
-          />
-        </g>
+        <text
+          x={x}
+          y={y}
+          textAnchor="middle"
+          dominantBaseline="central"
+          fontSize={s * 1.8}
+          style={{ filter: 'grayscale(100%) brightness(0.6) contrast(1.4)' }}
+        >
+          🐺
+        </text>
       )
     default:
       return null

@@ -10,6 +10,7 @@ export default function CommandCentre() {
   const [selectedScenario, setSelectedScenario] = useState(scenarios[0])
   const [speed, setSpeed] = useState(1)
   const [selectedUnit, setSelectedUnit] = useState(null)
+  const [escalationMessage, setEscalationMessage] = useState('')
 
   // Subscribe to simulator updates
   useEffect(() => {
@@ -47,12 +48,23 @@ export default function CommandCentre() {
     setSelectedUnit(null)
   }, [])
 
+  const handleEscalationDecision = useCallback((action) => {
+    if (state.pendingEscalation) {
+      simulator.resolveChiefEscalation(state.pendingEscalation.id, {
+        action,
+        message: escalationMessage || null
+      })
+      setEscalationMessage('')
+    }
+  }, [simulator, state.pendingEscalation, escalationMessage])
+
   // Calculate stats
   const stats = {
     active: Array.from(state.units.values()).filter(u => u.status === UnitStatus.ACTIVE).length,
     completed: Array.from(state.units.values()).filter(u => u.status === UnitStatus.COMPLETED).length,
     failed: Array.from(state.units.values()).filter(u => u.status === UnitStatus.FAILED).length,
-    tokens: Array.from(state.units.values()).reduce((sum, u) => sum + (u.stats?.tokensUsed || 0), 0)
+    tokens: Array.from(state.units.values()).reduce((sum, u) => sum + (u.stats?.tokensUsed || 0), 0),
+    escalating: Array.from(state.units.values()).filter(u => u.status === UnitStatus.ESCALATING || u.status === UnitStatus.AWAITING_INPUT).length
   }
 
   const overallStatus = state.isRunning
@@ -283,6 +295,65 @@ export default function CommandCentre() {
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Chief Escalation Decision Modal */}
+      {state.pendingEscalation && (
+        <div className="modal-overlay escalation-overlay">
+          <div className="modal escalation-modal">
+            <div className="modal-header escalation-header">
+              <span className="modal-title">🔺 CHIEF DECISION REQUIRED</span>
+            </div>
+            <div className="modal-content">
+              <div className="escalation-from">
+                <span className="detail-label">From</span>
+                <span className="detail-value">{state.pendingEscalation.fromUnitName}</span>
+              </div>
+
+              <div className="escalation-problem">
+                <div className="escalation-problem-label">Problem</div>
+                <div className="escalation-problem-text">{state.pendingEscalation.problem}</div>
+              </div>
+
+              {state.pendingEscalation.context && (
+                <div className="escalation-context">
+                  {state.pendingEscalation.context}
+                </div>
+              )}
+
+              <div className="escalation-input">
+                <label>Additional directive (optional):</label>
+                <input
+                  type="text"
+                  value={escalationMessage}
+                  onChange={(e) => setEscalationMessage(e.target.value)}
+                  placeholder="Enter instructions..."
+                />
+              </div>
+
+              <div className="escalation-actions">
+                <button
+                  className="btn btn-approve"
+                  onClick={() => handleEscalationDecision('approve')}
+                >
+                  ✓ Approve
+                </button>
+                <button
+                  className="btn btn-deny"
+                  onClick={() => handleEscalationDecision('deny')}
+                >
+                  ✕ Deny
+                </button>
+                <button
+                  className="btn btn-defer"
+                  onClick={() => handleEscalationDecision('defer')}
+                >
+                  ⏸ Defer
+                </button>
+              </div>
             </div>
           </div>
         </div>

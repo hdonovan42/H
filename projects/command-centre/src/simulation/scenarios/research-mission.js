@@ -487,5 +487,141 @@ export const dynamicMission = {
   ]
 }
 
-export const scenarios = [researchMission, codeReviewMission, bugFixMission, dynamicMission]
+// Escalation Chain Demo - shows model tiers and resolution at General level
+export const escalationChainDemo = {
+  id: 'escalation-chain',
+  name: 'Escalation Chain Demo',
+  description: 'Demonstrates escalation flow: Soldier (Haiku) → Officer (Sonnet) → General (Opus) with model tier visibility',
+  objective: 'Watch problems bubble up the chain until resolved by superior reasoning',
+
+  steps: [
+    // Chief kicks off a task
+    {
+      type: 'order',
+      from: 'chief',
+      to: 'gen-execution',
+      message: 'Execute complex refactoring task requiring advanced reasoning',
+      delay: 600
+    },
+
+    // General delegates to Officer
+    {
+      type: 'order',
+      from: 'gen-execution',
+      to: 'officer-4',
+      message: 'Echo Company - handle the refactoring implementation',
+      delay: 500
+    },
+
+    // Officer deploys swarm (Haiku tier)
+    {
+      type: 'swarm',
+      officerId: 'officer-4',
+      task: 'Attempting refactoring with standard approach',
+      workersDeployed: 100,
+      duration: 1200,
+      tokens: 180,
+      result: 'Initial attempt - encountering edge case complexity'
+    },
+
+    // Officer hits a problem - escalate to General who CAN solve it
+    {
+      type: 'escalate',
+      unitId: 'officer-4',
+      problem: 'Edge case in async handler requires deeper analysis than Sonnet can provide',
+      resolution: 'Applied advanced pattern matching - implement state machine for async flow',
+      delay: 500,
+      analysisDelay: 1200,
+      tokens: 450,
+      parentCanSolve: true  // General (Opus) resolves it
+    },
+
+    // After General resolves, reports flow back
+    {
+      type: 'report',
+      from: 'gen-execution',
+      to: 'chief',
+      message: '[Opus] Escalation resolved. Edge case addressed with state machine pattern for async handling.',
+      delay: 600
+    },
+
+    // Final cleanup
+    {
+      type: 'dogTask',
+      dogId: 'dog-cleanup',
+      task: 'Documenting escalation resolution pattern',
+      duration: 500
+    }
+  ]
+}
+
+// Chief Intervention Required - escalates all the way to user
+export const chiefInterventionDemo = {
+  id: 'chief-intervention',
+  name: 'Chief Intervention Required',
+  description: 'Problem escalates to Chief of Staff (you) for decision. Simulation pauses until you respond.',
+  objective: 'Experience the escalation chain reaching the user for critical decisions',
+
+  steps: [
+    // Chief starts mission
+    {
+      type: 'order',
+      from: 'chief',
+      to: 'gen-planning',
+      message: 'Plan deployment of sensitive production changes',
+      delay: 600
+    },
+
+    // General delegates
+    {
+      type: 'order',
+      from: 'gen-planning',
+      to: 'officer-2',
+      message: 'Charlie Company - analyze deployment risks',
+      delay: 500
+    },
+
+    // Officer attempts
+    {
+      type: 'execute',
+      unitId: 'officer-2',
+      task: 'Analyzing deployment risk factors',
+      duration: 1000,
+      tokens: 200,
+      result: 'Identified critical decision point requiring authorization'
+    },
+
+    // Officer escalates - this will go Officer -> General -> Chief
+    {
+      type: 'escalate',
+      unitId: 'officer-2',
+      problem: 'Production deployment requires authorization: 5-minute downtime during migration. Rollback plan ready.',
+      context: 'Critical production decision requires Chief authorization for changes with downtime impact.',
+      options: ['approve', 'deny', 'defer'],
+      delay: 500,
+      analysisDelay: 800,
+      parentCanSolve: false,
+      continueEscalation: 2  // Officer -> General -> Chief (2 levels)
+    },
+
+    // After Chief decision, execute accordingly
+    {
+      type: 'report',
+      from: 'gen-planning',
+      to: 'chief',
+      message: 'Deployment directive received. Proceeding with authorized action.',
+      delay: 500
+    },
+
+    // Cleanup
+    {
+      type: 'dogTask',
+      dogId: 'dog-logger',
+      task: 'Recording Chief decision in audit log',
+      duration: 400
+    }
+  ]
+}
+
+export const scenarios = [researchMission, codeReviewMission, bugFixMission, dynamicMission, escalationChainDemo, chiefInterventionDemo]
 export default scenarios

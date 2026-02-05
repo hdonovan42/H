@@ -24,6 +24,8 @@ function getMessageTypeIcon(type) {
       return '📊'
     case MessageType.ALERT:
       return '⚠️'
+    case MessageType.ESCALATE:
+      return '🔺'
     case MessageType.INFO:
     default:
       return 'ℹ️'

@@ -5,7 +5,9 @@ export const UnitStatus = {
   IDLE: 'idle',
   ACTIVE: 'active',
   COMPLETED: 'completed',
-  FAILED: 'failed'
+  FAILED: 'failed',
+  ESCALATING: 'escalating',
+  AWAITING_INPUT: 'awaiting'
 }
 
 export const UnitRank = {
@@ -20,7 +22,17 @@ export const MessageType = {
   ORDER: 'order',
   REPORT: 'report',
   ALERT: 'alert',
-  INFO: 'info'
+  INFO: 'info',
+  ESCALATE: 'escalate'
+}
+
+// Model configuration per rank tier
+export const MODEL_CONFIG = {
+  [UnitRank.CHIEF]: { model: 'user', displayName: 'User', cost: 0 },
+  [UnitRank.GENERAL]: { model: 'opus', displayName: 'Opus', cost: 'high' },
+  [UnitRank.OFFICER]: { model: 'sonnet', displayName: 'Sonnet', cost: 'medium' },
+  [UnitRank.SOLDIER]: { model: 'haiku', displayName: 'Haiku', cost: 'low' },
+  [UnitRank.DOG]: { model: 'haiku', displayName: 'Haiku', cost: 'low' }
 }
 
 // Keyword-based routing configuration for auto-delegation
@@ -110,6 +122,8 @@ export class AgentSimulator {
     this.taskQueue = []
     this.completedTasks = 0
     this.totalTasks = 0
+    this.pendingEscalation = null  // Stores escalation awaiting Chief decision
+    this.escalationResolvers = new Map()  // Maps escalation IDs to resolve functions
 
     this.initializeHierarchy()
   }
@@ -192,7 +206,8 @@ export class AgentSimulator {
       isPaused: this.isPaused,
       completedTasks: this.completedTasks,
       totalTasks: this.totalTasks,
-      currentScenario: this.currentScenario
+      currentScenario: this.currentScenario,
+      pendingEscalation: this.pendingEscalation
     }
   }
 
@@ -265,6 +280,8 @@ export class AgentSimulator {
     this.completedTasks = 0
     this.totalTasks = 0
     this.currentScenario = null
+    this.pendingEscalation = null
+    this.escalationResolvers.clear()
 
     // Reset all units
     this.units.forEach(unit => {
@@ -381,6 +398,9 @@ export class AgentSimulator {
         break
       case 'swarm':
         await this.handleSwarm(step)
+        break
+      case 'escalate':
+        await this.handleEscalation(step)
         break
       default:
         console.warn('Unknown step type:', step.type)
@@ -543,6 +563,209 @@ export class AgentSimulator {
 
     this.completedTasks++
     this.notify()
+  }
+
+  async handleEscalation(step) {
+    const unit = this.units.get(step.unitId)
+    if (!unit) return
+
+    const unitConfig = MODEL_CONFIG[unit.rank]
+
+    // Mark unit as escalating
+    this.updateUnit(step.unitId, {
+      status: UnitStatus.ESCALATING,
+      currentTask: step.problem
+    })
+
+    // Log the escalation with model tier info
+    this.addMessage(createMessage(
+      MessageType.ESCALATE,
+      step.unitId,
+      unit.parentId,
+      `[${unitConfig.displayName}] Cannot resolve: ${step.problem}`,
+      { model: unitConfig.model, cost: unitConfig.cost }
+    ))
+
+    await this.wait(step.delay || 600)
+
+    // Find parent unit
+    const parentId = step.escalateTo || unit.parentId
+    const parent = this.units.get(parentId)
+
+    if (!parent) {
+      // No parent to escalate to
+      this.updateUnit(step.unitId, { status: UnitStatus.FAILED })
+      return
+    }
+
+    const parentConfig = MODEL_CONFIG[parent.rank]
+
+    // Check if this escalates to Chief (user)
+    if (parent.rank === UnitRank.CHIEF) {
+      await this.escalateToChief(step, unit, parent)
+      return
+    }
+
+    // Parent attempts to resolve
+    this.updateUnit(parentId, {
+      status: UnitStatus.ACTIVE,
+      currentTask: `Analyzing escalation: ${step.problem}`
+    })
+
+    this.addMessage(createMessage(
+      MessageType.INFO,
+      parentId,
+      null,
+      `[${parentConfig.displayName}] Received escalation, analyzing...`,
+      { model: parentConfig.model, cost: parentConfig.cost }
+    ))
+
+    await this.wait(step.analysisDelay || 1000)
+
+    // Check if parent can solve (configurable per step)
+    if (step.parentCanSolve) {
+      // Parent resolves the issue
+      this.addMessage(createMessage(
+        MessageType.REPORT,
+        parentId,
+        step.unitId,
+        `[${parentConfig.displayName}] Resolved: ${step.resolution || 'Issue addressed with enhanced reasoning'}`,
+        { model: parentConfig.model, cost: parentConfig.cost }
+      ))
+
+      this.updateUnit(parentId, {
+        status: UnitStatus.COMPLETED,
+        currentTask: null
+      })
+      parent.stats.tasksCompleted++
+      parent.stats.tokensUsed += step.tokens || 300
+
+      // Original unit can resume
+      this.updateUnit(step.unitId, {
+        status: UnitStatus.COMPLETED,
+        currentTask: null
+      })
+      unit.stats.tasksCompleted++
+
+      this.completedTasks++
+    } else {
+      // Parent cannot solve, escalate further
+      this.addMessage(createMessage(
+        MessageType.ESCALATE,
+        parentId,
+        parent.parentId,
+        `[${parentConfig.displayName}] Cannot resolve, escalating further: ${step.problem}`,
+        { model: parentConfig.model, cost: parentConfig.cost }
+      ))
+
+      this.updateUnit(parentId, { status: UnitStatus.ESCALATING })
+
+      // Continue escalation up the chain
+      if (step.continueEscalation) {
+        await this.handleEscalation({
+          ...step,
+          unitId: parentId,
+          escalateTo: parent.parentId,
+          continueEscalation: step.continueEscalation - 1
+        })
+      }
+    }
+
+    this.notify()
+  }
+
+  async escalateToChief(step, originUnit, chief) {
+    const escalationId = `esc-${Date.now()}`
+
+    // Mark Chief as awaiting input
+    this.updateUnit('chief', {
+      status: UnitStatus.AWAITING_INPUT,
+      currentTask: 'Awaiting decision on escalation'
+    })
+
+    // Log escalation to Chief
+    this.addMessage(createMessage(
+      MessageType.ESCALATE,
+      originUnit.id,
+      'chief',
+      `[CHIEF ATTENTION REQUIRED] ${step.problem}`,
+      {
+        escalationId,
+        options: step.options || ['approve', 'deny', 'defer'],
+        context: step.context || null
+      }
+    ))
+
+    // Set pending escalation for UI
+    this.pendingEscalation = {
+      id: escalationId,
+      problem: step.problem,
+      fromUnit: originUnit.id,
+      fromUnitName: originUnit.name,
+      options: step.options || ['approve', 'deny', 'defer'],
+      context: step.context || `${originUnit.name} requires your decision`,
+      timestamp: Date.now()
+    }
+
+    this.notify()
+
+    // Pause and wait for user decision
+    const decision = await new Promise(resolve => {
+      this.escalationResolvers.set(escalationId, resolve)
+    })
+
+    // Clear pending escalation
+    this.pendingEscalation = null
+    this.escalationResolvers.delete(escalationId)
+
+    // Process the decision
+    this.addMessage(createMessage(
+      MessageType.ORDER,
+      'chief',
+      originUnit.id,
+      `[DIRECTIVE] Chief decision: ${decision.action.toUpperCase()}${decision.message ? ' - ' + decision.message : ''}`,
+      { decision: decision.action }
+    ))
+
+    this.updateUnit('chief', {
+      status: UnitStatus.COMPLETED,
+      currentTask: null
+    })
+
+    // Update original unit based on decision
+    if (decision.action === 'approve') {
+      this.updateUnit(step.unitId, {
+        status: UnitStatus.ACTIVE,
+        currentTask: 'Proceeding with Chief approval'
+      })
+      await this.wait(500)
+      this.updateUnit(step.unitId, {
+        status: UnitStatus.COMPLETED,
+        currentTask: null
+      })
+      this.completedTasks++
+    } else if (decision.action === 'deny') {
+      this.updateUnit(step.unitId, {
+        status: UnitStatus.FAILED,
+        currentTask: null
+      })
+    } else {
+      // defer
+      this.updateUnit(step.unitId, {
+        status: UnitStatus.IDLE,
+        currentTask: 'Deferred - awaiting further instructions'
+      })
+    }
+
+    this.notify()
+  }
+
+  // Called by UI when user makes a decision on an escalation
+  resolveChiefEscalation(escalationId, decision) {
+    const resolver = this.escalationResolvers.get(escalationId)
+    if (resolver) {
+      resolver(decision)
+    }
   }
 }
 
