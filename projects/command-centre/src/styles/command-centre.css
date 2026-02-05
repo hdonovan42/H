@@ -58,6 +58,67 @@ body {
   min-height: 0;
 }
 
+/* Desktop: 3-column layout */
+@media (min-width: 1200px) {
+  .command-centre {
+    grid-template-columns: 260px 1fr 300px;
+    grid-template-rows: 1fr;
+    grid-template-areas: "chief hierarchy operations";
+    padding: 12px 20px;
+    height: 100vh;
+  }
+
+  .chief-panel {
+    grid-area: chief;
+    max-height: 100%;
+    overflow-y: auto;
+  }
+
+  .chief-panel .chief-content {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .chief-panel .stats-bar {
+    margin-left: 0;
+    justify-content: space-around;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .chief-panel .stats-bar .stat:last-child {
+    flex-basis: 100%;
+    text-align: center;
+    padding-top: 8px;
+    border-top: 1px solid var(--green-border);
+  }
+
+  .chief-panel .simulation-controls {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .chief-panel .speed-control {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: none;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--green-border);
+    width: 100%;
+    justify-content: center;
+  }
+
+  .hierarchy-panel {
+    grid-area: hierarchy;
+    min-height: 0;
+  }
+
+  .operations-panel {
+    grid-area: operations;
+  }
+}
+
 /* Panel Base */
 .panel {
   background: var(--bg-panel);
@@ -253,6 +314,7 @@ body {
 .hierarchy-panel .panel-content {
   flex: 1;
   padding: 0;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -261,6 +323,66 @@ body {
     linear-gradient(90deg, var(--green-muted) 1px, transparent 1px);
   background-size: 40px 40px;
   background-position: center center;
+}
+
+.hierarchy-legend {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: var(--bg-dark);
+  border: 1px solid var(--green-border);
+  padding: 8px 12px;
+  pointer-events: none;
+}
+
+.hierarchy-legend-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--green-text);
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.hierarchy-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 8px;
+  color: var(--text-secondary);
+}
+
+.hierarchy-legend-item + .hierarchy-legend-item {
+  margin-top: 6px;
+}
+
+.hierarchy-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.hierarchy-legend-dot.dot-idle {
+  background: var(--bg-panel);
+  border: 1px solid var(--green-border);
+}
+
+.hierarchy-legend-dot.dot-active {
+  background: var(--green-muted);
+  border: 2px solid var(--green-accent);
+}
+
+.hierarchy-legend-dot.dot-complete {
+  background: var(--green-muted);
+  border: 1px solid var(--status-complete);
+}
+
+.hierarchy-legend-dot.dot-failed {
+  background: #1a1212;
+  border: 1px solid var(--status-error);
 }
 
 .hierarchy-tree {
@@ -326,6 +448,21 @@ body {
   display: flex;
   flex-direction: column;
   max-height: 250px;
+}
+
+@media (min-width: 1200px) {
+  .operations-panel {
+    max-height: none;
+    position: relative;
+  }
+
+  .operations-panel .panel-content {
+    position: absolute;
+    top: 37px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+  }
 }
 
 .operations-panel .panel-content {

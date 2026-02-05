@@ -168,9 +168,46 @@ function generateConnections(units, positions) {
   return connections
 }
 
+// Compute tight bounding box around all visible content
+function computeContentBounds(positions, units) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+
+  positions.forEach((pos, id) => {
+    const unit = units.get(id)
+    if (!unit) return
+    const radius = LAYOUT.nodeRadius[unit.rank] || 15
+
+    // Horizontal: node radius + margin for label overflow
+    minX = Math.min(minX, pos.x - radius - 30)
+    maxX = Math.max(maxX, pos.x + radius + 30)
+    // Vertical: radius + active ring above, label below
+    minY = Math.min(minY, pos.y - radius - 5)
+    maxY = Math.max(maxY, pos.y + radius + 20)
+
+    // Officers have swarm clouds + company label below
+    if (unit.rank === UnitRank.OFFICER) {
+      const swarmBottom = pos.y + 50 + 12.5 + 20
+      maxY = Math.max(maxY, swarmBottom)
+    }
+  })
+
+  if (!isFinite(minX)) {
+    return { x: 0, y: 0, width: LAYOUT.width, height: LAYOUT.height }
+  }
+
+  const pad = 25
+  return {
+    x: minX - pad,
+    y: minY - pad,
+    width: (maxX - minX) + pad * 2,
+    height: (maxY - minY) + pad * 2
+  }
+}
+
 export default function HierarchyTree({ units, onUnitClick }) {
   const positions = useMemo(() => calculatePositions(units), [units])
   const connections = useMemo(() => generateConnections(units, positions), [units, positions])
+  const bounds = useMemo(() => computeContentBounds(positions, units), [positions, units])
 
   // Zoom and pan state
   const [zoom, setZoom] = useState(1)
@@ -220,17 +257,19 @@ export default function HierarchyTree({ units, onUnitClick }) {
       // Check if any content is still visible, snap back only if nothing is in view
       setPan(p => {
         // Calculate content bounds after transform
-        const contentMinX = LAYOUT.width / 2 * (1 - zoom) + p.x
-        const contentMaxX = LAYOUT.width / 2 * (1 + zoom) + p.x
-        const contentMinY = LAYOUT.height / 2 * (1 - zoom) + p.y
-        const contentMaxY = LAYOUT.height / 2 * (1 + zoom) + p.y
+        const cx = bounds.x + bounds.width / 2
+        const cy = bounds.y + bounds.height / 2
+        const contentMinX = cx + p.x - bounds.width / 2 * zoom
+        const contentMaxX = cx + p.x + bounds.width / 2 * zoom
+        const contentMinY = cy + p.y - bounds.height / 2 * zoom
+        const contentMaxY = cy + p.y + bounds.height / 2 * zoom
 
         // Check if content is completely outside viewport
         const outOfView =
-          contentMaxX < 0 ||
-          contentMinX > LAYOUT.width ||
-          contentMaxY < 0 ||
-          contentMinY > LAYOUT.height
+          contentMaxX < bounds.x ||
+          contentMinX > bounds.x + bounds.width ||
+          contentMaxY < bounds.y ||
+          contentMinY > bounds.y + bounds.height
 
         if (outOfView) {
           return { x: 0, y: 0 }
@@ -238,7 +277,7 @@ export default function HierarchyTree({ units, onUnitClick }) {
         return p
       })
     }
-  }, [zoom])
+  }, [zoom, bounds])
 
   const resetView = useCallback(() => {
     setZoom(1)
@@ -388,10 +427,11 @@ export default function HierarchyTree({ units, onUnitClick }) {
   }
 
   return (
+    <>
     <svg
       ref={svgRef}
       className="hierarchy-tree"
-      viewBox={`0 0 ${LAYOUT.width} ${LAYOUT.height}`}
+      viewBox={`${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`}
       preserveAspectRatio="xMidYMid meet"
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
@@ -417,7 +457,7 @@ export default function HierarchyTree({ units, onUnitClick }) {
       </defs>
 
       {/* Zoomable/pannable content */}
-      <g transform={`translate(${LAYOUT.width / 2 + pan.x}, ${LAYOUT.height / 2 + pan.y}) scale(${zoom}) translate(${-LAYOUT.width / 2}, ${-LAYOUT.height / 2})`}>
+      <g transform={`translate(${bounds.x + bounds.width / 2 + pan.x}, ${bounds.y + bounds.height / 2 + pan.y}) scale(${zoom}) translate(${-(bounds.x + bounds.width / 2)}, ${-(bounds.y + bounds.height / 2)})`}>
 
       {/* Connection lines */}
       <g className="connections">
@@ -488,35 +528,26 @@ export default function HierarchyTree({ units, onUnitClick }) {
 
       </g>{/* End zoomable content */}
 
-      {/* Legend - fixed position */}
-      <g transform={`translate(${LAYOUT.width - 110}, ${LAYOUT.height - 85})`}>
-        <rect x={-8} y={-8} width={105} height={88} fill="#0c0e0c" rx={0} stroke="#3d5c3d" />
-        <text className="unit-label" y={6} fontSize={9} fill="#7fa87f">STATUS</text>
-
-        <g transform="translate(0, 20)">
-          <circle r={4} fill="#111411" stroke="#3d5c3d" />
-          <text className="unit-status-label" x={10} y={3}>Idle</text>
-        </g>
-        <g transform="translate(0, 36)">
-          <circle r={4} fill="#2d422d" stroke="#5a8a5a" strokeWidth={2} />
-          <text className="unit-status-label" x={10} y={3}>Active</text>
-        </g>
-        <g transform="translate(0, 52)">
-          <circle r={4} fill="#2d422d" stroke="#4a7a4a" />
-          <text className="unit-status-label" x={10} y={3}>Complete</text>
-        </g>
-        <g transform="translate(0, 68)">
-          <circle r={4} fill="#1a1212" stroke="#8a4a4a" />
-          <text className="unit-status-label" x={10} y={3}>Failed</text>
-        </g>
-      </g>
-
-      {/* Zoom indicator */}
-      <g transform="translate(10, 20)">
-        <text fill="#5a6a5a" fontSize="10" fontFamily="IBM Plex Mono">
-          {Math.round(zoom * 100)}%
-        </text>
-      </g>
     </svg>
+    <div className="hierarchy-legend">
+      <div className="hierarchy-legend-title">STATUS</div>
+      <div className="hierarchy-legend-item">
+        <span className="hierarchy-legend-dot dot-idle" />
+        <span>Idle</span>
+      </div>
+      <div className="hierarchy-legend-item">
+        <span className="hierarchy-legend-dot dot-active" />
+        <span>Active</span>
+      </div>
+      <div className="hierarchy-legend-item">
+        <span className="hierarchy-legend-dot dot-complete" />
+        <span>Complete</span>
+      </div>
+      <div className="hierarchy-legend-item">
+        <span className="hierarchy-legend-dot dot-failed" />
+        <span>Failed</span>
+      </div>
+    </div>
+    </>
   )
 }
