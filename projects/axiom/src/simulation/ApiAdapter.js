@@ -147,6 +147,69 @@ export class ApiAdapter {
     }
   }
 
+  async runSession(sessionType, onEvent) {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/session/run`, {
+        method: 'POST',
+        headers: this._headers(),
+        credentials: 'include',
+        body: JSON.stringify({ sessionType })
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        let errorMsg = `API error (${response.status}): ${errorText}`
+        if (response.status === 409) {
+          try { errorMsg = JSON.parse(errorText).error } catch { /* use raw */ }
+        }
+        return { success: false, error: errorMsg }
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let lastEvent = null
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop()
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6).trim()
+          if (data === '[DONE]') continue
+
+          try {
+            const event = JSON.parse(data)
+            lastEvent = event
+            if (onEvent) onEvent(event)
+          } catch { /* skip unparseable */ }
+        }
+      }
+
+      return { success: true, lastEvent }
+    } catch (error) {
+      return { success: false, error: `Network error: ${error.message}` }
+    }
+  }
+
+  async checkActiveSession() {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/session/active`, {
+        credentials: 'include',
+        headers: this._headers()
+      })
+      if (!response.ok) return { active: false }
+      return await response.json()
+    } catch {
+      return { active: false }
+    }
+  }
+
   async route(message) {
     try {
       const response = await fetch(`${this.baseUrl}/api/route`, {

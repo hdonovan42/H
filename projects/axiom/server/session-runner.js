@@ -3,6 +3,7 @@ import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { executeCall } from './claude-client.js'
 import { buildSystemPrompt } from './prompts.js'
+import { DIRECTORS } from '../shared/identity.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -28,7 +29,11 @@ function buildStateSummary(state) {
   }
 
   if (state.knowledgeBase.discoveredActuators.length > 0) {
-    lines.push(`\nDiscovered actuators: ${state.knowledgeBase.discoveredActuators.join(', ')}`)
+    lines.push(`\nDiscovered actuators (from prior sessions):`)
+    for (const a of state.knowledgeBase.discoveredActuators) {
+      if (typeof a === 'string') { lines.push(`- ${a}`); continue }
+      lines.push(`- ${a.name} [${a.status}, feasibility: ${a.feasibility}] — ${a.description}`)
+    }
   }
 
   if (Object.keys(state.knowledgeBase.revisedFeasibility).length > 0) {
@@ -55,11 +60,16 @@ function buildStateSummary(state) {
   return lines.join('\n')
 }
 
-function buildActuatorLandscape(actuators) {
+function buildActuatorLandscape(actuators, discovered = []) {
   const byCategory = {}
   for (const a of actuators) {
     if (!byCategory[a.category]) byCategory[a.category] = []
     byCategory[a.category].push(`${a.name} [${a.status}, feasibility: ${a.feasibility}]`)
+  }
+  for (const a of discovered) {
+    if (typeof a === 'string') continue
+    if (!byCategory[a.category]) byCategory[a.category] = []
+    byCategory[a.category].push(`${a.name} [${a.status}, feasibility: ${a.feasibility}] (discovered)`)
   }
 
   const lines = []
@@ -70,51 +80,55 @@ function buildActuatorLandscape(actuators) {
   return lines.join('\n')
 }
 
-function buildHypothesisStatus(hypotheses, hypothesisResults = {}) {
+function buildHypothesisStatus(hypotheses, hypothesisResults = {}, groundTruth = {}) {
   return hypotheses.map(h => {
-    const runtimeStatus = hypothesisResults[h.id] || h.status
-    return `${h.id}: ${h.name} — ${runtimeStatus} (priority: ${h.priority})${h.blockedBy.length ? ` [blocked by: ${h.blockedBy.join(', ')}]` : ''}`
+    const gt = groundTruth[h.id]
+    const runtimeStatus = gt || hypothesisResults[h.id] || h.status
+    const tag = gt ? ' [CONFIRMED — do not reassess]' : ''
+    return `${h.id}: ${h.name} — ${runtimeStatus} (priority: ${h.priority})${h.blockedBy.length ? ` [blocked by: ${h.blockedBy.join(', ')}]` : ''}${tag}`
   }).join('\n')
 }
 
-function parseTasks(text) {
-  const tasks = []
-  const re = /<TASK>([\s\S]*?)<\/TASK>/g
+function parseTagBlocks(text, tagName) {
+  const blocks = []
+  const re = new RegExp(`<${tagName}>([\\s\\S]*?)(?:<\\/${tagName}>|(?=<${tagName}>)|$)`, 'g')
   let m
   while ((m = re.exec(text)) !== null) {
-    tasks.push(m[1].trim())
+    const content = m[1].trim()
+    if (content) blocks.push(content)
   }
-  return tasks
+  return blocks
 }
 
-function parseFindings(text) {
-  const findings = []
-  const re = /<FINDING>([\s\S]*?)<\/FINDING>/g
-  let m
-  while ((m = re.exec(text)) !== null) {
-    findings.push(m[1].trim())
-  }
-  return findings
-}
+function parseTasks(text) { return parseTagBlocks(text, 'TASK') }
+function parseFindings(text) { return parseTagBlocks(text, 'FINDING') }
+function parseUpdates(text) { return parseTagBlocks(text, 'UPDATE') }
+function parseHypothesisUpdates(text) { return parseTagBlocks(text, 'HYPOTHESIS') }
 
-function parseUpdates(text) {
-  const updates = []
-  const re = /<UPDATE>([\s\S]*?)<\/UPDATE>/g
-  let m
-  while ((m = re.exec(text)) !== null) {
-    updates.push(m[1].trim())
+function parseActuatorDiscoveries(text, seedIds) {
+  const blocks = parseTagBlocks(text, 'ACTUATOR')
+  const results = []
+  for (const block of blocks) {
+    try {
+      const obj = JSON.parse(block)
+      if (!obj.id || !obj.name || !obj.category) continue
+      if (seedIds.has(obj.id)) continue
+      results.push({
+        id: obj.id,
+        name: obj.name,
+        category: obj.category,
+        description: obj.description || '',
+        feasibility: obj.feasibility ?? 0.1,
+        desirability: obj.desirability ?? 0.5,
+        status: 'theoretical',
+        risk: obj.risk || 'medium',
+        dependencies: obj.dependencies || [],
+        linkedHypotheses: obj.linkedHypotheses || [],
+        discoveredBy: obj.discoveredBy || null
+      })
+    } catch { /* skip malformed JSON */ }
   }
-  return updates
-}
-
-function parseHypothesisUpdates(text) {
-  const updates = []
-  const re = /<HYPOTHESIS>([\s\S]*?)<\/HYPOTHESIS>/g
-  let m
-  while ((m = re.exec(text)) !== null) {
-    updates.push(m[1].trim())
-  }
-  return updates
+  return results
 }
 
 /**
@@ -124,26 +138,32 @@ function parseHypothesisUpdates(text) {
  * @returns {{ session, knowledgeUpdates, error }}
  */
 export async function runSession(state, options = {}) {
-  const { sessionType = 'auto', verbose = false, dryRun = false } = options
+  const { sessionType = 'auto', verbose = false, dryRun = false, onEvent = () => {} } = options
   const startTime = Date.now()
   const { actuators, hypotheses } = loadSeedData()
+  const seedActuatorIds = new Set(actuators.map(a => a.id))
 
   const log = verbose ? (...args) => console.log(...args) : () => {}
 
   const stateSummary = buildStateSummary(state)
-  const actuatorLandscape = buildActuatorLandscape(actuators)
-  const hypothesisStatus = buildHypothesisStatus(hypotheses, state.knowledgeBase.hypothesisResults || {})
+  const actuatorLandscape = buildActuatorLandscape(actuators, state.knowledgeBase.discoveredActuators)
+  const hypothesisStatus = buildHypothesisStatus(
+    hypotheses,
+    state.knowledgeBase.hypothesisResults || {},
+    state.knowledgeBase.groundTruth || {}
+  )
 
   const totalTokens = { input: 0, output: 0 }
   let totalSearchCount = 0
 
   // --- Phase 1: Director Planning ---
   log('\n[Phase 1] Director Planning...')
+  onEvent({ type: 'phase', phase: 'planning' })
 
-  const directorUnit = { id: 'dir-research', name: 'Research Director', rank: 'general' }
-  const directorSystemPrompt = buildSystemPrompt(directorUnit, 'Autonomous AXIOM research session')
+  const directorUnit = { id: 'dir-research', name: DIRECTORS['dir-research'].name, rank: 'general' }
+  const directorSystemPrompt = buildSystemPrompt(directorUnit, 'Autonomous AXIOM acquisition session')
 
-  const planningMessage = `You are running an autonomous research session for AXIOM — the AI actuator research system.
+  const planningMessage = `You are running an autonomous acquisition session for AXIOM — the AI actuator research system.
 
 Session type: ${sessionType}
 
@@ -156,8 +176,10 @@ ${hypothesisStatus}
 ACTUATOR LANDSCAPE:
 ${actuatorLandscape}
 
-Your task: Plan this session. Choose 1-2 focused research tasks for analysts to execute.
-${sessionType === 'auto' ? 'Pick whichever session type (literature review, status assessment, experiment design) would be most productive given the current state.' : `Focus on: ${sessionType}`}
+Your task: Plan this session. Choose 1-2 focused tasks for analysts to execute.
+${sessionType === 'auto' ? `Your default objective is hypothesis advancement. Pick the highest-priority unblocked hypothesis and design tasks that move it toward pass or fail. If no hypothesis can be advanced this session, explain why and fall back to status assessment or gap analysis. Only choose literature review if you have a specific evidence gap that blocks a hypothesis.` : `Focus on: ${sessionType}`}
+
+For each analyst task, be specific about the expected deliverable — not "research X" but "find the exact steps to do X" or "verify whether Y is possible by testing Z".
 
 Return your plan, then list each analyst task inside <TASK>...</TASK> blocks. Each task should be a clear, self-contained instruction that an analyst can execute with web search.`
 
@@ -179,6 +201,7 @@ Return your plan, then list each analyst task inside <TASK>...</TASK> blocks. Ea
   })
 
   if (!planResult.success) {
+    onEvent({ type: 'error', error: `Phase 1 failed: ${planResult.error}` })
     return { session: null, knowledgeUpdates: null, error: `Phase 1 failed: ${planResult.error}` }
   }
 
@@ -189,6 +212,7 @@ Return your plan, then list each analyst task inside <TASK>...</TASK> blocks. Ea
   const tasks = parseTasks(directorPlan)
   log(`  Director plan received (${planResult.tokens.total} tokens)`)
   log(`  Tasks extracted: ${tasks.length}`)
+  onEvent({ type: 'plan', taskCount: tasks.length, summary: directorPlan.slice(0, 300) })
 
   if (tasks.length === 0) {
     log('  WARNING: No <TASK> blocks found — using full response as single task')
@@ -204,6 +228,7 @@ Return your plan, then list each analyst task inside <TASK>...</TASK> blocks. Ea
   for (let i = 0; i < tasks.length; i++) {
     const task = tasks[i]
     log(`  Analyst ${i + 1}/${tasks.length}: ${task.slice(0, 80)}...`)
+    onEvent({ type: 'task_start', index: i, total: tasks.length, description: task.slice(0, 200) })
 
     const analystUnit = { id: `analyst-${i + 1}`, name: `Analyst ${i + 1}`, rank: 'officer' }
     const analystSystemPrompt = buildSystemPrompt(analystUnit, 'Autonomous AXIOM research session')
@@ -228,14 +253,16 @@ Return your plan, then list each analyst task inside <TASK>...</TASK> blocks. Ea
 
     analystFindings.push(analystResult.result)
     log(`  Analyst ${i + 1} complete (${analystResult.tokens.total} tokens, ${analystResult.searchCount || 0} searches)`)
+    onEvent({ type: 'task_complete', index: i, tokens: analystResult.tokens.total, searchCount: analystResult.searchCount || 0 })
   }
 
   // --- Phase 3: Director Synthesis ---
   log('\n[Phase 3] Director Synthesis...')
+  onEvent({ type: 'phase', phase: 'synthesis' })
 
   const findingsBlock = analystFindings.map((f, i) => `=== Analyst ${i + 1} Findings ===\n${f}`).join('\n\n')
 
-  const synthesisMessage = `You are synthesising the results of an AXIOM research session.
+  const synthesisMessage = `You are synthesising the results of an AXIOM acquisition session.
 
 ORIGINAL PLAN:
 ${directorPlan}
@@ -243,21 +270,40 @@ ${directorPlan}
 ANALYST FINDINGS:
 ${findingsBlock}
 
+CURRENT HYPOTHESIS STATUS:
+${hypothesisStatus}
+
 Your task:
-1. Synthesise the findings into a coherent summary.
-2. Identify key discoveries worth persisting to the knowledge base — wrap each in <FINDING>...</FINDING> blocks (one sentence each).
-3. If any actuator feasibility scores or statuses should be revised based on evidence, wrap each proposed change in <UPDATE>actuator-id: new-feasibility-score (reason)</UPDATE> blocks.
-4. If any hypothesis status should change based on session evidence, wrap each in <HYPOTHESIS>hypothesis-id: new-status (reason)</HYPOTHESIS> blocks. Valid statuses: passed, failed, in-progress.
-5. Suggest what the next session should focus on.`
+1. Acquisition progress — For each hypothesis targeted this session, state whether it moved closer to pass/fail and what evidence supports that assessment. Be honest: if the session produced no actionable progress, say so.
+
+2. Key discoveries — wrap each in tags (one sentence each):
+   <FINDING>The specific finding text.</FINDING>
+
+3. If any actuator feasibility scores should change based on evidence:
+   <UPDATE>actuator-id: 0.75 (brief reason)</UPDATE>
+
+4. IMPORTANT — Review each hypothesis against the session evidence and update status where warranted. You MUST evaluate hypotheses explicitly. For each hypothesis that has relevant evidence, emit:
+   <HYPOTHESIS>H001: in-progress (brief reason)</HYPOTHESIS>
+   Valid statuses: passed, failed, in-progress
+   Use the exact format above. Always close the tag.
+
+5. If your research reveals actuator capabilities NOT in the current taxonomy, propose them:
+   <ACTUATOR>{"id": "kebab-case-id", "name": "Human Name", "category": "cognitive|physical|social|digital|economic|informational|meta", "description": "One sentence.", "feasibility": 0.3}</ACTUATOR>
+   Only propose genuinely new mechanisms — not restatements of existing actuators.
+
+6. Next session directive — State the single most impactful action for the next session. Frame it as: "Next session should [verb] [specific objective] to advance [hypothesis ID]." Do NOT suggest broad literature review unless you identify a specific evidence gap.
+
+CRITICAL: Every <FINDING>, <UPDATE>, <HYPOTHESIS>, and <ACTUATOR> block MUST have a closing tag. Example: <HYPOTHESIS>H005: in-progress (evidence found)</HYPOTHESIS>`
 
   const synthesisResult = await executeCall({
     model: 'opus',
     systemPrompt: directorSystemPrompt,
     userMessage: synthesisMessage,
-    maxTokens: 2048
+    maxTokens: 4096
   })
 
   if (!synthesisResult.success) {
+    onEvent({ type: 'error', error: `Phase 3 failed: ${synthesisResult.error}` })
     return { session: null, knowledgeUpdates: null, error: `Phase 3 failed: ${synthesisResult.error}` }
   }
 
@@ -269,10 +315,13 @@ Your task:
   const proposedUpdates = parseUpdates(synthesis)
   const proposedHypothesisUpdates = parseHypothesisUpdates(synthesis)
 
+  const discoveredActuators = parseActuatorDiscoveries(synthesis, seedActuatorIds)
+
   log(`  Synthesis complete (${synthesisResult.tokens.total} tokens)`)
   log(`  Key findings: ${keyFindings.length}`)
   log(`  Proposed updates: ${proposedUpdates.length}`)
   log(`  Hypothesis updates: ${proposedHypothesisUpdates.length}`)
+  log(`  Discovered actuators: ${discoveredActuators.length}`)
 
   // Build session record
   const durationMs = Date.now() - startTime
@@ -299,18 +348,18 @@ Your task:
     }
   }
 
-  const validHypothesisStatuses = ['passed', 'failed', 'in-progress']
   const hypothesisResults = {}
   for (const update of proposedHypothesisUpdates) {
-    const match = update.match(/^(H\d{3}):\s*([\w-]+)/)
-    if (match && validHypothesisStatuses.includes(match[2])) {
-      hypothesisResults[match[1]] = match[2]
+    const idMatch = update.match(/^(H\d{3})/)
+    const statusMatch = update.match(/\b(passed|failed|in-progress)\b/)
+    if (idMatch && statusMatch) {
+      hypothesisResults[idMatch[1]] = statusMatch[1]
     }
   }
 
   const knowledgeUpdates = {
     keyFindings,
-    discoveredActuators: [], // Director would need to explicitly tag these
+    discoveredActuators,
     revisedFeasibility,
     hypothesisResults
   }
@@ -318,6 +367,8 @@ Your task:
   log(`\nSession complete in ${(durationMs / 1000).toFixed(1)}s`)
   log(`Total tokens: ${totalTokens.input + totalTokens.output} (in: ${totalTokens.input}, out: ${totalTokens.output})`)
   log(`Web searches: ${totalSearchCount}`)
+
+  onEvent({ type: 'done', session, knowledgeUpdates })
 
   return { session, knowledgeUpdates, error: null }
 }

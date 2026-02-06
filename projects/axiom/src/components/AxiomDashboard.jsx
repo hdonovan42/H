@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { getSimulator, UnitStatus } from '../simulation/AgentSimulator'
 import { ApiAdapter } from '../simulation/ApiAdapter'
-import { scenarios } from '../simulation/scenarios/axiom-sessions'
 import actuatorsData from '../data/actuators.json'
 import hypothesesData from '../data/hypotheses.json'
 import ActuatorGraph from './ActuatorGraph'
@@ -13,14 +12,20 @@ import useCliState from '../hooks/useCliState'
 
 const STATUS_OPTIONS = ['confirmed', 'theoretical', 'blocked', 'impossible']
 
+const SESSION_TYPES = [
+  { id: 'auto', name: 'Auto', description: 'Autonomous hypothesis advancement — picks highest-priority unblocked hypothesis' },
+  { id: 'literature', name: 'Literature', description: 'Literature review — searches for academic and technical evidence' },
+  { id: 'status', name: 'Status', description: 'Status assessment — evaluates current knowledge and identifies gaps' },
+  { id: 'experiment', name: 'Experiment', description: 'Experiment design — creates testable protocols for hypotheses' }
+]
+
 export default function AxiomDashboard() {
   const [simulator] = useState(() => getSimulator())
   const [state, setState] = useState(() => simulator.getState())
-  const [selectedScenario, setSelectedScenario] = useState(scenarios[0])
-  const [speed, setSpeed] = useState(1)
+  const [selectedSessionType, setSelectedSessionType] = useState(SESSION_TYPES[0])
   const [selectedActuator, setSelectedActuator] = useState(null)
   const [escalationMessage, setEscalationMessage] = useState('')
-  const [mode, setMode] = useState('simulation')
+  const [apiAdapter, setApiAdapter] = useState(null)
   const [apiStatus, setApiStatus] = useState(null)
   const [apiError, setApiError] = useState(null)
   const [statusFilter, setStatusFilter] = useState([])
@@ -33,26 +38,29 @@ export default function AxiomDashboard() {
     return unsubscribe
   }, [simulator])
 
-  const handleStart = useCallback(() => {
-    simulator.start(selectedScenario)
-  }, [simulator, selectedScenario])
+  // Auto health-check on mount
+  useEffect(() => {
+    const adapter = new ApiAdapter()
+    setApiAdapter(adapter)
+    setApiStatus('checking')
+    adapter.healthCheck().then(health => {
+      setApiStatus(health.ok ? 'ok' : 'error')
+      setApiError(health.ok ? null : health.error)
+    })
+  }, [])
 
-  const handlePause = useCallback(() => {
-    if (state.isPaused) {
-      simulator.resume()
-    } else {
-      simulator.pause()
+  const handleStart = useCallback(async () => {
+    if (!apiAdapter) return
+    setApiError(null)
+    try {
+      await simulator.startRealSession(selectedSessionType.id, apiAdapter)
+    } catch (err) {
+      setApiError(err.message)
     }
-  }, [simulator, state.isPaused])
+  }, [simulator, selectedSessionType, apiAdapter])
 
   const handleReset = useCallback(() => {
     simulator.reset()
-  }, [simulator])
-
-  const handleSpeedChange = useCallback((e) => {
-    const newSpeed = parseFloat(e.target.value)
-    setSpeed(newSpeed)
-    simulator.setSpeed(newSpeed)
   }, [simulator])
 
   const handleNodeClick = useCallback((actuator) => {
@@ -74,33 +82,6 @@ export default function AxiomDashboard() {
     }
   }, [simulator, state.pendingEscalation, escalationMessage])
 
-  const handleModeChange = useCallback(async (e) => {
-    const newMode = e.target.value
-
-    if (newMode === 'real') {
-      setApiStatus('checking')
-      setApiError(null)
-
-      const adapter = new ApiAdapter()
-      const health = await adapter.healthCheck()
-
-      if (health.ok) {
-        setApiStatus('ok')
-        setApiError(null)
-        simulator.setMode('real', adapter)
-        setMode('real')
-      } else {
-        setApiStatus('error')
-        setApiError(health.error)
-      }
-    } else {
-      simulator.setMode('simulation', null)
-      setMode('simulation')
-      setApiStatus(null)
-      setApiError(null)
-    }
-  }, [simulator])
-
   const toggleStatusFilter = useCallback((status) => {
     setStatusFilter(prev => {
       if (prev.includes(status)) {
@@ -110,15 +91,40 @@ export default function AxiomDashboard() {
     })
   }, [])
 
-  // Merge actuator data with CLI revised feasibility
+  // Merge actuator data with CLI revised feasibility + hypothesis results
   const mergedActuators = useMemo(() => {
-    if (!cliSummary?.revisedFeasibility) return actuatorsData
-    const revised = cliSummary.revisedFeasibility
-    if (Object.keys(revised).length === 0) return actuatorsData
-    return actuatorsData.map(a =>
-      revised[a.id] !== undefined ? { ...a, feasibility: revised[a.id], _revised: true } : a
-    )
-  }, [cliSummary?.revisedFeasibility])
+    // Build set of actuator IDs confirmed by passed hypotheses
+    const confirmedByHypothesis = new Set()
+    if (cliSummary?.hypothesisResults) {
+      for (const h of hypothesesData) {
+        if (cliSummary.hypothesisResults[h.id] === 'passed') {
+          h.linkedActuators.forEach(id => confirmedByHypothesis.add(id))
+        }
+      }
+    }
+
+    const revised = cliSummary?.revisedFeasibility || {}
+
+    const seedResult = actuatorsData.map(a => {
+      let updated = a
+      // Promote theoretical → confirmed if linked hypothesis passed
+      if (a.status === 'theoretical' && confirmedByHypothesis.has(a.id)) {
+        updated = { ...updated, status: 'confirmed', _revised: true }
+      }
+      // Merge revised feasibility
+      if (revised[a.id] !== undefined) {
+        updated = { ...updated, feasibility: revised[a.id], _revised: true }
+      }
+      return updated
+    })
+
+    // Append discovered actuators from CLI sessions
+    const discovered = (cliSummary?.discoveredActuators || [])
+      .filter(a => typeof a === 'object' && a.id)
+      .map(a => ({ ...a, _discovered: true, _revised: true }))
+
+    return [...seedResult, ...discovered]
+  }, [cliSummary?.revisedFeasibility, cliSummary?.hypothesisResults, cliSummary?.discoveredActuators])
 
   // Merge hypothesis data with CLI hypothesis results
   const mergedHypotheses = useMemo(() => {
@@ -163,65 +169,37 @@ export default function AxiomDashboard() {
           <div className="control-content">
             <div className="session-input">
               <select
-                value={selectedScenario.id}
-                onChange={(e) => setSelectedScenario(scenarios.find(s => s.id === e.target.value))}
+                value={selectedSessionType.id}
+                onChange={(e) => setSelectedSessionType(SESSION_TYPES.find(s => s.id === e.target.value))}
                 disabled={state.isRunning}
               >
-                {scenarios.map(s => (
+                {SESSION_TYPES.map(s => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
               </select>
+              <span className={`mode-status-dot ${apiStatus === 'ok' ? 'connected' : apiStatus === 'checking' ? 'checking' : apiStatus === 'error' ? 'error' : ''}`}></span>
             </div>
 
             <div className="simulation-controls">
-              {!state.isRunning ? (
-                <button className="btn btn-primary" onClick={handleStart}>
-                  {'>'} Start
-                </button>
-              ) : (
-                <button className="btn btn-secondary" onClick={handlePause}>
-                  {state.isPaused ? '> Resume' : '|| Pause'}
-                </button>
-              )}
+              <button
+                className="btn btn-primary"
+                onClick={handleStart}
+                disabled={state.isRunning || apiStatus !== 'ok'}
+              >
+                {'>'} Start
+              </button>
               <button
                 className="btn btn-secondary"
                 onClick={handleReset}
-                disabled={!state.isRunning && stats.active === 0 && stats.tokens === 0}
+                disabled={!state.isRunning && state.messages.length === 0}
               >
                 x Reset
               </button>
-
-              <div className="speed-control">
-                <label>Speed:</label>
-                <select value={speed} onChange={handleSpeedChange}>
-                  <option value={0.5}>0.5x</option>
-                  <option value={1}>1x</option>
-                  <option value={2}>2x</option>
-                  <option value={4}>4x</option>
-                </select>
-              </div>
             </div>
 
-            <div className="mode-control">
-              <div className="mode-toggle">
-                <label>Mode:</label>
-                <select
-                  value={mode}
-                  onChange={handleModeChange}
-                  disabled={state.isRunning}
-                >
-                  <option value="simulation">Simulation</option>
-                  <option value="real">Real (API)</option>
-                </select>
-                <span className={`mode-status-dot ${apiStatus === 'ok' ? 'connected' : apiStatus === 'checking' ? 'checking' : apiStatus === 'error' ? 'error' : ''}`}></span>
-              </div>
-              {apiStatus === 'error' && apiError && (
-                <div className="api-error">{apiError}</div>
-              )}
-              {apiStatus === 'ok' && (
-                <div className="api-connected">API connected</div>
-              )}
-            </div>
+            {apiError && (
+              <div className="api-error">{apiError}</div>
+            )}
 
             <div className="stats-bar">
               <div className="stat">
@@ -247,14 +225,12 @@ export default function AxiomDashboard() {
             </div>
           </div>
 
-          {selectedScenario && (
-            <div className="objective-bar">
-              <div className="objective-label">Objective</div>
-              <div className="objective-text">{selectedScenario.description}</div>
-            </div>
-          )}
+          <div className="objective-bar">
+            <div className="objective-label">Objective</div>
+            <div className="objective-text">{selectedSessionType.description}</div>
+          </div>
 
-          <HypothesisPanel hypotheses={mergedHypotheses} />
+          <HypothesisPanel hypotheses={mergedHypotheses} actuators={mergedActuators} />
         </div>
       </div>
 
@@ -322,7 +298,7 @@ export default function AxiomDashboard() {
                 if (!cliFullState) cliFetchFull()
               }}
             >
-              Research{cliSummary?.sessionCount ? ` (${cliSummary.sessionCount})` : ''}
+              Sessions{cliSummary?.sessionCount ? ` (${cliSummary.sessionCount})` : ''}
             </button>
           </div>
         </div>

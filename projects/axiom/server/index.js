@@ -3,7 +3,9 @@ import express from 'express'
 import cors from 'cors'
 import { executeCall, executeCallStream, AVAILABLE_MODELS } from './claude-client.js'
 import { buildSystemPrompt } from './prompts.js'
-import { loadState } from './state.js'
+import { loadState, saveState, nextSessionId, mergeKnowledgeUpdates } from './state.js'
+import { runSession } from './session-runner.js'
+import { DIRECTORS, DEFAULT_DIRECTOR } from '../shared/identity.js'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -39,6 +41,10 @@ function authMiddleware(req, res, next) {
 
 app.use('/api/execute', authMiddleware)
 app.use('/api/route', authMiddleware)
+app.use('/api/session', authMiddleware)
+
+// Concurrency guard for real sessions
+let activeSession = null
 
 // Session state
 const missions = new Map()
@@ -92,8 +98,12 @@ app.get('/api/state/summary', (req, res) => {
     totalSearches: state.sessions.reduce((sum, s) => sum + (s.searchCount || 0), 0),
     findingsCount: state.knowledgeBase?.keyFindings?.length || 0,
     revisedFeasibility: state.knowledgeBase?.revisedFeasibility || {},
-    hypothesisResults: state.knowledgeBase?.hypothesisResults || {},
-    lastSession
+    hypothesisResults: {
+      ...(state.knowledgeBase?.hypothesisResults || {}),
+      ...(state.knowledgeBase?.groundTruth || {})
+    },
+    lastSession,
+    discoveredActuators: state.knowledgeBase?.discoveredActuators || []
   })
 })
 
@@ -239,12 +249,14 @@ app.post('/api/route', async (req, res) => {
     })
   }
 
+  const directorList = Object.entries(DIRECTORS)
+    .map(([id, d]) => `- ${id}: ${d.specialty}`)
+    .join('\n')
+
   const routingPrompt = `You are an AXIOM task router. Given these directors and their specialties, assign the incoming task to the best one.
 
 Directors:
-- dir-research: Literature mining, taxonomy building, knowledge synthesis, paper analysis, data exploration
-- dir-strategy: Session planning, priority assessment, risk evaluation, hypothesis ranking, feasibility analysis
-- dir-experiment: Hypothesis testing, actuator acquisition, capability verification, experiment execution
+${directorList}
 
 Task: "${message}"
 
@@ -262,9 +274,9 @@ Respond with ONLY valid JSON (no markdown, no explanation):
     if (result.success) {
       try {
         const parsed = JSON.parse(result.result.trim())
-        const validIds = ['dir-research', 'dir-strategy', 'dir-experiment']
+        const validIds = Object.keys(DIRECTORS)
         if (!validIds.includes(parsed.directorId)) {
-          parsed.directorId = 'dir-research'
+          parsed.directorId = DEFAULT_DIRECTOR
           parsed.reasoning = (parsed.reasoning || '') + ' (corrected: invalid directorId)'
         }
         res.json({
@@ -284,14 +296,12 @@ Respond with ONLY valid JSON (no markdown, no explanation):
   }
 
   // Keyword fallback
-  const ROUTING_KEYWORDS = {
-    'dir-research': ['search', 'literature', 'taxonomy', 'read', 'paper', 'analyse', 'analyze', 'find', 'gather', 'review', 'mine'],
-    'dir-strategy': ['plan', 'prioritise', 'prioritize', 'assess', 'schedule', 'evaluate', 'strategy', 'rank', 'feasibility'],
-    'dir-experiment': ['test', 'hypothesis', 'acquire', 'execute', 'verify', 'implement', 'experiment', 'build', 'run']
-  }
+  const ROUTING_KEYWORDS = Object.fromEntries(
+    Object.entries(DIRECTORS).map(([id, d]) => [id, d.keywords])
+  )
 
   const lowerMessage = message.toLowerCase()
-  let bestMatch = { generalId: 'dir-research', confidence: 0.3, reasoning: 'Default assignment' }
+  let bestMatch = { generalId: DEFAULT_DIRECTOR, confidence: 0.3, reasoning: 'Default assignment' }
 
   for (const [directorId, keywords] of Object.entries(ROUTING_KEYWORDS)) {
     const matched = keywords.filter(kw => lowerMessage.includes(kw))
@@ -307,6 +317,63 @@ Respond with ONLY valid JSON (no markdown, no explanation):
 
   bestMatch.llmRouted = false
   res.json(bestMatch)
+})
+
+// Real session via SSE
+app.get('/api/session/active', (req, res) => {
+  res.json({ active: !!activeSession, session: activeSession })
+})
+
+app.post('/api/session/run', async (req, res) => {
+  const { sessionType } = req.body
+  const validTypes = ['auto', 'literature', 'status', 'experiment']
+
+  if (!sessionType || !validTypes.includes(sessionType)) {
+    return res.status(400).json({ success: false, error: `Invalid sessionType. Must be one of: ${validTypes.join(', ')}` })
+  }
+
+  if (activeSession) {
+    return res.status(409).json({ success: false, error: 'A session is already running', session: activeSession })
+  }
+
+  activeSession = { sessionType, startedAt: new Date().toISOString() }
+
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.flushHeaders()
+
+  const sendEvent = (event) => {
+    try { res.write(`data: ${JSON.stringify(event)}\n\n`) } catch { /* client disconnected */ }
+  }
+
+  try {
+    const state = loadState(STATE_PATH)
+
+    const { session, knowledgeUpdates, error } = await runSession(state, {
+      sessionType,
+      verbose: true,
+      onEvent: sendEvent
+    })
+
+    if (error) {
+      sendEvent({ type: 'error', error })
+    } else {
+      session.id = nextSessionId(state)
+      state.sessionCount++
+      state.sessions.push(session)
+      mergeKnowledgeUpdates(state, knowledgeUpdates)
+      saveState(STATE_PATH, state)
+      sendEvent({ type: 'session_saved', sessionId: session.id, sessionCount: state.sessionCount })
+    }
+  } catch (err) {
+    console.error('Session run error:', err)
+    sendEvent({ type: 'error', error: err.message })
+  } finally {
+    activeSession = null
+    res.write('data: [DONE]\n\n')
+    res.end()
+  }
 })
 
 // Session management

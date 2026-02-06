@@ -4,7 +4,7 @@ import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { config } from 'dotenv'
-import { loadState, saveState, nextSessionId } from './state.js'
+import { loadState, saveState, nextSessionId, mergeKnowledgeUpdates } from './state.js'
 import { runSession } from './session-runner.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -93,21 +93,7 @@ async function main() {
   state.sessions.push(session)
 
   // Merge knowledge updates
-  if (knowledgeUpdates) {
-    for (const finding of knowledgeUpdates.keyFindings) {
-      if (!state.knowledgeBase.keyFindings.includes(finding)) {
-        state.knowledgeBase.keyFindings.push(finding)
-      }
-    }
-    for (const actuator of knowledgeUpdates.discoveredActuators) {
-      if (!state.knowledgeBase.discoveredActuators.includes(actuator)) {
-        state.knowledgeBase.discoveredActuators.push(actuator)
-      }
-    }
-    Object.assign(state.knowledgeBase.revisedFeasibility, knowledgeUpdates.revisedFeasibility)
-    if (!state.knowledgeBase.hypothesisResults) state.knowledgeBase.hypothesisResults = {}
-    Object.assign(state.knowledgeBase.hypothesisResults, knowledgeUpdates.hypothesisResults)
-  }
+  mergeKnowledgeUpdates(state, knowledgeUpdates)
 
   // Save state
   if (!dryRun) {

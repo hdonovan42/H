@@ -1,6 +1,8 @@
 // AgentSimulator.js - AXIOM fork
 // Core simulation engine for actuator research agent orchestration
 
+import { DIRECTORS, DEFAULT_DIRECTOR, RANKS, ANALYSTS, SUPPORT_AGENTS } from '../../shared/identity.js'
+
 export const UnitStatus = {
   IDLE: 'idle',
   ACTIVE: 'active',
@@ -26,33 +28,19 @@ export const MessageType = {
   ESCALATE: 'escalate'
 }
 
-// Model configuration per rank tier
-export const MODEL_CONFIG = {
-  [UnitRank.CHIEF]: { model: 'user', displayName: 'User', cost: 0 },
-  [UnitRank.GENERAL]: { model: 'opus', displayName: 'Opus', cost: 'high' },
-  [UnitRank.OFFICER]: { model: 'sonnet', displayName: 'Sonnet', cost: 'medium' },
-  [UnitRank.SOLDIER]: { model: 'haiku', displayName: 'Haiku', cost: 'low' },
-  [UnitRank.DOG]: { model: 'haiku', displayName: 'Haiku', cost: 'low' }
-}
+// Model configuration per rank tier — derived from shared RANKS
+export const MODEL_CONFIG = Object.fromEntries(
+  Object.entries(RANKS).map(([rank, cfg]) => [rank, { ...cfg }])
+)
 
-// AXIOM routing keywords
-const ROUTING_CONFIG = {
-  'dir-research': {
-    name: 'Research',
-    keywords: ['search', 'literature', 'taxonomy', 'read', 'paper', 'analyse', 'analyze', 'find', 'gather', 'review', 'mine', 'explore', 'discover'],
-    priority: 1
-  },
-  'dir-strategy': {
-    name: 'Strategy',
-    keywords: ['plan', 'prioritise', 'prioritize', 'assess', 'schedule', 'evaluate', 'strategy', 'rank', 'feasibility', 'design', 'organize'],
-    priority: 2
-  },
-  'dir-experiment': {
-    name: 'Experiment',
-    keywords: ['test', 'hypothesis', 'acquire', 'execute', 'verify', 'implement', 'experiment', 'build', 'run', 'code', 'deploy'],
-    priority: 3
-  }
-}
+// AXIOM routing keywords — derived from shared DIRECTORS
+const ROUTING_CONFIG = Object.fromEntries(
+  Object.entries(DIRECTORS).map(([id, d], i) => [id, {
+    name: d.shortName,
+    keywords: d.keywords,
+    priority: i + 1
+  }])
+)
 
 function routeTask(taskMessage) {
   const lowerMessage = taskMessage.toLowerCase()
@@ -67,7 +55,7 @@ function routeTask(taskMessage) {
   }
 
   if (!bestMatch.id) {
-    bestMatch = { id: 'dir-research', score: 0, name: 'Research', matchedKeywords: ['(default)'] }
+    bestMatch = { id: DEFAULT_DIRECTOR, score: 0, name: DIRECTORS[DEFAULT_DIRECTOR].shortName, matchedKeywords: ['(default)'] }
   }
 
   return bestMatch
@@ -131,59 +119,34 @@ export class AgentSimulator {
     const core = createUnit('chief', 'AXIOM Core', UnitRank.CHIEF)
     this.units.set('chief', core)
 
-    // Directors (Opus tier)
-    const directors = [
-      createUnit('dir-research', 'Research Director', UnitRank.GENERAL, 'chief'),
-      createUnit('dir-strategy', 'Strategy Director', UnitRank.GENERAL, 'chief'),
-      createUnit('dir-experiment', 'Experiment Director', UnitRank.GENERAL, 'chief')
-    ]
+    // Directors (Opus tier) — from shared config
+    for (const [id, dir] of Object.entries(DIRECTORS)) {
+      const unit = createUnit(id, dir.name, UnitRank.GENERAL, 'chief')
+      this.units.set(id, unit)
+      core.childrenIds.push(id)
+    }
 
-    directors.forEach(d => {
-      this.units.set(d.id, d)
-      core.childrenIds.push(d.id)
-    })
-
-    // Analysts (Sonnet tier) under each Director
-    const analystConfigs = [
-      { parentId: 'dir-research', analysts: [
-        { name: 'Analyst Alpha', company: 'Research Team A', swarmSize: 120 },
-        { name: 'Analyst Bravo', company: 'Research Team B', swarmSize: 95 }
-      ]},
-      { parentId: 'dir-strategy', analysts: [
-        { name: 'Analyst Charlie', company: 'Strategy Team A', swarmSize: 110 },
-        { name: 'Analyst Delta', company: 'Strategy Team B', swarmSize: 85 }
-      ]},
-      { parentId: 'dir-experiment', analysts: [
-        { name: 'Analyst Echo', company: 'Experiment Team A', swarmSize: 150 },
-        { name: 'Analyst Foxtrot', company: 'Experiment Team B', swarmSize: 130 }
-      ]}
-    ]
-
+    // Analysts (Sonnet tier) — from shared config
     let analystIndex = 0
-    analystConfigs.forEach(config => {
-      const parent = this.units.get(config.parentId)
-      config.analysts.forEach(({ name, company, swarmSize }) => {
-        const analyst = createUnit(`officer-${analystIndex}`, name, UnitRank.OFFICER, config.parentId)
-        analyst.company = company
+    for (const [dirId, analysts] of Object.entries(ANALYSTS)) {
+      const parent = this.units.get(dirId)
+      for (const { name, team, swarmSize } of analysts) {
+        const analyst = createUnit(`officer-${analystIndex}`, name, UnitRank.OFFICER, dirId)
+        analyst.company = team
         analyst.swarmSize = swarmSize
         analyst.activeWorkers = 0
         this.units.set(analyst.id, analyst)
         parent.childrenIds.push(analyst.id)
         analystIndex++
-      })
-    })
+      }
+    }
 
-    // Support agents (Haiku tier)
-    const support = [
-      createUnit('dog-logger', 'Support: Recon', UnitRank.DOG, 'chief'),
-      createUnit('dog-cleanup', 'Support: Synthesis', UnitRank.DOG, 'chief'),
-      createUnit('dog-monitor', 'Support: Monitor', UnitRank.DOG, 'chief')
-    ]
-
-    support.forEach(s => {
-      this.units.set(s.id, s)
-      core.childrenIds.push(s.id)
-    })
+    // Support agents (Haiku tier) — from shared config
+    for (const { id, name } of SUPPORT_AGENTS) {
+      const unit = createUnit(id, name, UnitRank.DOG, 'chief')
+      this.units.set(id, unit)
+      core.childrenIds.push(id)
+    }
   }
 
   subscribe(listener) {
@@ -906,6 +869,100 @@ export class AgentSimulator {
     }
 
     this.notify()
+  }
+
+  async startRealSession(sessionType, apiAdapter) {
+    if (this.isRunning) return
+
+    this.reset()
+    this.isRunning = true
+    this.currentScenario = { name: sessionType, description: `Real ${sessionType} session` }
+    this.notify()
+
+    // Light up AXIOM Core
+    this.updateUnit('chief', { status: UnitStatus.ACTIVE, currentTask: `Running ${sessionType} session` })
+
+    try {
+      const result = await apiAdapter.runSession(sessionType, (event) => {
+        this._handleSessionEvent(event)
+      })
+
+      if (!result.success) {
+        this.addMessage(createMessage(MessageType.ALERT, 'chief', null, `Session failed: ${result.error}`))
+      }
+    } catch (error) {
+      this.addMessage(createMessage(MessageType.ALERT, 'chief', null, `Session error: ${error.message}`))
+    }
+
+    // Reset all unit statuses
+    this.units.forEach(unit => {
+      unit.status = UnitStatus.IDLE
+      unit.currentTask = null
+    })
+    this.isRunning = false
+    this.notify()
+  }
+
+  _handleSessionEvent(event) {
+    switch (event.type) {
+      case 'phase':
+        if (event.phase === 'planning') {
+          this.updateUnit('dir-research', { status: UnitStatus.ACTIVE, currentTask: 'Planning session' })
+          this.addMessage(createMessage(MessageType.INFO, 'dir-research', null, '[Phase 1] Director planning...'))
+        } else if (event.phase === 'synthesis') {
+          this.updateUnit('dir-research', { status: UnitStatus.ACTIVE, currentTask: 'Synthesising findings' })
+          this.addMessage(createMessage(MessageType.INFO, 'dir-research', null, '[Phase 3] Director synthesis...'))
+        }
+        break
+
+      case 'plan':
+        this.updateUnit('dir-research', { status: UnitStatus.COMPLETED, currentTask: null })
+        this.totalTasks = event.taskCount
+        this.addMessage(createMessage(MessageType.REPORT, 'dir-research', 'chief',
+          `Plan ready: ${event.taskCount} task${event.taskCount !== 1 ? 's' : ''} — ${event.summary}`))
+        break
+
+      case 'task_start': {
+        const officerId = `officer-${event.index}`
+        const officer = this.units.get(officerId)
+        if (officer) {
+          this.updateUnit(officerId, { status: UnitStatus.ACTIVE, currentTask: event.description })
+        }
+        this.addMessage(createMessage(MessageType.ORDER, 'dir-research', officerId || null,
+          `[Analyst ${event.index + 1}/${event.total}] ${event.description}`))
+        break
+      }
+
+      case 'task_complete': {
+        const officerId = `officer-${event.index}`
+        const officer = this.units.get(officerId)
+        if (officer) {
+          this.updateUnit(officerId, { status: UnitStatus.COMPLETED, currentTask: null })
+          officer.stats.tasksCompleted++
+          officer.stats.tokensUsed += event.tokens || 0
+        }
+        this.completedTasks++
+        this.addMessage(createMessage(MessageType.REPORT, officerId || 'chief', 'dir-research',
+          `Analyst ${event.index + 1} complete (${event.tokens} tokens, ${event.searchCount} searches)`))
+        break
+      }
+
+      case 'done':
+        this.updateUnit('dir-research', { status: UnitStatus.COMPLETED, currentTask: null })
+        this.updateUnit('chief', { status: UnitStatus.COMPLETED, currentTask: null })
+        this.addMessage(createMessage(MessageType.REPORT, 'dir-research', 'chief',
+          `Session complete — ${(event.session.durationMs / 1000).toFixed(1)}s, ${event.knowledgeUpdates?.keyFindings?.length || 0} findings`))
+        break
+
+      case 'session_saved':
+        this.addMessage(createMessage(MessageType.INFO, 'chief', null,
+          `Session saved as ${event.sessionId} (total: ${event.sessionCount})`))
+        break
+
+      case 'error':
+        this.addMessage(createMessage(MessageType.ALERT, 'chief', null, `Error: ${event.error}`))
+        break
+    }
   }
 
   resolveChiefEscalation(escalationId, decision) {
