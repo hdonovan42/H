@@ -1167,6 +1167,17 @@ body {
   font-weight: 600;
 }
 
+.hypothesis-result-status {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.hypothesis-result-status.status-passed { color: var(--status-confirmed); }
+.hypothesis-result-status.status-failed { color: var(--status-error); }
+.hypothesis-result-status.status-in-progress { color: var(--accent-bright); }
+
 /* Session Cards */
 .session-card {
   margin-bottom: 6px;

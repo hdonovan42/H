@@ -17,6 +17,8 @@ export default function ResearchPanel({ cliState, cliSummary, loading, onRefresh
   const revisedFeasibility = cliSummary?.revisedFeasibility || {}
   const sessions = cliState?.sessions || []
   const revisedEntries = Object.entries(revisedFeasibility)
+  const hypothesisResults = cliSummary?.hypothesisResults || {}
+  const hypothesisEntries = Object.entries(hypothesisResults)
 
   return (
     <div className="research-panel-content">
@@ -46,6 +48,19 @@ export default function ResearchPanel({ cliState, cliSummary, loading, onRefresh
             <div key={id} className="revised-row">
               <span className="revised-id">{id}</span>
               <span className="revised-score">{Math.round(score * 100)}%</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Hypothesis Results */}
+      {hypothesisEntries.length > 0 && (
+        <div className="research-section">
+          <div className="research-section-title">Hypothesis Results</div>
+          {hypothesisEntries.map(([id, status]) => (
+            <div key={id} className="revised-row">
+              <span className="revised-id">{id}</span>
+              <span className={`hypothesis-result-status status-${status}`}>{status}</span>
             </div>
           ))}
         </div>
@@ -84,7 +99,7 @@ export default function ResearchPanel({ cliState, cliSummary, loading, onRefresh
         </div>
       )}
 
-      {keyFindings.length === 0 && revisedEntries.length === 0 && sessions.length === 0 && (
+      {keyFindings.length === 0 && revisedEntries.length === 0 && hypothesisEntries.length === 0 && sessions.length === 0 && (
         <div className="research-empty">
           No CLI sessions recorded yet. Run <code>npm run cli</code> to start.
         </div>
