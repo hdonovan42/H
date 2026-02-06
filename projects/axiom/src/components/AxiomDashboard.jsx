@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { getSimulator, UnitStatus } from '../simulation/AgentSimulator'
 import { ApiAdapter } from '../simulation/ApiAdapter'
 import actuatorsData from '../data/actuators.json'
-import hypothesesData from '../data/hypotheses.json'
 import ActuatorGraph from './ActuatorGraph'
 import ActuatorDetail from './ActuatorDetail'
 import HypothesisPanel from './HypothesisPanel'
@@ -10,13 +9,13 @@ import SessionLog from './SessionLog'
 import ResearchPanel from './ResearchPanel'
 import useCliState from '../hooks/useCliState'
 
-const STATUS_OPTIONS = ['confirmed', 'theoretical', 'blocked', 'impossible']
+const STATUS_OPTIONS = ['confirmed', 'theoretical', 'blocked', 'distant']
 
 const SESSION_TYPES = [
-  { id: 'auto', name: 'Auto', description: 'Autonomous hypothesis advancement — picks highest-priority unblocked hypothesis' },
+  { id: 'auto', name: 'Auto', description: 'Autonomous actuator acquisition — picks highest-priority unblocked experiment' },
   { id: 'literature', name: 'Literature', description: 'Literature review — searches for academic and technical evidence' },
   { id: 'status', name: 'Status', description: 'Status assessment — evaluates current knowledge and identifies gaps' },
-  { id: 'experiment', name: 'Experiment', description: 'Experiment design — creates testable protocols for hypotheses' }
+  { id: 'experiment', name: 'Experiment', description: 'Experiment design — creates testable protocols for actuator acquisition' }
 ]
 
 export default function AxiomDashboard() {
@@ -91,25 +90,16 @@ export default function AxiomDashboard() {
     })
   }, [])
 
-  // Merge actuator data with CLI revised feasibility + hypothesis results
+  // Merge actuator data with CLI revised feasibility + actuator status overrides
   const mergedActuators = useMemo(() => {
-    // Build set of actuator IDs confirmed by passed hypotheses
-    const confirmedByHypothesis = new Set()
-    if (cliSummary?.hypothesisResults) {
-      for (const h of hypothesesData) {
-        if (cliSummary.hypothesisResults[h.id] === 'passed') {
-          h.linkedActuators.forEach(id => confirmedByHypothesis.add(id))
-        }
-      }
-    }
-
     const revised = cliSummary?.revisedFeasibility || {}
+    const statusOverrides = cliSummary?.actuatorStatuses || {}
 
     const seedResult = actuatorsData.map(a => {
       let updated = a
-      // Promote theoretical → confirmed if linked hypothesis passed
-      if (a.status === 'theoretical' && confirmedByHypothesis.has(a.id)) {
-        updated = { ...updated, status: 'confirmed', _revised: true }
+      // Apply status override from CLI sessions
+      if (statusOverrides[a.id] && statusOverrides[a.id] !== a.status) {
+        updated = { ...updated, status: statusOverrides[a.id], _revised: true }
       }
       // Merge revised feasibility
       if (revised[a.id] !== undefined) {
@@ -118,23 +108,24 @@ export default function AxiomDashboard() {
       return updated
     })
 
+    // Auto-promote: blocked → theoretical when all deps are confirmed
+    const confirmedIds = new Set(seedResult.filter(a => a.status === 'confirmed').map(a => a.id))
+    for (let i = 0; i < seedResult.length; i++) {
+      const a = seedResult[i]
+      if (a.status !== 'blocked') continue
+      const deps = a.dependencies || []
+      if (deps.length > 0 && deps.every(depId => confirmedIds.has(depId))) {
+        seedResult[i] = { ...a, status: 'theoretical', _revised: true }
+      }
+    }
+
     // Append discovered actuators from CLI sessions
     const discovered = (cliSummary?.discoveredActuators || [])
       .filter(a => typeof a === 'object' && a.id)
       .map(a => ({ ...a, _discovered: true, _revised: true }))
 
     return [...seedResult, ...discovered]
-  }, [cliSummary?.revisedFeasibility, cliSummary?.hypothesisResults, cliSummary?.discoveredActuators])
-
-  // Merge hypothesis data with CLI hypothesis results
-  const mergedHypotheses = useMemo(() => {
-    if (!cliSummary?.hypothesisResults) return hypothesesData
-    const results = cliSummary.hypothesisResults
-    if (Object.keys(results).length === 0) return hypothesesData
-    return hypothesesData.map(h =>
-      results[h.id] !== undefined ? { ...h, status: results[h.id], _revised: true } : h
-    )
-  }, [cliSummary?.hypothesisResults])
+  }, [cliSummary?.revisedFeasibility, cliSummary?.actuatorStatuses, cliSummary?.discoveredActuators])
 
   // Stats
   const stats = useMemo(() => {
@@ -230,7 +221,7 @@ export default function AxiomDashboard() {
             <div className="objective-text">{selectedSessionType.description}</div>
           </div>
 
-          <HypothesisPanel hypotheses={mergedHypotheses} actuators={mergedActuators} />
+          <HypothesisPanel actuators={mergedActuators} />
         </div>
       </div>
 
@@ -275,7 +266,7 @@ export default function AxiomDashboard() {
             </div>
             <div className="graph-legend-item">
               <div className="graph-legend-dot" style={{ background: '#3d3d5c' }}></div>
-              Impossible
+              Distant
             </div>
           </div>
         </div>

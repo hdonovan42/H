@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { getSimulator, UnitStatus } from '../simulation/AgentSimulator'
+import { ApiAdapter } from '../simulation/ApiAdapter'
 import { scenarios } from '../simulation/scenarios/research-mission'
 import HierarchyTree from './HierarchyTree'
 import OperationsLog from './OperationsLog'
@@ -11,6 +12,9 @@ export default function CommandCentre() {
   const [speed, setSpeed] = useState(1)
   const [selectedUnit, setSelectedUnit] = useState(null)
   const [escalationMessage, setEscalationMessage] = useState('')
+  const [mode, setMode] = useState('simulation')
+  const [apiStatus, setApiStatus] = useState(null) // null | 'checking' | 'ok' | 'error'
+  const [apiError, setApiError] = useState(null)
 
   // Subscribe to simulator updates
   useEffect(() => {
@@ -57,6 +61,34 @@ export default function CommandCentre() {
       setEscalationMessage('')
     }
   }, [simulator, state.pendingEscalation, escalationMessage])
+
+  const handleModeChange = useCallback(async (e) => {
+    const newMode = e.target.value
+
+    if (newMode === 'real') {
+      setApiStatus('checking')
+      setApiError(null)
+
+      const adapter = new ApiAdapter()
+      const health = await adapter.healthCheck()
+
+      if (health.ok) {
+        setApiStatus('ok')
+        setApiError(null)
+        simulator.setMode('real', adapter)
+        setMode('real')
+      } else {
+        setApiStatus('error')
+        setApiError(health.error)
+        // Don't switch mode if API is unreachable
+      }
+    } else {
+      simulator.setMode('simulation', null)
+      setMode('simulation')
+      setApiStatus(null)
+      setApiError(null)
+    }
+  }, [simulator])
 
   // Calculate stats
   const stats = {
@@ -123,6 +155,27 @@ export default function CommandCentre() {
                   <option value={4}>4x</option>
                 </select>
               </div>
+            </div>
+
+            <div className="mode-control">
+              <div className="mode-toggle">
+                <label>Mode:</label>
+                <select
+                  value={mode}
+                  onChange={handleModeChange}
+                  disabled={state.isRunning}
+                >
+                  <option value="simulation">Simulation</option>
+                  <option value="real">Real (API)</option>
+                </select>
+                <span className={`mode-status-dot ${apiStatus === 'ok' ? 'connected' : apiStatus === 'checking' ? 'checking' : apiStatus === 'error' ? 'error' : ''}`}></span>
+              </div>
+              {apiStatus === 'error' && apiError && (
+                <div className="api-error">{apiError}</div>
+              )}
+              {apiStatus === 'ok' && (
+                <div className="api-connected">API connected</div>
+              )}
             </div>
 
             <div className="stats-bar">

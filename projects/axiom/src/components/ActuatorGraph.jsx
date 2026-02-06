@@ -14,7 +14,7 @@ const STATUS_COLORS = {
   confirmed:   '#4ecdc4',
   theoretical: '#6272a4',
   blocked:     '#f0c040',
-  impossible:  '#3d3d5c'
+  distant:     '#3d3d5c'
 }
 
 function computeLayout(actuators, cx, cy, outerRadius) {
@@ -251,7 +251,7 @@ export default function ActuatorGraph({ actuators, onNodeClick, statusFilter }) 
               r={r}
               className="actuator-node-circle"
               fill={fillColor}
-              fillOpacity={actuator.status === 'impossible' ? 0.3 : 0.6}
+              fillOpacity={actuator.status === 'distant' ? 0.3 : 0.6}
               stroke={strokeColor}
               strokeWidth={isHovered ? 2 : 1}
             />

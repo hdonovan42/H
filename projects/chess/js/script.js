@@ -28,11 +28,44 @@ const MOVE_CLASSIFICATION = {
 const ENGINES = {
   lite: {
     name: 'Stockfish 17 Lite',
-    script: 'js/stockfish-17-lite-single.js'
+    script: 'js/stockfish-17-lite-single.js',
+    type: 'local'
   },
   full: {
     name: 'Stockfish 17',
-    script: 'js/stockfish-17-single.js'
+    script: 'js/stockfish-17-single.js',
+    type: 'local'
+  },
+  cloud: {
+    name: 'Lichess Cloud',
+    type: 'cloud'
+  }
+};
+
+// Theme Manager
+const ThemeManager = {
+  init() {
+    // Load saved preference or system preference
+    const savedTheme = localStorage.getItem('theme') ||
+      (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    this.setTheme(savedTheme);
+  },
+
+  setTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+
+    // Update Firestore if logged in
+    if (typeof AuthModule !== 'undefined' && AuthModule.currentUser) {
+      db.collection('users').doc(AuthModule.currentUser.uid).update({
+        'settings.theme': theme
+      }).catch(err => console.log('Theme sync error:', err));
+    }
+  },
+
+  toggle() {
+    const current = document.documentElement.getAttribute('data-theme');
+    this.setTheme(current === 'dark' ? 'light' : 'dark');
   }
 };
 
@@ -80,12 +113,15 @@ const AppState = {
 
 // Initialize the application
 function initializeApp() {
+  // Initialize theme
+  ThemeManager.init();
+
   // Initialize Chess.js game
   AppState.game = new Chess();
-  
+
   // Initialize Stockfish
   initializeStockfish();
-  
+
   // Initialize board with configuration
   const config = {
     draggable: true,
@@ -96,14 +132,25 @@ function initializeApp() {
     onDrop: handleDrop,
     onSnapEnd: handleSnapEnd
   };
-  
+
   AppState.board = Chessboard('myBoard', config);
-  
+
   // Set up event listeners
   setupEventListeners();
-  
+
   // Initialize empty eval graph
   drawEvalGraph();
+
+  // Initialize Auth module if available
+  if (typeof AuthModule !== 'undefined') {
+    AuthModule.init();
+  }
+
+  // Show My Games button if auth is available
+  const myGamesBtn = document.getElementById('my-games-btn');
+  if (myGamesBtn && typeof AuthModule !== 'undefined') {
+    // Button visibility controlled by AuthModule.updateUI
+  }
 }
 
 AppState.hasLoadedOnce = false;
@@ -394,6 +441,14 @@ function handleSnapEnd() {
 
 // Stockfish analysis update - queue-based to prevent crashes
 function updateStockfishAnalysis() {
+  // Handle cloud engine
+  if (AppState.selectedEngine === 'cloud') {
+    if (AppState.engineEnabled && typeof updateCloudAnalysis !== 'undefined') {
+      updateCloudAnalysis();
+    }
+    return;
+  }
+
   if (!AppState.engineEnabled || !AppState.stockfish || !AppState.stockfishReady) {
     return;
   }
@@ -478,6 +533,11 @@ function updateDisplay() {
     const canvas = document.getElementById('arrows-overlay');
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // Update material display if available
+  if (typeof MaterialDisplay !== 'undefined') {
+    MaterialDisplay.render();
   }
 }
 
@@ -881,6 +941,36 @@ function preloadFullEngine() {
 // Switch to a different engine
 function switchEngine(engineKey) {
   if (!ENGINES[engineKey] || engineKey === AppState.selectedEngine) return;
+
+  // Handle cloud engine selection
+  if (engineKey === 'cloud') {
+    console.log('Switching to Lichess cloud engine...');
+    AppState.selectedEngine = 'cloud';
+
+    // Stop local engine if running
+    if (AppState.stockfish && AppState.engineBusy) {
+      AppState.stockfish.postMessage('stop');
+    }
+
+    // Clear current results and start cloud analysis
+    AppState.multipvResults = {};
+    AppState.bestMoveInfo = null;
+
+    if (AppState.engineEnabled && typeof updateCloudAnalysis !== 'undefined') {
+      updateCloudAnalysis();
+    }
+    return;
+  }
+
+  // If switching from cloud to local engine
+  if (AppState.selectedEngine === 'cloud') {
+    AppState.selectedEngine = engineKey;
+    // Initialize local engine
+    document.getElementById('stockfish-loading').style.display = 'block';
+    document.getElementById('stockfish-loading').textContent = `Loading ${ENGINES[engineKey].name}...`;
+    initializeStockfish();
+    return;
+  }
 
   console.log(`Switching engine to ${ENGINES[engineKey].name}...`);
 
@@ -1333,16 +1423,29 @@ function loadPGN() {
   // Reset to starting position (ALL EXISTING CODE UNCHANGED)
   AppState.game.reset();
   AppState.board.start();
-  
+
   updateGameStatus();
-  
-  // NOTE: analyzeGamePositions() removed - evalHistory is not used since 
+
+  // Auto-flip board if user played as black
+  if (typeof GameStorage !== 'undefined') {
+    const headers = GameStorage.extractPGNHeaders(pgnText);
+    const userColor = GameStorage.detectUserColor(headers);
+
+    if (userColor === 'black') {
+      AppState.board.orientation('black');
+    } else if (userColor === 'white') {
+      AppState.board.orientation('white');
+    }
+    // If unknown, keep current orientation
+  }
+
+  // NOTE: analyzeGamePositions() removed - evalHistory is not used since
   // drawAnalysisEvalGraph uses graphEvalHistory instead
-  
+
   // Auto-analyze graph positions (uses lite engine for speed/stability)
   AppState.graphDrawn = true;
   analyzeGraphPositions();
-  
+
   if (AppState.engineEnabled) {
     updateStockfishAnalysis();
   }

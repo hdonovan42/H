@@ -10,8 +10,8 @@ export function createDefaultState() {
       keyFindings: [],
       discoveredActuators: [],
       revisedFeasibility: {},
-      hypothesisResults: {},
-      groundTruth: {}
+      actuatorStatuses: {},
+      confirmedActuators: {}
     }
   }
 }
@@ -63,12 +63,12 @@ export function mergeKnowledgeUpdates(state, knowledgeUpdates) {
     }
   }
   Object.assign(state.knowledgeBase.revisedFeasibility, knowledgeUpdates.revisedFeasibility)
-  if (!state.knowledgeBase.hypothesisResults) state.knowledgeBase.hypothesisResults = {}
-  if (!state.knowledgeBase.groundTruth) state.knowledgeBase.groundTruth = {}
-  const gt = state.knowledgeBase.groundTruth
-  for (const [id, status] of Object.entries(knowledgeUpdates.hypothesisResults)) {
-    if (!gt[id]) {
-      state.knowledgeBase.hypothesisResults[id] = status
+  if (!state.knowledgeBase.actuatorStatuses) state.knowledgeBase.actuatorStatuses = {}
+  if (!state.knowledgeBase.confirmedActuators) state.knowledgeBase.confirmedActuators = {}
+  const confirmed = state.knowledgeBase.confirmedActuators
+  for (const [id, status] of Object.entries(knowledgeUpdates.actuatorStatuses)) {
+    if (!confirmed[id]) {
+      state.knowledgeBase.actuatorStatuses[id] = status
     }
   }
 }

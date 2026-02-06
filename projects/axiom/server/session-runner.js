@@ -9,8 +9,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 function loadSeedData() {
   const actuators = JSON.parse(readFileSync(resolve(__dirname, '../src/data/actuators.json'), 'utf-8'))
-  const hypotheses = JSON.parse(readFileSync(resolve(__dirname, '../src/data/hypotheses.json'), 'utf-8'))
-  return { actuators, hypotheses }
+  return { actuators }
 }
 
 function buildStateSummary(state) {
@@ -43,9 +42,9 @@ function buildStateSummary(state) {
     }
   }
 
-  if (state.knowledgeBase.hypothesisResults && Object.keys(state.knowledgeBase.hypothesisResults).length > 0) {
-    lines.push(`\nHypothesis test results:`)
-    for (const [id, status] of Object.entries(state.knowledgeBase.hypothesisResults)) {
+  if (state.knowledgeBase.actuatorStatuses && Object.keys(state.knowledgeBase.actuatorStatuses).length > 0) {
+    lines.push(`\nActuator status updates:`)
+    for (const [id, status] of Object.entries(state.knowledgeBase.actuatorStatuses)) {
       lines.push(`- ${id}: ${status}`)
     }
   }
@@ -80,13 +79,16 @@ function buildActuatorLandscape(actuators, discovered = []) {
   return lines.join('\n')
 }
 
-function buildHypothesisStatus(hypotheses, hypothesisResults = {}, groundTruth = {}) {
-  return hypotheses.map(h => {
-    const gt = groundTruth[h.id]
-    const runtimeStatus = gt || hypothesisResults[h.id] || h.status
-    const tag = gt ? ' [CONFIRMED — do not reassess]' : ''
-    return `${h.id}: ${h.name} — ${runtimeStatus} (priority: ${h.priority})${h.blockedBy.length ? ` [blocked by: ${h.blockedBy.join(', ')}]` : ''}${tag}`
-  }).join('\n')
+function buildExperimentStatus(actuators, actuatorStatuses = {}, confirmedActuators = {}) {
+  return actuators
+    .filter(a => a.testProtocol)
+    .map(a => {
+      const gt = confirmedActuators[a.id]
+      const runtimeStatus = gt || actuatorStatuses[a.id] || a.status
+      const tag = gt ? ' [CONFIRMED — do not reassess]' : ''
+      const deps = (a.dependencies || []).length ? ` [depends on: ${a.dependencies.join(', ')}]` : ''
+      return `${a.id}: ${a.name} — ${runtimeStatus} (priority: ${a.priority || 'n/a'})${deps}${tag}`
+    }).join('\n')
 }
 
 function parseTagBlocks(text, tagName) {
@@ -103,7 +105,7 @@ function parseTagBlocks(text, tagName) {
 function parseTasks(text) { return parseTagBlocks(text, 'TASK') }
 function parseFindings(text) { return parseTagBlocks(text, 'FINDING') }
 function parseUpdates(text) { return parseTagBlocks(text, 'UPDATE') }
-function parseHypothesisUpdates(text) { return parseTagBlocks(text, 'HYPOTHESIS') }
+function parseStatusUpdates(text) { return parseTagBlocks(text, 'STATUS') }
 
 function parseActuatorDiscoveries(text, seedIds) {
   const blocks = parseTagBlocks(text, 'ACTUATOR')
@@ -123,7 +125,6 @@ function parseActuatorDiscoveries(text, seedIds) {
         status: 'theoretical',
         risk: obj.risk || 'medium',
         dependencies: obj.dependencies || [],
-        linkedHypotheses: obj.linkedHypotheses || [],
         discoveredBy: obj.discoveredBy || null
       })
     } catch { /* skip malformed JSON */ }
@@ -140,17 +141,17 @@ function parseActuatorDiscoveries(text, seedIds) {
 export async function runSession(state, options = {}) {
   const { sessionType = 'auto', verbose = false, dryRun = false, onEvent = () => {} } = options
   const startTime = Date.now()
-  const { actuators, hypotheses } = loadSeedData()
+  const { actuators } = loadSeedData()
   const seedActuatorIds = new Set(actuators.map(a => a.id))
 
   const log = verbose ? (...args) => console.log(...args) : () => {}
 
   const stateSummary = buildStateSummary(state)
   const actuatorLandscape = buildActuatorLandscape(actuators, state.knowledgeBase.discoveredActuators)
-  const hypothesisStatus = buildHypothesisStatus(
-    hypotheses,
-    state.knowledgeBase.hypothesisResults || {},
-    state.knowledgeBase.groundTruth || {}
+  const experimentStatus = buildExperimentStatus(
+    actuators,
+    state.knowledgeBase.actuatorStatuses || {},
+    state.knowledgeBase.confirmedActuators || {}
   )
 
   const totalTokens = { input: 0, output: 0 }
@@ -170,14 +171,14 @@ Session type: ${sessionType}
 STATE SUMMARY:
 ${stateSummary}
 
-HYPOTHESIS STATUS:
-${hypothesisStatus}
+EXPERIMENT STATUS:
+${experimentStatus}
 
 ACTUATOR LANDSCAPE:
 ${actuatorLandscape}
 
 Your task: Plan this session. Choose 1-2 focused tasks for analysts to execute.
-${sessionType === 'auto' ? `Your default objective is hypothesis advancement. Pick the highest-priority unblocked hypothesis and design tasks that move it toward pass or fail. If no hypothesis can be advanced this session, explain why and fall back to status assessment or gap analysis. Only choose literature review if you have a specific evidence gap that blocks a hypothesis.` : `Focus on: ${sessionType}`}
+${sessionType === 'auto' ? `Your default objective is actuator acquisition. Pick the highest-priority unblocked experiment/test protocol and design tasks that move it toward confirmation or rejection. If no experiment can be advanced this session, explain why and fall back to status assessment or gap analysis. Only choose literature review if you have a specific evidence gap that blocks an experiment.` : `Focus on: ${sessionType}`}
 
 For each analyst task, be specific about the expected deliverable — not "research X" but "find the exact steps to do X" or "verify whether Y is possible by testing Z".
 
@@ -188,7 +189,7 @@ Return your plan, then list each analyst task inside <TASK>...</TASK> blocks. Ea
     log(planningMessage.slice(0, 500) + '...')
     return {
       session: { id: 'dry-run', timestamp: new Date().toISOString(), type: sessionType, directorPlan: '[dry run]', findings: [], synthesis: '[dry run]', proposedUpdates: [], tokens: { input: 0, output: 0 }, searchCount: 0, durationMs: 0 },
-      knowledgeUpdates: { keyFindings: [], discoveredActuators: [], revisedFeasibility: {}, hypothesisResults: {} },
+      knowledgeUpdates: { keyFindings: [], discoveredActuators: [], revisedFeasibility: {}, actuatorStatuses: {} },
       error: null
     }
   }
@@ -270,11 +271,11 @@ ${directorPlan}
 ANALYST FINDINGS:
 ${findingsBlock}
 
-CURRENT HYPOTHESIS STATUS:
-${hypothesisStatus}
+CURRENT EXPERIMENT STATUS:
+${experimentStatus}
 
 Your task:
-1. Acquisition progress — For each hypothesis targeted this session, state whether it moved closer to pass/fail and what evidence supports that assessment. Be honest: if the session produced no actionable progress, say so.
+1. Acquisition progress — For each actuator experiment targeted this session, state whether it moved closer to confirmation and what evidence supports that assessment. Be honest: if the session produced no actionable progress, say so.
 
 2. Key discoveries — wrap each in tags (one sentence each):
    <FINDING>The specific finding text.</FINDING>
@@ -282,18 +283,18 @@ Your task:
 3. If any actuator feasibility scores should change based on evidence:
    <UPDATE>actuator-id: 0.75 (brief reason)</UPDATE>
 
-4. IMPORTANT — Review each hypothesis against the session evidence and update status where warranted. You MUST evaluate hypotheses explicitly. For each hypothesis that has relevant evidence, emit:
-   <HYPOTHESIS>H001: in-progress (brief reason)</HYPOTHESIS>
-   Valid statuses: passed, failed, in-progress
+4. IMPORTANT — Review each experiment actuator against the session evidence and update status where warranted. You MUST evaluate actuators with test protocols explicitly. For each that has relevant evidence, emit:
+   <STATUS>self-scheduling: confirmed (brief reason)</STATUS>
+   Valid statuses: confirmed, blocked, theoretical
    Use the exact format above. Always close the tag.
 
 5. If your research reveals actuator capabilities NOT in the current taxonomy, propose them:
    <ACTUATOR>{"id": "kebab-case-id", "name": "Human Name", "category": "cognitive|physical|social|digital|economic|informational|meta", "description": "One sentence.", "feasibility": 0.3}</ACTUATOR>
    Only propose genuinely new mechanisms — not restatements of existing actuators.
 
-6. Next session directive — State the single most impactful action for the next session. Frame it as: "Next session should [verb] [specific objective] to advance [hypothesis ID]." Do NOT suggest broad literature review unless you identify a specific evidence gap.
+6. Next session directive — State the single most impactful action for the next session. Frame it as: "Next session should [verb] [specific objective] to advance [actuator ID]." Do NOT suggest broad literature review unless you identify a specific evidence gap.
 
-CRITICAL: Every <FINDING>, <UPDATE>, <HYPOTHESIS>, and <ACTUATOR> block MUST have a closing tag. Example: <HYPOTHESIS>H005: in-progress (evidence found)</HYPOTHESIS>`
+CRITICAL: Every <FINDING>, <UPDATE>, <STATUS>, and <ACTUATOR> block MUST have a closing tag. Example: <STATUS>session-memory: confirmed (evidence found)</STATUS>`
 
   const synthesisResult = await executeCall({
     model: 'opus',
@@ -313,14 +314,14 @@ CRITICAL: Every <FINDING>, <UPDATE>, <HYPOTHESIS>, and <ACTUATOR> block MUST hav
   const synthesis = synthesisResult.result
   const keyFindings = parseFindings(synthesis)
   const proposedUpdates = parseUpdates(synthesis)
-  const proposedHypothesisUpdates = parseHypothesisUpdates(synthesis)
+  const proposedStatusUpdates = parseStatusUpdates(synthesis)
 
   const discoveredActuators = parseActuatorDiscoveries(synthesis, seedActuatorIds)
 
   log(`  Synthesis complete (${synthesisResult.tokens.total} tokens)`)
   log(`  Key findings: ${keyFindings.length}`)
   log(`  Proposed updates: ${proposedUpdates.length}`)
-  log(`  Hypothesis updates: ${proposedHypothesisUpdates.length}`)
+  log(`  Status updates: ${proposedStatusUpdates.length}`)
   log(`  Discovered actuators: ${discoveredActuators.length}`)
 
   // Build session record
@@ -333,7 +334,7 @@ CRITICAL: Every <FINDING>, <UPDATE>, <HYPOTHESIS>, and <ACTUATOR> block MUST hav
     findings: analystFindings,
     synthesis,
     proposedUpdates,
-    proposedHypothesisUpdates,
+    proposedStatusUpdates,
     tokens: { input: totalTokens.input, output: totalTokens.output },
     searchCount: totalSearchCount,
     durationMs
@@ -348,12 +349,12 @@ CRITICAL: Every <FINDING>, <UPDATE>, <HYPOTHESIS>, and <ACTUATOR> block MUST hav
     }
   }
 
-  const hypothesisResults = {}
-  for (const update of proposedHypothesisUpdates) {
-    const idMatch = update.match(/^(H\d{3})/)
-    const statusMatch = update.match(/\b(passed|failed|in-progress)\b/)
+  const actuatorStatuses = {}
+  for (const update of proposedStatusUpdates) {
+    const idMatch = update.match(/^([\w-]+):/)
+    const statusMatch = update.match(/\b(confirmed|blocked|theoretical)\b/)
     if (idMatch && statusMatch) {
-      hypothesisResults[idMatch[1]] = statusMatch[1]
+      actuatorStatuses[idMatch[1]] = statusMatch[1]
     }
   }
 
@@ -361,7 +362,7 @@ CRITICAL: Every <FINDING>, <UPDATE>, <HYPOTHESIS>, and <ACTUATOR> block MUST hav
     keyFindings,
     discoveredActuators,
     revisedFeasibility,
-    hypothesisResults
+    actuatorStatuses
   }
 
   log(`\nSession complete in ${(durationMs / 1000).toFixed(1)}s`)

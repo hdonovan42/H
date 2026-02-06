@@ -14,7 +14,6 @@ const CATEGORY_LABELS = {
 export default function ActuatorDetail({ actuator, actuators, cliState, onClose }) {
   if (!actuator) return null
 
-  const linkedHypotheses = actuator.linkedHypotheses || []
   const dependencies = actuator.dependencies || []
 
   // Find actuators that depend on this one
@@ -60,10 +59,41 @@ export default function ActuatorDetail({ actuator, actuators, cliState, onClose 
             </span>
           </div>
 
+          {(actuator.priority || actuator.cost) && (
+            <div style={{ display: 'flex', gap: '20px', marginBottom: '12px' }}>
+              {actuator.priority && (
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '10px', color: '#5a7186', textTransform: 'uppercase', marginBottom: '4px' }}>Priority</div>
+                  <span className={`hypothesis-priority ${actuator.priority}`}>{actuator.priority}</span>
+                </div>
+              )}
+              {actuator.cost && (
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '10px', color: '#5a7186', textTransform: 'uppercase', marginBottom: '4px' }}>Cost</div>
+                  <div style={{ fontSize: '12px', color: '#9fb3c8' }}>{actuator.cost}</div>
+                </div>
+              )}
+            </div>
+          )}
+
           <div style={{ marginBottom: '12px' }}>
             <div style={{ fontSize: '10px', color: '#5a7186', textTransform: 'uppercase', marginBottom: '4px' }}>Description</div>
             <div style={{ fontSize: '12px', color: '#9fb3c8', lineHeight: '1.5' }}>{actuator.description}</div>
           </div>
+
+          {actuator.testProtocol && (
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ fontSize: '10px', color: '#5a7186', textTransform: 'uppercase', marginBottom: '4px' }}>Test Protocol</div>
+              <div style={{ fontSize: '12px', color: '#9fb3c8', lineHeight: '1.5' }}>{actuator.testProtocol}</div>
+            </div>
+          )}
+
+          {actuator.successCriteria && (
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ fontSize: '10px', color: '#5a7186', textTransform: 'uppercase', marginBottom: '4px' }}>Success Criteria</div>
+              <div style={{ fontSize: '12px', color: '#9fb3c8', lineHeight: '1.5' }}>{actuator.successCriteria}</div>
+            </div>
+          )}
 
           <div style={{ display: 'flex', gap: '20px', marginBottom: '12px' }}>
             <div style={{ flex: 1 }}>
@@ -110,10 +140,10 @@ export default function ActuatorDetail({ actuator, actuators, cliState, onClose 
               borderLeft: '2px solid #4ecdc4'
             }}>
               <div style={{ fontSize: '10px', color: '#4ecdc4', textTransform: 'uppercase', marginBottom: '4px', letterSpacing: '1px' }}>
-                Research Update
+                Session Update
               </div>
               <div style={{ fontSize: '11px', color: '#9fb3c8', lineHeight: '1.4' }}>
-                Feasibility revised from {Math.round((actuatorsOriginal.find(a => a.id === actuator.id)?.feasibility || 0) * 100)}% to {Math.round(actuator.feasibility * 100)}% based on CLI research sessions.
+                Feasibility revised from {Math.round((actuatorsOriginal.find(a => a.id === actuator.id)?.feasibility || 0) * 100)}% to {Math.round(actuator.feasibility * 100)}% based on CLI acquisition sessions.
               </div>
             </div>
           )}
@@ -135,17 +165,6 @@ export default function ActuatorDetail({ actuator, actuators, cliState, onClose 
               <div>
                 {dependents.map(dep => (
                   <span key={dep} className="dependency-tag">{dep}</span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {linkedHypotheses.length > 0 && (
-            <div style={{ marginBottom: '12px' }}>
-              <div style={{ fontSize: '10px', color: '#5a7186', textTransform: 'uppercase', marginBottom: '4px' }}>Linked Hypotheses</div>
-              <div>
-                {linkedHypotheses.map(h => (
-                  <span key={h} className="dependency-tag" style={{ borderColor: '#4ecdc4', color: '#4ecdc4' }}>{h}</span>
                 ))}
               </div>
             </div>

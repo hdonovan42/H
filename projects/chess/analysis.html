@@ -2,20 +2,94 @@
 <html>
   <head>
     <title>Chess Analysis with Stockfish</title>
-    <link rel="icon" type="image/png" href="/images/H-favicon.png"> 
-    
+    <link rel="icon" type="image/png" href="/images/H-favicon.png">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
     <!-- Preload critical resources -->
     <link rel="preload" href="js/stockfish-17-lite-single.js" as="fetch" crossorigin="anonymous">
     <link rel="preload" href="js/chessboard-1.0.0.min.js" as="script">
     <link rel="preload" href="js/script.js" as="script">
     <link rel="preload" href="https://code.jquery.com/jquery-3.6.0.min.js" as="script" crossorigin="anonymous">
     <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js" as="script" crossorigin="anonymous">
-    
+
     <!-- Stylesheets -->
     <link rel="stylesheet" href="css/chessboard-1.0.0.min.css">
     <link rel="stylesheet" href="css/styles.css">
   </head>
   <body>
+
+    <!-- App Header with Auth -->
+    <header id="app-header">
+      <div class="header-left">
+        <h1 class="app-title">Chess Analysis</h1>
+      </div>
+      <div class="header-right">
+        <!-- Auth Container (shown when signed out) -->
+        <div id="auth-container">
+          <button onclick="AuthModule.signInWithGoogle()" class="auth-btn google-btn">
+            <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4"/><path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z" fill="#34A853"/><path d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/></svg>
+            Sign in
+          </button>
+          <button onclick="showEmailAuthModal()" class="auth-btn email-btn">
+            Email
+          </button>
+        </div>
+        <!-- User Info (shown when signed in) -->
+        <div id="user-info" style="display: none;"></div>
+        <!-- Theme Toggle -->
+        <button id="theme-toggle" onclick="ThemeManager.toggle()" class="icon-btn" title="Toggle dark mode">
+          <span class="theme-icon-light">&#9728;</span>
+          <span class="theme-icon-dark">&#9790;</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Email Auth Modal -->
+    <div id="email-auth-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <button class="modal-close" onclick="closeEmailAuthModal()">&times;</button>
+        <h3 id="auth-modal-title">Sign In</h3>
+        <div id="auth-error" class="auth-error" style="display: none;"></div>
+        <input type="email" id="auth-email" placeholder="Email" autocomplete="email">
+        <input type="password" id="auth-password" placeholder="Password" autocomplete="current-password">
+        <button id="auth-submit-btn" onclick="handleEmailAuth()" class="auth-submit-btn">Sign In</button>
+        <p class="toggle-auth">
+          <span id="auth-toggle-text">Don't have an account?</span>
+          <a href="#" id="auth-toggle-link" onclick="toggleAuthMode(); return false;">Sign Up</a>
+        </p>
+      </div>
+    </div>
+
+    <!-- Games List Panel -->
+    <div id="games-list-panel" class="side-panel" style="display: none;">
+      <div class="panel-header">
+        <h3>My Games</h3>
+        <button onclick="toggleGamesList()" class="panel-close">&times;</button>
+      </div>
+      <div id="games-list-content" class="panel-content">
+        <p class="no-games">Loading games...</p>
+      </div>
+    </div>
+
+    <!-- AI Coach Panel -->
+    <div id="coach-panel" class="side-panel" style="display: none;">
+      <div class="panel-header">
+        <h3>AI Chess Coach</h3>
+        <button onclick="toggleCoachPanel()" class="panel-close">&times;</button>
+      </div>
+      <div class="panel-content">
+        <p class="coach-intro">Get personalized coaching advice based on your game history.</p>
+        <button id="coach-analyze-btn" onclick="analyzeMyGames()" class="coach-btn primary">
+          Analyze My Games
+        </button>
+        <div id="coach-response"></div>
+        <div class="coach-questions">
+          <h4>Ask a specific question:</h4>
+          <input type="text" id="coach-question" placeholder="e.g., How can I improve my endgame?">
+          <button id="coach-ask-btn" onclick="askCoachQuestion()" class="coach-btn">Ask</button>
+        </div>
+      </div>
+    </div>
 
     <div id="stockfish-loading" style="text-align: center; padding: 10px; background-color: #fff3cd; color: #856404;">
       Stockfish loading...
@@ -26,12 +100,16 @@
 
       <!-- Evaluation bar -->
       <div class="evaluation-bar" id="eval-bar"></div>
+
       <!-- Board and arrows -->
       <div id="board-container">
         <div id="myBoard"></div>
-        <!-- Canvas overlay for arrows (instead of using SVG marker elements) -->
+        <!-- Canvas overlay for arrows -->
         <canvas id="arrows-overlay" width="500" height="500"></canvas>
+        <!-- Material display overlay -->
+        <div id="material-display"></div>
       </div>
+
       <!-- Stockfish analysis output -->
       <div id="analysis-container">
         <!-- Engine control section -->
@@ -40,6 +118,7 @@
             <select id="engine-select">
               <option value="lite" selected>Stockfish 17 Lite</option>
               <option value="full">Stockfish 17</option>
+              <option value="cloud">Lichess Cloud</option>
             </select>
             <label class="toggle-switch">
               <input type="checkbox" id="engine-toggle" checked>
@@ -59,16 +138,42 @@
     <!-- PGN controls and board reset -->
     <div id="pgn-controls">
       <textarea id="pgn-input" placeholder="Paste PGN here and press Enter..." rows="4" cols="50"></textarea>
-      <div class="pgn-hint">Arrow keys to navigate &bull; F to flip &bull; R to reset</div>
+      <div class="pgn-buttons">
+        <button id="save-game-btn" onclick="GameStorage.saveGame()" style="display: none;">Save Game</button>
+        <button id="my-games-btn" onclick="toggleGamesList()" style="display: none;">My Games</button>
+        <button id="coach-toggle" onclick="toggleCoachPanel()" style="display: none;">AI Coach</button>
+      </div>
+      <div class="pgn-hint">Arrow keys to navigate &bull; F to flip &bull; R to reset &bull; T to toggle engine</div>
+    </div>
+
+    <!-- Mobile Navigation -->
+    <div class="mobile-nav">
+      <button onclick="navigateToStart()" title="Start">|&lt;</button>
+      <button onclick="navigateToPreviousMove()" title="Previous">&lt;</button>
+      <button onclick="navigateToNextMove()" title="Next">&gt;</button>
+      <button onclick="flipBoard()" title="Flip">&#8645;</button>
     </div>
 
     <!-- Load dependencies first (jQuery and chess.js are needed by chessboard) -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
 
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
+
     <!-- Load chessboard after its dependencies -->
     <script src="js/chessboard-1.0.0.min.js"></script>
-    
+
+    <!-- Firebase and Auth modules (must load before main script) -->
+    <script src="js/firebase-config.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/game-storage.js"></script>
+    <script src="js/material.js"></script>
+    <script src="js/lichess-api.js"></script>
+    <script src="js/ai-coach.js"></script>
+
     <!-- Load main script with defer to ensure DOM is ready -->
     <script src="js/script.js" defer></script>
   </body>

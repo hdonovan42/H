@@ -10,31 +10,35 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 echo "=== AXIOM Deploy ==="
 
 # 1. Build frontend
-echo "[1/5] Building frontend..."
+echo "[1/6] Building frontend..."
 cd "$PROJECT_DIR"
 npm run build
 
 # 2. Sync dist/ (built SPA)
-echo "[2/5] Syncing dist/..."
+echo "[2/6] Syncing dist/..."
 rsync -az --delete "$PROJECT_DIR/dist/" "$VPS:$REMOTE/dist/"
 
 # 3. Sync server/ (excluding .env, data/, node_modules)
-echo "[3/5] Syncing server/..."
+echo "[3/6] Syncing server/..."
 rsync -az --delete \
   --exclude='node_modules' \
   --exclude='.env' \
   --exclude='data/' \
   "$PROJECT_DIR/server/" "$VPS:$REMOTE/server/"
 
-# 4. Sync seed data (actuators.json, hypotheses.json)
-echo "[4/5] Syncing seed data..."
+# 4. Sync seed data (actuators.json)
+echo "[4/6] Syncing seed data..."
 rsync -az "$PROJECT_DIR/src/data/" "$VPS:$REMOTE/src/data/"
 
-# 5. Sync deploy configs (ecosystem, nginx conf)
+# 5. Sync shared/ config
+echo "[5/6] Syncing shared/..."
+rsync -az "$PROJECT_DIR/shared/" "$VPS:$REMOTE/shared/"
+
+# 6. Sync deploy configs (ecosystem, nginx conf)
 rsync -az "$PROJECT_DIR/deploy/" "$VPS:$REMOTE/deploy/"
 
-# 6. Remote: install deps + restart PM2
-echo "[5/5] Installing deps and restarting PM2..."
+# 7. Remote: install deps + restart PM2
+echo "[6/6] Installing deps and restarting PM2..."
 ssh "$VPS" bash <<'EOF'
   export NVM_DIR="$HOME/.nvm"
   [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"

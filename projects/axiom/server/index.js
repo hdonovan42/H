@@ -98,9 +98,9 @@ app.get('/api/state/summary', (req, res) => {
     totalSearches: state.sessions.reduce((sum, s) => sum + (s.searchCount || 0), 0),
     findingsCount: state.knowledgeBase?.keyFindings?.length || 0,
     revisedFeasibility: state.knowledgeBase?.revisedFeasibility || {},
-    hypothesisResults: {
-      ...(state.knowledgeBase?.hypothesisResults || {}),
-      ...(state.knowledgeBase?.groundTruth || {})
+    actuatorStatuses: {
+      ...(state.knowledgeBase?.actuatorStatuses || {}),
+      ...(state.knowledgeBase?.confirmedActuators || {})
     },
     lastSession,
     discoveredActuators: state.knowledgeBase?.discoveredActuators || []

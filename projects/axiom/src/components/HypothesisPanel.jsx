@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 
-export default function HypothesisPanel({ hypotheses, actuators = [] }) {
+export default function HypothesisPanel({ actuators = [] }) {
   const [view, setView] = useState('unconfirmed')
 
   const unconfirmed = useMemo(() =>
@@ -13,7 +13,6 @@ export default function HypothesisPanel({ hypotheses, actuators = [] }) {
   const limitingFactors = useMemo(() => {
     const blockerMap = new Map()
     const actuatorMap = new Map(actuators.map(a => [a.id, a]))
-    const hypothesisMap = new Map(hypotheses.map(h => [h.id, h]))
     const confirmedIds = new Set(actuators.filter(a => a.status === 'confirmed').map(a => a.id))
 
     for (const a of unconfirmed) {
@@ -22,32 +21,19 @@ export default function HypothesisPanel({ hypotheses, actuators = [] }) {
         if (!blockerMap.has(depId)) {
           const dep = actuatorMap.get(depId)
           blockerMap.set(depId, {
-            id: depId, name: dep?.name || depId, type: 'actuator',
+            id: depId, name: dep?.name || depId,
             status: dep?.status || 'unknown', feasibility: dep?.feasibility,
             blockedActuators: new Set()
           })
         }
         blockerMap.get(depId).blockedActuators.add(a.id)
       }
-
-      for (const hId of (a.linkedHypotheses || [])) {
-        const h = hypothesisMap.get(hId)
-        if (h && h.status === 'passed') continue
-        if (!blockerMap.has(hId)) {
-          blockerMap.set(hId, {
-            id: hId, name: h?.name || hId, type: 'hypothesis',
-            status: h?.status || 'unknown',
-            blockedActuators: new Set()
-          })
-        }
-        blockerMap.get(hId).blockedActuators.add(a.id)
-      }
     }
 
     return Array.from(blockerMap.values())
       .map(f => ({ ...f, blockedActuators: Array.from(f.blockedActuators) }))
       .sort((a, b) => b.blockedActuators.length - a.blockedActuators.length)
-  }, [actuators, hypotheses, unconfirmed])
+  }, [actuators, unconfirmed])
 
   return (
     <div className="hypothesis-panel">
@@ -89,14 +75,12 @@ export default function HypothesisPanel({ hypotheses, actuators = [] }) {
           limitingFactors.map(f => (
             <div key={f.id} className={`hypothesis-card status-${f.status}`}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="hypothesis-id" style={{ fontSize: '0.65rem' }}>
-                  {f.type === 'hypothesis' ? f.id.toUpperCase() : f.id}
-                </span>
+                <span className="hypothesis-id" style={{ fontSize: '0.65rem' }}>{f.id}</span>
                 <span className={`hypothesis-status ${f.status}`}>{f.status}</span>
               </div>
               <div className="hypothesis-name">{f.name}</div>
               <div className="hypothesis-meta">
-                {f.type === 'actuator' && f.feasibility != null && (
+                {f.feasibility != null && (
                   <span style={{
                     color: f.feasibility >= 0.7 ? 'var(--accent)' : f.feasibility >= 0.4 ? 'var(--status-warning)' : 'var(--text-dim)'
                   }}>

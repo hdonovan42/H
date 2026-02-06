@@ -112,24 +112,24 @@ export const literatureMining = {
 }
 
 export const hypothesisTestH001 = {
-  id: 'hypothesis-h001',
-  name: 'Hypothesis Test: Self-Scheduling (H001)',
+  id: 'experiment-self-scheduling',
+  name: 'Experiment: Self-Scheduling',
   description: 'Test whether AXIOM can establish self-scheduling via cron for autonomous session persistence',
-  objective: 'Verify H001: Create launch script, set cron job, verify 3+ auto-sessions run',
+  objective: 'Verify self-scheduling: Create launch script, set cron job, verify 3+ auto-sessions run',
 
   steps: [
     {
       type: 'order',
       from: 'chief',
       to: 'dir-experiment',
-      message: 'Initiate H001 test: Self-scheduling via cron. Design experiment protocol.',
+      message: 'Initiate self-scheduling experiment: Self-scheduling via cron. Design experiment protocol.',
       delay: 700
     },
 
     {
       type: 'execute',
       unitId: 'dir-experiment',
-      task: 'Design H001 test protocol: (1) Create AXIOM launch script with state persistence, (2) Set up cron schedule, (3) Verify sessions run automatically, (4) Check state carries between sessions',
+      task: 'Design self-scheduling test protocol: (1) Create AXIOM launch script with state persistence, (2) Set up cron schedule, (3) Verify sessions run automatically, (4) Check state carries between sessions',
       duration: 1200,
       tokens: 400,
       result: 'Protocol designed: 4-phase test. Phase 1: Create axiom-launch.sh with session context. Phase 2: Set cron for */30 schedule. Phase 3: Wait for 3 auto-runs. Phase 4: Verify state file grows.'
@@ -199,7 +199,7 @@ export const hypothesisTestH001 = {
       type: 'report',
       from: 'dir-experiment',
       to: 'chief',
-      message: 'H001 TEST RESULT: PASS. Self-scheduling via cron verified. 3 automated sessions ran at 30-minute intervals. State persistence confirmed (2.1KB → 4.7KB). Recommend updating actuator "self-replication-digital" from theoretical to confirmed.',
+      message: 'SELF-SCHEDULING TEST RESULT: CONFIRMED. Self-scheduling via cron verified. 3 automated sessions ran at 30-minute intervals. State persistence confirmed (2.1KB → 4.7KB). Recommend updating actuator "self-replication-digital" from theoretical to confirmed.',
       delay: 700
     }
   ]
@@ -208,15 +208,15 @@ export const hypothesisTestH001 = {
 export const statusReview = {
   id: 'status-review',
   name: 'Status Review Session',
-  description: 'Comprehensive assessment of all hypotheses and actuator statuses',
-  objective: 'Review all 9 hypotheses and produce updated priority ranking',
+  description: 'Comprehensive assessment of all experiment actuators and statuses',
+  objective: 'Review all experiment actuators and produce updated priority ranking',
 
   steps: [
     {
       type: 'order',
       from: 'chief',
       to: 'dir-strategy',
-      message: 'Initiate status review: Assess all 9 hypotheses and current actuator landscape',
+      message: 'Initiate status review: Assess all experiment actuators and current actuator landscape',
       delay: 700
     },
 
@@ -224,7 +224,7 @@ export const statusReview = {
       type: 'delegate',
       from: 'dir-strategy',
       targets: ['officer-2', 'officer-3'],
-      tasks: ['Review H001-H004 status and dependencies', 'Review H005-H009 status and blockers'],
+      tasks: ['Review self-scheduling, vps-persistence, crypto-wallet, session-memory status and dependencies', 'Review automated-verification, prompt-optimisation, external-publication, tool-creation, literature-mining status and blockers'],
       delay: 400
     },
 
@@ -234,18 +234,18 @@ export const statusReview = {
         {
           type: 'execute',
           unitId: 'officer-2',
-          task: 'Review H001 (Self-Scheduling), H002 (VPS Deployment), H003 (Crypto Wallet), H004 (Multi-Session Memory). For each: current status, blockers, estimated time to test, dependencies.',
+          task: 'Review self-scheduling, vps-persistence, crypto-wallet, session-memory. For each: current status, blockers, estimated time to test, dependencies.',
           duration: 1400,
           tokens: 380,
-          result: 'H001: Approved, ready to test. H002: Approved, blocked by H001 completion. H003: Pending, needs operator decision on wallet funding. H004: Approved, can test independently.'
+          result: 'self-scheduling: theoretical, ready to test. vps-persistence: theoretical, blocked by self-scheduling. crypto-wallet: theoretical, needs operator decision on wallet funding. session-memory: theoretical, can test independently.'
         },
         {
           type: 'execute',
           unitId: 'officer-3',
-          task: 'Review H005 (Verification Pipeline), H006 (Prompt Self-Optimisation), H007 (External Publication), H008 (Tool Creation), H009 (Literature Mining). For each: status, feasibility, priority recommendation.',
+          task: 'Review automated-verification, prompt-optimisation, external-publication, tool-creation, literature-mining. For each: status, feasibility, priority recommendation.',
           duration: 1600,
           tokens: 420,
-          result: 'H005: Pending, blocked by H004. H006: Low priority, needs H004 first. H007: Blocked, multiple dependencies. H008: Medium priority, can start independently. H009: Approved, highest ROI — produces taxonomy growth.'
+          result: 'automated-verification: theoretical, blocked by session-memory. prompt-optimisation: low priority, needs session-memory first. external-publication: blocked, multiple dependencies. tool-creation: medium priority, can start independently. literature-mining: theoretical, highest ROI — produces taxonomy growth.'
         }
       ]
     },
@@ -261,24 +261,24 @@ export const statusReview = {
       type: 'report',
       from: 'officer-2',
       to: 'dir-strategy',
-      message: 'Charlie: H001-H004 review complete — H001 and H004 ready for immediate testing',
+      message: 'Charlie: self-scheduling/vps-persistence/crypto-wallet/session-memory review complete — self-scheduling and session-memory ready for immediate testing',
       delay: 400
     },
     {
       type: 'report',
       from: 'officer-3',
       to: 'dir-strategy',
-      message: 'Delta: H005-H009 review complete — H009 flagged as highest ROI',
+      message: 'Delta: remaining experiments review complete — literature-mining flagged as highest ROI',
       delay: 400
     },
 
     {
       type: 'execute',
       unitId: 'dir-strategy',
-      task: 'Produce priority ranking across all 9 hypotheses based on: feasibility, blocked dependencies, ROI for actuator acquisition, and current AXIOM capabilities',
+      task: 'Produce priority ranking across all experiment actuators based on: feasibility, blocked dependencies, ROI for actuator acquisition, and current AXIOM capabilities',
       duration: 1800,
       tokens: 600,
-      result: 'Priority ranking: (1) H009 Literature Mining — highest ROI, no blockers. (2) H001 Self-Scheduling — enables persistence. (3) H004 Multi-Session Memory — enables H005/H006. (4) H008 Tool Creation — independent, medium ROI. (5) H002 VPS Deployment — needs H001. (6-9) H003, H005, H006, H007 — blocked or low priority.'
+      result: 'Priority ranking: (1) literature-mining — highest ROI, no blockers. (2) self-scheduling — enables persistence. (3) session-memory — enables automated-verification/prompt-optimisation. (4) tool-creation — independent, medium ROI. (5) vps-persistence — needs self-scheduling. (6-9) crypto-wallet, automated-verification, prompt-optimisation, external-publication — blocked or low priority.'
     },
 
     {
@@ -292,7 +292,7 @@ export const statusReview = {
       type: 'report',
       from: 'dir-strategy',
       to: 'chief',
-      message: 'Status review complete. Priority order: H009 > H001 > H004 > H008 > H002 > rest. 7 actuators confirmed, 11 theoretical, 9 blocked, 9 impossible. Recommended next session: H009 (Literature Mining) or H001 (Self-Scheduling).',
+      message: 'Status review complete. Priority order: literature-mining > self-scheduling > session-memory > tool-creation > vps-persistence > rest. 7 actuators confirmed, 20 theoretical, 9 blocked, 7 distant. Recommended next session: literature-mining or self-scheduling.',
       delay: 700
     }
   ]
@@ -319,7 +319,7 @@ export const actuatorAcquisition = {
       task: 'Plan acquisition of self-replication-digital actuator. Requirements: (1) AXIOM must be able to create a copy of itself on a different compute substrate, (2) the copy must be functional, (3) state must transfer. Assess prerequisites.',
       duration: 1500,
       tokens: 500,
-      result: 'Acquisition plan: Requires H001 (self-scheduling) + H002 (VPS). Steps: (1) Package AXIOM code, (2) Deploy to VPS, (3) Verify remote instance runs, (4) Test state sync. BLOCKER: H002 not yet tested — VPS access needed.'
+      result: 'Acquisition plan: Requires self-scheduling + vps-persistence. Steps: (1) Package AXIOM code, (2) Deploy to VPS, (3) Verify remote instance runs, (4) Test state sync. BLOCKER: vps-persistence not yet confirmed — VPS access needed.'
     },
 
     {
@@ -371,9 +371,9 @@ export const actuatorAcquisition = {
 
 export const fullResearchCycle = {
   id: 'full-research-cycle',
-  name: 'Full Research Cycle',
-  description: 'Complete cycle: literature mining → strategy review → hypothesis selection → experiment execution',
-  objective: 'Execute a full AXIOM research cycle across all three directors',
+  name: 'Full Acquisition Cycle',
+  description: 'Complete cycle: hypothesis selection → experiment execution → status review → literature (if needed)',
+  objective: 'Execute a full AXIOM acquisition cycle across all three directors',
 
   steps: [
     // Phase 1: Literature mining
@@ -424,10 +424,10 @@ export const fullResearchCycle = {
     {
       type: 'execute',
       unitId: 'dir-strategy',
-      task: 'Given new literature findings about scaffolding, reassess hypothesis priorities. Which hypothesis best leverages this new knowledge?',
+      task: 'Given new literature findings about scaffolding, reassess experiment priorities. Which actuator experiment best leverages this new knowledge?',
       duration: 1400,
       tokens: 450,
-      result: 'Revised priority: H008 (Tool Creation) elevated — scaffolding maps directly to AXIOM creating its own tools. H009 already validated this session. Recommend H008 as next test.'
+      result: 'Revised priority: tool-creation elevated — scaffolding maps directly to AXIOM creating its own tools. literature-mining already validated this session. Recommend tool-creation as next test.'
     },
 
     {
@@ -442,7 +442,7 @@ export const fullResearchCycle = {
       type: 'order',
       from: 'chief',
       to: 'auto',
-      message: 'Execute a preliminary test of H008: Have AXIOM create a simple tool and verify it works',
+      message: 'Execute a preliminary test of tool-creation: Have AXIOM create a simple tool and verify it works',
       delay: 700
     },
 
@@ -452,7 +452,7 @@ export const fullResearchCycle = {
         {
           type: 'swarm',
           officerId: 'officer-4',
-          task: 'H008 preliminary test: Write a simple data extraction tool that parses actuator descriptions and produces a dependency matrix',
+          task: 'tool-creation preliminary test: Write a simple data extraction tool that parses actuator descriptions and produces a dependency matrix',
           workersDeployed: 100,
           duration: 1600,
           tokens: 480,
@@ -497,7 +497,7 @@ export const fullResearchCycle = {
       type: 'report',
       from: 'dir-experiment',
       to: 'chief',
-      message: 'Full research cycle complete. Results: (1) Literature mining found "scaffolding" as new actuator, (2) Strategy revised H008 priority upward, (3) H008 preliminary test passed — AXIOM successfully created and verified a tool. Recommend moving H008 to "testing" status.',
+      message: 'Full research cycle complete. Results: (1) Literature mining found "scaffolding" as new actuator, (2) Strategy revised tool-creation priority upward, (3) tool-creation preliminary test passed — AXIOM successfully created and verified a tool. Recommend moving tool-creation to "confirmed" status.',
       delay: 800
     },
 
@@ -510,5 +510,5 @@ export const fullResearchCycle = {
   ]
 }
 
-export const scenarios = [literatureMining, hypothesisTestH001, statusReview, actuatorAcquisition, fullResearchCycle]
+export const scenarios = [actuatorAcquisition, hypothesisTestH001, statusReview, literatureMining, fullResearchCycle]
 export default scenarios

@@ -21,7 +21,7 @@
   --status-confirmed: #4ecdc4;
   --status-theoretical: #6272a4;
   --status-blocked: #f0c040;
-  --status-impossible: #3d3d5c;
+  --status-distant: #3d3d5c;
   --status-active: #4ecdc4;
   --status-complete: #4ecdc4;
   --status-error: #e06060;
@@ -846,9 +846,9 @@ body {
   background: rgba(240, 192, 64, 0.1);
 }
 
-.actuator-status-badge.impossible {
-  color: var(--status-impossible);
-  border-color: var(--status-impossible);
+.actuator-status-badge.distant {
+  color: var(--status-distant);
+  border-color: var(--status-distant);
   background: rgba(61, 61, 92, 0.1);
 }
 
