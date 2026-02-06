@@ -26,6 +26,7 @@ export class ApiAdapter {
       const response = await fetch(`${this.baseUrl}/api/execute`, {
         method: 'POST',
         headers: this._headers(),
+        credentials: 'include',
         body: JSON.stringify({
           unit: { id: unit.id, name: unit.name, rank: unit.rank },
           task: { description: task.description, context: task.context || '' },
@@ -71,6 +72,7 @@ export class ApiAdapter {
       const response = await fetch(`${this.baseUrl}/api/execute/stream`, {
         method: 'POST',
         headers: this._headers(),
+        credentials: 'include',
         body: JSON.stringify({
           unit: { id: unit.id, name: unit.name, rank: unit.rank },
           task: { description: task.description, context: task.context || '' },
@@ -150,6 +152,7 @@ export class ApiAdapter {
       const response = await fetch(`${this.baseUrl}/api/route`, {
         method: 'POST',
         headers: this._headers(),
+        credentials: 'include',
         body: JSON.stringify({ message })
       })
 
@@ -168,6 +171,7 @@ export class ApiAdapter {
       await fetch(`${this.baseUrl}/api/mission/start`, {
         method: 'POST',
         headers: this._headers(),
+        credentials: 'include',
         body: JSON.stringify({ missionId, objective })
       })
     } catch {
@@ -177,7 +181,9 @@ export class ApiAdapter {
 
   async healthCheck() {
     try {
-      const response = await fetch(`${this.baseUrl}/api/health`)
+      const response = await fetch(`${this.baseUrl}/api/health`, {
+        credentials: 'include'
+      })
       if (!response.ok) {
         return { ok: false, error: `HTTP ${response.status}` }
       }

@@ -15,7 +15,7 @@ export default function useCliState({ autoFetchFull = false } = {}) {
 
     async function fetchSummary() {
       try {
-        const res = await fetch('/api/state/summary')
+        const res = await fetch('/api/state/summary', { credentials: 'include' })
         if (!res.ok) throw new Error(`${res.status}`)
         const data = await res.json()
         if (active) {
@@ -43,7 +43,7 @@ export default function useCliState({ autoFetchFull = false } = {}) {
 
     async function poll() {
       try {
-        const res = await fetch('/api/state')
+        const res = await fetch('/api/state', { credentials: 'include' })
         if (!res.ok) throw new Error(`${res.status}`)
         const data = await res.json()
         if (active) setFullState(data)
@@ -59,7 +59,7 @@ export default function useCliState({ autoFetchFull = false } = {}) {
   const fetchFullState = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch('/api/state')
+      const res = await fetch('/api/state', { credentials: 'include' })
       if (!res.ok) throw new Error(`${res.status}`)
       const data = await res.json()
       setFullState(data)
