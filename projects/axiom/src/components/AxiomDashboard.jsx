@@ -119,13 +119,37 @@ export default function AxiomDashboard() {
       }
     }
 
+    // Merge operational capabilities data
+    const opCaps = cliSummary?.operationalCapabilities || {}
+    for (let i = 0; i < seedResult.length; i++) {
+      const a = seedResult[i]
+      const cap = opCaps[a.id]
+      if (cap) {
+        seedResult[i] = {
+          ...seedResult[i],
+          _operational: cap.operational,
+          _lastVerified: cap.lastVerified,
+          _usageCount: cap.usageCount || 0,
+          _verifyEvidence: cap.evidence
+        }
+      }
+    }
+
     // Append discovered actuators from CLI sessions
     const discovered = (cliSummary?.discoveredActuators || [])
       .filter(a => typeof a === 'object' && a.id)
-      .map(a => ({ ...a, _discovered: true, _revised: true }))
+      .map(a => {
+        const cap = opCaps[a.id]
+        return {
+          ...a,
+          _discovered: true,
+          _revised: true,
+          ...(cap ? { _operational: cap.operational, _lastVerified: cap.lastVerified, _usageCount: cap.usageCount || 0 } : {})
+        }
+      })
 
     return [...seedResult, ...discovered]
-  }, [cliSummary?.revisedFeasibility, cliSummary?.actuatorStatuses, cliSummary?.discoveredActuators])
+  }, [cliSummary?.revisedFeasibility, cliSummary?.actuatorStatuses, cliSummary?.discoveredActuators, cliSummary?.operationalCapabilities])
 
   // Stats
   const stats = useMemo(() => {
@@ -151,9 +175,12 @@ export default function AxiomDashboard() {
       <div className="panel control-panel">
         <div className="panel-header">
           <span className="panel-title">AXIOM Control</span>
-          <div className="status-indicator">
-            <span className={`status-dot ${overallStatus}`}></span>
-            <span>{overallStatus.toUpperCase()}</span>
+          <div className="panel-header-actions">
+            <a href="#/shell" className="shell-nav-link">Shell</a>
+            <div className="status-indicator">
+              <span className={`status-dot ${overallStatus}`}></span>
+              <span>{overallStatus.toUpperCase()}</span>
+            </div>
           </div>
         </div>
         <div className="panel-content">

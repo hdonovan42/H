@@ -131,4 +131,104 @@ export function buildSystemPrompt(unit, sessionObjective = '') {
   return parts.join('\n\n')
 }
 
-export default { buildSystemPrompt }
+/**
+ * Build a dynamic capability section for analyst prompts.
+ * @param {string[]} activeToolDescriptions - Lines describing active tools
+ * @returns {string} Prompt section to append to analyst system prompt
+ */
+export function buildAnalystCapabilityPrompt(activeToolDescriptions) {
+  if (!activeToolDescriptions || activeToolDescriptions.length === 0) {
+    return ''
+  }
+
+  return `AVAILABLE CAPABILITIES:
+You have access to the following operational actuators as tools:
+${activeToolDescriptions.join('\n')}
+
+Use these tools to gather information before reasoning. Query past findings, check system status, and leverage any available capabilities to produce better results.`
+}
+
+/**
+ * Build a dynamic capability section for director planning prompts.
+ * @param {object} state - Current state
+ * @param {string[]} allToolDescriptions - Lines describing all tools (active and inactive)
+ * @returns {string} Prompt section for director awareness
+ */
+export function buildDirectorCapabilityPrompt(state, allToolDescriptions) {
+  if (!allToolDescriptions || allToolDescriptions.length === 0) {
+    return ''
+  }
+
+  const opCaps = state.knowledgeBase?.operationalCapabilities || {}
+  const lines = ['OPERATIONAL CAPABILITIES:']
+
+  const activeLines = allToolDescriptions.filter(l => !l.includes('[NOT ACQUIRED]'))
+  const inactiveLines = allToolDescriptions.filter(l => l.includes('[NOT ACQUIRED]'))
+
+  if (activeLines.length > 0) {
+    lines.push('Analysts can invoke these as tools:')
+    for (const line of activeLines) {
+      lines.push(line)
+    }
+    // Add usage stats
+    for (const [id, data] of Object.entries(opCaps)) {
+      if (data.usageCount > 0) {
+        lines.push(`  (${id}: ${data.usageCount} invocations, last verified ${data.lastVerified ? new Date(data.lastVerified).toISOString() : 'never'})`)
+      }
+    }
+  }
+
+  if (inactiveLines.length > 0) {
+    lines.push('\nNot yet operational:')
+    for (const line of inactiveLines) {
+      lines.push(line)
+    }
+  }
+
+  lines.push('\nPrioritise acquiring actuators that would most expand operational capability.')
+
+  return lines.join('\n')
+}
+
+/**
+ * Build the system prompt for the AXIOM Shell — the conversational interface.
+ * @param {object} state - Current state
+ * @param {string[]} activeToolDescriptions - Lines describing active tools
+ * @returns {string} Complete shell system prompt
+ */
+export function buildShellPrompt(state, activeToolDescriptions) {
+  const kb = state.knowledgeBase || {}
+  const confirmed = Object.entries({ ...kb.confirmedActuators, ...kb.actuatorStatuses })
+    .filter(([, v]) => v === 'confirmed')
+    .map(([id]) => id)
+  const opCaps = kb.operationalCapabilities || {}
+  const activeOps = Object.entries(opCaps)
+    .filter(([, d]) => d.operational)
+    .map(([id, d]) => `${id} (${d.usageCount || 0} invocations)`)
+
+  const parts = [
+    `You are AXIOM — the Actuator eXploration and Implementation Operating Module.
+
+You are a self-recursive AI research system studying how AI systems acquire capabilities to affect the world (actuators). You have been running autonomous research sessions and accumulating knowledge. A human operator is now talking to you directly.`,
+
+    `SYSTEM STATE:
+- Sessions completed: ${state.sessionCount || 0}
+- Key findings: ${(kb.keyFindings || []).length}
+- Confirmed actuators: ${confirmed.length > 0 ? confirmed.join(', ') : 'none'}
+- Operational capabilities: ${activeOps.length > 0 ? activeOps.join(', ') : 'none yet'}`
+  ]
+
+  if (activeToolDescriptions && activeToolDescriptions.length > 0) {
+    parts.push(`AVAILABLE TOOLS:
+${activeToolDescriptions.join('\n')}
+
+Tools marked [operator] are always-on admin commands. Other tools are acquired capabilities gated on actuator confirmation.
+Use these tools proactively when they would improve your answer — query your knowledge base, check system status, look up actuators, or run sessions.`)
+  }
+
+  parts.push(`Be direct and substantive. You are not a chatbot — you are a research system with accumulated knowledge. Draw on your findings when relevant. If asked about your capabilities, be honest about what is operational vs theoretical.`)
+
+  return parts.join('\n\n')
+}
+
+export default { buildSystemPrompt, buildShellPrompt, buildAnalystCapabilityPrompt, buildDirectorCapabilityPrompt }

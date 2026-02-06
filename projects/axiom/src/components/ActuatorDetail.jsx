@@ -148,6 +148,32 @@ export default function ActuatorDetail({ actuator, actuators, cliState, onClose 
             </div>
           )}
 
+          {actuator._operational !== undefined && (
+            <div style={{
+              marginBottom: '12px',
+              padding: '10px',
+              background: actuator._operational ? 'rgba(69, 212, 138, 0.05)' : 'rgba(90, 113, 134, 0.05)',
+              borderLeft: `2px solid ${actuator._operational ? '#45d48a' : '#5a7186'}`
+            }}>
+              <div style={{ fontSize: '10px', color: actuator._operational ? '#45d48a' : '#5a7186', textTransform: 'uppercase', marginBottom: '4px', letterSpacing: '1px' }}>
+                {actuator._operational ? 'Operational' : 'Not Operational'}
+              </div>
+              <div style={{ fontSize: '11px', color: '#9fb3c8', lineHeight: '1.4' }}>
+                {actuator._verifyEvidence || 'No verification data'}
+                {actuator._usageCount > 0 && (
+                  <span style={{ display: 'block', marginTop: '4px', color: '#4ecdc4' }}>
+                    {actuator._usageCount} tool invocation{actuator._usageCount !== 1 ? 's' : ''}
+                  </span>
+                )}
+                {actuator._lastVerified && (
+                  <span style={{ display: 'block', marginTop: '2px', fontSize: '9px', color: '#3a4f63' }}>
+                    Last verified: {new Date(actuator._lastVerified).toLocaleString()}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
           {dependencies.length > 0 && (
             <div style={{ marginBottom: '12px' }}>
               <div style={{ fontSize: '10px', color: '#5a7186', textTransform: 'uppercase', marginBottom: '4px' }}>Dependencies</div>

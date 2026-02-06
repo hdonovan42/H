@@ -1,8 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { executeCall } from './claude-client.js'
-import { buildSystemPrompt } from './prompts.js'
+import { executeCall, executeCallWithTools } from './claude-client.js'
+import { buildSystemPrompt, buildAnalystCapabilityPrompt, buildDirectorCapabilityPrompt } from './prompts.js'
+import { recordToolUsage } from './state.js'
+import { loadCapabilities, initRegistry, getActiveTools, getActiveToolDescriptions, getAllToolDescriptions, executeToolCall } from './capabilities/registry.js'
 import { DIRECTORS } from '../shared/identity.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -156,6 +158,16 @@ export async function runSession(state, options = {}) {
 
   const totalTokens = { input: 0, output: 0 }
   let totalSearchCount = 0
+  const toolUsageLog = [] // track capability tool invocations
+
+  // --- Load capability registry ---
+  await loadCapabilities()
+  initRegistry(state)
+  const capabilityTools = getActiveTools()
+  const activeToolDescriptions = getActiveToolDescriptions()
+  const allToolDescriptions = getAllToolDescriptions()
+
+  log(`  Capability tools available: ${capabilityTools.length}`)
 
   // --- Phase 1: Director Planning ---
   log('\n[Phase 1] Director Planning...')
@@ -164,12 +176,15 @@ export async function runSession(state, options = {}) {
   const directorUnit = { id: 'dir-research', name: DIRECTORS['dir-research'].name, rank: 'general' }
   const directorSystemPrompt = buildSystemPrompt(directorUnit, 'Autonomous AXIOM acquisition session')
 
+  const directorCapSection = buildDirectorCapabilityPrompt(state, allToolDescriptions)
+
   const planningMessage = `You are running an autonomous acquisition session for AXIOM — the AI actuator research system.
 
 Session type: ${sessionType}
 
 STATE SUMMARY:
 ${stateSummary}
+${directorCapSection}
 
 EXPERIMENT STATUS:
 ${experimentStatus}
@@ -226,21 +241,62 @@ Return your plan, then list each analyst task inside <TASK>...</TASK> blocks. Ea
   const analystFindings = []
   const webSearchTool = { type: 'web_search_20250305', name: 'web_search', max_uses: 5 }
 
+  // Build capability-aware analyst prompt section
+  const analystCapSection = buildAnalystCapabilityPrompt(activeToolDescriptions)
+
+  // Tool executor: routes calls to the registry and tracks usage
+  const toolExecutor = async (name, input) => {
+    const result = await executeToolCall(name, input)
+    // Find which actuator this tool belongs to and record usage
+    const { getActiveModules } = await import('./capabilities/registry.js')
+    for (const mod of getActiveModules()) {
+      if (mod.tools.some(t => t.name === name)) {
+        const ids = Array.isArray(mod.actuatorId) ? mod.actuatorId : [mod.actuatorId]
+        for (const id of ids) {
+          recordToolUsage(state, id)
+        }
+        toolUsageLog.push({ tool: name, actuatorIds: ids })
+        break
+      }
+    }
+    return result
+  }
+
   for (let i = 0; i < tasks.length; i++) {
     const task = tasks[i]
     log(`  Analyst ${i + 1}/${tasks.length}: ${task.slice(0, 80)}...`)
     onEvent({ type: 'task_start', index: i, total: tasks.length, description: task.slice(0, 200) })
 
     const analystUnit = { id: `analyst-${i + 1}`, name: `Analyst ${i + 1}`, rank: 'officer' }
-    const analystSystemPrompt = buildSystemPrompt(analystUnit, 'Autonomous AXIOM research session')
+    const basePrompt = buildSystemPrompt(analystUnit, 'Autonomous AXIOM research session')
+    const analystSystemPrompt = analystCapSection
+      ? basePrompt + '\n\n' + analystCapSection
+      : basePrompt
 
-    const analystResult = await executeCall({
-      model: 'sonnet',
-      systemPrompt: analystSystemPrompt,
-      userMessage: task,
-      maxTokens: 1024,
-      tools: [webSearchTool]
-    })
+    let analystResult
+
+    if (capabilityTools.length > 0) {
+      // Use tool-loop version when capability tools are available
+      analystResult = await executeCallWithTools({
+        model: 'sonnet',
+        systemPrompt: analystSystemPrompt,
+        userMessage: task,
+        maxTokens: 1024,
+        serverTools: [webSearchTool],
+        capabilityTools,
+        toolExecutor,
+        maxToolRounds: 5
+      })
+    } else {
+      // No capability tools — use simple executeCall with web search only
+      analystResult = await executeCall({
+        model: 'sonnet',
+        systemPrompt: analystSystemPrompt,
+        userMessage: task,
+        maxTokens: 1024,
+        tools: [webSearchTool]
+      })
+    }
 
     if (!analystResult.success) {
       log(`  WARNING: Analyst ${i + 1} failed: ${analystResult.error}`)
@@ -252,9 +308,10 @@ Return your plan, then list each analyst task inside <TASK>...</TASK> blocks. Ea
     totalTokens.output += analystResult.tokens.output
     totalSearchCount += analystResult.searchCount || 0
 
+    const toolCount = analystResult.toolInvocations?.length || 0
     analystFindings.push(analystResult.result)
-    log(`  Analyst ${i + 1} complete (${analystResult.tokens.total} tokens, ${analystResult.searchCount || 0} searches)`)
-    onEvent({ type: 'task_complete', index: i, tokens: analystResult.tokens.total, searchCount: analystResult.searchCount || 0 })
+    log(`  Analyst ${i + 1} complete (${analystResult.tokens.total} tokens, ${analystResult.searchCount || 0} searches, ${toolCount} tool calls)`)
+    onEvent({ type: 'task_complete', index: i, tokens: analystResult.tokens.total, searchCount: analystResult.searchCount || 0, toolCalls: toolCount })
   }
 
   // --- Phase 3: Director Synthesis ---
@@ -337,6 +394,7 @@ CRITICAL: Every <FINDING>, <UPDATE>, <STATUS>, and <ACTUATOR> block MUST have a 
     proposedStatusUpdates,
     tokens: { input: totalTokens.input, output: totalTokens.output },
     searchCount: totalSearchCount,
+    toolUsage: toolUsageLog,
     durationMs
   }
 

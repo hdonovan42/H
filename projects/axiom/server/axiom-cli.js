@@ -6,6 +6,7 @@ import { appendFileSync, mkdirSync } from 'node:fs'
 import { config } from 'dotenv'
 import { loadState, saveState, nextSessionId, mergeKnowledgeUpdates } from './state.js'
 import { runSession } from './session-runner.js'
+import { loadCapabilities, initRegistry, verifyAll } from './capabilities/registry.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -98,6 +99,37 @@ async function main() {
   // Save state
   if (!dryRun) {
     saveState(statePath, state)
+  }
+
+  // Run capability verification
+  if (!dryRun) {
+    if (verbose) console.log('\n[Post-Session] Running capability verification...')
+    try {
+      await loadCapabilities()
+      initRegistry(state)
+      const verifyResults = await verifyAll()
+
+      if (!state.knowledgeBase.operationalCapabilities) {
+        state.knowledgeBase.operationalCapabilities = {}
+      }
+      for (const [id, result] of Object.entries(verifyResults)) {
+        const existing = state.knowledgeBase.operationalCapabilities[id]
+        state.knowledgeBase.operationalCapabilities[id] = {
+          operational: result.operational,
+          lastVerified: result.lastVerified,
+          evidence: result.evidence,
+          usageCount: existing?.usageCount || 0
+        }
+      }
+      saveState(statePath, state)
+
+      if (verbose) {
+        const passing = Object.values(verifyResults).filter(r => r.operational).length
+        console.log(`  Verification: ${passing}/${Object.keys(verifyResults).length} capabilities operational`)
+      }
+    } catch (err) {
+      if (verbose) console.log(`  Verification error: ${err.message}`)
+    }
   }
 
   // Log summary

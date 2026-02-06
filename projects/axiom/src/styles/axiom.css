@@ -1232,6 +1232,298 @@ body {
   margin-top: 8px;
 }
 
+/* Shell Nav Link (used in both dashboard and shell) */
+.shell-nav-link {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--accent);
+  text-decoration: none;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.shell-nav-link:hover {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* AXIOM Shell */
+.axiom-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-dark);
+}
+
+.shell-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.shell-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  color: var(--accent);
+}
+
+.shell-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.shell-clear-btn {
+  font-size: 9px;
+  padding: 4px 10px;
+}
+
+.shell-health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.shell-health-dot.ok {
+  background: var(--status-confirmed);
+  box-shadow: 0 0 4px var(--status-confirmed);
+}
+
+.shell-health-dot.checking {
+  background: var(--status-warning);
+  animation: pulse-glow 1s ease-in-out infinite;
+}
+
+.shell-health-dot.error {
+  background: var(--status-error);
+}
+
+/* Messages area */
+.shell-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Welcome screen */
+.shell-welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  text-align: center;
+  gap: 10px;
+  opacity: 0.6;
+}
+
+.shell-welcome-title {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 8px;
+  color: var(--accent);
+}
+
+.shell-welcome-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+  letter-spacing: 1px;
+}
+
+.shell-welcome-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 16px;
+  max-width: 400px;
+  line-height: 1.6;
+}
+
+.shell-welcome-guide {
+  margin-top: 24px;
+  max-width: 540px;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+
+.shell-welcome-guide > p {
+  margin: 0 0 14px 0;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.shell-welcome-guide ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shell-welcome-guide li {
+  padding-left: 12px;
+  border-left: 2px solid var(--border-subtle);
+}
+
+.shell-welcome-guide li strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.shell-welcome-guide li em {
+  color: var(--text-dim);
+  font-style: normal;
+  opacity: 0.7;
+}
+
+.shell-tool-count {
+  margin-top: 16px;
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+/* Message bubbles */
+.shell-message {
+  padding: 6px 0;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.shell-message.user {
+  color: var(--accent-bright);
+}
+
+.shell-message.assistant {
+  color: var(--text-primary);
+}
+
+.shell-message.error {
+  color: var(--status-error);
+}
+
+.shell-message-prefix {
+  color: var(--text-secondary);
+  font-weight: 600;
+  user-select: none;
+}
+
+.shell-message.user .shell-message-prefix {
+  color: var(--accent);
+}
+
+.shell-message-meta {
+  font-size: 9px;
+  color: var(--text-dim);
+  padding: 2px 0 8px;
+  letter-spacing: 0.5px;
+}
+
+/* Tool events */
+.shell-tool-events {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+}
+
+.shell-tool-event {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-style: italic;
+  padding: 2px 0;
+  letter-spacing: 0.3px;
+}
+
+.shell-tool-event.tool_start {
+  color: var(--accent-dim);
+}
+
+/* Thinking indicator */
+.shell-thinking {
+  font-size: 11px;
+  color: var(--accent-dim);
+  padding: 6px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shell-thinking-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse-glow 1s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+/* Input bar */
+.shell-input-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.shell-input-prompt {
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.shell-input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  padding: 10px 14px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.shell-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.shell-input:disabled {
+  opacity: 0.5;
+}
+
+.shell-send-btn {
+  padding: 10px 20px;
+}
+
 /* Revised Node Pulse Animation */
 @keyframes revised-node-pulse {
   0%, 100% { opacity: 0.6; }

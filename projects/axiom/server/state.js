@@ -11,7 +11,8 @@ export function createDefaultState() {
       discoveredActuators: [],
       revisedFeasibility: {},
       actuatorStatuses: {},
-      confirmedActuators: {}
+      confirmedActuators: {},
+      operationalCapabilities: {}
     }
   }
 }
@@ -71,4 +72,33 @@ export function mergeKnowledgeUpdates(state, knowledgeUpdates) {
       state.knowledgeBase.actuatorStatuses[id] = status
     }
   }
+
+  // Merge operational capabilities
+  if (knowledgeUpdates.operationalCapabilities) {
+    if (!state.knowledgeBase.operationalCapabilities) {
+      state.knowledgeBase.operationalCapabilities = {}
+    }
+    for (const [id, data] of Object.entries(knowledgeUpdates.operationalCapabilities)) {
+      const existing = state.knowledgeBase.operationalCapabilities[id]
+      state.knowledgeBase.operationalCapabilities[id] = {
+        ...data,
+        usageCount: (existing?.usageCount || 0) + (data.usageCount || 0)
+      }
+    }
+  }
+}
+
+export function recordToolUsage(state, actuatorId) {
+  if (!state.knowledgeBase.operationalCapabilities) {
+    state.knowledgeBase.operationalCapabilities = {}
+  }
+  if (!state.knowledgeBase.operationalCapabilities[actuatorId]) {
+    state.knowledgeBase.operationalCapabilities[actuatorId] = {
+      operational: true,
+      lastVerified: null,
+      evidence: '',
+      usageCount: 0
+    }
+  }
+  state.knowledgeBase.operationalCapabilities[actuatorId].usageCount++
 }

@@ -1,10 +1,13 @@
 import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
-import { executeCall, executeCallStream, AVAILABLE_MODELS } from './claude-client.js'
-import { buildSystemPrompt } from './prompts.js'
+import { readFileSync } from 'node:fs'
+import { executeCall, executeCallStream, executeCallWithTools, AVAILABLE_MODELS } from './claude-client.js'
+import { buildSystemPrompt, buildShellPrompt } from './prompts.js'
 import { loadState, saveState, nextSessionId, mergeKnowledgeUpdates } from './state.js'
 import { runSession } from './session-runner.js'
+import { loadCapabilities, initRegistry, verifyAll, getActiveTools, getActiveToolDescriptions, executeToolCall, getAllModules } from './capabilities/registry.js'
+import { SHELL_TOOLS, executeShellTool } from './shell-tools.js'
 import { DIRECTORS, DEFAULT_DIRECTOR } from '../shared/identity.js'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -42,9 +45,12 @@ function authMiddleware(req, res, next) {
 app.use('/api/execute', authMiddleware)
 app.use('/api/route', authMiddleware)
 app.use('/api/session', authMiddleware)
+app.use('/api/shell', authMiddleware)
 
 // Concurrency guard for real sessions
 let activeSession = null
+function getActiveSession() { return activeSession }
+function setActiveSession(v) { activeSession = v }
 
 // Session state
 const missions = new Map()
@@ -103,7 +109,8 @@ app.get('/api/state/summary', (req, res) => {
       ...(state.knowledgeBase?.confirmedActuators || {})
     },
     lastSession,
-    discoveredActuators: state.knowledgeBase?.discoveredActuators || []
+    discoveredActuators: state.knowledgeBase?.discoveredActuators || [],
+    operationalCapabilities: state.knowledgeBase?.operationalCapabilities || {}
   })
 })
 
@@ -389,6 +396,169 @@ app.post('/api/mission/start', authMiddleware, (req, res) => {
 app.get('/api/mission/:missionId/context/:unitId', authMiddleware, (req, res) => {
   const ctx = getMissionContext(req.params.missionId, req.params.unitId)
   res.json({ success: true, context: ctx })
+})
+
+// Capabilities endpoint
+app.get('/api/capabilities', async (req, res) => {
+  try {
+    const state = loadState(STATE_PATH)
+    await loadCapabilities()
+    initRegistry(state)
+
+    const activeTools = getActiveTools()
+    const allModules = getAllModules()
+    const opCaps = state.knowledgeBase?.operationalCapabilities || {}
+
+    const modules = allModules.map(mod => {
+      const ids = Array.isArray(mod.actuatorId) ? mod.actuatorId : [mod.actuatorId]
+      const isActive = activeTools.some(t => mod.tools.some(mt => mt.name === t.name))
+      return {
+        actuatorIds: ids,
+        active: isActive,
+        tools: mod.tools.map(t => ({ name: t.name, description: t.description })),
+        verification: ids.map(id => opCaps[id] || null)
+      }
+    })
+
+    res.json({
+      totalModules: allModules.length,
+      activeCount: modules.filter(m => m.active).length,
+      modules,
+      operationalCapabilities: opCaps
+    })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// Shell tools manifest — dynamic list for the UI
+app.get('/api/shell/tools', async (req, res) => {
+  try {
+    const state = loadState(STATE_PATH)
+    await loadCapabilities()
+    initRegistry(state)
+
+    const registryTools = getActiveTools()
+
+    const tools = [
+      ...SHELL_TOOLS.map(t => ({ name: t.name, description: t.description, type: 'operator' })),
+      ...registryTools.map(t => ({ name: t.name, description: t.description, type: 'capability' }))
+    ]
+
+    res.json({ tools })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// Shell chat — conversational interface to AXIOM
+app.post('/api/shell/chat', async (req, res) => {
+  const { message, history } = req.body
+
+  if (!message) {
+    return res.status(400).json({ success: false, error: 'Missing required field: message' })
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.flushHeaders()
+
+  const sendEvent = (event) => {
+    try { res.write(`data: ${JSON.stringify(event)}\n\n`) } catch { /* client disconnected */ }
+  }
+
+  try {
+    const state = loadState(STATE_PATH)
+    await loadCapabilities()
+    initRegistry(state)
+
+    const registryTools = getActiveTools()
+    const activeDescriptions = getActiveToolDescriptions()
+
+    // Load seed actuators for lookup_actuator
+    const seedActuators = JSON.parse(readFileSync(resolve(__dirname, '../src/data/actuators.json'), 'utf-8'))
+    const registryModules = getAllModules()
+
+    // Build shell context for shell tool execution
+    const shellContext = { state, statePath: STATE_PATH, getActiveSession, setActiveSession, seedActuators, registryModules }
+
+    // Shell tool descriptions for the prompt
+    const shellToolDescriptions = SHELL_TOOLS.map(t => `- ${t.name}: ${t.description} [operator]`)
+    const allDescriptions = [...shellToolDescriptions, ...activeDescriptions]
+
+    const systemPrompt = buildShellPrompt(state, allDescriptions)
+
+    // Build messages from history + new message
+    const messages = []
+    if (history && Array.isArray(history)) {
+      for (const msg of history) {
+        messages.push({ role: msg.role, content: msg.content })
+      }
+    }
+    messages.push({ role: 'user', content: message })
+
+    // Combine shell tools + registry tools for the API
+    const shellToolSchemas = SHELL_TOOLS.map(t => ({
+      name: t.name,
+      description: t.description,
+      input_schema: t.input_schema
+    }))
+    const registryToolSchemas = registryTools.map(t => ({
+      name: t.name,
+      description: t.description,
+      input_schema: t.input_schema
+    }))
+    const allToolSchemas = [...shellToolSchemas, ...registryToolSchemas]
+
+    // Shell tool names for routing
+    const shellToolNames = new Set(SHELL_TOOLS.map(t => t.name))
+
+    // Server tools (web search)
+    const serverTools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }]
+
+    sendEvent({ type: 'thinking', text: 'Processing...' })
+
+    console.log(`[Shell] "${message.slice(0, 80)}..." (${allToolSchemas.length} tools: ${SHELL_TOOLS.length} shell + ${registryToolSchemas.length} registry)`)
+
+    const result = await executeCallWithTools({
+      model: 'opus',
+      systemPrompt,
+      maxTokens: 4096,
+      serverTools,
+      capabilityTools: allToolSchemas,
+      toolExecutor: (name, input) => {
+        if (shellToolNames.has(name)) {
+          return executeShellTool(name, input, shellContext)
+        }
+        return executeToolCall(name, input)
+      },
+      maxToolRounds: 8,
+      messages,
+      onToolEvent: sendEvent
+    })
+
+    if (result.success) {
+      sendEvent({
+        type: 'response',
+        text: result.result,
+        tokens: result.tokens,
+        toolInvocations: result.toolInvocations || [],
+        searchCount: result.searchCount || 0,
+        duration: result.duration
+      })
+      console.log(`  -> OK (${result.tokens.total} tokens, ${result.duration}ms, ${result.toolInvocations?.length || 0} tool calls)`)
+    } else {
+      sendEvent({ type: 'error', error: result.error })
+      console.log(`  -> FAIL: ${result.error}`)
+    }
+  } catch (err) {
+    console.error('Shell chat error:', err)
+    sendEvent({ type: 'error', error: err.message })
+  }
+
+  res.write('data: [DONE]\n\n')
+  res.end()
 })
 
 app.listen(PORT, () => {

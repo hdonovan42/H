@@ -251,17 +251,40 @@ export default function ActuatorGraph({ actuators, onNodeClick, statusFilter }) 
               r={r}
               className="actuator-node-circle"
               fill={fillColor}
-              fillOpacity={actuator.status === 'distant' ? 0.3 : 0.6}
+              fillOpacity={actuator.status === 'distant' ? 0.3 : (actuator._operational && actuator.status === 'confirmed') ? 0.9 : (actuator.status === 'confirmed' && !actuator._operational) ? 0.45 : 0.6}
               stroke={strokeColor}
               strokeWidth={isHovered ? 2 : 1}
             />
-            {actuator._revised && (
+            {actuator._revised && !actuator._operational && (
               <circle
                 cx={pos.x}
                 cy={pos.y}
                 r={r + 4}
                 fill="none"
                 stroke="#4ecdc4"
+                strokeWidth={0.8}
+                opacity={0.6}
+                className="revised-pulse"
+              />
+            )}
+            {actuator._operational && actuator.status === 'confirmed' && (
+              <circle
+                cx={pos.x}
+                cy={pos.y}
+                r={r + 4}
+                fill="none"
+                stroke="#4ecdc4"
+                strokeWidth={1.5}
+                opacity={0.9}
+              />
+            )}
+            {actuator._operational && actuator.status !== 'confirmed' && (
+              <circle
+                cx={pos.x}
+                cy={pos.y}
+                r={r + 4}
+                fill="none"
+                stroke="#45d48a"
                 strokeWidth={0.8}
                 opacity={0.6}
                 className="revised-pulse"
@@ -294,9 +317,9 @@ export default function ActuatorGraph({ actuators, onNodeClick, statusFilter }) 
                   textAnchor="middle"
                   className="actuator-label"
                   fontSize="7"
-                  fill="#5a7186"
+                  fill={actuator._operational ? '#45d48a' : '#5a7186'}
                 >
-                  {actuator.status}
+                  {actuator.status}{actuator._operational ? ' \u2022 operational' : ''}
                 </text>
               </>
             )}
