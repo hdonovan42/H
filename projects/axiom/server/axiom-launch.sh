@@ -6,8 +6,11 @@ set -euo pipefail
 # Resolve script directory (works from any cwd)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Add node to PATH (nvm)
-export PATH="/home/hdonovan/.nvm/versions/node/v22.22.0/bin:$PATH"
+# Add node to PATH (nvm — works for any user)
+if [ -d "$HOME/.nvm" ]; then
+  export NVM_DIR="$HOME/.nvm"
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+fi
 
 # Ensure data directory exists
 mkdir -p "$SCRIPT_DIR/data"
