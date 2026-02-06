@@ -92,6 +92,7 @@ app.get('/api/state/summary', (req, res) => {
     totalSearches: state.sessions.reduce((sum, s) => sum + (s.searchCount || 0), 0),
     findingsCount: state.knowledgeBase?.keyFindings?.length || 0,
     revisedFeasibility: state.knowledgeBase?.revisedFeasibility || {},
+    hypothesisResults: state.knowledgeBase?.hypothesisResults || {},
     lastSession
   })
 })

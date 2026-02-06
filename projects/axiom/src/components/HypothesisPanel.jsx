@@ -13,7 +13,7 @@ export default function HypothesisPanel({ hypotheses }) {
             </div>
             <div className="hypothesis-name">{h.name}</div>
             <div className="hypothesis-meta">
-              <span>{h.status}</span>
+              <span>{h.status}{h._revised ? ' *' : ''}</span>
               <span>{h.cost}</span>
               {h.blockedBy.length > 0 && (
                 <span style={{ color: 'var(--status-warning)' }}>

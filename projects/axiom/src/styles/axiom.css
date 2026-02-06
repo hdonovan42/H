@@ -692,6 +692,20 @@ body {
   opacity: 0.7;
 }
 
+.hypothesis-card.status-passed {
+  border-left-color: var(--status-confirmed);
+  opacity: 0.7;
+}
+
+.hypothesis-card.status-failed {
+  border-left-color: var(--status-error);
+  opacity: 0.7;
+}
+
+.hypothesis-card.status-in-progress {
+  border-left-color: var(--accent-bright);
+}
+
 .hypothesis-id {
   font-size: 10px;
   font-weight: 600;

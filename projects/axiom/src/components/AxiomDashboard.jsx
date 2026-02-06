@@ -120,6 +120,16 @@ export default function AxiomDashboard() {
     )
   }, [cliSummary?.revisedFeasibility])
 
+  // Merge hypothesis data with CLI hypothesis results
+  const mergedHypotheses = useMemo(() => {
+    if (!cliSummary?.hypothesisResults) return hypothesesData
+    const results = cliSummary.hypothesisResults
+    if (Object.keys(results).length === 0) return hypothesesData
+    return hypothesesData.map(h =>
+      results[h.id] !== undefined ? { ...h, status: results[h.id], _revised: true } : h
+    )
+  }, [cliSummary?.hypothesisResults])
+
   // Stats
   const stats = useMemo(() => {
     const units = Array.from(state.units.values())
@@ -244,7 +254,7 @@ export default function AxiomDashboard() {
             </div>
           )}
 
-          <HypothesisPanel hypotheses={hypothesesData} />
+          <HypothesisPanel hypotheses={mergedHypotheses} />
         </div>
       </div>
 

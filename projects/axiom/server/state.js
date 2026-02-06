@@ -9,7 +9,8 @@ export function createDefaultState() {
     knowledgeBase: {
       keyFindings: [],
       discoveredActuators: [],
-      revisedFeasibility: {}
+      revisedFeasibility: {},
+      hypothesisResults: {}
     }
   }
 }

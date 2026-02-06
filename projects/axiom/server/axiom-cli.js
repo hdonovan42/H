@@ -105,6 +105,8 @@ async function main() {
       }
     }
     Object.assign(state.knowledgeBase.revisedFeasibility, knowledgeUpdates.revisedFeasibility)
+    if (!state.knowledgeBase.hypothesisResults) state.knowledgeBase.hypothesisResults = {}
+    Object.assign(state.knowledgeBase.hypothesisResults, knowledgeUpdates.hypothesisResults)
   }
 
   // Save state

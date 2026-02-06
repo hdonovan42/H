@@ -38,6 +38,13 @@ function buildStateSummary(state) {
     }
   }
 
+  if (state.knowledgeBase.hypothesisResults && Object.keys(state.knowledgeBase.hypothesisResults).length > 0) {
+    lines.push(`\nHypothesis test results:`)
+    for (const [id, status] of Object.entries(state.knowledgeBase.hypothesisResults)) {
+      lines.push(`- ${id}: ${status}`)
+    }
+  }
+
   if (recent.length > 0) {
     lines.push(`\nRecent sessions:`)
     for (const s of recent) {
@@ -63,10 +70,11 @@ function buildActuatorLandscape(actuators) {
   return lines.join('\n')
 }
 
-function buildHypothesisStatus(hypotheses) {
-  return hypotheses.map(h =>
-    `${h.id}: ${h.name} — ${h.status} (priority: ${h.priority})${h.blockedBy.length ? ` [blocked by: ${h.blockedBy.join(', ')}]` : ''}`
-  ).join('\n')
+function buildHypothesisStatus(hypotheses, hypothesisResults = {}) {
+  return hypotheses.map(h => {
+    const runtimeStatus = hypothesisResults[h.id] || h.status
+    return `${h.id}: ${h.name} — ${runtimeStatus} (priority: ${h.priority})${h.blockedBy.length ? ` [blocked by: ${h.blockedBy.join(', ')}]` : ''}`
+  }).join('\n')
 }
 
 function parseTasks(text) {
@@ -99,6 +107,16 @@ function parseUpdates(text) {
   return updates
 }
 
+function parseHypothesisUpdates(text) {
+  const updates = []
+  const re = /<HYPOTHESIS>([\s\S]*?)<\/HYPOTHESIS>/g
+  let m
+  while ((m = re.exec(text)) !== null) {
+    updates.push(m[1].trim())
+  }
+  return updates
+}
+
 /**
  * Run a single AXIOM research session.
  * @param {object} state - Current persistent state
@@ -114,7 +132,7 @@ export async function runSession(state, options = {}) {
 
   const stateSummary = buildStateSummary(state)
   const actuatorLandscape = buildActuatorLandscape(actuators)
-  const hypothesisStatus = buildHypothesisStatus(hypotheses)
+  const hypothesisStatus = buildHypothesisStatus(hypotheses, state.knowledgeBase.hypothesisResults || {})
 
   const totalTokens = { input: 0, output: 0 }
   let totalSearchCount = 0
@@ -148,7 +166,7 @@ Return your plan, then list each analyst task inside <TASK>...</TASK> blocks. Ea
     log(planningMessage.slice(0, 500) + '...')
     return {
       session: { id: 'dry-run', timestamp: new Date().toISOString(), type: sessionType, directorPlan: '[dry run]', findings: [], synthesis: '[dry run]', proposedUpdates: [], tokens: { input: 0, output: 0 }, searchCount: 0, durationMs: 0 },
-      knowledgeUpdates: { keyFindings: [], discoveredActuators: [], revisedFeasibility: {} },
+      knowledgeUpdates: { keyFindings: [], discoveredActuators: [], revisedFeasibility: {}, hypothesisResults: {} },
       error: null
     }
   }
@@ -229,7 +247,8 @@ Your task:
 1. Synthesise the findings into a coherent summary.
 2. Identify key discoveries worth persisting to the knowledge base — wrap each in <FINDING>...</FINDING> blocks (one sentence each).
 3. If any actuator feasibility scores or statuses should be revised based on evidence, wrap each proposed change in <UPDATE>actuator-id: new-feasibility-score (reason)</UPDATE> blocks.
-4. Suggest what the next session should focus on.`
+4. If any hypothesis status should change based on session evidence, wrap each in <HYPOTHESIS>hypothesis-id: new-status (reason)</HYPOTHESIS> blocks. Valid statuses: passed, failed, in-progress.
+5. Suggest what the next session should focus on.`
 
   const synthesisResult = await executeCall({
     model: 'opus',
@@ -248,10 +267,12 @@ Your task:
   const synthesis = synthesisResult.result
   const keyFindings = parseFindings(synthesis)
   const proposedUpdates = parseUpdates(synthesis)
+  const proposedHypothesisUpdates = parseHypothesisUpdates(synthesis)
 
   log(`  Synthesis complete (${synthesisResult.tokens.total} tokens)`)
   log(`  Key findings: ${keyFindings.length}`)
   log(`  Proposed updates: ${proposedUpdates.length}`)
+  log(`  Hypothesis updates: ${proposedHypothesisUpdates.length}`)
 
   // Build session record
   const durationMs = Date.now() - startTime
@@ -263,6 +284,7 @@ Your task:
     findings: analystFindings,
     synthesis,
     proposedUpdates,
+    proposedHypothesisUpdates,
     tokens: { input: totalTokens.input, output: totalTokens.output },
     searchCount: totalSearchCount,
     durationMs
@@ -277,10 +299,20 @@ Your task:
     }
   }
 
+  const validHypothesisStatuses = ['passed', 'failed', 'in-progress']
+  const hypothesisResults = {}
+  for (const update of proposedHypothesisUpdates) {
+    const match = update.match(/^(H\d{3}):\s*([\w-]+)/)
+    if (match && validHypothesisStatuses.includes(match[2])) {
+      hypothesisResults[match[1]] = match[2]
+    }
+  }
+
   const knowledgeUpdates = {
     keyFindings,
     discoveredActuators: [], // Director would need to explicitly tag these
-    revisedFeasibility
+    revisedFeasibility,
+    hypothesisResults
   }
 
   log(`\nSession complete in ${(durationMs / 1000).toFixed(1)}s`)
