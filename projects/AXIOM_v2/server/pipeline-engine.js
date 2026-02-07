@@ -42,6 +42,7 @@ function extractJSON(text) {
 
 let pipelineActive = null
 let selectorActive = null
+let abortController = null
 
 export function isPipelineActive() {
   return pipelineActive
@@ -53,6 +54,21 @@ export function getPipelineStatus() {
 
 export function getSelectorStatus() {
   return selectorActive
+}
+
+export function abortPipeline() {
+  if (!pipelineActive && !selectorActive) {
+    return { success: false, error: 'No pipeline running' }
+  }
+  if (abortController) {
+    abortController.abort()
+  }
+  const was = pipelineActive || selectorActive
+  pipelineActive = null
+  selectorActive = null
+  abortController = null
+  console.log('[Pipeline] Aborted by operator')
+  return { success: true, aborted: was }
 }
 
 /**
@@ -299,6 +315,14 @@ export async function runImplementPhase(statePath, proposalId, onEvent = () => {
     state = loadState(statePath) // Reload in case verify phase modified state
     state.sessionCount++
     state.sessions.push(session)
+
+    // Mark proposal as completed so it doesn't get re-picked by auto-select
+    const prop = (state.proposals || []).find(p => p.id === proposalId)
+    if (prop) {
+      prop.status = verifyResult.success ? 'verified' : 'implemented'
+      if (verifyResult.success) prop.verifiedAt = new Date().toISOString()
+    }
+
     saveState(statePath, state)
 
     onEvent({ type: 'pipeline_complete', capabilityId, verified: verifyResult.success })

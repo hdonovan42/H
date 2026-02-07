@@ -56,6 +56,17 @@ export default function PipelineView() {
     }
   }
 
+  const killPipeline = async () => {
+    try {
+      const res = await fetch('/api/v2/pipeline/abort', { method: 'POST', credentials: 'include' })
+      const data = await res.json()
+      setEvents(prev => [...prev, { type: 'abort', ...data }])
+      setRunning(false)
+    } catch (err) {
+      setEvents(prev => [...prev, { type: 'error', error: `Abort failed: ${err.message}` }])
+    }
+  }
+
   const runAuto = async () => {
     setRunning(true)
     setEvents([])
@@ -153,6 +164,11 @@ export default function PipelineView() {
           <button className="btn" onClick={runAuto} disabled={running} style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
             Auto-Select Next
           </button>
+          {running && (
+            <button className="btn" onClick={killPipeline} style={{ borderColor: '#ff4444', color: '#ff4444' }}>
+              Kill
+            </button>
+          )}
         </div>
 
         {events.length > 0 && (

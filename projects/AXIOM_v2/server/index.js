@@ -9,7 +9,7 @@ import { loadState, saveState } from './state.js'
 import { loadCapabilities, getAllTools, executeAnyToolCall, verifyAll } from './capabilities/registry.js'
 import { SHELL_TOOLS, executeShellTool } from './shell-tools.js'
 import { initProposalCounter, approveProposal, rejectProposal, getPendingProposals, getAllProposals, getProposal } from './proposal-manager.js'
-import { runPipeline, runImplementPhase, runAutoSelect, isPipelineActive, getPipelineStatus, getSelectorStatus } from './pipeline-engine.js'
+import { runPipeline, runImplementPhase, runAutoSelect, isPipelineActive, getPipelineStatus, getSelectorStatus, abortPipeline } from './pipeline-engine.js'
 import { verifyCapability } from './verification-engine.js'
 import { parseWhatsAppReply } from './whatsapp-bridge.js'
 import { VALUES } from '../shared/identity.js'
@@ -252,6 +252,13 @@ app.get('/api/v2/pipeline/active', (req, res) => {
     active: !!(pipeline || selector),
     pipeline: pipeline || selector
   })
+})
+
+// Abort running pipeline
+app.post('/api/v2/pipeline/abort', (req, res) => {
+  const result = abortPipeline()
+  console.log(`[Pipeline] Abort requested: ${JSON.stringify(result)}`)
+  res.json(result)
 })
 
 // Implement an approved proposal
