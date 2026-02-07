@@ -266,7 +266,7 @@ export async function runImplementPhase(statePath, proposalId, onEvent = () => {
       serverTools: [],
       capabilityTools,
       toolExecutor: executeAnyToolCall,
-      maxToolRounds: 40,
+      maxToolRounds: 25,
       onToolEvent: (evt) => onEvent({ ...evt, phase: 'implement' })
     })
 
@@ -369,18 +369,12 @@ export async function runAutoSelect(statePath, onEvent = () => {}) {
   let selectorResult
   try {
     const selectorPrompt = buildSelectorPrompt(state)
-    const capabilityTools = getAllTools()
 
-    selectorResult = await executeCallWithTools({
+    selectorResult = await executeCall({
       model: 'opus',
       systemPrompt: selectorPrompt,
-      userMessage: 'Investigate the system state using your tools, then select the next capability to build. Respond with JSON only after your investigation.',
-      maxTokens: 4096,
-      serverTools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
-      capabilityTools,
-      toolExecutor: executeAnyToolCall,
-      maxToolRounds: 12,
-      onToolEvent: (evt) => onEvent({ ...evt, phase: 'select' })
+      userMessage: 'Based on the system state provided above, select the next capability to build. Respond with JSON only.',
+      maxTokens: 4096
     })
   } catch (err) {
     const durationMs = Date.now() - selectorStart

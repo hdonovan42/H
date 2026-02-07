@@ -27,7 +27,7 @@ export async function executeCall({ model, systemPrompt, userMessage, maxTokens 
     const params = {
       model: modelId,
       max_tokens: maxTokens,
-      system: systemPrompt,
+      system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
       messages: messages || [{ role: 'user', content: userMessage }]
     }
 
@@ -64,6 +64,8 @@ export async function executeCall({ model, systemPrompt, userMessage, maxTokens 
       tokens: {
         input: response.usage.input_tokens,
         output: response.usage.output_tokens,
+        cacheRead: response.usage.cache_read_input_tokens || 0,
+        cacheCreation: response.usage.cache_creation_input_tokens || 0,
         total: response.usage.input_tokens + response.usage.output_tokens
       },
       model: modelId,
@@ -110,6 +112,8 @@ export async function executeCallWithTools({
   const startTime = Date.now()
   let totalInputTokens = 0
   let totalOutputTokens = 0
+  let totalCacheRead = 0
+  let totalCacheCreation = 0
   let searchCount = 0
   const toolInvocations = []
   let round = 0
@@ -125,7 +129,7 @@ export async function executeCallWithTools({
       const params = {
         model: modelId,
         max_tokens: maxTokens,
-        system: systemPrompt,
+        system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
         messages
       }
 
@@ -146,6 +150,8 @@ export async function executeCallWithTools({
 
       totalInputTokens += response.usage.input_tokens
       totalOutputTokens += response.usage.output_tokens
+      totalCacheRead += response.usage.cache_read_input_tokens || 0
+      totalCacheCreation += response.usage.cache_creation_input_tokens || 0
 
       if (response.usage?.server_tool_use?.web_search_requests) {
         searchCount += response.usage.server_tool_use.web_search_requests
@@ -167,10 +173,14 @@ export async function executeCallWithTools({
               toolInvocations.push({ name: block.name, input: block.input, round })
               const resultStr = typeof result === 'string' ? result : JSON.stringify(result)
               if (onToolEvent) onToolEvent({ type: 'tool_result', name: block.name, resultPreview: resultStr.slice(0, 200) })
+              const MAX_TOOL_RESULT = 12000
+              const capped = resultStr.length > MAX_TOOL_RESULT
+                ? resultStr.slice(0, MAX_TOOL_RESULT) + '\n... [truncated — full output was ' + resultStr.length + ' chars]'
+                : resultStr
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: block.id,
-                content: resultStr
+                content: capped
               })
             } catch (err) {
               if (onToolEvent) onToolEvent({ type: 'tool_result', name: block.name, resultPreview: `Error: ${err.message}`, error: true })
@@ -208,6 +218,8 @@ export async function executeCallWithTools({
         tokens: {
           input: totalInputTokens,
           output: totalOutputTokens,
+          cacheRead: totalCacheRead,
+          cacheCreation: totalCacheCreation,
           total: totalInputTokens + totalOutputTokens
         },
         model: modelId,
@@ -226,6 +238,8 @@ export async function executeCallWithTools({
       tokens: {
         input: totalInputTokens,
         output: totalOutputTokens,
+        cacheRead: totalCacheRead,
+        cacheCreation: totalCacheCreation,
         total: totalInputTokens + totalOutputTokens
       },
       model: modelId,
@@ -262,7 +276,7 @@ export async function* executeCallStream({ model, systemPrompt, userMessage, max
     const params = {
       model: modelId,
       max_tokens: maxTokens,
-      system: systemPrompt,
+      system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
       messages: messages || [{ role: 'user', content: userMessage }]
     }
 

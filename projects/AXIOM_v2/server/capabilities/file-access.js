@@ -58,7 +58,11 @@ export default {
       switch (operation) {
         case 'read': {
           if (!existsSync(fullPath)) return `Error: file not found — workspace/${path}`
-          return readFileSync(fullPath, 'utf-8')
+          const content = readFileSync(fullPath, 'utf-8')
+          if (content.length > 16384) {
+            return content.slice(0, 16384) + '\n... [truncated — file is ' + content.length + ' chars]'
+          }
+          return content
         }
         case 'write': {
           if (content === undefined) return 'Error: content is required for write'

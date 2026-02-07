@@ -115,10 +115,19 @@ app.get('/api/v2/proposals', (req, res) => {
   res.json(getAllProposals(state))
 })
 
-app.post('/api/v2/proposals/:id/approve', (req, res) => {
+app.post('/api/v2/proposals/:id/approve', async (req, res) => {
   const state = loadState(STATE_PATH)
   const result = approveProposal(state, STATE_PATH, req.params.id)
   res.json(result)
+
+  // Auto-trigger implement phase in the background
+  if (result.success && !isPipelineActive()) {
+    await ensureCapabilities()
+    console.log(`[Pipeline] Auto-implementing after approval: ${req.params.id}`)
+    runImplementPhase(STATE_PATH, req.params.id, (evt) => {
+      console.log(`[Pipeline] ${evt.type}${evt.phase ? ' (' + evt.phase + ')' : ''}`)
+    }).catch(err => console.error(`[Pipeline] Auto-implement error: ${err.message}`))
+  }
 })
 
 app.post('/api/v2/proposals/:id/reject', (req, res) => {
@@ -469,5 +478,23 @@ app.listen(PORT, async () => {
   console.log(`AXIOM v2 API running on port ${PORT}`)
   console.log(`API key configured: ${!!process.env.ANTHROPIC_API_KEY}`)
   await ensureCapabilities()
+
+  // Recover capabilities stuck mid-pipeline from a crash/restart
+  const state = loadState(STATE_PATH)
+  let recovered = 0
+  for (const [valueId, v] of Object.entries(state.values)) {
+    for (const [capId, cap] of Object.entries(v.capabilities || {})) {
+      if (cap.stage === 'implementing') {
+        console.log(`[Recovery] ${capId} stuck at 'implementing' — resetting to 'approved'`)
+        cap.stage = 'approved'
+        recovered++
+      }
+    }
+  }
+  if (recovered > 0) {
+    saveState(STATE_PATH, state)
+    console.log(`[Recovery] Reset ${recovered} stuck capability(s)`)
+  }
+
   console.log('Ready.')
 })

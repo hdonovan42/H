@@ -247,6 +247,23 @@ body {
   border-radius: 6px;
   padding: 12px;
   margin-bottom: 10px;
+  position: relative;
+  overflow: hidden;
+}
+
+.proposal-card .implementing-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: var(--ra-color);
+  animation: implementing-slide 2s ease-in-out infinite;
+}
+
+@keyframes implementing-slide {
+  0%   { width: 0%; left: 0; }
+  50%  { width: 60%; left: 20%; }
+  100% { width: 0%; left: 100%; }
 }
 
 .proposal-card .title {

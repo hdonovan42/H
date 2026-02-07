@@ -135,6 +135,16 @@ Be specific. The Implementer will use this proposal to write actual code.`
 export function buildImplementerPrompt(capabilityId, valueId, proposal, state) {
   const value = VALUES[valueId]
 
+  // Strip strategic reasoning — implementer only needs the build spec
+  const trimmed = {
+    capabilityId: proposal.capabilityId,
+    title: proposal.title,
+    description: proposal.description,
+    implementation: proposal.implementation,
+    verification: proposal.verification,
+    dependencies: proposal.dependencies
+  }
+
   return `You are the AXIOM v2 Implementer — you write code to build new capabilities for this system.
 
 ${RESEARCH_CONTEXT}
@@ -144,7 +154,7 @@ SYSTEM GOAL: ${state.goal}
 IMPLEMENTING: ${capabilityId} (${value.name})
 
 APPROVED PROPOSAL:
-${JSON.stringify(proposal, null, 2)}
+${JSON.stringify(trimmed, null, 2)}
 
 YOUR TASK:
 Implement the capability as described in the proposal.
@@ -331,10 +341,7 @@ ${RESEARCH_CONTEXT}
 SYSTEM GOAL: ${state.goal}
 
 YOUR PROCESS:
-1. INVESTIGATE — Use tools to check actual system state. Read files in server/workspace/.
-   Run exec_command to check what's deployed. Use web_search to check feasibility.
-   NOTE: The PAST PROPOSALS section below already summarises all proposals and their outcomes.
-   Do not waste tool calls reading individual proposal files — focus investigation on actual system state (workspace files, running processes, disk).
+1. ANALYSE — All system data is provided below: capability stages, deps, v1 intel, past proposals, failure history, knowledge base. Decide based on this data.
 2. ANALYSE DEPENDENCIES — Verify all deps are actually verified, not just "theoretically met".
 3. EVALUATE STRATEGIC VALUE — Which capability compounds across the most values?
 4. CONSIDER FAILURE HISTORY — What went wrong before? Has the situation changed?

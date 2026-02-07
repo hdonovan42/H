@@ -115,6 +115,17 @@ function ProposalChat({ proposalId }) {
 
 export default function ProposalQueue() {
   const { proposals, pending, approve, reject } = useProposals()
+  const [pipelineActive, setPipelineActive] = useState(null)
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetch('/api/v2/pipeline/active', { credentials: 'include' })
+        .then(r => r.json())
+        .then(data => setPipelineActive(data.active ? data.pipeline : null))
+        .catch(() => {})
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [])
 
   const handleApprove = async (id) => {
     await approve(id)
@@ -182,15 +193,21 @@ export default function ProposalQueue() {
             <div className="sidebar-header" style={{ padding: '12px 0 8px', borderBottom: 'none' }}>
               Recent
             </div>
-            {recent.map(p => (
-              <div key={p.id} className="proposal-card" style={{ opacity: 0.6 }}>
-                <div className="title">{p.title || p.capabilityId}</div>
-                <div className="meta">
-                  <span className={`badge badge-${p.status}`}>{p.status}</span>
-                  {' '}&middot; {p.capabilityId}
+            {recent.map(p => {
+              const isImplementing = pipelineActive && (
+                pipelineActive.proposalId === p.id || pipelineActive.capabilityId === p.capabilityId
+              )
+              return (
+                <div key={p.id} className="proposal-card" style={{ opacity: isImplementing ? 1 : 0.6 }}>
+                  <div className="title">{p.title || p.capabilityId}</div>
+                  <div className="meta">
+                    <span className={`badge badge-${p.status}`}>{p.status}</span>
+                    {' '}&middot; {p.capabilityId}
+                  </div>
+                  {isImplementing && <div className="implementing-bar" />}
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </>
         )}
       </div>

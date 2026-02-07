@@ -60,7 +60,10 @@ export default {
     try {
       const validated = validateCommand(command)
       const output = execSync(validated, { encoding: 'utf-8', timeout: 10000, maxBuffer: 64 * 1024 })
-      return output || '(no output)'
+      const capped = output.length > 8192
+        ? output.slice(0, 8192) + '\n... [truncated — full output was ' + output.length + ' chars]'
+        : output
+      return capped || '(no output)'
     } catch (err) {
       if (err.message?.startsWith('Blocked command') || err.message?.startsWith('Command "')) {
         return `Error: ${err.message}`
