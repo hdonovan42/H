@@ -45,7 +45,7 @@ function authMiddleware(req, res, next) {
 app.use('/api/execute', authMiddleware)
 app.use('/api/route', authMiddleware)
 app.use('/api/session', authMiddleware)
-app.use('/api/shell', authMiddleware)
+// Shell routes are browser-accessed behind nginx basic auth — no Bearer token needed
 
 // Concurrency guard for real sessions
 let activeSession = null
