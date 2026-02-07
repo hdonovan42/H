@@ -61,17 +61,26 @@ export default function AxiomShell() {
             <div className="shell-welcome-title">AXIOM</div>
             <div className="shell-welcome-sub">Actuator eXploration and Implementation Operating Module</div>
             <div className="shell-welcome-guide">
-              <p>AXIOM has persistent memory, its own research history, and operator tools that let it act on its knowledge base.</p>
+              <p>AXIOM has persistent memory, its own research history, and 11 capability modules (28 tools) that let it act on its knowledge base.</p>
               <ul>
-                <li><strong>Run research sessions</strong> — ask AXIOM to run a session and it will execute a full director/analyst pipeline autonomously. Takes 30-120s. Try: <em>"Run a status assessment session"</em></li>
-                <li><strong>Query the actuator taxonomy</strong> — look up any actuator by name, category, or status. AXIOM merges seed data with everything it has learned. Try: <em>"What actuators are confirmed?"</em></li>
-                <li><strong>Inspect past sessions</strong> — pull full transcripts of any prior session including director plans, analyst findings, and synthesis. Try: <em>"Show me session-050"</em></li>
-                <li><strong>Update the knowledge base</strong> — add findings, change actuator statuses, or revise feasibility scores directly. Try: <em>"Mark X as theoretical because Y"</em></li>
-                <li><strong>Check system capabilities</strong> — see all registry modules, which are active, and their usage stats. Try: <em>"List all capabilities"</em></li>
+                <li><strong>Run research sessions</strong> — execute a full director/analyst pipeline autonomously. Takes 30-120s. Try: <em>"Run a status assessment session"</em></li>
+                <li><strong>Query the actuator taxonomy</strong> — look up any actuator by name, category, or status. Try: <em>"What actuators are confirmed?"</em></li>
+                <li><strong>Session memory</strong> — query findings, inspect past sessions, pull full transcripts. Try: <em>"Show me session-050"</em></li>
+                <li><strong>Session analytics</strong> — flexible metrics grouped by type, trigger, week, or quartile. Costs, efficiency, trends, and forecasts. Try: <em>"How efficient are my sessions?"</em></li>
+                <li><strong>Research landscape</strong> — category coverage heatmap, blind spots, evidence grading for any actuator. Try: <em>"Scan the research landscape"</em></li>
+                <li><strong>Strategic planning</strong> — rank actuators by priority, map critical paths through the dependency graph. Try: <em>"What are the research priorities?"</em></li>
+                <li><strong>Safety monitor</strong> — verify safety constraints, check for autonomy escalation, scan for Omohundro instrumental drives. Try: <em>"Check safety constraints"</em></li>
+                <li><strong>System health</strong> — uptime, state file, cron status, endpoint connectivity. Try: <em>"Check system status"</em></li>
+                <li><strong>Verification</strong> — run verification checks on all modules, validate actuator status claims against evidence. Try: <em>"Verify all capabilities"</em></li>
+                <li><strong>Reports & export</strong> — generate formatted research reports, export findings by topic. Try: <em>"Generate a research report"</em></li>
+                <li><strong>Crypto wallet</strong> — check balance, propose and execute transactions with two-step confirmation. Try: <em>"What's in the wallet?"</em></li>
+                <li><strong>Tool builder</strong> — save and list custom tools. Try: <em>"List saved tools"</em></li>
+                <li><strong>Self-replication</strong> — deployment status, state snapshots. Try: <em>"Export a state snapshot"</em></li>
+                <li><strong>Agent tools</strong> — run code, read/write files, make HTTP requests, execute shell commands. AXIOM can compute, interact with services, and inspect its own infrastructure. Try: <em>"Run some code to calculate the fibonacci sequence"</em></li>
                 <li><strong>Web search</strong> — AXIOM can search the web during any conversation to find current information.</li>
               </ul>
               {availableTools.length > 0 && (
-                <div className="shell-tool-count">{availableTools.length} tools active — {availableTools.filter(t => t.type === 'operator').length} operator, {availableTools.filter(t => t.type === 'capability').length} acquired</div>
+                <div className="shell-tool-count">{availableTools.length} tools active — {availableTools.filter(t => t.type === 'operator').length} operator, {availableTools.filter(t => t.type === 'registry').length} registry</div>
               )}
             </div>
           </div>

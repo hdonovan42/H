@@ -6,7 +6,7 @@ import { executeCall, executeCallStream, executeCallWithTools, AVAILABLE_MODELS 
 import { buildSystemPrompt, buildShellPrompt } from './prompts.js'
 import { loadState, saveState, nextSessionId, mergeKnowledgeUpdates } from './state.js'
 import { runSession } from './session-runner.js'
-import { loadCapabilities, initRegistry, verifyAll, getActiveTools, getActiveToolDescriptions, executeToolCall, getAllModules } from './capabilities/registry.js'
+import { loadCapabilities, initRegistry, verifyAll, getActiveTools, getAllTools, getActiveToolDescriptions, executeToolCall, executeAnyToolCall, getAllModules } from './capabilities/registry.js'
 import { SHELL_TOOLS, executeShellTool } from './shell-tools.js'
 import { DIRECTORS, DEFAULT_DIRECTOR } from '../shared/identity.js'
 import { resolve, dirname } from 'node:path'
@@ -438,11 +438,11 @@ app.get('/api/shell/tools', async (req, res) => {
     await loadCapabilities()
     initRegistry(state)
 
-    const registryTools = getActiveTools()
+    const registryTools = getAllTools()
 
     const tools = [
       ...SHELL_TOOLS.map(t => ({ name: t.name, description: t.description, type: 'operator' })),
-      ...registryTools.map(t => ({ name: t.name, description: t.description, type: 'capability' }))
+      ...registryTools.map(t => ({ name: t.name, description: t.description, type: 'registry' }))
     ]
 
     res.json({ tools })
@@ -473,8 +473,7 @@ app.post('/api/shell/chat', async (req, res) => {
     await loadCapabilities()
     initRegistry(state)
 
-    const registryTools = getActiveTools()
-    const activeDescriptions = getActiveToolDescriptions()
+    const registryTools = getAllTools()
 
     // Load seed actuators for lookup_actuator
     const seedActuators = JSON.parse(readFileSync(resolve(__dirname, '../src/data/actuators.json'), 'utf-8'))
@@ -483,9 +482,10 @@ app.post('/api/shell/chat', async (req, res) => {
     // Build shell context for shell tool execution
     const shellContext = { state, statePath: STATE_PATH, getActiveSession, setActiveSession, seedActuators, registryModules }
 
-    // Shell tool descriptions for the prompt
+    // Shell tool descriptions for the prompt — shell has full access to all registry tools
     const shellToolDescriptions = SHELL_TOOLS.map(t => `- ${t.name}: ${t.description} [operator]`)
-    const allDescriptions = [...shellToolDescriptions, ...activeDescriptions]
+    const registryDescriptions = registryTools.map(t => `- ${t.name}: ${t.description}`)
+    const allDescriptions = [...shellToolDescriptions, ...registryDescriptions]
 
     const systemPrompt = buildShellPrompt(state, allDescriptions)
 
@@ -531,7 +531,7 @@ app.post('/api/shell/chat', async (req, res) => {
         if (shellToolNames.has(name)) {
           return executeShellTool(name, input, shellContext)
         }
-        return executeToolCall(name, input)
+        return executeAnyToolCall(name, input)
       },
       maxToolRounds: 8,
       messages,

@@ -351,6 +351,8 @@ Your task:
 
 6. Next session directive — State the single most impactful action for the next session. Frame it as: "Next session should [verb] [specific objective] to advance [actuator ID]." Do NOT suggest broad literature review unless you identify a specific evidence gap.
 
+7. Tool creation — If any tools were created this session via save_tool, note them as <FINDING> entries. If you identify capability gaps that could be addressed by a new tool in the next session, call that out in your next session directive.
+
 CRITICAL: Every <FINDING>, <UPDATE>, <STATUS>, and <ACTUATOR> block MUST have a closing tag. Example: <STATUS>session-memory: confirmed (evidence found)</STATUS>`
 
   const synthesisResult = await executeCall({

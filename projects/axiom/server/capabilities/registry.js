@@ -67,6 +67,21 @@ export function getActiveToolDescriptions() {
   return lines
 }
 
+export function getAllTools() {
+  return modules.flatMap(mod => mod.tools)
+}
+
+export async function executeAnyToolCall(name, input) {
+  for (const mod of modules) {
+    const tool = mod.tools.find(t => t.name === name)
+    if (tool) {
+      const context = { state }
+      return await mod.execute(name, input, context)
+    }
+  }
+  return `Error: tool "${name}" not found in any capability module`
+}
+
 export function getAllToolDescriptions() {
   const active = new Set(activeModules.map(m => m))
   const lines = []
@@ -137,9 +152,11 @@ export default {
   loadCapabilities,
   initRegistry,
   getActiveTools,
+  getAllTools,
   getActiveToolDescriptions,
   getAllToolDescriptions,
   executeToolCall,
+  executeAnyToolCall,
   verifyAll,
   getAllModules,
   getActiveModules
