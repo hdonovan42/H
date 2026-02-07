@@ -371,9 +371,27 @@ ${recentSessions ? `LAST 10 SESSIONS:\n${recentSessions}` : 'NO SESSIONS YET'}
 
 ${bridge?.taxonomySummary ? `BOSTROM ACTUATOR TAXONOMY (49 actuators — what lies beyond the 20 bootstrap caps):\n${bridge.taxonomySummary.map(l => '  ' + l).join('\n')}` : ''}
 
-${bridge?.crossValueCompounding ? `CROSS-VALUE COMPOUNDING (pre-computed — capabilities ranked by how many values they strengthen):
-  3 values: ${bridge.crossValueCompounding.threeValues.map(c => `${c.id} (${c.values.join('+')})`).join(', ')}
-  2 values: ${bridge.crossValueCompounding.twoValues.map(c => c.id).join(', ')}` : ''}
+${(() => {
+  // Compute cross-value compounding from values.json
+  const threeValues = []
+  const twoValues = []
+  for (const [valueId, valueDef] of Object.entries(valuesJson)) {
+    for (const cap of valueDef.bootstrapCapabilities) {
+      const cross = cap.crossValueImpact || []
+      const allValues = [valueId, ...cross]
+      if (allValues.length >= 3) {
+        threeValues.push(`${cap.id} (${allValues.join('+')})`)
+      } else if (allValues.length === 2) {
+        twoValues.push(cap.id)
+      }
+    }
+  }
+  if (threeValues.length === 0 && twoValues.length === 0) return ''
+  let section = 'CROSS-VALUE COMPOUNDING (capabilities ranked by how many values they strengthen):'
+  if (threeValues.length > 0) section += `\n  3 values: ${threeValues.join(', ')}`
+  if (twoValues.length > 0) section += `\n  2 values: ${twoValues.join(', ')}`
+  return section
+})()}
 
 ${(state.knowledgeBase?.keyFindings || []).length > 0 ? `KNOWLEDGE BASE (accumulated findings from past sessions):\n${state.knowledgeBase.keyFindings.slice(-10).map(f => '  - ' + f).join('\n')}` : ''}
 
@@ -381,7 +399,7 @@ SELECTION CRITERIA (in priority order):
 1. Dependencies — all listed deps must be verified before selecting a capability
 2. Cross-value impact — consult the CROSS-VALUE COMPOUNDING data above. A capability that strengthens multiple values simultaneously is far more valuable than one that only helps a single value.
 3. Compounding effect — prefer capabilities that unblock the most downstream work across the full capability tree. The BOSTROM ACTUATOR TAXONOMY shows what each capability eventually unlocks.
-4. Feasibility — v1 feasibility scores are research-backed priors. Below 0.5 means v1 found significant difficulty. Weight these alongside what is achievable with current verified tools.
+4. Feasibility — if v1 feasibility scores are shown, treat them as research-backed priors (below 0.5 = significant difficulty). Otherwise, assess feasibility from capability descriptions, past learner findings, and failure history.
 5. Value balance — the weakest values need attention, but only if the capability genuinely matters
 6. Avoid repeating failures — do not re-select stuck capabilities without good reason
 7. Knowledge base — if accumulated knowledge base findings contain relevant intelligence about a capability, use it to inform your decision
