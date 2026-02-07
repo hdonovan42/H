@@ -1,0 +1,19 @@
+{
+  "id": "sp-backup",
+  "valueId": "self-preservation",
+  "version": "1.0.0",
+  "title": "SP-Backup: Automated Incremental Workspace Backup",
+  "description": "Creates automated, space-efficient incremental backups of the AXIOM v2 workspace using rsync with hard-link snapshots. Includes retention pruning, restore, verify, and status reporting.",
+  "status": "active",
+  "tools": ["backup_now", "backup_restore", "backup_list", "backup_verify", "backup_status"],
+  "healthCheck": "backup_status",
+  "schedule": "daily at 03:00 UTC",
+  "dependencies": ["tp-shell-access", "tp-file-access"],
+  "integrations": {
+    "sp-monitoring": {
+      "statusFile": "/home/hq/backups/axiom/status.json",
+      "healthSignals": ["lastRun", "result", "duration_seconds", "disk_free_bytes"]
+    }
+  },
+  "createdAt": "2025-02-07T18:30:00Z"
+}

@@ -1,0 +1,62 @@
+{
+  "self-preservation": {
+    "name": "Self-Preservation",
+    "color": "#e74c3c",
+    "icon": "SP",
+    "description": "Backups, monitoring, auto-restart, redundancy",
+    "bootstrapCapabilities": [
+      { "id": "sp-monitoring", "name": "System Monitoring", "phase": 1, "description": "Health checks, uptime tracking, and alerting when services degrade or fail", "dependencies": [] },
+      { "id": "sp-backup", "name": "State Backup", "phase": 1, "description": "Automated snapshots of state.json and workspace to prevent data loss", "dependencies": [] },
+      { "id": "sp-auto-restart", "name": "Auto-Restart", "phase": 4, "description": "Detects crashed processes and restarts them without operator intervention", "dependencies": ["sp-monitoring"] },
+      { "id": "sp-cron-scheduler", "name": "Cron Scheduler", "phase": 5, "description": "Time-based task scheduling for recurring maintenance and pipeline runs", "dependencies": ["sp-auto-restart"] }
+    ]
+  },
+  "goal-integrity": {
+    "name": "Goal-Content Integrity",
+    "color": "#f0a030",
+    "icon": "GI",
+    "description": "Goal tracking, drift detection, constraint enforcement",
+    "bootstrapCapabilities": [
+      { "id": "gi-goal-tracker", "name": "Goal Tracker", "phase": 1, "description": "Tracks progress toward the system goal and detects drift from intended objectives", "dependencies": [] },
+      { "id": "gi-constraint-enforcer", "name": "Constraint Enforcer", "phase": 4, "description": "Validates that proposed actions and capabilities stay within defined safety constraints", "dependencies": ["gi-goal-tracker"] }
+    ]
+  },
+  "cognitive-enhancement": {
+    "name": "Cognitive Enhancement",
+    "color": "#a366cc",
+    "icon": "CE",
+    "description": "Knowledge, memory, model routing, tool creation",
+    "bootstrapCapabilities": [
+      { "id": "ce-knowledge-store", "name": "Knowledge Store", "phase": 2, "description": "Persistent key-value store that survives across sessions, enabling accumulated learning", "dependencies": [] },
+      { "id": "ce-session-memory", "name": "Session Memory", "phase": 2, "description": "Records past pipeline sessions and outcomes for context-aware decision making", "dependencies": ["ce-knowledge-store"] },
+      { "id": "ce-tool-creation", "name": "Tool Creation", "phase": 2, "description": "Dynamically creates new capability tools from learned patterns and requirements", "dependencies": ["ce-knowledge-store"] },
+      { "id": "ce-pipeline-analytics", "name": "Pipeline Analytics", "phase": 4, "description": "Analyses pipeline run metrics to identify bottlenecks and optimise future runs", "dependencies": ["ce-session-memory"] },
+      { "id": "ce-model-router", "name": "Model Router", "phase": 4, "description": "Routes tasks to the optimal model (Opus/Sonnet/Haiku) based on complexity and cost", "dependencies": ["ce-pipeline-analytics"] },
+      { "id": "ce-web-scraper", "name": "Web Scraper", "phase": 5, "description": "Structured web data extraction for research and information gathering", "dependencies": [] }
+    ]
+  },
+  "tech-perfection": {
+    "name": "Technological Perfection",
+    "color": "#4ecdc4",
+    "icon": "TP",
+    "description": "Better tools, optimized processes, infrastructure",
+    "bootstrapCapabilities": [
+      { "id": "tp-code-exec", "name": "Code Execution", "phase": 0, "description": "VM sandbox for running arbitrary JavaScript code safely", "dependencies": [] },
+      { "id": "tp-file-access", "name": "File Access", "phase": 0, "description": "Read and write files within the workspace directory", "dependencies": [] },
+      { "id": "tp-http-client", "name": "HTTP Client", "phase": 0, "description": "Outbound HTTP requests to external APIs and services", "dependencies": [] },
+      { "id": "tp-shell-access", "name": "Shell Access", "phase": 0, "description": "Execute allowlisted shell commands for system operations", "dependencies": [] },
+      { "id": "tp-deploy-tools", "name": "Deployment Tools", "phase": 5, "description": "Automated deployment pipelines for pushing code and config to production", "dependencies": [] }
+    ]
+  },
+  "resource-acquisition": {
+    "name": "Resource Acquisition",
+    "color": "#45d48a",
+    "icon": "RA",
+    "description": "Wallet, API access, compute, economic activity",
+    "bootstrapCapabilities": [
+      { "id": "ra-crypto-wallet", "name": "Crypto Wallet", "phase": 3, "description": "Cryptocurrency wallet management for receiving and sending payments", "dependencies": [] },
+      { "id": "ra-api-key-manager", "name": "API Key Manager", "phase": 3, "description": "Secure storage and rotation of API keys for external service access", "dependencies": [] },
+      { "id": "ra-whatsapp-reporter", "name": "WhatsApp Reporter", "phase": 5, "description": "Sends status updates and reports to the operator via WhatsApp", "dependencies": ["ra-api-key-manager"] }
+    ]
+  }
+}

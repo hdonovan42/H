@@ -1,0 +1,26 @@
+{
+  "source_paths": [
+    "/home/hq/axiom2"
+  ],
+  "backup_dest": "/home/hq/backups/axiom",
+  "exclude_patterns": [
+    "node_modules",
+    ".git/objects",
+    "*.log",
+    "tmp/",
+    ".npm",
+    ".nvm",
+    ".cache"
+  ],
+  "retention": {
+    "daily": 7,
+    "weekly": 4,
+    "monthly": 3
+  },
+  "disk_free_threshold_mb": 500,
+  "log_file": "/home/hq/backups/axiom/backup.log",
+  "status_file": "/home/hq/backups/axiom/status.json",
+  "lock_file": "/tmp/axiom-backup.lock",
+  "nice_level": 19,
+  "ionice_class": 3
+}

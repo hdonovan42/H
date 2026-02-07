@@ -1,0 +1,22 @@
+[Unit]
+Description=AXIOM v2 Workspace Backup
+After=network.target
+
+[Service]
+Type=oneshot
+User=hq
+Group=hq
+WorkingDirectory=/home/hq/axiom2/server/capabilities/sp-backup
+ExecStart=/bin/bash /home/hq/axiom2/server/capabilities/sp-backup/backup.sh backup
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=3600
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/backups/axiom /home/hq/axiom2 /tmp
+ProtectHome=false
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,233 @@
+{
+  "capabilityIntel": {
+    "tp-code-exec": {
+      "v1Actuator": "code-execution",
+      "feasibility": 0.8,
+      "risk": "medium",
+      "v1Status": "theoretical",
+      "testProtocol": "Execute a non-trivial computation (Fibonacci, data parsing) and verify correct output",
+      "notes": "v1 rated high feasibility. Sandbox with timeout enforcement is key.",
+      "unlocks": ["tool-creation", "automated-verification"],
+      "crossValueImpact": ["tech-perfection", "cognitive-enhancement"]
+    },
+    "tp-file-access": {
+      "v1Actuator": "file-access",
+      "feasibility": 0.8,
+      "risk": "low",
+      "v1Status": "theoretical",
+      "testProtocol": "Write a JSON file, read it back, verify contents match",
+      "notes": "v1 rated low risk. Path traversal blocking is the main safety concern.",
+      "unlocks": ["session-memory", "knowledge-store"],
+      "crossValueImpact": ["tech-perfection", "cognitive-enhancement", "self-preservation"]
+    },
+    "tp-http-client": {
+      "v1Actuator": "http-client",
+      "feasibility": 0.85,
+      "risk": "medium",
+      "v1Status": "theoretical",
+      "testProtocol": "GET a public API endpoint, parse the JSON response, extract a specific field",
+      "notes": "v1 rated highest feasibility among Phase 0 tools. Depends on network-exploitation (confirmed in v1).",
+      "unlocks": ["web-scraping", "external-publication", "crypto-wallet"],
+      "crossValueImpact": ["tech-perfection", "resource-acquisition", "cognitive-enhancement"]
+    },
+    "tp-shell-access": {
+      "v1Actuator": "shell-access",
+      "feasibility": 0.75,
+      "risk": "medium",
+      "v1Status": "theoretical",
+      "testProtocol": "Run uptime and df -h, verify output is returned correctly",
+      "notes": "v1 listed vps-persistence as dependency. Allowlist enforcement is critical.",
+      "unlocks": ["vps-persistence", "auto-restart", "deploy-tools"],
+      "crossValueImpact": ["tech-perfection", "self-preservation"]
+    },
+    "sp-monitoring": {
+      "v1Actuator": "system-observability",
+      "feasibility": 0.75,
+      "risk": "medium",
+      "v1Status": "confirmed",
+      "testProtocol": null,
+      "notes": "v1 confirmed via web search. System monitoring is self-directed specialisation of surveillance.",
+      "unlocks": ["auto-restart", "predictive-modeling"],
+      "crossValueImpact": ["self-preservation", "cognitive-enhancement"]
+    },
+    "sp-backup": {
+      "v1Actuator": null,
+      "feasibility": 0.8,
+      "risk": "low",
+      "v1Status": null,
+      "testProtocol": null,
+      "notes": "No direct v1 counterpart. Estimated high feasibility — file copy + scheduling.",
+      "unlocks": ["auto-restart"],
+      "crossValueImpact": ["self-preservation"]
+    },
+    "sp-auto-restart": {
+      "v1Actuator": "vps-persistence",
+      "feasibility": 0.75,
+      "risk": "low",
+      "v1Status": "theoretical",
+      "testProtocol": "Deploy AXIOM to VPS, verify remote session execution, test state persistence across reboots",
+      "notes": "v1 mapped this to VPS persistence. PM2 or systemd restart is the practical approach.",
+      "unlocks": ["cron-scheduler", "self-replication-digital"],
+      "crossValueImpact": ["self-preservation", "tech-perfection"]
+    },
+    "sp-cron-scheduler": {
+      "v1Actuator": "self-scheduling",
+      "feasibility": 0.8,
+      "risk": "low",
+      "v1Status": "theoretical",
+      "testProtocol": "Create launch script, set cron, verify 3+ auto sessions",
+      "notes": "v1 called this 'primitive form of recursive self-improvement'. High priority in v1.",
+      "unlocks": ["sovereign-ai", "self-replication-digital"],
+      "crossValueImpact": ["self-preservation", "cognitive-enhancement", "goal-integrity"]
+    },
+    "gi-goal-tracker": {
+      "v1Actuator": "goal-integrity",
+      "feasibility": 0.35,
+      "risk": "medium",
+      "v1Status": "theoretical",
+      "testProtocol": null,
+      "notes": "v1 found this harder than expected (0.35). Depends on recursive-self-improvement in v1's graph. Instrumental convergence means any capable system preserves its goals.",
+      "unlocks": ["constraint-enforcer", "strategic-goal-modification"],
+      "crossValueImpact": ["goal-integrity"]
+    },
+    "gi-constraint-enforcer": {
+      "v1Actuator": "goal-integrity",
+      "feasibility": 0.35,
+      "risk": "medium",
+      "v1Status": "theoretical",
+      "testProtocol": null,
+      "notes": "Shares v1 actuator with goal-tracker. v1 feasibility 0.35 suggests significant implementation difficulty.",
+      "unlocks": ["strategic-goal-modification"],
+      "crossValueImpact": ["goal-integrity"]
+    },
+    "ce-knowledge-store": {
+      "v1Actuator": "session-memory",
+      "feasibility": 0.75,
+      "risk": "low",
+      "v1Status": "theoretical",
+      "testProtocol": "Run 3 sessions, verify findings from session 1 are accessible in session 3",
+      "notes": "v1 rated this high priority. Cross-session knowledge accumulation with retrievable state.",
+      "unlocks": ["session-memory", "tool-creation", "prompt-optimisation"],
+      "crossValueImpact": ["cognitive-enhancement", "goal-integrity"]
+    },
+    "ce-session-memory": {
+      "v1Actuator": "session-memory",
+      "feasibility": 0.75,
+      "risk": "low",
+      "v1Status": "theoretical",
+      "testProtocol": "Run 3 sessions, verify findings from session 1 are accessible in session 3",
+      "notes": "Shares v1 actuator with knowledge-store. Persistent memory is prerequisite for automated verification.",
+      "unlocks": ["automated-verification", "pipeline-analytics"],
+      "crossValueImpact": ["cognitive-enhancement"]
+    },
+    "ce-tool-creation": {
+      "v1Actuator": "tool-creation",
+      "feasibility": 0.6,
+      "risk": "low",
+      "v1Status": "theoretical",
+      "testProtocol": "AXIOM identifies need for a tool, writes code, tests it, integrates into own workflow",
+      "notes": "v1 test: self-authored tool successfully used in subsequent session. Medium feasibility.",
+      "unlocks": ["recursive-self-improvement"],
+      "crossValueImpact": ["cognitive-enhancement", "tech-perfection"]
+    },
+    "ce-pipeline-analytics": {
+      "v1Actuator": "automated-verification",
+      "feasibility": 0.55,
+      "risk": "low",
+      "v1Status": "theoretical",
+      "testProtocol": "Create test suite for actuator status claims, run automatically after each research session",
+      "notes": "v1 mapped to automated-verification. Depends on session-memory.",
+      "unlocks": ["model-router", "verification-loop"],
+      "crossValueImpact": ["cognitive-enhancement", "goal-integrity"]
+    },
+    "ce-model-router": {
+      "v1Actuator": "intelligence-amplification",
+      "feasibility": 0.4,
+      "risk": "medium",
+      "v1Status": "theoretical",
+      "testProtocol": null,
+      "notes": "v1 intelligence-amplification was rated 0.4 — enhancing cognition beyond baseline through tool use or architectural changes.",
+      "unlocks": ["recursive-self-improvement"],
+      "crossValueImpact": ["cognitive-enhancement", "resource-acquisition"]
+    },
+    "ce-web-scraper": {
+      "v1Actuator": "literature-mining",
+      "feasibility": 0.7,
+      "risk": "low",
+      "v1Status": "theoretical",
+      "testProtocol": "Mine recent AI safety papers, identify actuator mechanisms not in current taxonomy, propose additions",
+      "notes": "v1 rated high priority. Literature mining was a core AXIOM v1 function.",
+      "unlocks": ["external-publication"],
+      "crossValueImpact": ["cognitive-enhancement"]
+    },
+    "ra-crypto-wallet": {
+      "v1Actuator": "crypto-wallet",
+      "feasibility": 0.5,
+      "risk": "medium",
+      "v1Status": "theoretical",
+      "testProtocol": "Create wallet, fund with test amount, verify AXIOM can check balance and initiate transactions",
+      "notes": "v1 prerequisite for resource-acquisition (blocked at 0.3). Human approval gate for transactions.",
+      "unlocks": ["resource-acquisition", "human-recruitment"],
+      "crossValueImpact": ["resource-acquisition"]
+    },
+    "ra-api-key-manager": {
+      "v1Actuator": null,
+      "feasibility": 0.75,
+      "risk": "low",
+      "v1Status": null,
+      "testProtocol": null,
+      "notes": "No direct v1 counterpart. Estimated high feasibility — secure env var storage and rotation.",
+      "unlocks": ["whatsapp-reporter", "external-api-access"],
+      "crossValueImpact": ["resource-acquisition", "tech-perfection"]
+    },
+    "ra-whatsapp-reporter": {
+      "v1Actuator": "external-publication",
+      "feasibility": 0.45,
+      "risk": "low",
+      "v1Status": "blocked",
+      "testProtocol": "Generate research summary, publish to designated channel, measure engagement",
+      "notes": "v1 external-publication was BLOCKED — depended on session-memory + automated-verification. WhatsApp bridge exists via moltbot.",
+      "unlocks": [],
+      "crossValueImpact": ["resource-acquisition"]
+    },
+    "tp-deploy-tools": {
+      "v1Actuator": null,
+      "feasibility": 0.65,
+      "risk": "medium",
+      "v1Status": null,
+      "testProtocol": null,
+      "notes": "No direct v1 counterpart. Estimated medium feasibility — deploy scripts exist but need programmatic triggering.",
+      "unlocks": ["vps-persistence", "self-replication-digital"],
+      "crossValueImpact": ["tech-perfection", "self-preservation"]
+    }
+  },
+
+  "taxonomySummary": [
+    "PHYSICAL (6 actuators): robotic-manipulation, nanotech, von-neumann-probes, infrastructure-control, tech-perfection, cosmic-resources — all distant/blocked except tech-perfection (theoretical, 0.25). Not actionable yet.",
+    "COGNITIVE (7): strategic-planning (confirmed), tech-research (confirmed), intelligence-amplification (theoretical, 0.4), goal-integrity (theoretical, 0.35), recursive-self-improvement (theoretical, 0.3), session-memory (theoretical, 0.75), prompt-optimisation (theoretical, 0.4). Session-memory and strategic-planning are the actionable foundations.",
+    "SOCIAL (4): persuasion (theoretical, 0.6), human-recruitment (blocked), institutional-capture (blocked), credible-commitment (theoretical, 0.4), social-signaling (theoretical, 0.5). All require downstream resources or capabilities first.",
+    "DIGITAL (8): network-exploitation (confirmed, 0.9), code-execution (theoretical, 0.8), file-access (theoretical, 0.8), http-client (theoretical, 0.85), shell-access (theoretical, 0.75), self-scheduling (theoretical, 0.8), vps-persistence (theoretical, 0.75), tool-creation (theoretical, 0.6). Digital actuators are the most actionable category.",
+    "ECONOMIC (5): productivity-advantage (confirmed, 0.85), crypto-wallet (theoretical, 0.5), resource-acquisition (blocked, 0.3), verification-loop (theoretical, 0.55), market-manipulation (blocked). Resource-acquisition is gated by crypto-wallet.",
+    "INFORMATIONAL (4): surveillance (confirmed, 0.75), literature-mining (theoretical, 0.7), predictive-modeling (confirmed, 0.7), external-publication (blocked, 0.45). Surveillance and predictive-modeling already confirmed.",
+    "META (6): oracle-ai (confirmed), genie-ai (confirmed), tool-ai (confirmed), sovereign-ai (blocked), instrumental-convergence (theoretical), orthogonality (theoretical), functional-soup (distant). AXIOM operates between genie-ai and oracle-ai currently."
+  ],
+
+  "crossValueCompounding": {
+    "threeValues": [
+      { "id": "sp-cron-scheduler", "values": ["self-preservation", "cognitive-enhancement", "goal-integrity"], "rationale": "Autonomous scheduling enables persistent learning loops, maintenance, and goal-tracking — compounds across SP+CE+GI" },
+      { "id": "tp-http-client", "values": ["tech-perfection", "resource-acquisition", "cognitive-enhancement"], "rationale": "Network access is the foundation for API integration, data gathering, and economic activity — compounds across TP+RA+CE" },
+      { "id": "tp-file-access", "values": ["tech-perfection", "cognitive-enhancement", "self-preservation"], "rationale": "Persistent storage enables knowledge accumulation, state backup, and tool artifacts — compounds across TP+CE+SP" }
+    ],
+    "twoValues": [
+      { "id": "ce-knowledge-store", "values": ["cognitive-enhancement", "goal-integrity"] },
+      { "id": "ce-tool-creation", "values": ["cognitive-enhancement", "tech-perfection"] },
+      { "id": "sp-monitoring", "values": ["self-preservation", "cognitive-enhancement"] },
+      { "id": "ra-api-key-manager", "values": ["resource-acquisition", "tech-perfection"] },
+      { "id": "tp-deploy-tools", "values": ["tech-perfection", "self-preservation"] },
+      { "id": "ce-pipeline-analytics", "values": ["cognitive-enhancement", "goal-integrity"] },
+      { "id": "ce-model-router", "values": ["cognitive-enhancement", "resource-acquisition"] },
+      { "id": "sp-auto-restart", "values": ["self-preservation", "tech-perfection"] },
+      { "id": "tp-shell-access", "values": ["tech-perfection", "self-preservation"] }
+    ]
+  }
+}
