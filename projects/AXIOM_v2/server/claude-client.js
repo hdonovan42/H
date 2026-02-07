@@ -15,6 +15,67 @@ function getClient() {
   return client
 }
 
+/**
+ * Add cache_control breakpoints to messages for prompt caching.
+ * Places breakpoints on: the first user message, and the 2 most recent user messages.
+ * Combined with the system prompt breakpoint, this uses 4 of 4 allowed breakpoints.
+ * Mutates the messages array in-place for efficiency.
+ */
+function addCacheBreakpoints(messages) {
+  // Clear any existing breakpoints
+  for (const msg of messages) {
+    if (msg.cache_control) delete msg.cache_control
+    // Also clear from content blocks (array-form messages)
+    if (Array.isArray(msg.content)) {
+      for (const block of msg.content) {
+        if (block.cache_control) delete block.cache_control
+      }
+    }
+  }
+
+  // Find user message indices
+  const userIndices = messages
+    .map((m, i) => m.role === 'user' ? i : -1)
+    .filter(i => i !== -1)
+
+  if (userIndices.length === 0) return
+
+  // Breakpoint targets: first user message + last 2 user messages (up to 3 total)
+  const targets = new Set()
+  targets.add(userIndices[0])
+  if (userIndices.length >= 2) targets.add(userIndices[userIndices.length - 2])
+  targets.add(userIndices[userIndices.length - 1])
+
+  for (const idx of targets) {
+    const msg = messages[idx]
+    if (Array.isArray(msg.content) && msg.content.length > 0) {
+      msg.content[msg.content.length - 1].cache_control = { type: 'ephemeral' }
+    } else if (typeof msg.content === 'string') {
+      // Wrap string content in a block to attach cache_control
+      msg.content = [{ type: 'text', text: msg.content, cache_control: { type: 'ephemeral' } }]
+    }
+  }
+}
+
+/**
+ * Trim large file-write content from assistant tool_use blocks to reduce
+ * token re-send cost. Replaces content fields >500 chars with a byte-count stub.
+ * Keeps path/operation so the model knows what it wrote and where.
+ */
+function trimAssistantContent(content) {
+  return content.map(block => {
+    if (block.type !== 'tool_use') return block
+    const input = block.input
+    if (typeof input?.content === 'string' && input.content.length > 500) {
+      return {
+        ...block,
+        input: { ...input, content: `<written — ${Buffer.byteLength(input.content)} bytes>` }
+      }
+    }
+    return block
+  })
+}
+
 export async function executeCall({ model, systemPrompt, userMessage, maxTokens = 1024, tools, messages }) {
   const modelId = MODEL_MAP[model]
   if (!modelId) {
@@ -126,6 +187,9 @@ export async function executeCallWithTools({
     while (round < maxToolRounds) {
       round++
 
+      // Add cache breakpoints before each API call
+      addCacheBreakpoints(messages)
+
       const params = {
         model: modelId,
         max_tokens: maxTokens,
@@ -159,8 +223,8 @@ export async function executeCallWithTools({
 
       // If the model wants to use tools, execute them and continue the loop
       if (response.stop_reason === 'tool_use' && toolExecutor) {
-        // Add the full assistant response to messages
-        messages.push({ role: 'assistant', content: response.content })
+        // Add the assistant response to messages, trimming large file-write payloads
+        messages.push({ role: 'assistant', content: trimAssistantContent(response.content) })
 
         // Find tool_use blocks and execute them
         const toolResults = []

@@ -8,7 +8,7 @@ import { loadState, saveState, setCapabilityStage, recalcValueScore, nextSession
 import { createProposal, getApprovedProposals } from './proposal-manager.js'
 import { sendProposalToUser } from './whatsapp-bridge.js'
 import { verifyCapability } from './verification-engine.js'
-import { getAllTools, executeAnyToolCall } from './capabilities/registry.js'
+import { loadCapabilities, getAllTools, executeAnyToolCall } from './capabilities/registry.js'
 import { VALUES } from '../shared/identity.js'
 
 const __dirnamePE = dirname(fileURLToPath(import.meta.url))
@@ -266,7 +266,7 @@ export async function runImplementPhase(statePath, proposalId, onEvent = () => {
       serverTools: [],
       capabilityTools,
       toolExecutor: executeAnyToolCall,
-      maxToolRounds: 25,
+      maxToolRounds: 15,
       onToolEvent: (evt) => onEvent({ ...evt, phase: 'implement' })
     })
 
@@ -289,6 +289,9 @@ export async function runImplementPhase(statePath, proposalId, onEvent = () => {
     // === PHASE 4: VERIFY ===
     pipelineActive.phase = 'verify'
     onEvent({ type: 'pipeline_phase', phase: 'verify', capabilityId, valueId })
+
+    // Reload registry so newly-written capability modules are discovered
+    await loadCapabilities()
 
     const verifyResult = await verifyCapability(
       state, statePath, capabilityId, valueId,
