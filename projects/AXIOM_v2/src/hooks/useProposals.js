@@ -43,7 +43,17 @@ export default function useProposals(pollInterval = 5000) {
     return data
   }, [fetchProposals])
 
+  const retryImplement = useCallback(async (proposalId) => {
+    const res = await fetch(`/api/v2/proposals/${proposalId}/retry-implement`, {
+      method: 'POST',
+      credentials: 'include'
+    })
+    const data = await res.json()
+    if (data.success) fetchProposals()
+    return data
+  }, [fetchProposals])
+
   const pending = proposals.filter(p => p.status === 'pending_approval')
 
-  return { proposals, pending, loading, approve, reject, refresh: fetchProposals }
+  return { proposals, pending, loading, approve, reject, retryImplement, refresh: fetchProposals }
 }

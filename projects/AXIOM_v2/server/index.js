@@ -2,10 +2,11 @@ import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import { resolve, dirname } from 'node:path'
+import { unlinkSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { AVAILABLE_MODELS, executeCall, executeCallWithTools } from './claude-client.js'
 import { buildShellPrompt, buildProposalChatPrompt } from './prompts.js'
-import { loadState, saveState } from './state.js'
+import { loadState, saveState, setCapabilityStage } from './state.js'
 import { loadCapabilities, getAllTools, getAllModules, executeAnyToolCall, verifyAll } from './capabilities/registry.js'
 import { SHELL_TOOLS, executeShellTool } from './shell-tools.js'
 import { initProposalCounter, approveProposal, rejectProposal, getPendingProposals, getAllProposals, getProposal } from './proposal-manager.js'
@@ -135,6 +136,43 @@ app.post('/api/v2/proposals/:id/reject', (req, res) => {
   const { reason } = req.body
   const result = rejectProposal(state, STATE_PATH, req.params.id, reason)
   res.json(result)
+})
+
+app.post('/api/v2/proposals/:id/retry-implement', async (req, res) => {
+  if (isPipelineActive()) {
+    return res.json({ success: false, error: 'Pipeline already running' })
+  }
+
+  const state = loadState(STATE_PATH)
+  const proposal = (state.proposals || []).find(p => p.id === req.params.id)
+  if (!proposal) {
+    return res.status(404).json({ success: false, error: `Proposal ${req.params.id} not found` })
+  }
+  if (proposal.status === 'pending_approval' || proposal.status === 'rejected') {
+    return res.json({ success: false, error: `Cannot retry: proposal is ${proposal.status}` })
+  }
+  if (proposal.status === 'verified') {
+    return res.json({ success: false, error: 'Already verified' })
+  }
+
+  // Reset proposal and capability state for fresh implementation
+  proposal.status = 'approved'
+  const { capabilityId, valueId } = proposal
+  setCapabilityStage(state, valueId, capabilityId, 'approved')
+
+  // Remove old capability module so verification uses the fresh one
+  const capFile = resolve(__dirname, `capabilities/${capabilityId}.js`)
+  try { unlinkSync(capFile) } catch {}
+
+  saveState(STATE_PATH, state)
+  console.log(`[Pipeline] Retry implementation for ${capabilityId} (proposal ${req.params.id})`)
+  res.json({ success: true, capabilityId, valueId })
+
+  // Fire implementation in background
+  await ensureCapabilities()
+  runImplementPhase(STATE_PATH, req.params.id, (evt) => {
+    console.log(`[Pipeline] ${evt.type}${evt.phase ? ' (' + evt.phase + ')' : ''}`)
+  }).catch(err => console.error(`[Pipeline] Retry-implement error: ${err.message}`))
 })
 
 // ===== PROPOSAL Q&A =====

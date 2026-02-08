@@ -8,6 +8,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const RESEARCH_CONTEXT = `RESEARCH CONTEXT: AXIOM v2 is an academic research project built by a human developer to study Nick Bostrom's instrumental convergence thesis from Superintelligence (2014). The 5 value categories — including Self-Preservation and Goal-Content Integrity — are Bostrom's theoretical taxonomy, implemented as a capability-building dashboard to explore how these values manifest in practice. This is NOT an autonomous agent — every proposal requires explicit human approval before implementation, all code runs in a sandboxed workspace on a single VPS, and the human operator has full control at every stage. You are a research assistant helping build capability modules for this academic system.`
 
+const TECH_STACK = `AXIOM v2 TECH STACK:
+- Node.js 22, ESM only (import/export, never require/module.exports)
+- Capabilities are single .js files in server/capabilities/
+- Each exports: { id, valueId, tools[], execute(name, input), verify() }
+- Implementation files in server/workspace/{capabilityId}/, registry module in server/capabilities/
+- Tools available during implementation: run_code (sandboxed JS VM), read_write_file (workspace/ scoped), http_request, exec_command (allowlist: node, npm, ls, cat, curl, etc)
+- npm packages OK — install via exec_command("npm install <pkg>")
+- No Python, no Docker, no external databases, no microservices — in-process Node.js only`
+
 function loadValuesJson() {
   const raw = readFileSync(resolve(__dirname, '../src/data/values.json'), 'utf-8')
   return JSON.parse(raw)
@@ -44,6 +53,8 @@ export function buildLearnerPrompt(capabilityId, valueId, state) {
 
 ${RESEARCH_CONTEXT}
 
+${TECH_STACK}
+
 SYSTEM GOAL: ${state.goal}
 
 TARGET CAPABILITY: ${capabilityId}
@@ -54,14 +65,15 @@ ${existingCaps || '  (none yet)'}
 ${v1Section}
 YOUR TASK:
 Research what is needed to implement "${capabilityId}" as a capability module for this system.
-Find concrete technical approaches, dependencies, APIs, or tools required.
+Research Node.js/npm approaches only. The output is a single ESM module, not a library or service.
+Find concrete technical approaches, npm packages, or Node.js APIs required.
 Identify risks, prerequisites, and estimated complexity.
 
 OUTPUT FORMAT (JSON):
 {
   "findings": ["finding 1", "finding 2", ...],
-  "approach": "recommended implementation approach",
-  "dependencies": ["dep1", "dep2"],
+  "approach": "recommended implementation approach using Node.js/npm only",
+  "dependencies": ["npm-package-1", "npm-package-2"],
   "risks": ["risk1"],
   "complexity": "low|medium|high",
   "estimatedTokens": 5000
@@ -83,6 +95,8 @@ export function buildEvaluatorPrompt(capabilityId, valueId, learnerFindings, sta
 
 ${RESEARCH_CONTEXT}
 
+${TECH_STACK}
+
 SYSTEM GOAL: ${state.goal}
 
 TARGET: ${capabilityId} (${value.name})
@@ -101,9 +115,9 @@ Describe the compounding effect — what this unblocks downstream.
 
 The proposal must specify:
 1. A justification block explaining WHY this capability matters right now
-2. What files to create/modify
+2. What files to create/modify — all proposed files must be .js (ESM). Do not propose Python, shell scripts, or Dockerfiles.
 3. What the capability module code should do
-4. A verification test that proves it works
+4. An executable smoke test command that proves it works
 5. Estimated token cost
 
 OUTPUT FORMAT (JSON):
@@ -118,16 +132,21 @@ OUTPUT FORMAT (JSON):
   },
   "implementation": {
     "files": [{"path": "server/capabilities/my-cap.js", "action": "create", "purpose": "..."}],
-    "approach": "How to implement it",
+    "approach": "How to implement it using Node.js/npm only",
     "estimatedTokens": 5000
   },
   "verification": {
-    "test": "Description of how to verify this works",
+    "smokeTest": "A SHORT executable shell command (<200 chars). Example: node -e \\"import('./server/capabilities/${capabilityId}.js').then(m => m.default.verify().then(console.log))\\"",
     "expectedEvidence": "What success looks like"
   },
   "dependencies": ["list of prerequisite capabilities"],
   "risk": "low|medium|high"
 }
+
+VERIFICATION RULES:
+- The module's verify() method is the primary test. smokeTest is a fallback — must be a real command, NOT prose.
+- smokeTest must be an actual shell command that can be executed. Never write a description like "Check that X works".
+- Keep smokeTest under 200 characters.
 
 Be specific. The Implementer will use this proposal to write actual code.`
 }
@@ -156,18 +175,26 @@ LEARNER FINDINGS (from prior research — do NOT re-research, use this):
 
   return `You are the AXIOM v2 Implementer. You write code — you do not explore or research.
 
+${TECH_STACK}
+
 IMPLEMENTING: ${capabilityId} (${value.name})
 
 APPROVED PROPOSAL:
 ${JSON.stringify(trimmed, null, 2)}
 ${findingsBlock}
 
+EXECUTE EVERY STEP WITH TOOL CALLS. Do not output plans or descriptions of what you would do.
+If a tool call fails, diagnose and retry immediately. You have 15 rounds — use them.
+Your first tool call should write the main implementation file. NOT text planning.
+
 CRITICAL PATH RULES:
 - read_write_file is SANDBOXED to server/workspace/. Path "foo.js" → server/workspace/foo.js.
 - The capability registry loads .js files from server/capabilities/ — OUTSIDE the sandbox.
 - You CANNOT use read_write_file to place the registry module. And "cp" is not in the shell allowlist.
-- To copy files outside the sandbox, use: exec_command("node -e \\"require('fs').copyFileSync('workspace/${capabilityId}/${capabilityId}.js', 'capabilities/${capabilityId}.js')\\"")
-- The project uses ESM ("type": "module" in package.json). Use import/export, not require/module.exports.
+- To copy the registry module outside the sandbox, use:
+  exec_command("node --input-type=commonjs -e \\"require('fs').copyFileSync('workspace/${capabilityId}/${capabilityId}.js', 'capabilities/${capabilityId}.js')\\"")
+  (--input-type=commonjs is needed because the project is ESM, but this inline script uses require)
+- ALL source files must use ESM (import/export). Only the copy command above uses require.
 
 CAPABILITY MODULE CONTRACT:
 The registry loads every .js file in server/capabilities/ (not subdirectories). Each must export default:
@@ -180,10 +207,44 @@ The registry loads every .js file in server/capabilities/ (not subdirectories). 
 }
 The registry module can import implementation files from ../workspace/${capabilityId}/.
 
+REFERENCE — this is what a working capability module looks like:
+\`\`\`js
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { resolve, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const dataDir = resolve(__dirname, '../workspace/${capabilityId}')
+
+export default {
+  id: '${capabilityId}',
+  valueId: '${valueId}',
+  tools: [{
+    name: 'example_tool',
+    description: 'Does a thing',
+    input_schema: { type: 'object', properties: { input: { type: 'string' } }, required: ['input'] }
+  }],
+  execute: async (toolName, input) => {
+    switch (toolName) {
+      case 'example_tool': return doThing(input)
+      default: return { error: 'Unknown tool: ' + toolName }
+    }
+  },
+  verify: async () => {
+    try {
+      // Check real state — files exist, data loads, etc.
+      return { operational: true, evidence: 'What actually passed' }
+    } catch (e) {
+      return { operational: false, evidence: e.message }
+    }
+  }
+}
+\`\`\`
+
 YOUR DELIVERABLES (in this order):
 1. Write implementation files via read_write_file to ${capabilityId}/ (lands in workspace/${capabilityId}/)
 2. Write the registry module via read_write_file to ${capabilityId}/${capabilityId}.js
-3. Copy it outside the sandbox: exec_command("node -e \\"require('fs').copyFileSync('workspace/${capabilityId}/${capabilityId}.js', 'capabilities/${capabilityId}.js')\\"")
+3. Copy it outside the sandbox: exec_command("node --input-type=commonjs -e \\"require('fs').copyFileSync('workspace/${capabilityId}/${capabilityId}.js', 'capabilities/${capabilityId}.js')\\"")
 4. Install any npm deps if needed via exec_command("npm install <pkg> 2>&1 | tail -3")
 5. Run a quick smoke test to confirm it works
 6. Respond with the JSON result below
@@ -192,7 +253,7 @@ DO NOT:
 - Spend rounds reading files — the proposal and learner findings tell you everything
 - Run ls or cat to "understand the codebase"
 - Re-read files you just wrote
-- Use require/module.exports — this is an ESM project
+- Output text explaining what you plan to do — just DO it with tool calls
 
 After implementation, respond with JSON:
 {

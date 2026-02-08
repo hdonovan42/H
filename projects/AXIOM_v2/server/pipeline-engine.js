@@ -164,8 +164,13 @@ export async function runPipeline(statePath, capabilityId, valueId, onEvent = ()
         title: `Implement ${capabilityId}`,
         description: evalResult.result,
         implementation: { files: [], approach: evalResult.result },
-        verification: { test: `Verify ${capabilityId} is operational` }
+        verification: { smokeTest: `node -e "import('./server/capabilities/${capabilityId}.js').then(m => m.default.verify().then(console.log))"` }
       }
+    }
+
+    // Normalize: if evaluator used smokeTest, copy to test for backwards compat
+    if (proposalData.verification?.smokeTest && !proposalData.verification?.test) {
+      proposalData.verification.test = proposalData.verification.smokeTest
     }
 
     // Create proposal and mark as proposed

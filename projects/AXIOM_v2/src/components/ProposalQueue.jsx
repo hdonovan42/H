@@ -114,7 +114,7 @@ function ProposalChat({ proposalId }) {
 }
 
 export default function ProposalQueue() {
-  const { proposals, pending, approve, reject } = useProposals()
+  const { proposals, pending, approve, reject, retryImplement } = useProposals()
   const [pipelineActive, setPipelineActive] = useState(null)
 
   useEffect(() => {
@@ -197,6 +197,7 @@ export default function ProposalQueue() {
               const isImplementing = pipelineActive && (
                 pipelineActive.proposalId === p.id || pipelineActive.capabilityId === p.capabilityId
               )
+              const canRetry = !isImplementing && p.status !== 'verified' && p.status !== 'pending_approval' && p.status !== 'rejected'
               return (
                 <div key={p.id} className="proposal-card" style={{ opacity: isImplementing ? 1 : 0.6 }}>
                   <div className="title">{p.title || p.capabilityId}</div>
@@ -205,6 +206,15 @@ export default function ProposalQueue() {
                     {' '}&middot; {p.capabilityId}
                   </div>
                   {isImplementing && <div className="implementing-bar" />}
+                  {canRetry && (
+                    <button
+                      className="btn"
+                      onClick={() => retryImplement(p.id)}
+                      style={{ fontSize: 10, marginTop: 6, width: '100%' }}
+                    >
+                      Retry Implementation
+                    </button>
+                  )}
                 </div>
               )
             })}
