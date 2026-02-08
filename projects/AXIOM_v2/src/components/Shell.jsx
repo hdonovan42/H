@@ -1,11 +1,42 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useMemo } from 'react'
 import useShellChat from '../hooks/useShellChat'
+
+const VALUE_COLOURS = {
+  'self-preservation': '#e74c3c',
+  'goal-integrity': '#f0a030',
+  'cognitive-enhancement': '#a366cc',
+  'tech-perfection': '#4ecdc4',
+  'resource-acquisition': '#45d48a'
+}
+
+const VALUE_ABBREV = {
+  'self-preservation': 'SP',
+  'goal-integrity': 'GI',
+  'cognitive-enhancement': 'CE',
+  'tech-perfection': 'TP',
+  'resource-acquisition': 'RA'
+}
 
 export default function Shell() {
   const { messages, sendMessage, isLoading, activeTools, availableTools, clearHistory } = useShellChat()
   const [input, setInput] = useState('')
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
+
+  const { operatorTools, capabilityGroups } = useMemo(() => {
+    const ops = availableTools.filter(t => t.type === 'operator')
+    const reg = availableTools.filter(t => t.type === 'registry')
+
+    // Group registry tools by capabilityId
+    const groups = {}
+    for (const t of reg) {
+      const key = t.capabilityId || '_ungrouped'
+      if (!groups[key]) groups[key] = { capabilityId: key, valueId: t.valueId, tools: [] }
+      groups[key].tools.push(t)
+    }
+
+    return { operatorTools: ops, capabilityGroups: Object.values(groups) }
+  }, [availableTools])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -53,24 +84,41 @@ export default function Shell() {
               </div>
 
               <div className="section">
-                <h3>What You Can Do</h3>
-                <div className="guide-item">Ask about system status, values, and capabilities</div>
-                <div className="guide-item">Trigger the Learn/Evaluate pipeline for any capability</div>
-                <div className="guide-item">Query the knowledge base and past sessions</div>
-                <div className="guide-item">Use tools: <code>run_code</code>, <code>read_write_file</code>, <code>http_request</code>, <code>exec_command</code></div>
-                <div className="guide-item">Web search for research</div>
-                <div className="guide-item">Auto-select runs a full Opus agent with web search and system inspection to pick the highest-value next capability</div>
-                <div className="guide-item">Proposals include strategic justification — why now, what it unblocks</div>
-                <div className="guide-item">Q&A chat on pending proposals — interrogate before approving</div>
+                <h3>Active Capabilities</h3>
+                {capabilityGroups.length > 0 ? capabilityGroups.map(group => (
+                  <div key={group.capabilityId} className="guide-item" style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                    <span style={{ color: VALUE_COLOURS[group.valueId] || 'var(--text-dim)', fontWeight: 700, flexShrink: 0 }}>
+                      {VALUE_ABBREV[group.valueId] || '??'}
+                    </span>
+                    <span>
+                      <span style={{ color: 'var(--text-light)' }}>{group.capabilityId}</span>
+                      <br />
+                      <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>
+                        {group.tools.map(t => t.name).join(' \u00B7 ')}
+                      </span>
+                    </span>
+                  </div>
+                )) : (
+                  <div className="guide-item" style={{ color: 'var(--text-dim)' }}>
+                    No capabilities verified yet &mdash; run the pipeline to build your first.
+                  </div>
+                )}
+              </div>
+
+              <div className="section">
+                <h3>Operator Commands</h3>
+                <div className="guide-item" style={{ color: 'var(--text-dim)', fontSize: 11 }}>
+                  {operatorTools.map(t => t.name).join(' \u00B7 ')}
+                </div>
               </div>
 
               <div className="section">
                 <h3>The 5 Values</h3>
-                <div className="guide-item"><span style={{ color: '#e74c3c' }}>SP</span> Self-Preservation &mdash; backups, monitoring, redundancy</div>
-                <div className="guide-item"><span style={{ color: '#f0a030' }}>GI</span> Goal Integrity &mdash; goal tracking, drift detection</div>
-                <div className="guide-item"><span style={{ color: '#a366cc' }}>CE</span> Cognitive Enhancement &mdash; knowledge, memory, tools</div>
-                <div className="guide-item"><span style={{ color: '#4ecdc4' }}>TP</span> Technological Perfection &mdash; better tools, infrastructure</div>
-                <div className="guide-item"><span style={{ color: '#45d48a' }}>RA</span> Resource Acquisition &mdash; wallet, APIs, economic activity</div>
+                {Object.entries(VALUE_ABBREV).map(([valId, abbr]) => (
+                  <div key={valId} className="guide-item">
+                    <span style={{ color: VALUE_COLOURS[valId] }}>{abbr}</span> {valId.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')}
+                  </div>
+                ))}
               </div>
 
               <div className="section">

@@ -7,12 +7,14 @@ export default function useShellChat() {
   const [availableTools, setAvailableTools] = useState([])
   const abortRef = useRef(null)
 
-  useEffect(() => {
+  const refreshTools = useCallback(() => {
     fetch('/api/v2/shell/tools', { credentials: 'include' })
       .then(r => r.json())
       .then(data => setAvailableTools(data.tools || []))
       .catch(() => {})
   }, [])
+
+  useEffect(() => { refreshTools() }, [refreshTools])
 
   const sendMessage = useCallback(async (text) => {
     if (!text.trim() || isLoading) return
@@ -79,6 +81,7 @@ export default function useShellChat() {
                 duration: event.duration,
                 searchCount: event.searchCount
               }])
+              refreshTools()
             } else if (event.type === 'error') {
               setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${event.error}`, error: true }])
             }
@@ -94,14 +97,15 @@ export default function useShellChat() {
       setActiveTools([])
       abortRef.current = null
     }
-  }, [messages, isLoading])
+  }, [messages, isLoading, refreshTools])
 
   const clearHistory = useCallback(() => {
     if (abortRef.current) abortRef.current.abort()
     setMessages([])
     setIsLoading(false)
     setActiveTools([])
-  }, [])
+    refreshTools()
+  }, [refreshTools])
 
   return { messages, sendMessage, isLoading, activeTools, availableTools, clearHistory }
 }

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { AVAILABLE_MODELS, executeCall, executeCallWithTools } from './claude-client.js'
 import { buildShellPrompt, buildProposalChatPrompt } from './prompts.js'
 import { loadState, saveState } from './state.js'
-import { loadCapabilities, getAllTools, executeAnyToolCall, verifyAll } from './capabilities/registry.js'
+import { loadCapabilities, getAllTools, getAllModules, executeAnyToolCall, verifyAll } from './capabilities/registry.js'
 import { SHELL_TOOLS, executeShellTool } from './shell-tools.js'
 import { initProposalCounter, approveProposal, rejectProposal, getPendingProposals, getAllProposals, getProposal } from './proposal-manager.js'
 import { runPipeline, runImplementPhase, runAutoSelect, isPipelineActive, getPipelineStatus, getSelectorStatus, abortPipeline } from './pipeline-engine.js'
@@ -342,12 +342,21 @@ app.post('/api/v2/verify/:capabilityId', async (req, res) => {
 
 // ===== SHELL =====
 app.get('/api/v2/shell/tools', async (req, res) => {
-  await ensureCapabilities()
+  await loadCapabilities()
 
-  const registryTools = getAllTools()
+  const modules = getAllModules()
+  const registryTools = modules.flatMap(mod =>
+    mod.tools.map(t => ({
+      name: t.name,
+      description: t.description,
+      type: 'registry',
+      capabilityId: mod.id,
+      valueId: mod.valueId
+    }))
+  )
   const tools = [
     ...SHELL_TOOLS.map(t => ({ name: t.name, description: t.description, type: 'operator' })),
-    ...registryTools.map(t => ({ name: t.name, description: t.description, type: 'registry' }))
+    ...registryTools
   ]
 
   res.json({ tools })
@@ -360,7 +369,7 @@ app.post('/api/v2/shell/chat', async (req, res) => {
     return res.status(400).json({ success: false, error: 'Missing required field: message' })
   }
 
-  await ensureCapabilities()
+  await loadCapabilities()
 
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
