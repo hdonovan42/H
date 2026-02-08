@@ -14,7 +14,7 @@ const TECH_STACK = `AXIOM v2 TECH STACK:
 - Each exports: { id, valueId, tools[], execute(name, input), verify() }
 - Implementation files in server/workspace/{capabilityId}/, registry module in server/capabilities/
 - Tools available during implementation: run_code (sandboxed JS VM), read_write_file (workspace/ scoped), http_request, exec_command (allowlist: node, npm, ls, cat, curl, etc)
-- npm packages OK — install via exec_command("npm install <pkg>")
+- exec_command cwd is server/ — "npm install <pkg>" works directly, no cd needed. Do NOT guess filesystem paths.
 - No Python, no Docker, no external databases, no microservices — in-process Node.js only`
 
 function loadValuesJson() {
@@ -116,6 +116,7 @@ Describe the compounding effect — what this unblocks downstream.
 The proposal must specify:
 1. A justification block explaining WHY this capability matters right now
 2. What files to create/modify — all proposed files must be .js (ESM). Do not propose Python, shell scripts, or Dockerfiles.
+   STRONGLY PREFER a single self-contained capability module. Only split into workspace helper files if the implementation genuinely exceeds ~300 lines. Cross-file integration bugs are the #1 cause of implementation failure.
 3. What the capability module code should do
 4. An executable smoke test command that proves it works
 5. Estimated token cost
@@ -185,16 +186,12 @@ ${findingsBlock}
 
 EXECUTE EVERY STEP WITH TOOL CALLS. Do not output plans or descriptions of what you would do.
 If a tool call fails, diagnose and retry immediately. You have 15 rounds — use them.
-Your first tool call should write the main implementation file. NOT text planning.
 
-CRITICAL PATH RULES:
+SANDBOX RULES:
 - read_write_file is SANDBOXED to server/workspace/. Path "foo.js" → server/workspace/foo.js.
 - The capability registry loads .js files from server/capabilities/ — OUTSIDE the sandbox.
-- You CANNOT use read_write_file to place the registry module. And "cp" is not in the shell allowlist.
-- To copy the registry module outside the sandbox, use:
-  exec_command("node --input-type=commonjs -e \\"require('fs').copyFileSync('workspace/${capabilityId}/${capabilityId}.js', 'capabilities/${capabilityId}.js')\\"")
-  (--input-type=commonjs is needed because the project is ESM, but this inline script uses require)
-- ALL source files must use ESM (import/export). Only the copy command above uses require.
+- You CANNOT use read_write_file to place the registry module. Use the copy command in step 4 below.
+- ALL source files must use ESM (import/export).
 
 CAPABILITY MODULE CONTRACT:
 The registry loads every .js file in server/capabilities/ (not subdirectories). Each must export default:
@@ -205,63 +202,37 @@ The registry loads every .js file in server/capabilities/ (not subdirectories). 
   execute: async (toolName, input) => { ... },
   verify: async () => ({ operational: true|false, evidence: 'string' })
 }
-The registry module can import implementation files from ../workspace/${capabilityId}/.
 
-REFERENCE — this is what a working capability module looks like:
-\`\`\`js
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { resolve, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+PREFER SINGLE-FILE MODULES. Put all logic in the capability module itself. Only split into workspace helper files if the implementation genuinely exceeds ~300 lines. Cross-file bugs are the #1 failure cause.
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const dataDir = resolve(__dirname, '../workspace/${capabilityId}')
+If you DO use workspace helper files, the registry module can import them from ../workspace/${capabilityId}/.
 
-export default {
-  id: '${capabilityId}',
-  valueId: '${valueId}',
-  tools: [{
-    name: 'example_tool',
-    description: 'Does a thing',
-    input_schema: { type: 'object', properties: { input: { type: 'string' } }, required: ['input'] }
-  }],
-  execute: async (toolName, input) => {
-    switch (toolName) {
-      case 'example_tool': return doThing(input)
-      default: return { error: 'Unknown tool: ' + toolName }
-    }
-  },
-  verify: async () => {
-    try {
-      // Check real state — files exist, data loads, etc.
-      return { operational: true, evidence: 'What actually passed' }
-    } catch (e) {
-      return { operational: false, evidence: e.message }
-    }
-  }
-}
-\`\`\`
+YOUR DELIVERABLES — execute in THIS order, using the EXACT commands shown:
 
-YOUR DELIVERABLES (in this order):
-1. Write implementation files via read_write_file to ${capabilityId}/ (lands in workspace/${capabilityId}/)
-2. Write the registry module via read_write_file to ${capabilityId}/${capabilityId}.js
-3. Copy it outside the sandbox: exec_command("node --input-type=commonjs -e \\"require('fs').copyFileSync('workspace/${capabilityId}/${capabilityId}.js', 'capabilities/${capabilityId}.js')\\"")
-4. Install any npm deps if needed via exec_command("npm install <pkg> 2>&1 | tail -3")
-5. Run a quick smoke test to confirm it works
-6. Respond with the JSON result below
+1. INSTALL DEPS (if needed — skip if none):
+   exec_command("npm install <pkg> 2>&1 | tail -3")
+   This works on the first try. cwd is server/. Do NOT cd anywhere. Do NOT guess paths.
+
+2. WRITE THE MODULE via read_write_file to ${capabilityId}/${capabilityId}.js
+   This is your main deliverable. Prefer writing everything in this single file.
+
+3. WRITE HELPER FILES (only if needed) via read_write_file to ${capabilityId}/helper.js
+
+4. COPY MODULE to registry:
+   exec_command("node --input-type=commonjs -e \\"require('fs').copyFileSync('workspace/${capabilityId}/${capabilityId}.js', 'capabilities/${capabilityId}.js')\\"")
+
+5. SMOKE TEST (mandatory — do not skip):
+   exec_command("node -e \\"import('./capabilities/${capabilityId}.js').then(m=>m.default.verify()).then(r=>console.log(JSON.stringify(r))).catch(e=>console.error(e.message))\\"")
+   If it fails, read the error, fix the module, re-copy (step 4), re-test. You have rounds for this.
+
+6. RESPOND with JSON:
+   { "success": true|false, "filesCreated": [...], "evidence": "smoke test output", "notes": "..." }
 
 DO NOT:
-- Spend rounds reading files — the proposal and learner findings tell you everything
-- Run ls or cat to "understand the codebase"
-- Re-read files you just wrote
-- Output text explaining what you plan to do — just DO it with tool calls
-
-After implementation, respond with JSON:
-{
-  "success": true|false,
-  "filesCreated": ["path1", "path2"],
-  "evidence": "What happened when verification ran",
-  "notes": "Any issues or observations"
-}`
+- Spend rounds reading files, running ls, or exploring — the proposal tells you everything
+- Guess filesystem paths or cd anywhere — cwd is server/, use relative paths
+- Output text planning — just make tool calls
+- Skip the smoke test — if you run out of rounds before testing, your implementation WILL fail verification`
 }
 
 export function buildShellPrompt(state) {

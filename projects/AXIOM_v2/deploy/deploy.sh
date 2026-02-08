@@ -20,12 +20,17 @@ rsync -az --delete "$PROJECT_DIR/dist/" "$VPS:$REMOTE/dist/"
 
 # 3. Sync server/ (excluding .env, data/, node_modules, workspace/)
 echo "[3/6] Syncing server/..."
+# Sync server/ but exclude capabilities/ (pipeline-created modules live on VPS only)
 rsync -az --delete \
   --exclude='node_modules' \
   --exclude='.env' \
   --exclude='data/' \
   --exclude='workspace/' \
+  --exclude='capabilities/' \
   "$PROJECT_DIR/server/" "$VPS:$REMOTE/server/"
+
+# Sync Phase 0 capability modules (no --delete — preserves pipeline-created modules)
+rsync -az "$PROJECT_DIR/server/capabilities/" "$VPS:$REMOTE/server/capabilities/"
 
 # 4. Sync seed data
 echo "[4/6] Syncing seed data..."
