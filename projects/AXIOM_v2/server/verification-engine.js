@@ -182,7 +182,7 @@ export function coldVerifyCapability(capabilityId) {
   // Use process.execPath so the subprocess uses the SAME Node binary as the
   // running server (nvm v22 under PM2), not whatever bare `node` resolves to.
   const nodeBin = process.execPath
-  const cmd = `"${nodeBin}" -e "import('./capabilities/${capabilityId}.js').then(m=>(m.default||m).verify()).then(r=>{console.log(JSON.stringify(r));if(!r.operational)process.exit(1)}).catch(e=>{console.error(e.message);process.exit(1)})"`
+  const cmd = `"${nodeBin}" -e "import('dotenv').then(d=>d.config()).catch(()=>{}).then(()=>import('./capabilities/${capabilityId}.js')).then(m=>(m.default||m).verify()).then(r=>{console.log(JSON.stringify(r));if(!r.operational)process.exit(1)}).catch(e=>{console.error(e.message);process.exit(1)})"`
 
   try {
     const stdout = execSync(cmd, { encoding: 'utf-8', timeout: 30000, cwd: __dirname })

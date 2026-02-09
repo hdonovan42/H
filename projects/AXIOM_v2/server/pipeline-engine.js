@@ -8,6 +8,7 @@ import { loadState, saveState, setCapabilityStage, recalcValueScore, nextSession
 import { createProposal, getApprovedProposals } from './proposal-manager.js'
 import { sendProposalToUser, sendOperatorRequest } from './whatsapp-bridge.js'
 import { verifyCapability, deployVerifyCapability, coldVerifyCapability } from './verification-engine.js'
+import dotenvPkg from 'dotenv'
 import { loadCapabilities, getAllTools, executeAnyToolCall } from './capabilities/registry.js'
 import { VALUES } from '../shared/identity.js'
 
@@ -297,7 +298,21 @@ export async function runImplementPhase(statePath, proposalId, onEvent = () => {
       }
     }
 
+    const selfVerifyTool = {
+      name: 'self_verify',
+      description: 'Run the exact cold-verify subprocess that determines pass/fail after implementation. Use this after your smoke test to confirm your module passes real verification.',
+      input_schema: { type: 'object', properties: {}, required: [] }
+    }
+
     const wrappedExecutor = async (name, input) => {
+      if (name === 'self_verify') {
+        console.log(`[Pipeline] Implementer running self-verify for ${capabilityId}`)
+        try { dotenvPkg.config({ override: true }) } catch {}
+        await loadCapabilities()
+        const result = coldVerifyCapability(capabilityId)
+        onEvent({ type: 'self_verify_result', ...result })
+        return JSON.stringify(result)
+      }
       if (name === 'ask_operator') {
         const reqId = `opreq-${Date.now()}`
         console.log(`[Pipeline] Implementer requesting operator action: ${input.request}`)
@@ -335,7 +350,7 @@ export async function runImplementPhase(statePath, proposalId, onEvent = () => {
       userMessage: `Implement the capability "${capabilityId}" according to the approved proposal. Use your tools to write files and test.`,
       maxTokens: 8192,
       serverTools: [],
-      capabilityTools: [...capabilityTools, askOperatorTool],
+      capabilityTools: [...capabilityTools, askOperatorTool, selfVerifyTool],
       toolExecutor: wrappedExecutor,
       maxToolRounds: 15,
       onToolEvent: (evt) => onEvent({ ...evt, phase: 'implement' })
@@ -361,6 +376,9 @@ export async function runImplementPhase(statePath, proposalId, onEvent = () => {
     pipelineActive.phase = 'verify'
     onEvent({ type: 'pipeline_phase', phase: 'verify', capabilityId, valueId })
 
+    // Reload .env so env vars added during implementation are visible
+    try { dotenvPkg.config({ override: true }) } catch {}
+
     // Reload registry so newly-written capability modules are discovered
     await loadCapabilities()
 
@@ -379,21 +397,49 @@ export async function runImplementPhase(statePath, proposalId, onEvent = () => {
       onEvent({ type: 'pipeline_phase', phase: 'cold-verify', capabilityId, valueId })
       console.log(`[Pipeline] COLD-VERIFY: ${capabilityId} in fresh subprocess`)
 
-      const coldResult = coldVerifyCapability(capabilityId)
+      let coldResult = coldVerifyCapability(capabilityId)
       onEvent({ type: 'pipeline_result', phase: 'cold-verify', ...coldResult })
 
       if (!coldResult.success) {
-        // Override — in-process verify passed but cold verify failed
-        verifyResult.success = false
-        verifyResult.evidence = (verifyResult.evidence || '') + '\n' + coldResult.evidence
+        // Retry loop — give implementer 2 more attempts to fix
+        let fixed = false
+        for (let retry = 0; retry < 2 && !fixed; retry++) {
+          console.log(`[Pipeline] Cold-verify FAILED — giving implementer retry ${retry + 1}/2`)
+          onEvent({ type: 'verify_retry', attempt: retry + 1, error: coldResult.evidence })
 
-        state = loadState(statePath)
-        setCapabilityStage(state, valueId, capabilityId, 'implemented', {
-          evidence: verifyResult.evidence.slice(0, 2000),
-          coldVerifyFailed: true
-        })
-        saveState(statePath, state)
-        console.log(`[Pipeline] Cold-verify FAILED for ${capabilityId} — marking as implemented`)
+          const repairResult = await executeCallWithTools({
+            model: 'sonnet',
+            systemPrompt: implementerPrompt,
+            userMessage: `Cold verification FAILED for "${capabilityId}":\n\n${coldResult.evidence}\n\nFix the issue. Your module is at capabilities/${capabilityId}.js. Re-copy from workspace after fixing, then run self_verify to confirm.`,
+            maxTokens: 8192,
+            serverTools: [],
+            capabilityTools: [...capabilityTools, askOperatorTool, selfVerifyTool],
+            toolExecutor: wrappedExecutor,
+            maxToolRounds: 5,
+            onToolEvent: (evt) => onEvent({ ...evt, phase: 'verify-retry' })
+          })
+          addTokens(repairResult.tokens)
+
+          await loadCapabilities()
+          try { dotenvPkg.config({ override: true }) } catch {}
+          coldResult = coldVerifyCapability(capabilityId)
+          onEvent({ type: 'pipeline_result', phase: 'cold-verify-retry', ...coldResult })
+          if (coldResult.success) fixed = true
+        }
+
+        if (!fixed) {
+          // Override — in-process verify passed but cold verify failed after retries
+          verifyResult.success = false
+          verifyResult.evidence = (verifyResult.evidence || '') + '\n' + coldResult.evidence
+
+          state = loadState(statePath)
+          setCapabilityStage(state, valueId, capabilityId, 'implemented', {
+            evidence: verifyResult.evidence.slice(0, 2000),
+            coldVerifyFailed: true
+          })
+          saveState(statePath, state)
+          console.log(`[Pipeline] Cold-verify FAILED for ${capabilityId} after retries — marking as implemented`)
+        }
       }
     }
 
@@ -414,18 +460,44 @@ export async function runImplementPhase(statePath, proposalId, onEvent = () => {
       onEvent({ type: 'pipeline_result', phase: 'deploy', ...deployResult })
 
       if (!deployResult.success) {
-        // Override — not truly verified if deps won't survive deploy
-        verifyResult.success = false
-        verifyResult.evidence = (verifyResult.evidence || '') + '\n' + deployResult.evidence
+        // Retry — give implementer 1 attempt to fix (typically just npm install)
+        let deployFixed = false
+        console.log(`[Pipeline] Deploy-verify FAILED — giving implementer 1 retry`)
+        onEvent({ type: 'verify_retry', attempt: 1, phase: 'deploy', error: deployResult.evidence })
 
-        state = loadState(statePath)
-        setCapabilityStage(state, valueId, capabilityId, 'implemented', {
-          evidence: verifyResult.evidence.slice(0, 2000),
-          deployVerifyFailed: true,
-          missingDeps: deployResult.missingDeps
+        const deployRepairResult = await executeCallWithTools({
+          model: 'sonnet',
+          systemPrompt: implementerPrompt,
+          userMessage: `Deploy verification FAILED for "${capabilityId}":\n\n${deployResult.evidence}\n\nFix the issue — typically you need to run npm install <pkg> to add missing deps to package.json.`,
+          maxTokens: 4096,
+          serverTools: [],
+          capabilityTools: [...capabilityTools, askOperatorTool, selfVerifyTool],
+          toolExecutor: wrappedExecutor,
+          maxToolRounds: 3,
+          onToolEvent: (evt) => onEvent({ ...evt, phase: 'deploy-retry' })
         })
-        saveState(statePath, state)
-        console.log(`[Pipeline] Deploy-verify FAILED for ${capabilityId}: missing deps [${deployResult.missingDeps.join(', ')}]`)
+        addTokens(deployRepairResult.tokens)
+
+        // Re-check deploy verification
+        try { currentPackageJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8')) } catch { currentPackageJson = {} }
+        const retryDeployResult = deployVerifyCapability(capabilityId, currentPackageJson)
+        onEvent({ type: 'pipeline_result', phase: 'deploy-retry', ...retryDeployResult })
+        if (retryDeployResult.success) deployFixed = true
+
+        if (!deployFixed) {
+          // Override — not truly verified if deps won't survive deploy
+          verifyResult.success = false
+          verifyResult.evidence = (verifyResult.evidence || '') + '\n' + retryDeployResult.evidence
+
+          state = loadState(statePath)
+          setCapabilityStage(state, valueId, capabilityId, 'implemented', {
+            evidence: verifyResult.evidence.slice(0, 2000),
+            deployVerifyFailed: true,
+            missingDeps: retryDeployResult.missingDeps
+          })
+          saveState(statePath, state)
+          console.log(`[Pipeline] Deploy-verify FAILED for ${capabilityId} after retry: missing deps [${retryDeployResult.missingDeps.join(', ')}]`)
+        }
       }
     }
 

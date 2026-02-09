@@ -140,9 +140,18 @@ OUTPUT FORMAT (JSON):
     "smokeTest": "A SHORT executable shell command (<200 chars). Example: node -e \\"import('./server/capabilities/${capabilityId}.js').then(m => m.default.verify().then(console.log))\\"",
     "expectedEvidence": "What success looks like"
   },
+  "envVars": {
+    "required": ["ENV_VAR_NAME"],
+    "description": "What each variable is and where to get it. Empty array if none needed."
+  },
   "dependencies": ["list of prerequisite capabilities"],
   "risk": "low|medium|high"
 }
+
+ENVIRONMENT VARIABLES:
+If this capability needs API keys, secrets, or external config, list them in "envVars.required".
+The operator will be prompted to set these in server/.env before implementation begins.
+If none needed: "envVars": { "required": [], "description": "None" }
 
 VERIFICATION RULES:
 - The module's verify() method is the primary test. smokeTest is a fallback — must be a real command, NOT prose.
@@ -204,6 +213,19 @@ Be specific — tell the operator EXACTLY what to do.
 The pipeline pauses until they reply. Batch related requests into one call.
 Do not use ask_operator for things you can do yourself with your other tools.
 
+VERIFICATION ENVIRONMENT — how your code gets tested after you finish:
+After implementation, verification runs THREE sequential stages. ALL must pass:
+1. IN-PROCESS VERIFY — your verify() runs inside the server. .env is reloaded first.
+2. COLD SUBPROCESS VERIFY (authoritative) — a FRESH Node process loads .env, imports your module, calls verify(). If this passes, you are verified.
+3. DEPLOY VERIFY — static analysis checks all your npm imports exist in package.json.
+
+CRITICAL RULES:
+- NEVER pass env vars inline (e.g. KEY=val node -e "..."). They vanish in verification.
+- Use ask_operator to get secrets into .env FIRST, then write your module to read process.env.
+- Your verify() must return operational:false with clear evidence if env vars are missing.
+- Use self_verify after your smoke test to run the real cold-verify and see if it passes.
+- If cold-verify fails after you finish, you get retry rounds with the error — but better to catch it with self_verify first.
+
 CAPABILITY MODULE CONTRACT:
 The registry loads every .js file in server/capabilities/ (not subdirectories). Each must export default:
 {
@@ -254,6 +276,10 @@ YOUR DELIVERABLES — execute in THIS order, using the EXACT commands shown:
 5. SMOKE TEST (mandatory — do not skip):
    exec_command("node -e \\"import('./capabilities/${capabilityId}.js').then(m=>m.default.verify()).then(r=>console.log(JSON.stringify(r))).catch(e=>console.error(e.message))\\"")
    If it fails, read the error, fix the module, re-copy (step 4), re-test. You have rounds for this.
+
+5b. SELF-VERIFY (recommended):
+    self_verify() — runs the exact cold-verify subprocess. If it fails, fix and re-test.
+    Use this AFTER your smoke test passes. If self_verify fails, your implementation WILL fail.
 
 6. RESPOND with JSON:
    { "success": true|false, "filesCreated": [...], "evidence": "smoke test output", "notes": "..." }
