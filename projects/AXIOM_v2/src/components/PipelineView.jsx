@@ -6,6 +6,29 @@ const PHASES = ['Select', 'Learn', 'Evaluate', 'Approve', 'Implement', 'Verify',
 export default function PipelineView() {
   const { events, running, pipelineState } = usePipelineStore()
   const [runTarget, setRunTarget] = useState({ capabilityId: '', valueId: '' })
+  const [operatorResponse, setOperatorResponse] = useState('')
+  const [responding, setResponding] = useState(false)
+
+  const handleOperatorRespond = async (reqId) => {
+    if (!operatorResponse.trim()) return
+    setResponding(true)
+    try {
+      const res = await fetch('/api/v2/pipeline/operator-respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ response: operatorResponse.trim() })
+      })
+      const data = await res.json()
+      if (data.success) setOperatorResponse('')
+    } catch (err) {
+      console.error('Operator respond failed:', err)
+    } finally {
+      setResponding(false)
+    }
+  }
+
+  const pendingOpRequest = pipelineState?.operatorRequest
 
   const activePhase = pipelineState?.pipeline?.phase
   const phaseIndex = activePhase
@@ -75,6 +98,40 @@ export default function PipelineView() {
             </button>
           )}
         </div>
+
+        {pendingOpRequest && (
+          <div style={{ background: 'rgba(255, 170, 0, 0.1)', border: '2px solid var(--gi-color, #ffaa00)', borderRadius: 6, padding: 16, marginBottom: 16 }}>
+            <div style={{ color: 'var(--gi-color, #ffaa00)', fontWeight: 700, fontSize: 13, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
+              Pipeline Paused — Operator Response Needed
+            </div>
+            <div style={{ color: 'var(--text-bright)', fontSize: 12, marginBottom: 8 }}>
+              {pendingOpRequest.request}
+            </div>
+            {pendingOpRequest.context && (
+              <div style={{ color: 'var(--text-dim)', fontSize: 11, marginBottom: 12 }}>
+                Context: {pendingOpRequest.context}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                type="text"
+                placeholder="Your response..."
+                value={operatorResponse}
+                onChange={e => setOperatorResponse(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleOperatorRespond(pendingOpRequest.id)}
+                style={{ flex: 1, padding: '8px 12px', background: 'var(--bg-input)', border: '1px solid var(--gi-color, #ffaa00)', borderRadius: 4, color: 'var(--text-bright)', fontFamily: 'var(--font)', fontSize: 12 }}
+              />
+              <button
+                className="btn"
+                onClick={() => handleOperatorRespond(pendingOpRequest.id)}
+                disabled={responding || !operatorResponse.trim()}
+                style={{ borderColor: 'var(--gi-color, #ffaa00)', color: 'var(--gi-color, #ffaa00)' }}
+              >
+                {responding ? 'Sending...' : 'Respond'}
+              </button>
+            </div>
+          </div>
+        )}
 
         {events.length > 0 && (
           <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, padding: 16, maxHeight: 400, overflowY: 'auto' }}>
@@ -155,6 +212,17 @@ export default function PipelineView() {
                     {evt.success && evt.evidence && (
                       <span style={{ color: 'var(--text-dim)', marginLeft: 8, fontSize: 10 }}>{evt.evidence}</span>
                     )}
+                  </div>
+                ) : evt.type === 'operator_request' ? (
+                  <div style={{ background: 'rgba(255, 170, 0, 0.08)', border: '1px solid var(--gi-color, #ffaa00)', borderRadius: 4, padding: 8, margin: '4px 0' }}>
+                    <span style={{ color: 'var(--gi-color, #ffaa00)', fontWeight: 600 }}>OPERATOR REQUEST:</span>{' '}
+                    <span style={{ color: 'var(--text-bright)' }}>{evt.request}</span>
+                    {evt.context && <div style={{ color: 'var(--text-dim)', fontSize: 10, marginTop: 4 }}>Context: {evt.context}</div>}
+                  </div>
+                ) : evt.type === 'operator_response' ? (
+                  <div style={{ margin: '4px 0' }}>
+                    <span style={{ color: 'var(--gi-color, #ffaa00)', fontWeight: 600 }}>OPERATOR RESPONDED:</span>{' '}
+                    <span style={{ color: 'var(--text-bright)' }}>{evt.response}</span>
                   </div>
                 ) : (
                   <>

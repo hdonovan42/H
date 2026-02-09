@@ -193,6 +193,17 @@ SANDBOX RULES:
 - You CANNOT use read_write_file to place the registry module. Use the copy command in step 4 below.
 - ALL source files must use ESM (import/export).
 
+OPERATOR INTERACTION:
+You have an ask_operator tool. Use it when you GENUINELY CANNOT proceed without human help:
+- Setting environment variables or secrets in .env
+- Providing API keys that cannot be generated programmatically
+- Configuring external services
+- Any action requiring human credentials or physical access
+
+Be specific — tell the operator EXACTLY what to do.
+The pipeline pauses until they reply. Batch related requests into one call.
+Do not use ask_operator for things you can do yourself with your other tools.
+
 CAPABILITY MODULE CONTRACT:
 The registry loads every .js file in server/capabilities/ (not subdirectories). Each must export default:
 {

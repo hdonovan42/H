@@ -1,4 +1,5 @@
 // WhatsApp bridge via moltbot gateway on same VPS
+// Requires: hq user has SSH key access to moltbot@localhost
 import { writeFileSync, unlinkSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 
@@ -13,11 +14,13 @@ export async function sendToUser(message) {
   const tmpFile = `/tmp/axiom2-msg-${Date.now()}.txt`
 
   try {
-    writeFileSync(tmpFile, message)
-    execSync(
-      `ssh root@localhost "su - moltbot -c 'cd ~/moltbot && cat ${tmpFile} | node scripts/run-node.mjs agent --agent haiku --to ${MOLTBOT_PHONE} --channel whatsapp --deliver'"`,
-      { timeout: 30000, encoding: 'utf-8' }
-    )
+    // Write message to /tmp (world-readable) so moltbot user can access it
+    writeFileSync(tmpFile, message, { mode: 0o644 })
+
+    // SSH as moltbot, read the tmp file as --message arg
+    // Matches the working pattern from cron scripts (run-node.mjs agent --deliver)
+    const cmd = `ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes moltbot@localhost 'cd ~/moltbot && node scripts/run-node.mjs agent --agent kimi --to "${MOLTBOT_PHONE}" --channel whatsapp --deliver --timeout 60 --message "$(cat ${tmpFile})"'`
+    execSync(cmd, { timeout: 60000, encoding: 'utf-8' })
     console.log(`[WhatsApp] Sent message (${message.length} chars)`)
     return { success: true }
   } catch (err) {
@@ -44,6 +47,17 @@ Reply YES to approve or NO to reject.
 Proposal ID: ${proposal.id}
 
 Dashboard: https://axiom.hjd.ai`
+}
+
+export async function sendOperatorRequest(request, context) {
+  const message = `AXIOM v2 — OPERATOR ACTION NEEDED
+
+${request}
+
+${context ? `Context: ${context}\n` : ''}The pipeline is PAUSED waiting for your response.
+Respond via dashboard: https://axiom.hjd.ai/#/pipeline`
+
+  return sendToUser(message)
 }
 
 export function parseWhatsAppReply(text) {

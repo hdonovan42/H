@@ -10,7 +10,7 @@ import { loadState, saveState, setCapabilityStage } from './state.js'
 import { loadCapabilities, getAllTools, getAllModules, executeAnyToolCall, verifyAll } from './capabilities/registry.js'
 import { SHELL_TOOLS, executeShellTool } from './shell-tools.js'
 import { initProposalCounter, approveProposal, rejectProposal, getPendingProposals, getAllProposals, getProposal } from './proposal-manager.js'
-import { runPipeline, runImplementPhase, runAutoSelect, isPipelineActive, getPipelineStatus, getSelectorStatus, abortPipeline } from './pipeline-engine.js'
+import { runPipeline, runImplementPhase, runAutoSelect, isPipelineActive, getPipelineStatus, getSelectorStatus, abortPipeline, getPendingOperatorRequest, respondToOperator } from './pipeline-engine.js'
 import { verifyCapability } from './verification-engine.js'
 import { parseWhatsAppReply } from './whatsapp-bridge.js'
 import { VALUES } from '../shared/identity.js'
@@ -297,7 +297,8 @@ app.get('/api/v2/pipeline/active', (req, res) => {
   const selector = getSelectorStatus()
   res.json({
     active: !!(pipeline || selector),
-    pipeline: pipeline || selector
+    pipeline: pipeline || selector,
+    operatorRequest: getPendingOperatorRequest() || null
   })
 })
 
@@ -305,6 +306,23 @@ app.get('/api/v2/pipeline/active', (req, res) => {
 app.post('/api/v2/pipeline/abort', (req, res) => {
   const result = abortPipeline()
   console.log(`[Pipeline] Abort requested: ${JSON.stringify(result)}`)
+  res.json(result)
+})
+
+// Operator request — check pending
+app.get('/api/v2/pipeline/operator-request', (req, res) => {
+  const pending = getPendingOperatorRequest()
+  res.json(pending ? { pending: true, ...pending } : { pending: false })
+})
+
+// Operator response
+app.post('/api/v2/pipeline/operator-respond', (req, res) => {
+  const { response } = req.body
+  if (!response) {
+    return res.status(400).json({ success: false, error: 'Missing response in body' })
+  }
+  const result = respondToOperator(response)
+  console.log(`[Pipeline] Operator respond: ${JSON.stringify(result)}`)
   res.json(result)
 })
 

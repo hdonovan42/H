@@ -6,7 +6,7 @@ import { executeCall, executeCallWithTools } from './claude-client.js'
 import { buildLearnerPrompt, buildEvaluatorPrompt, buildImplementerPrompt, buildSelectorPrompt } from './prompts.js'
 import { loadState, saveState, setCapabilityStage, recalcValueScore, nextSessionId } from './state.js'
 import { createProposal, getApprovedProposals } from './proposal-manager.js'
-import { sendProposalToUser } from './whatsapp-bridge.js'
+import { sendProposalToUser, sendOperatorRequest } from './whatsapp-bridge.js'
 import { verifyCapability, deployVerifyCapability, coldVerifyCapability } from './verification-engine.js'
 import { loadCapabilities, getAllTools, executeAnyToolCall } from './capabilities/registry.js'
 import { VALUES } from '../shared/identity.js'
@@ -43,6 +43,7 @@ function extractJSON(text) {
 let pipelineActive = null
 let selectorActive = null
 let abortController = null
+let operatorRequest = null // { id, request, context, resolve, reject, timestamp }
 
 export function isPipelineActive() {
   return pipelineActive
@@ -56,12 +57,30 @@ export function getSelectorStatus() {
   return selectorActive
 }
 
+export function getPendingOperatorRequest() {
+  if (!operatorRequest) return null
+  return { id: operatorRequest.id, request: operatorRequest.request, context: operatorRequest.context, timestamp: operatorRequest.timestamp }
+}
+
+export function respondToOperator(response) {
+  if (!operatorRequest) return { success: false, error: 'No pending operator request' }
+  const { resolve, id } = operatorRequest
+  operatorRequest = null
+  resolve(response)
+  console.log(`[Pipeline] Operator responded to request ${id}`)
+  return { success: true, requestId: id }
+}
+
 export function abortPipeline() {
   if (!pipelineActive && !selectorActive) {
     return { success: false, error: 'No pipeline running' }
   }
   if (abortController) {
     abortController.abort()
+  }
+  if (operatorRequest) {
+    operatorRequest.reject(new Error('Pipeline aborted by operator'))
+    operatorRequest = null
   }
   const was = pipelineActive || selectorActive
   pipelineActive = null
@@ -265,14 +284,59 @@ export async function runImplementPhase(statePath, proposalId, onEvent = () => {
     const implementerPrompt = buildImplementerPrompt(capabilityId, valueId, proposal, state)
     const capabilityTools = getAllTools()
 
+    const askOperatorTool = {
+      name: 'ask_operator',
+      description: 'Ask the human operator to perform an action you cannot do yourself (set env vars, provide API keys, configure external services). The pipeline pauses until the operator responds. Be specific about what you need.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          request: { type: 'string', description: 'What you need the operator to do — be specific and actionable' },
+          context: { type: 'string', description: 'Why you need this and what you have tried' }
+        },
+        required: ['request']
+      }
+    }
+
+    const wrappedExecutor = async (name, input) => {
+      if (name === 'ask_operator') {
+        const reqId = `opreq-${Date.now()}`
+        console.log(`[Pipeline] Implementer requesting operator action: ${input.request}`)
+
+        onEvent({ type: 'operator_request', id: reqId, request: input.request, context: input.context || '' })
+
+        // Send WhatsApp notification (non-blocking)
+        sendOperatorRequest(input.request, input.context || '').catch(err => {
+          console.log(`[Pipeline] WhatsApp operator notification failed (non-blocking): ${err.message}`)
+        })
+
+        // Block until operator responds or timeout
+        const response = await new Promise((resolve, reject) => {
+          operatorRequest = { id: reqId, request: input.request, context: input.context || '', resolve, reject, timestamp: new Date().toISOString() }
+
+          // 10-minute timeout
+          setTimeout(() => {
+            if (operatorRequest?.id === reqId) {
+              operatorRequest = null
+              resolve('TIMEOUT: No operator response after 10 minutes. Adapt your approach or skip this step.')
+              console.log(`[Pipeline] Operator request ${reqId} timed out`)
+            }
+          }, 10 * 60 * 1000)
+        })
+
+        onEvent({ type: 'operator_response', id: reqId, response })
+        return JSON.stringify({ success: true, response })
+      }
+      return executeAnyToolCall(name, input)
+    }
+
     const implResult = await executeCallWithTools({
       model: 'opus',
       systemPrompt: implementerPrompt,
       userMessage: `Implement the capability "${capabilityId}" according to the approved proposal. Use your tools to write files and test.`,
       maxTokens: 8192,
       serverTools: [],
-      capabilityTools,
-      toolExecutor: executeAnyToolCall,
+      capabilityTools: [...capabilityTools, askOperatorTool],
+      toolExecutor: wrappedExecutor,
       maxToolRounds: 15,
       onToolEvent: (evt) => onEvent({ ...evt, phase: 'implement' })
     })
