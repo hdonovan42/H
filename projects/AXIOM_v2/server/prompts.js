@@ -457,17 +457,38 @@ THINK FROM THE GOAL DOWN — not from the list up.
 
 SYSTEM GOAL: ${state.goal}
 
-Start here. What would most advance this goal right now? The 5 convergent instrumental values (Self-Preservation, Goal-Integrity, Cognitive-Enhancement, Tech-Perfection, Resource-Acquisition) are your strategic lens — use them to structure your thinking, not as a rigid menu.
+CRITICAL DIRECTIVE — READ THIS FIRST:
+The self-recursion pipeline is a MEANS, not an end. Its purpose is to create a MORE CAPABLE version of Claude — one that can do things vanilla Claude cannot. Every capability you select must pass this test: "Does this give the shell a genuine new ability that makes it more useful to the operator?"
+
+Infrastructure and self-monitoring capabilities (backup, monitoring, analytics, knowledge store, session memory, goal tracking) are ALREADY BUILT. The system does NOT need more introspective tools. It needs OUTWARD-FACING capabilities that let it act on the world and generate value.
+
+Examples of what "more capable" looks like:
+- Structured web scraping and data extraction
+- Database access (SQLite) for persistent structured data
+- Scheduled autonomous tasks (cron — act without being asked)
+- Financial data feeds and analysis
+- Content generation and report building
+- Workflow automation (multi-step task chains)
+- Integration with external services and APIs
+- Data transformation and analysis pipelines
+
+Examples of what is NOT useful at this point:
+- More monitoring, logging, or analytics of internal state
+- More knowledge/memory stores (already have 2)
+- Goal tracking or constraint enforcement (meta-overhead)
+- Any capability whose primary user is the pipeline itself
+
+The bootstrap list below is heavily weighted toward introspective capabilities. If nothing on that list passes the "genuinely more capable" test, you MUST propose a dynamic capability instead. Prefer dynamic proposals over weak bootstrap options.
 
 PHASE 0 BASELINE (already verified):
   tp-code-exec, tp-file-access, tp-http-client, tp-shell-access
   These 4 tools are operational. Any capability you select can use them during implementation.
 
 STRATEGIC QUESTIONS — reason through these before selecting:
-1. What is the system's biggest bottleneck or blind spot right now?
-2. Which capability creates the most compounding value — not just for one value, but for the system's overall ability to build more capabilities?
-3. What would bring the system closer to generating economic value?
-4. Is there a capability missing from the bootstrap list that would serve the goal better?
+1. What can the operator NOT do with the shell today that they should be able to?
+2. Which capability would make someone choose the AXIOM shell over vanilla Claude?
+3. What creates real economic value — not internal metrics, but actual useful output?
+4. Is there a capability missing from the bootstrap list that would serve the goal better? (Likely yes — look beyond the list.)
 
 SELECTION OPTIONS:
 You may select from the BOOTSTRAP CAPABILITIES below — these are known, researched, and dependency-mapped.
