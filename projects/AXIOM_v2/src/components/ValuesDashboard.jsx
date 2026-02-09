@@ -66,11 +66,6 @@ export default function ValuesDashboard() {
   const points = VALUE_IDS.map((_, i) => pentagonPoint(i, cx, cy, r))
   const pentagonPath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z'
 
-  // Aggregate score
-  const totalScore = valuesState
-    ? Object.values(valuesState).reduce((sum, v) => sum + (v.score || 0), 0) / 5
-    : 0
-
   return (
     <>
       <div className="nav-bar">
@@ -103,14 +98,6 @@ export default function ValuesDashboard() {
                 <line key={`line-${i}`} x1={cx} y1={cy} x2={p.x} y2={p.y}
                   stroke="var(--border)" strokeWidth="0.5" strokeDasharray="4 4" />
               ))}
-
-              {/* Centre label */}
-              <text x={cx} y={cy - 8} textAnchor="middle" className="center-label">
-                {(totalScore * 100).toFixed(0)}%
-              </text>
-              <text x={cx} y={cy + 8} textAnchor="middle" className="center-sublabel">
-                overall
-              </text>
 
               {/* Value nodes */}
               {VALUE_IDS.map((id, i) => {
