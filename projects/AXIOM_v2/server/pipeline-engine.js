@@ -7,7 +7,7 @@ import { buildLearnerPrompt, buildEvaluatorPrompt, buildImplementerPrompt, build
 import { loadState, saveState, setCapabilityStage, recalcValueScore, nextSessionId } from './state.js'
 import { createProposal, getApprovedProposals } from './proposal-manager.js'
 import { sendProposalToUser } from './whatsapp-bridge.js'
-import { verifyCapability } from './verification-engine.js'
+import { verifyCapability, deployVerifyCapability, coldVerifyCapability } from './verification-engine.js'
 import { loadCapabilities, getAllTools, executeAnyToolCall } from './capabilities/registry.js'
 import { VALUES } from '../shared/identity.js'
 
@@ -247,6 +247,11 @@ export async function runImplementPhase(statePath, proposalId, onEvent = () => {
   const { capabilityId, valueId } = proposal
   pipelineActive = { capabilityId, valueId, phase: 'implement', startedAt: new Date().toISOString(), proposalId }
   const startTime = Date.now()
+
+  // Snapshot package.json before implementer can modify it — this is what deploy will sync
+  const pkgJsonPath = resolve(__dirnamePE, 'package.json')
+  let baselinePackageJson
+  try { baselinePackageJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8')) } catch { baselinePackageJson = {} }
   let totalTokens = { input: 0, output: 0 }
   const addTokens = (t) => {
     if (t) { totalTokens.input += t.input || 0; totalTokens.output += t.output || 0 }
@@ -304,6 +309,60 @@ export async function runImplementPhase(statePath, proposalId, onEvent = () => {
     )
 
     onEvent({ type: 'pipeline_result', phase: 'verify', ...verifyResult })
+
+    // === PHASE 4b: COLD SUBPROCESS VERIFY ===
+    // Fresh Node process — no warm module cache, no shared state.
+    // This is the authoritative check: if it fails here, the capability is not verified.
+    if (verifyResult.success) {
+      pipelineActive.phase = 'cold-verify'
+      onEvent({ type: 'pipeline_phase', phase: 'cold-verify', capabilityId, valueId })
+      console.log(`[Pipeline] COLD-VERIFY: ${capabilityId} in fresh subprocess`)
+
+      const coldResult = coldVerifyCapability(capabilityId)
+      onEvent({ type: 'pipeline_result', phase: 'cold-verify', ...coldResult })
+
+      if (!coldResult.success) {
+        // Override — in-process verify passed but cold verify failed
+        verifyResult.success = false
+        verifyResult.evidence = (verifyResult.evidence || '') + '\n' + coldResult.evidence
+
+        state = loadState(statePath)
+        setCapabilityStage(state, valueId, capabilityId, 'implemented', {
+          evidence: verifyResult.evidence.slice(0, 2000),
+          coldVerifyFailed: true
+        })
+        saveState(statePath, state)
+        console.log(`[Pipeline] Cold-verify FAILED for ${capabilityId} — marking as implemented`)
+      }
+    }
+
+    // === PHASE 5: DEPLOY VERIFICATION ===
+    // Check the capability's deps exist in the baseline package.json.
+    // If the implementer installed deps ad-hoc (npm install X) but they aren't
+    // in the repo's package.json, they'll be nuked by npm ci on next deploy.
+    if (verifyResult.success) {
+      pipelineActive.phase = 'deploy'
+      onEvent({ type: 'pipeline_phase', phase: 'deploy', capabilityId, valueId })
+      console.log(`[Pipeline] DEPLOY-VERIFY: checking ${capabilityId} deps survive deploy`)
+
+      const deployResult = deployVerifyCapability(capabilityId, baselinePackageJson)
+      onEvent({ type: 'pipeline_result', phase: 'deploy', ...deployResult })
+
+      if (!deployResult.success) {
+        // Override — not truly verified if deps won't survive deploy
+        verifyResult.success = false
+        verifyResult.evidence = (verifyResult.evidence || '') + '\n' + deployResult.evidence
+
+        state = loadState(statePath)
+        setCapabilityStage(state, valueId, capabilityId, 'implemented', {
+          evidence: verifyResult.evidence.slice(0, 2000),
+          deployVerifyFailed: true,
+          missingDeps: deployResult.missingDeps
+        })
+        saveState(statePath, state)
+        console.log(`[Pipeline] Deploy-verify FAILED for ${capabilityId}: missing deps [${deployResult.missingDeps.join(', ')}]`)
+      }
+    }
 
     const duration = Date.now() - startTime
     const session = {

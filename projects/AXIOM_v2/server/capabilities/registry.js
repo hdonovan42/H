@@ -15,7 +15,7 @@ export async function loadCapabilities() {
 
   for (const file of files) {
     try {
-      const mod = await import(resolve(__dirname, file))
+      const mod = await import(resolve(__dirname, file) + '?t=' + Date.now())
       const cap = mod.default
       if (!cap || !cap.id || !cap.tools || !cap.execute) {
         console.log(`  [Registry] Skipping ${file}: missing required interface (need id, tools, execute)`)

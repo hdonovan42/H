@@ -44,7 +44,7 @@ rsync -az "$PROJECT_DIR/shared/" "$VPS:$REMOTE/shared/"
 rsync -az "$PROJECT_DIR/deploy/" "$VPS:$REMOTE/deploy/"
 
 # 7. Remote: install deps + restart PM2
-echo "[6/6] Installing deps and restarting PM2..."
+echo "[6/7] Installing deps and restarting PM2..."
 ssh "$VPS" bash <<'EOF'
   export NVM_DIR="$HOME/.nvm"
   [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
@@ -63,6 +63,20 @@ ssh "$VPS" bash <<'EOF'
   pm2 status
 EOF
 
+# 8. Verify capabilities loaded after restart
+echo "[7/7] Verifying capabilities loaded..."
+sleep 2
+REGISTRY_LINE=$(ssh "$VPS" "tail -20 /home/hq/axiom2/logs/out.log" | grep '\[Registry\]' | tail -1)
+FAILED=$(ssh "$VPS" "tail -20 /home/hq/axiom2/logs/out.log" | grep '\[Registry\] Failed' || true)
+
+if [ -n "$FAILED" ]; then
+  echo ""
+  echo "WARNING: Some capabilities failed to load after deploy:"
+  echo "$FAILED"
+  echo ""
+fi
+
+echo "$REGISTRY_LINE"
 echo ""
 echo "=== Deploy complete ==="
 echo "https://axiom.hjd.ai"

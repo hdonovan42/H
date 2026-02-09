@@ -200,8 +200,27 @@ The registry loads every .js file in server/capabilities/ (not subdirectories). 
   valueId: '${valueId}',
   tools: [ { name, description, input_schema } ],
   execute: async (toolName, input) => { ... },
-  verify: async () => ({ operational: true|false, evidence: 'string' })
+  verify: async () => ({ operational: true|false, evidence: 'string describing what was tested and what the result was' })
 }
+
+VERIFY() REQUIREMENTS — your verify() method is the SOLE gate to "verified" status:
+- MUST call execute() or core logic with a REAL test input (not a no-op)
+- MUST assert the output is correct — not just that it didn't throw
+- Evidence string MUST be >=10 chars and describe what was tested and the result
+- verify() runs in a COLD subprocess (fresh Node, no warm cache) — it must be self-contained
+
+BAD verify() examples (these WILL fail cold verification):
+  verify: async () => ({ operational: true, evidence: 'ok' })                    // trivial — no test
+  verify: async () => ({ operational: existsSync('some-file'), evidence: 'file exists' })  // existence check, not functional test
+  verify: async () => ({ operational: true, evidence: 'Module loaded successfully' })       // load != works
+
+GOOD verify() example:
+  verify: async () => {
+    const result = await execute('my_tool', { input: 'test data' })
+    const parsed = JSON.parse(result)
+    const ok = parsed.status === 'success' && parsed.output?.length > 0
+    return { operational: ok, evidence: ok ? \`Tested my_tool with sample input, got \${parsed.output.length} results\` : \`Failed: \${JSON.stringify(parsed)}\` }
+  }
 
 PREFER SINGLE-FILE MODULES. Put all logic in the capability module itself. Only split into workspace helper files if the implementation genuinely exceeds ~300 lines. Cross-file bugs are the #1 failure cause.
 

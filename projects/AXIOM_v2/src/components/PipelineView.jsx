@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import usePipelineStore, { runPipeline, runAuto, killPipeline } from '../hooks/usePipelineStore.js'
 
-const PHASES = ['Select', 'Learn', 'Evaluate', 'Approve', 'Implement', 'Verify']
+const PHASES = ['Select', 'Learn', 'Evaluate', 'Approve', 'Implement', 'Verify', 'Cold Verify', 'Deploy']
 
 export default function PipelineView() {
   const { events, running, pipelineState } = usePipelineStore()
@@ -9,7 +9,7 @@ export default function PipelineView() {
 
   const activePhase = pipelineState?.pipeline?.phase
   const phaseIndex = activePhase
-    ? { select: 0, learn: 1, evaluate: 2, approve: 3, implement: 4, verify: 5 }[activePhase] ?? -1
+    ? { select: 0, learn: 1, evaluate: 2, approve: 3, implement: 4, verify: 5, 'cold-verify': 6, deploy: 7 }[activePhase] ?? -1
     : -1
 
   return (
@@ -26,7 +26,7 @@ export default function PipelineView() {
       <div className="pipeline-container">
         <h2 style={{ marginBottom: 8 }}>Pipeline Engine</h2>
         <p style={{ color: 'var(--text-dim)', fontSize: 12, marginBottom: 24 }}>
-          Select &rarr; Learn &rarr; Evaluate &rarr; Approve &rarr; Implement &rarr; Verify
+          Select &rarr; Learn &rarr; Evaluate &rarr; Approve &rarr; Implement &rarr; Verify &rarr; Cold Verify &rarr; Deploy
         </p>
 
         <div className="pipeline-phases">
@@ -130,6 +130,32 @@ export default function PipelineView() {
                     <span style={{ color: 'var(--accent)' }}>[select]</span> {'\u2713'} {evt.name}
                     {evt.resultPreview && <span style={{ marginLeft: 8 }}>{evt.resultPreview.slice(0, 100)}</span>}
                   </span>
+                ) : evt.type === 'pipeline_result' && evt.phase === 'cold-verify' ? (
+                  <div>
+                    <span style={{ color: evt.success ? 'var(--ra-color)' : 'var(--sp-color)', fontWeight: 600 }}>
+                      [cold-verify] {evt.success ? 'PASSED' : 'FAILED'}
+                    </span>
+                    {evt.evidence && (
+                      <span style={{ color: 'var(--text-dim)', marginLeft: 8, fontSize: 10 }}>{evt.evidence}</span>
+                    )}
+                  </div>
+                ) : evt.type === 'pipeline_result' && evt.phase === 'deploy' ? (
+                  <div>
+                    <span style={{ color: evt.success ? 'var(--ra-color)' : 'var(--sp-color)', fontWeight: 600 }}>
+                      [deploy] {evt.success ? 'PASSED' : 'FAILED'}
+                    </span>
+                    {evt.missingDeps?.length > 0 && (
+                      <div style={{ color: 'var(--sp-color)', marginTop: 4, paddingLeft: 8, fontSize: 10 }}>
+                        Missing deps: <strong>{evt.missingDeps.join(', ')}</strong>
+                        <div style={{ color: 'var(--text-dim)', marginTop: 2 }}>
+                          These packages will be lost after deploy. Add them to server/package.json.
+                        </div>
+                      </div>
+                    )}
+                    {evt.success && evt.evidence && (
+                      <span style={{ color: 'var(--text-dim)', marginLeft: 8, fontSize: 10 }}>{evt.evidence}</span>
+                    )}
+                  </div>
                 ) : (
                   <>
                     <span style={{ color: 'var(--text-dim)' }}>[{evt.type}]</span>{' '}
