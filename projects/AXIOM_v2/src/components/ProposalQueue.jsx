@@ -137,7 +137,7 @@ export default function ProposalQueue() {
   }
 
   const recent = proposals
-    .filter(p => p.status !== 'pending_approval')
+    .filter(p => p.status !== 'pending_approval' && p.status !== 'rejected')
     .slice(-5)
     .reverse()
 
