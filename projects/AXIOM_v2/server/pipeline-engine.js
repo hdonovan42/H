@@ -473,11 +473,13 @@ export async function runAutoSelect(statePath, onEvent = () => {}) {
     return { success: false, error }
   }
 
-  // Cross-check: verify the capability exists under the claimed value in values.json
+  // Cross-check: verify the capability exists under the claimed value in values.json,
+  // OR accept it as a dynamic capability if it has valid valueId + name + description
   const valuesJson = loadValuesJson()
   let resolvedValueId = parsed.valueId
   let valueDef = valuesJson[resolvedValueId]
   let capExists = valueDef?.bootstrapCapabilities?.some(c => c.id === parsed.selected)
+  let isDynamic = false
 
   // If valueId doesn't match, search all values for the capability
   if (!capExists) {
@@ -492,11 +494,23 @@ export async function runAutoSelect(statePath, onEvent = () => {}) {
     }
   }
 
+  // Not a bootstrap capability — check if it's a valid dynamic proposal
   if (!capExists) {
-    const error = `Selector picked unknown capability: ${parsed.selected} (valueId: ${parsed.valueId})`
-    console.error(`[Pipeline] ${error}`)
-    onEvent({ type: 'selector_failed', error, durationMs })
-    return { success: false, error }
+    const knownValues = Object.keys(valuesJson)
+    if (!knownValues.includes(resolvedValueId)) {
+      const error = `Selector proposed dynamic capability "${parsed.selected}" with unknown valueId: ${parsed.valueId}`
+      console.error(`[Pipeline] ${error}`)
+      onEvent({ type: 'selector_failed', error, durationMs })
+      return { success: false, error }
+    }
+    if (!parsed.name || !parsed.description) {
+      const error = `Selector proposed dynamic capability "${parsed.selected}" without required name/description`
+      console.error(`[Pipeline] ${error}`)
+      onEvent({ type: 'selector_failed', error, durationMs })
+      return { success: false, error }
+    }
+    isDynamic = true
+    console.log(`[Pipeline] Selector proposed DYNAMIC capability: ${parsed.selected} (${resolvedValueId}) — "${parsed.name}"`)
   }
 
   // Verify the capability is selectable — not verified and not actively in-progress
@@ -527,6 +541,7 @@ export async function runAutoSelect(statePath, onEvent = () => {}) {
     riskAssessment: parsed.riskAssessment,
     expectedOutcome: parsed.expectedOutcome,
     alternatives: parsed.alternatives,
+    dynamic: isDynamic || undefined,
     toolInvocations: toolInvocations.length,
     searchCount,
     tokens: selectorResult.tokens,
@@ -546,6 +561,12 @@ export async function runAutoSelect(statePath, onEvent = () => {}) {
   cap.selectorReasoning = parsed.reasoning
   cap.selectorInvestigation = parsed.investigation
   cap.selectedAt = new Date().toISOString()
+  // Store name/description for dynamic capabilities so ValueNode can display them
+  if (isDynamic) {
+    cap.name = parsed.name
+    cap.description = parsed.description
+    cap.dynamic = true
+  }
 
   saveState(statePath, state)
 
