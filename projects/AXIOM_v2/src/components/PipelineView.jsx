@@ -1,106 +1,11 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
+import usePipelineStore, { runPipeline, runAuto, killPipeline } from '../hooks/usePipelineStore.js'
 
 const PHASES = ['Select', 'Learn', 'Evaluate', 'Approve', 'Implement', 'Verify']
 
 export default function PipelineView() {
-  const [pipelineState, setPipelineState] = useState(null)
-  const [events, setEvents] = useState([])
+  const { events, running, pipelineState } = usePipelineStore()
   const [runTarget, setRunTarget] = useState({ capabilityId: '', valueId: '' })
-  const [running, setRunning] = useState(false)
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetch('/api/v2/pipeline/active', { credentials: 'include' })
-        .then(r => r.json())
-        .then(data => setPipelineState(data))
-        .catch(() => {})
-    }, 3000)
-    return () => clearInterval(interval)
-  }, [])
-
-  const runPipeline = async () => {
-    if (!runTarget.capabilityId || !runTarget.valueId) return
-    setRunning(true)
-    setEvents([])
-
-    try {
-      const res = await fetch('/api/v2/pipeline/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(runTarget)
-      })
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-        for (const line of lines) {
-          if (!line.startsWith('data: ') || line.slice(6) === '[DONE]') continue
-          try {
-            const event = JSON.parse(line.slice(6))
-            setEvents(prev => [...prev, event])
-          } catch {}
-        }
-      }
-    } catch (err) {
-      setEvents(prev => [...prev, { type: 'error', error: err.message }])
-    } finally {
-      setRunning(false)
-    }
-  }
-
-  const killPipeline = async () => {
-    try {
-      const res = await fetch('/api/v2/pipeline/abort', { method: 'POST', credentials: 'include' })
-      const data = await res.json()
-      setEvents(prev => [...prev, { type: 'abort', ...data }])
-      setRunning(false)
-    } catch (err) {
-      setEvents(prev => [...prev, { type: 'error', error: `Abort failed: ${err.message}` }])
-    }
-  }
-
-  const runAuto = async () => {
-    setRunning(true)
-    setEvents([])
-
-    try {
-      const res = await fetch('/api/v2/pipeline/run-auto', {
-        method: 'POST',
-        credentials: 'include'
-      })
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-        for (const line of lines) {
-          if (!line.startsWith('data: ') || line.slice(6) === '[DONE]') continue
-          try {
-            const event = JSON.parse(line.slice(6))
-            setEvents(prev => [...prev, event])
-          } catch {}
-        }
-      }
-    } catch (err) {
-      setEvents(prev => [...prev, { type: 'error', error: err.message }])
-    } finally {
-      setRunning(false)
-    }
-  }
 
   const activePhase = pipelineState?.pipeline?.phase
   const phaseIndex = activePhase
@@ -158,7 +63,7 @@ export default function PipelineView() {
             <option value="tech-perfection">Technological Perfection</option>
             <option value="resource-acquisition">Resource Acquisition</option>
           </select>
-          <button className="btn" onClick={runPipeline} disabled={running || !runTarget.capabilityId || !runTarget.valueId}>
+          <button className="btn" onClick={() => runPipeline(runTarget)} disabled={running || !runTarget.capabilityId || !runTarget.valueId}>
             {running ? 'Running...' : 'Run Pipeline'}
           </button>
           <button className="btn" onClick={runAuto} disabled={running} style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
