@@ -375,6 +375,18 @@ app.post('/api/v2/verify/:capabilityId', async (req, res) => {
   const verificationSpec = proposal?.verification || {}
 
   const result = await verifyCapability(state, STATE_PATH, capabilityId, valueId, verificationSpec)
+
+  // Sync proposal status with verification result
+  if (proposal) {
+    const freshState = loadState(STATE_PATH)
+    const prop = (freshState.proposals || []).find(p => p.id === proposal.id)
+    if (prop) {
+      prop.status = result.success ? 'verified' : 'implemented'
+      if (result.success) prop.verifiedAt = new Date().toISOString()
+      saveState(STATE_PATH, freshState)
+    }
+  }
+
   res.json(result)
 })
 

@@ -248,10 +248,7 @@ export async function runImplementPhase(statePath, proposalId, onEvent = () => {
   pipelineActive = { capabilityId, valueId, phase: 'implement', startedAt: new Date().toISOString(), proposalId }
   const startTime = Date.now()
 
-  // Snapshot package.json before implementer can modify it — this is what deploy will sync
   const pkgJsonPath = resolve(__dirnamePE, 'package.json')
-  let baselinePackageJson
-  try { baselinePackageJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8')) } catch { baselinePackageJson = {} }
   let totalTokens = { input: 0, output: 0 }
   const addTokens = (t) => {
     if (t) { totalTokens.input += t.input || 0; totalTokens.output += t.output || 0 }
@@ -337,15 +334,19 @@ export async function runImplementPhase(statePath, proposalId, onEvent = () => {
     }
 
     // === PHASE 5: DEPLOY VERIFICATION ===
-    // Check the capability's deps exist in the baseline package.json.
-    // If the implementer installed deps ad-hoc (npm install X) but they aren't
-    // in the repo's package.json, they'll be nuked by npm ci on next deploy.
+    // Re-read package.json AFTER implementation — if the implementer ran
+    // `npm install <pkg>` it saves to package.json by default. We check the
+    // CURRENT state, not a pre-implementation baseline, to avoid false negatives.
+    // The deploy script pulls VPS package.json back to local before syncing,
+    // so pipeline-added deps survive future deploys.
     if (verifyResult.success) {
       pipelineActive.phase = 'deploy'
       onEvent({ type: 'pipeline_phase', phase: 'deploy', capabilityId, valueId })
       console.log(`[Pipeline] DEPLOY-VERIFY: checking ${capabilityId} deps survive deploy`)
 
-      const deployResult = deployVerifyCapability(capabilityId, baselinePackageJson)
+      let currentPackageJson
+      try { currentPackageJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8')) } catch { currentPackageJson = {} }
+      const deployResult = deployVerifyCapability(capabilityId, currentPackageJson)
       onEvent({ type: 'pipeline_result', phase: 'deploy', ...deployResult })
 
       if (!deployResult.success) {
