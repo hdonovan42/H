@@ -409,21 +409,43 @@ ALREADY BUILT (do not propose anything similar or re-propose these):
   ${verifiedCaps.length > 0 ? verifiedCaps.join(', ') : '(none yet)'}
 ${inProgressCaps.length > 0 ? `\nIN PROGRESS (do not re-propose):\n  ${inProgressCaps.join(', ')}` : ''}
 
-REDUNDANCY TEST — apply this to every candidate before selecting:
-Can the shell already do this by combining its existing Phase 0 tools? If yes, it is NOT a new capability — it is a convenience wrapper. Do not select it.
-Example: "web scraper" = http_request (fetch HTML) + run_code (parse it). The shell can already do this. A wrapper adds no genuine ability.
-A genuine new capability gives the shell access to something it fundamentally CANNOT do today — a new integration, a new runtime primitive, a new mode of operation.
+=== CAPABILITY vs OPERATIONAL IMPROVEMENT ===
 
-There is no predefined list of capabilities. You must think from first principles about what the system genuinely needs.
+You MUST distinguish between these two categories:
+
+A CAPABILITY gives the operator access to a NEW DOMAIN of interaction — a new protocol, service, I/O type, or environment that the shell has zero access to today. After building it, the operator can DO something entirely new.
+
+An OPERATIONAL IMPROVEMENT makes existing abilities cheaper, faster, more reliable, or better organised. It does NOT let the operator do anything new — it optimises what they can already do.
+
+ONLY propose capabilities. NEVER propose operational improvements.
+
+NOT CAPABILITIES (do not propose these):
+- Cost optimisation (e.g. model routing, cheaper LLM calls)
+- Resilience/reliability (e.g. auto-restart, fallback chains, health checks)
+- Monitoring/observability (e.g. dashboards, analytics, logging)
+- Infrastructure/plumbing (e.g. service managers, schedulers, registries)
+- Wrappers around existing tools (e.g. "web scraper" = http_request + run_code)
+- Internal self-improvement (e.g. pipeline analytics, capability verification)
+
+CAPABILITIES (this is the kind of thing to propose):
+- Access to a new protocol or service the shell cannot reach today
+- Ability to interact with a new type of environment or I/O
+- A new runtime primitive that no combination of existing tools provides
+- Integration with an external system that unlocks a new class of tasks
+
+NEW DOMAIN TEST — apply this to every candidate:
+Does this give the operator access to an entirely new domain of interaction? Or is it a better/cheaper/faster way to do something the shell already does? If the latter, reject it.
+
+Ask yourself: "What NEW THING can the operator DO after this is built?" If the answer is "the same things, but better" — it is not a capability.
 
 STRATEGIC QUESTIONS — reason through these before selecting:
-1. What is fundamentally impossible for the shell today, even by combining all its tools?
-2. What new primitive would unlock the most downstream value for the operator?
-3. Would this capability make someone choose the AXIOM shell over vanilla Claude or Claude Code?
-4. Does this pass the redundancy test — or is it just a wrapper around existing tools?
+1. What external systems, protocols, or environments are completely unreachable today?
+2. What class of real-world tasks is impossible because the shell lacks access to a specific service or I/O type?
+3. After building this, what new command could the operator type that would have been impossible before?
+4. Does this pass the new domain test — or is it just an operational improvement?
 
 PROPOSE A NEW CAPABILITY:
-There is no predefined list. You must reason from the goal and the redundancy test to identify what the system needs. Your proposal must include:
+There is no predefined list. You must reason from the goal and the new domain test to identify what the system needs. Your proposal must include:
 - id (kebab-case), valueId (one of the 5 values), name, description
 
 DECISION CONSTRAINTS:
