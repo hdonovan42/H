@@ -381,6 +381,16 @@ export function buildSelectorPrompt(state) {
     return line
   })
 
+  // Dynamically collect verified and in-progress capabilities from state
+  const verifiedCaps = []
+  const inProgressCaps = []
+  for (const [valueId, v] of Object.entries(state.values || {})) {
+    for (const [capId, c] of Object.entries(v.capabilities || {})) {
+      if (c.stage === 'verified') verifiedCaps.push(capId)
+      else if (c.stage !== 'pending') inProgressCaps.push(`${capId} (${c.stage})`)
+    }
+  }
+
   return `You are the AXIOM v2 Strategic Selector. Your single decision determines what gets built next.
 
 ${RESEARCH_CONTEXT}
@@ -395,8 +405,9 @@ The self-recursion pipeline is a MEANS, not an end. Its purpose is to create a M
 PHASE 0 TOOLS (already verified):
   tp-code-exec (sandboxed JS VM), tp-file-access (workspace read/write), tp-http-client (HTTP requests), tp-shell-access (allowlisted shell commands)
 
-ALREADY BUILT (do not propose anything similar):
-  sp-monitoring, sp-backup, ce-knowledge-store, ce-session-memory, ce-tool-creation, ce-pipeline-analytics, ra-api-key-manager
+ALREADY BUILT (do not propose anything similar or re-propose these):
+  ${verifiedCaps.length > 0 ? verifiedCaps.join(', ') : '(none yet)'}
+${inProgressCaps.length > 0 ? `\nIN PROGRESS (do not re-propose):\n  ${inProgressCaps.join(', ')}` : ''}
 
 REDUNDANCY TEST — apply this to every candidate before selecting:
 Can the shell already do this by combining its existing Phase 0 tools? If yes, it is NOT a new capability — it is a convenience wrapper. Do not select it.
