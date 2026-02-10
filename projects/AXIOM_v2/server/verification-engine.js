@@ -130,7 +130,15 @@ export function deployVerifyCapability(capabilityId, baselinePackageJson) {
 
   const source = readFileSync(capPath, 'utf-8')
 
-  // Extract external package imports (static + dynamic, skip relative and node: builtins)
+  // Extract external package imports (static + dynamic, skip relative and Node built-ins)
+  const NODE_BUILTINS = new Set([
+    'assert', 'async_hooks', 'buffer', 'child_process', 'cluster', 'console',
+    'constants', 'crypto', 'dgram', 'diagnostics_channel', 'dns', 'domain',
+    'events', 'fs', 'http', 'http2', 'https', 'inspector', 'module', 'net',
+    'os', 'path', 'perf_hooks', 'process', 'punycode', 'querystring', 'readline',
+    'repl', 'stream', 'string_decoder', 'sys', 'timers', 'tls', 'trace_events',
+    'tty', 'url', 'util', 'v8', 'vm', 'wasi', 'worker_threads', 'zlib'
+  ])
   const externalDeps = new Set()
   const staticRe = /import\s+[\s\S]*?from\s+['"]([^'"./][^'"]*)['"]/g
   const dynamicRe = /import\(\s*['"]([^'"./][^'"]*)['"]\s*\)/g
@@ -141,7 +149,7 @@ export function deployVerifyCapability(capabilityId, baselinePackageJson) {
       const pkg = m[1].startsWith('@')
         ? m[1].split('/').slice(0, 2).join('/')
         : m[1].split('/')[0]
-      if (!pkg.startsWith('node:')) externalDeps.add(pkg)
+      if (!pkg.startsWith('node:') && !NODE_BUILTINS.has(pkg)) externalDeps.add(pkg)
     }
   }
 

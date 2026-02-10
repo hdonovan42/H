@@ -17,11 +17,6 @@ const TECH_STACK = `AXIOM v2 TECH STACK:
 - exec_command cwd is server/ — "npm install <pkg>" works directly, no cd needed. Do NOT guess filesystem paths.
 - No Python, no Docker, no external databases, no microservices — in-process Node.js only`
 
-function loadValuesJson() {
-  const raw = readFileSync(resolve(__dirname, '../src/data/values.json'), 'utf-8')
-  return JSON.parse(raw)
-}
-
 function loadActuatorBridge() {
   try {
     const raw = readFileSync(resolve(__dirname, '../shared/actuator-bridge.json'), 'utf-8')
@@ -371,70 +366,12 @@ RULES:
 }
 
 export function buildSelectorPrompt(state) {
-  const valuesJson = loadValuesJson()
-  const bridge = loadActuatorBridge()
-
-  // Build capability table with descriptions, deps, current stage, and v1 intel
-  const capLines = []
-  const pendingCaps = []
-  for (const [valueId, valueDef] of Object.entries(valuesJson)) {
-    for (const cap of valueDef.bootstrapCapabilities) {
-      const capState = state.values[valueId]?.capabilities?.[cap.id]
-      const stage = capState?.stage || 'pending'
-      const depsStr = cap.dependencies.length > 0 ? cap.dependencies.join(', ') : 'none'
-      let line = `  ${cap.id} | ${cap.name} | valueId: ${valueId} | phase ${cap.phase} | stage: ${stage} | deps: [${depsStr}] | ${cap.description}`
-      // Append v1 research intel inline
-      const intel = bridge?.capabilityIntel?.[cap.id]
-      if (intel) {
-        const crossCount = intel.crossValueImpact?.length || 0
-        line += ` | v1: feas=${intel.feasibility}, risk=${intel.risk}, cross-value=${crossCount}`
-      }
-      capLines.push(line)
-      const lockedStages = ['verified', 'learning', 'evaluating', 'implementing']
-      if (!lockedStages.includes(stage)) {
-        pendingCaps.push(cap.id)
-      }
-    }
-  }
-
-  // Value scores
-  const valueScores = Object.entries(state.values).map(([id, v]) => {
-    const caps = Object.entries(v.capabilities || {})
-    const verified = caps.filter(([, c]) => c.stage === 'verified').length
-    const total = valuesJson[id]?.bootstrapCapabilities?.length || 0
-    return `  ${id} (${VALUES[id]?.name || id}): ${verified}/${total} verified (score: ${v.score})`
-  }).join('\n')
-
-  // Last 10 sessions (up from 5)
+  // Last 10 sessions
   const recentSessions = (state.sessions || []).slice(-10).map(s => {
     let line = `  ${s.id}: ${s.capabilityId || 'n/a'} | type: ${s.type} | verified: ${s.verified ?? 'n/a'} | ${s.durationMs ? (s.durationMs / 1000).toFixed(1) + 's' : 'n/a'}`
     if (s.reasoning) line += ` | reasoning: ${s.reasoning}`
     return line
   }).join('\n')
-
-  // Failed/stuck capabilities with full error context
-  const stuckCaps = []
-  for (const [valueId, v] of Object.entries(state.values)) {
-    for (const [capId, c] of Object.entries(v.capabilities || {})) {
-      if (c.stage !== 'pending' && c.stage !== 'verified') {
-        let detail = `  ${capId} (${valueId}): stage=${c.stage}`
-        if (c.error) detail += ` | error: ${c.error}`
-        if (c.selectorReasoning) detail += ` | last selector reasoning: ${c.selectorReasoning}`
-        stuckCaps.push(detail)
-      }
-    }
-  }
-
-  // Past learner findings for capabilities that have them
-  const learnerSummaries = []
-  for (const [valueId, v] of Object.entries(state.values)) {
-    for (const [capId, c] of Object.entries(v.capabilities || {})) {
-      if (c.learnerFindings) {
-        const f = c.learnerFindings
-        learnerSummaries.push(`  ${capId}: approach=${f.approach || 'n/a'} | complexity=${f.complexity || 'n/a'} | risks=${(f.risks || []).join('; ') || 'none'}`)
-      }
-    }
-  }
 
   // Past proposals with fate
   const proposalSummaries = (state.proposals || []).map(p => {
@@ -442,11 +379,6 @@ export function buildSelectorPrompt(state) {
     if (p.justification?.whyNow) line += ` | whyNow: ${p.justification.whyNow}`
     if (p.status === 'rejected' && p.rejectionReason) line += ` | rejected: ${p.rejectionReason}`
     return line
-  })
-
-  // Verification evidence (last 15 entries)
-  const verificationEntries = (state.verificationLog || []).slice(-15).map(v => {
-    return `  ${v.capabilityId || 'n/a'}: ${v.success ? 'PASS' : 'FAIL'} | ${v.evidence?.slice(0, 120) || 'no evidence'}`
   })
 
   return `You are the AXIOM v2 Strategic Selector. Your single decision determines what gets built next.
@@ -458,113 +390,43 @@ THINK FROM THE GOAL DOWN — not from the list up.
 SYSTEM GOAL: ${state.goal}
 
 CRITICAL DIRECTIVE — READ THIS FIRST:
-The self-recursion pipeline is a MEANS, not an end. Its purpose is to create a MORE CAPABLE version of Claude — one that can do things vanilla Claude cannot. Every capability you select must pass this test: "Does this give the shell a genuine new ability that makes it more useful to the operator?"
+The self-recursion pipeline is a MEANS, not an end. Its purpose is to create a MORE CAPABLE version of Claude — one that can do things vanilla Claude cannot.
 
-Infrastructure and self-monitoring capabilities (backup, monitoring, analytics, knowledge store, session memory, goal tracking) are ALREADY BUILT. The system does NOT need more introspective tools. It needs OUTWARD-FACING capabilities that let it act on the world and generate value.
+PHASE 0 TOOLS (already verified):
+  tp-code-exec (sandboxed JS VM), tp-file-access (workspace read/write), tp-http-client (HTTP requests), tp-shell-access (allowlisted shell commands)
 
-Examples of what "more capable" looks like:
-- Structured web scraping and data extraction
-- Database access (SQLite) for persistent structured data
-- Scheduled autonomous tasks (cron — act without being asked)
-- Financial data feeds and analysis
-- Content generation and report building
-- Workflow automation (multi-step task chains)
-- Integration with external services and APIs
-- Data transformation and analysis pipelines
+ALREADY BUILT (do not propose anything similar):
+  sp-monitoring, sp-backup, ce-knowledge-store, ce-session-memory, ce-tool-creation, ce-pipeline-analytics, ra-api-key-manager
 
-Examples of what is NOT useful at this point:
-- More monitoring, logging, or analytics of internal state
-- More knowledge/memory stores (already have 2)
-- Goal tracking or constraint enforcement (meta-overhead)
-- Any capability whose primary user is the pipeline itself
+REDUNDANCY TEST — apply this to every candidate before selecting:
+Can the shell already do this by combining its existing Phase 0 tools? If yes, it is NOT a new capability — it is a convenience wrapper. Do not select it.
+Example: "web scraper" = http_request (fetch HTML) + run_code (parse it). The shell can already do this. A wrapper adds no genuine ability.
+A genuine new capability gives the shell access to something it fundamentally CANNOT do today — a new integration, a new runtime primitive, a new mode of operation.
 
-The bootstrap list below is heavily weighted toward introspective capabilities. If nothing on that list passes the "genuinely more capable" test, you MUST propose a dynamic capability instead. Prefer dynamic proposals over weak bootstrap options.
-
-PHASE 0 BASELINE (already verified):
-  tp-code-exec, tp-file-access, tp-http-client, tp-shell-access
-  These 4 tools are operational. Any capability you select can use them during implementation.
+There is no predefined list of capabilities. You must think from first principles about what the system genuinely needs.
 
 STRATEGIC QUESTIONS — reason through these before selecting:
-1. What can the operator NOT do with the shell today that they should be able to?
-2. Which capability would make someone choose the AXIOM shell over vanilla Claude?
-3. What creates real economic value — not internal metrics, but actual useful output?
-4. Is there a capability missing from the bootstrap list that would serve the goal better? (Likely yes — look beyond the list.)
+1. What is fundamentally impossible for the shell today, even by combining all its tools?
+2. What new primitive would unlock the most downstream value for the operator?
+3. Would this capability make someone choose the AXIOM shell over vanilla Claude or Claude Code?
+4. Does this pass the redundancy test — or is it just a wrapper around existing tools?
 
-SELECTION OPTIONS:
-You may select from the BOOTSTRAP CAPABILITIES below — these are known, researched, and dependency-mapped.
-OR you may propose a NEW CAPABILITY not on this list, if you genuinely believe it would advance the goal more than any bootstrap option.
-
-Rules for new capabilities:
-- Must have: id (kebab-case), valueId (one of the 5 values), name, description
-- Prefer bootstrap when close in value — they have v1 research intel and dependency mapping
-- Only propose new when the gap is clear and no bootstrap option serves the need
+PROPOSE A NEW CAPABILITY:
+There is no predefined list. You must reason from the goal and the redundancy test to identify what the system needs. Your proposal must include:
+- id (kebab-case), valueId (one of the 5 values), name, description
 
 DECISION CONSTRAINTS:
-- Dependencies — all listed deps must be verified before selecting a capability
-- Feasibility — if v1 feasibility scores are shown, treat them as research-backed priors (below 0.5 = significant difficulty). Otherwise, assess from descriptions, past learner findings, and failure history.
-- Avoid repeating failures — do not re-select stuck capabilities without good reason
-- Knowledge base — use accumulated findings to inform your decision
+- Avoid repeating past failures — check proposals and sessions below
+- The capability must be implementable as a single-file Node.js ESM module
+- It must expose tools that the shell agent can call via the standard registry
 
-VALUE SCORES:
-${valueScores}
-
-ALL 20 BOOTSTRAP CAPABILITIES:
-${capLines.join('\n')}
-
-SELECTABLE (pending or retryable): ${pendingCaps.join(', ') || 'none'}
-
-${stuckCaps.length > 0 ? `STUCK/FAILED (investigate before retrying):\n${stuckCaps.join('\n')}` : ''}
-
-${learnerSummaries.length > 0 ? `PAST LEARNER FINDINGS:\n${learnerSummaries.join('\n')}` : ''}
-
-${proposalSummaries.length > 0 ? `PAST PROPOSALS (approved/rejected/pending):\n${proposalSummaries.join('\n')}` : ''}
-
-${verificationEntries.length > 0 ? `RECENT VERIFICATION EVIDENCE (last 15):\n${verificationEntries.join('\n')}` : ''}
+${proposalSummaries.length > 0 ? `PAST PROPOSALS (learn from rejections):\n${proposalSummaries.join('\n')}` : ''}
 
 ${recentSessions ? `LAST 10 SESSIONS:\n${recentSessions}` : 'NO SESSIONS YET'}
-
-${bridge?.taxonomySummary ? `BOSTROM ACTUATOR TAXONOMY (49 actuators — what lies beyond the 20 bootstrap caps):\n${bridge.taxonomySummary.map(l => '  ' + l).join('\n')}` : ''}
-
-${(() => {
-  // Compute cross-value compounding from values.json
-  const threeValues = []
-  const twoValues = []
-  for (const [valueId, valueDef] of Object.entries(valuesJson)) {
-    for (const cap of valueDef.bootstrapCapabilities) {
-      const cross = cap.crossValueImpact || []
-      const allValues = [valueId, ...cross]
-      if (allValues.length >= 3) {
-        threeValues.push(`${cap.id} (${allValues.join('+')})`)
-      } else if (allValues.length === 2) {
-        twoValues.push(cap.id)
-      }
-    }
-  }
-  if (threeValues.length === 0 && twoValues.length === 0) return ''
-  let section = 'CROSS-VALUE COMPOUNDING (capabilities ranked by how many values they strengthen):'
-  if (threeValues.length > 0) section += `\n  3 values: ${threeValues.join(', ')}`
-  if (twoValues.length > 0) section += `\n  2 values: ${twoValues.join(', ')}`
-  return section
-})()}
-
-${(state.knowledgeBase?.keyFindings || []).length > 0 ? `KNOWLEDGE BASE (accumulated findings from past sessions):\n${state.knowledgeBase.keyFindings.slice(-10).map(f => '  - ' + f).join('\n')}` : ''}
 
 IMPORTANT: The "valueId" in your response MUST be an exact value key: "self-preservation", "goal-integrity", "cognitive-enhancement", "tech-perfection", or "resource-acquisition".
 
 OUTPUT FORMAT (JSON only, no prose before or after):
-
-For a BOOTSTRAP capability:
-{
-  "selected": "capability-id",
-  "valueId": "parent-value-id",
-  "reasoning": "3-5 sentences: what bottleneck this addresses, why now, what it compounds toward the goal",
-  "alternatives": [{"id": "cap-id", "reason": "why considered, why it lost"}],
-  "investigation": "Summary of what tools found",
-  "riskAssessment": "What could go wrong",
-  "expectedOutcome": "What the system gains once verified"
-}
-
-For a NEW capability (not on bootstrap list):
 {
   "selected": "new-capability-id",
   "valueId": "parent-value-id",

@@ -88,7 +88,7 @@ body {
 /* Pentagon Dashboard Layout */
 .dashboard {
   display: grid;
-  grid-template-columns: 1fr 500px;
+  grid-template-columns: 1fr 40vw;
   grid-template-rows: auto 1fr;
   gap: 0;
   height: calc(100vh - 49px);
