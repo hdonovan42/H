@@ -1,0 +1,213 @@
+"""SQLite schema and connection factory."""
+
+import sqlite3
+from pathlib import Path
+from vault.config_loader import get_db_path
+
+SCHEMA_VERSION = 2
+
+SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS api_calls (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    cycle_id     INTEGER,
+    model        TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cost_usd     REAL NOT NULL,
+    purpose      TEXT,
+    FOREIGN KEY (cycle_id) REFERENCES cycles(id)
+);
+
+CREATE TABLE IF NOT EXISTS cycles (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts_start      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    ts_end        TEXT,
+    action        TEXT,            -- buy/sell/hold/wait
+    asset         TEXT,
+    reasoning     TEXT,
+    alternatives  TEXT,            -- JSON array
+    total_cost    REAL DEFAULT 0,
+    rounds_used   INTEGER DEFAULT 0,
+    balance_after REAL
+);
+
+CREATE TABLE IF NOT EXISTS positions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset       TEXT NOT NULL,
+    quantity    REAL NOT NULL,
+    cost_basis  REAL NOT NULL,     -- USD paid
+    opened_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    closed_at   TEXT,
+    close_price REAL,
+    pnl         REAL,
+    status      TEXT NOT NULL DEFAULT 'open'  -- open/closed
+);
+
+CREATE TABLE IF NOT EXISTS trades (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    cycle_id    INTEGER,
+    side        TEXT NOT NULL,      -- buy/sell
+    asset       TEXT NOT NULL,
+    quantity    REAL NOT NULL,
+    price       REAL NOT NULL,      -- per unit
+    total_usd   REAL NOT NULL,
+    position_id INTEGER,
+    FOREIGN KEY (cycle_id) REFERENCES cycles(id),
+    FOREIGN KEY (position_id) REFERENCES positions(id)
+);
+
+CREATE TABLE IF NOT EXISTS ledger (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    entry_type      TEXT NOT NULL,   -- seed/api_cost/trade_buy/trade_sell/pnl
+    amount          REAL NOT NULL,   -- positive = credit, negative = debit
+    description     TEXT,
+    reference_id    INTEGER,         -- api_call.id or trade.id
+    balance_after   REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS memory (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    category    TEXT NOT NULL,       -- strategy/observation/lesson/rule
+    content     TEXT NOT NULL,
+    relevance   REAL DEFAULT 1.0,    -- 0.0-1.0, decays or agent-set
+    active      INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS market_cache (
+    asset       TEXT NOT NULL,
+    source      TEXT NOT NULL,       -- coingecko/yahoo
+    price_usd   REAL NOT NULL,
+    fetched_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    data_json   TEXT,                -- full response for context
+    PRIMARY KEY (asset, source)
+);
+
+CREATE TABLE IF NOT EXISTS objectives (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    balance      REAL NOT NULL,
+    burn_rate    REAL,               -- USD/day
+    runway_days  REAL,
+    positions_value REAL DEFAULT 0,
+    total_pnl    REAL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS events (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    event     TEXT NOT NULL,         -- start/stop/death/pause/resume/resurrect/error
+    detail    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS predictions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    market_id     TEXT NOT NULL,
+    condition_id  TEXT,
+    question      TEXT NOT NULL,
+    slug          TEXT,
+    side          TEXT NOT NULL,          -- YES/NO
+    shares        REAL NOT NULL,
+    entry_odds    REAL NOT NULL,          -- probability at entry (0-1)
+    cost_basis    REAL NOT NULL,          -- USD paid
+    clob_token_id TEXT,
+    end_date      TEXT,
+    opened_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    closed_at     TEXT,
+    resolution    TEXT,                   -- won/lost/sold
+    payout        REAL,
+    pnl           REAL,
+    status        TEXT NOT NULL DEFAULT 'open'  -- open/closed
+);
+"""
+
+
+def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
+    """Get a SQLite connection with WAL mode and row factory."""
+    if db_path is None:
+        db_path = get_db_path()
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+def _migrate(conn):
+    """Run schema migrations based on current version."""
+    current = get_meta(conn, "schema_version")
+    version = int(current) if current else 1
+
+    if version < 2:
+        # v2: add predictions table
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS predictions (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                market_id     TEXT NOT NULL,
+                condition_id  TEXT,
+                question      TEXT NOT NULL,
+                slug          TEXT,
+                side          TEXT NOT NULL,
+                shares        REAL NOT NULL,
+                entry_odds    REAL NOT NULL,
+                cost_basis    REAL NOT NULL,
+                clob_token_id TEXT,
+                end_date      TEXT,
+                opened_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                closed_at     TEXT,
+                resolution    TEXT,
+                payout        REAL,
+                pnl           REAL,
+                status        TEXT NOT NULL DEFAULT 'open'
+            );
+        """)
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "2"),
+        )
+        conn.commit()
+
+
+def init_db(db_path: Path | None = None) -> sqlite3.Connection:
+    """Create tables and seed meta if needed."""
+    conn = get_connection(db_path)
+    conn.executescript(SCHEMA_SQL)
+
+    # Set schema version
+    conn.execute(
+        "INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)",
+        ("schema_version", str(SCHEMA_VERSION)),
+    )
+    # Alive by default
+    conn.execute(
+        "INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)",
+        ("alive", "true"),
+    )
+    conn.commit()
+
+    # Run migrations for existing DBs
+    _migrate(conn)
+    return conn
+
+
+def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def set_meta(conn: sqlite3.Connection, key: str, value: str):
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+    conn.commit()

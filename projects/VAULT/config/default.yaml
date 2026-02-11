@@ -1,0 +1,41 @@
+# VAULT Default Configuration
+# Override by creating config.yaml in project root (gitignored)
+
+seed_balance: 50.00
+
+daemon:
+  interval_seconds: 900        # 15 minutes between cycles
+  pid_file: vault.pid
+  db_file: vault.db
+
+agent:
+  default_model: claude-haiku-4-5-20251001
+  max_rounds_per_cycle: 3       # research + decision
+  max_cycle_cost: 0.50          # circuit breaker per cycle
+
+trading:
+  allowed_assets: []             # crypto trading disabled — Polymarket only
+  max_position_pct: 1.0
+  simulated: true
+
+market_data:
+  cache_ttl_seconds: 300        # 5 min cache
+  coingecko_base: "https://api.coingecko.com/api/v3"
+
+polymarket:
+  cache_ttl_seconds: 300        # 5 min cache for market data
+  trending_count: 5             # number of trending markets in system prompt
+  max_bet_pct: 0.20             # max 20% of balance per bet
+
+# Model pricing (USD per 1M tokens) — updated for Claude 4.5/4.6
+# These are used to calculate cost from token counts
+pricing:
+  claude-opus-4-6:
+    input: 15.00
+    output: 75.00
+  claude-sonnet-4-5-20250929:
+    input: 3.00
+    output: 15.00
+  claude-haiku-4-5-20251001:
+    input: 0.80
+    output: 4.00

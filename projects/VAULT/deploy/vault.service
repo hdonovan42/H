@@ -1,0 +1,16 @@
+[Unit]
+Description=VAULT — Autonomous Financial Agent
+After=network.target
+
+[Service]
+Type=simple
+User=hq
+WorkingDirectory=/home/hq/vault
+ExecStart=/home/hq/vault/.venv/bin/vault start --foreground
+ExecStop=/home/hq/vault/.venv/bin/vault stop
+Restart=no
+Environment=ANTHROPIC_API_KEY=
+EnvironmentFile=-/home/hq/vault/.env
+
+[Install]
+WantedBy=multi-user.target

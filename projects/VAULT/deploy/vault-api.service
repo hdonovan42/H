@@ -1,0 +1,15 @@
+[Unit]
+Description=VAULT Dashboard API
+After=network.target
+
+[Service]
+Type=simple
+User=hq
+WorkingDirectory=/home/hq/vault
+ExecStart=/home/hq/vault/.venv/bin/vault api --port 3200
+Restart=on-failure
+RestartSec=5
+Environment=VAULT_DB_FILE=/home/hq/vault/vault.db
+
+[Install]
+WantedBy=multi-user.target
