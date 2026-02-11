@@ -65,11 +65,13 @@ def fetch_market(conn, market_id: str) -> dict | None:
 
 
 def fetch_trending(conn, limit: int = 5) -> list[dict]:
-    """Fetch trending markets sorted by volume."""
+    """Fetch trending markets sorted by volume, filtering out extreme-odds markets."""
     cfg = load_config()
     n = cfg.get("polymarket", {}).get("trending_count", limit)
 
     try:
+        # Fetch more than needed so we have enough after filtering extremes
+        fetch_count = max(n * 4, 20)
         resp = httpx.get(
             f"{GAMMA_BASE}/markets",
             params={
@@ -77,7 +79,7 @@ def fetch_trending(conn, limit: int = 5) -> list[dict]:
                 "closed": "false",
                 "order": "volume",
                 "ascending": "false",
-                "limit": n,
+                "limit": fetch_count,
             },
             timeout=10,
         )
@@ -87,11 +89,18 @@ def fetch_trending(conn, limit: int = 5) -> list[dict]:
         results = []
         for m in markets:
             parsed = _parse_market(m)
-            if parsed:
-                _save_cache(conn, parsed["id"], parsed, parsed.get("yes_price", 0))
-                results.append(parsed)
+            if not parsed:
+                continue
+            # Filter out extreme-odds markets (resolved-in-all-but-name)
+            yes = parsed["yes_price"]
+            if yes < 0.05 or yes > 0.95:
+                continue
+            _save_cache(conn, parsed["id"], parsed, yes)
+            results.append(parsed)
+            if len(results) >= n:
+                break
 
-        log.info(f"Fetched {len(results)} trending markets from Polymarket")
+        log.info(f"Fetched {len(results)} trending markets from Polymarket (filtered extremes)")
         return results
     except Exception as e:
         log.warning(f"Failed to fetch trending markets: {e}")

@@ -6,7 +6,6 @@ from vault.config_loader import load_config
 from vault.claude_client import call_claude
 from vault.prompts import build_system_prompt
 from vault.actuators import get_tool_schemas, get_actuator, ACTUATOR_MAP
-from vault.market_data import get_all_prices
 from vault import ledger
 from vault.guardrails import check_death, check_cycle_cost, check_trade_allowed
 from vault.polymarket import check_resolution
@@ -49,32 +48,19 @@ def run_cycle(conn) -> dict:
     cycle_id = cur.lastrowid
     conn.commit()
 
-    # Pre-fetch crypto prices if any assets configured
-    allowed_assets = cfg["trading"]["allowed_assets"]
-    prices = get_all_prices(conn) if allowed_assets else {}
     balance = ledger.get_balance(conn)
 
     context = {
         "cycle_id": cycle_id,
-        "prices": prices,
+        "prices": {},
         "balance": balance,
     }
 
     # Build system prompt
     system_prompt = build_system_prompt(conn)
 
-    # Initial message
-    if prices:
-        price_summary = "Current market prices:\n"
-        for asset, data in prices.items():
-            change = f" ({data.get('change_24h_pct', 0):+.2f}% 24h)" if data.get("change_24h_pct") is not None else ""
-            price_summary += f"  {asset}: ${data['price']:,.2f}{change}\n"
-        cycle_msg = f"{price_summary}\nWhat is your decision this cycle?"
-    else:
-        cycle_msg = "What is your decision this cycle? Review the trending prediction markets and your open positions."
-
     messages = [
-        {"role": "user", "content": cycle_msg}
+        {"role": "user", "content": "What is your decision this cycle? Review the trending prediction markets and your open positions."}
     ]
 
     tools = get_tool_schemas()

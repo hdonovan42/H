@@ -1,10 +1,8 @@
 """Actuator registry — aggregates all tools for Claude."""
 
-from vault.actuators.buy import BuyActuator
-from vault.actuators.sell import SellActuator
+from vault.config_loader import load_config
 from vault.actuators.hold import HoldActuator
 from vault.actuators.wait import WaitActuator
-from vault.actuators.research import ResearchActuator
 from vault.actuators.bet import BetActuator
 from vault.actuators.sell_prediction import SellPredictionActuator
 from vault.actuators.research_markets import ResearchMarketsActuator
@@ -55,18 +53,25 @@ class WriteMemoryActuator(BaseActuator):
         return {"success": True, "action": "write_memory", "memory_id": mem_id}
 
 
-# Registry
-ALL_ACTUATORS = [
-    BuyActuator(),
-    SellActuator(),
+# Registry — only load crypto actuators when allowed_assets is non-empty
+_cfg = load_config()
+_crypto_enabled = bool(_cfg["trading"]["allowed_assets"])
+
+ALL_ACTUATORS = []
+if _crypto_enabled:
+    from vault.actuators.buy import BuyActuator
+    from vault.actuators.sell import SellActuator
+    from vault.actuators.research import ResearchActuator
+    ALL_ACTUATORS.extend([BuyActuator(), SellActuator(), ResearchActuator()])
+
+ALL_ACTUATORS.extend([
     HoldActuator(),
     WaitActuator(),
-    ResearchActuator(),
     WriteMemoryActuator(),
     BetActuator(),
     SellPredictionActuator(),
     ResearchMarketsActuator(),
-]
+])
 
 ACTUATOR_MAP = {a.name: a for a in ALL_ACTUATORS}
 

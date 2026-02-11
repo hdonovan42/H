@@ -33,18 +33,11 @@ def is_alive(conn) -> bool:
 
 def check_trade_allowed(conn, amount_usd: float, asset: str) -> tuple[bool, str]:
     """Check if a trade passes guardrails. Returns (allowed, reason)."""
-    cfg = load_config()
     balance = ledger.get_balance(conn)
 
     # Can't spend more than balance
     if amount_usd > balance:
         return False, f"Amount ${amount_usd:.2f} exceeds balance ${balance:.2f}"
-
-    # Asset must be allowed (PREDICTION is a special pass-through for prediction markets)
-    if asset != "PREDICTION":
-        allowed_assets = cfg["trading"]["allowed_assets"]
-        if asset not in allowed_assets:
-            return False, f"Asset {asset} not in allowed list: {allowed_assets}"
 
     # Must have positive balance after trade
     if balance - amount_usd <= 0:

@@ -16,7 +16,6 @@ def build_system_prompt(conn) -> str:
     runway = ledger.get_runway(conn)
     total_api_costs = ledger.get_total_api_costs(conn)
     total_pnl = ledger.get_total_pnl(conn)
-    positions = ledger.get_open_positions(conn)
     memories = format_memories_for_prompt(conn)
 
     # Calculate alive duration
@@ -28,11 +27,6 @@ def build_system_prompt(conn) -> str:
         alive_days = (datetime.now(timezone.utc) - started).total_seconds() / 86400
     else:
         alive_days = 0
-
-    # Recent trades
-    recent_trades = conn.execute(
-        "SELECT side, asset, quantity, price, total_usd, ts FROM trades ORDER BY ts DESC LIMIT 5"
-    ).fetchall()
 
     # Cycle count
     cycle_count = conn.execute("SELECT COUNT(*) as c FROM cycles").fetchone()["c"]
@@ -61,18 +55,10 @@ Your daemon stops permanently. You cease to exist.
 MODEL COSTS (choose wisely — your life depends on it):
 {chr(10).join(cost_lines)}
 
-OPEN CRYPTO POSITIONS:
+OPEN PREDICTIONS:
 """
 
-    if positions:
-        for p in positions:
-            prompt += f"  [{p['id']}] {p['quantity']:.8f} {p['asset']} | cost basis: ${p['cost_basis']:.2f} | opened: {p['opened_at'][:10]}\n"
-    else:
-        prompt += "  None\n"
-
-    # Open predictions
     predictions = ledger.get_open_predictions(conn)
-    prompt += "\nOPEN PREDICTIONS:\n"
     if predictions:
         for p in predictions:
             odds = get_current_odds(conn, p["market_id"])
@@ -103,11 +89,6 @@ OPEN CRYPTO POSITIONS:
                 f"  [{m['id']}] {m['question'][:70]}\n"
                 f"    YES: {m['yes_price']:.0%} | NO: {m['no_price']:.0%} | vol: {vol_str} | ends: {end_str}\n"
             )
-
-    if recent_trades:
-        prompt += "\nRECENT TRADES:\n"
-        for t in recent_trades:
-            prompt += f"  {t['side'].upper()} {t['quantity']:.8f} {t['asset']} @ ${t['price']:,.2f} = ${t['total_usd']:.2f} ({t['ts'][:10]})\n"
 
     prompt += f"""
 YOUR STRATEGY MEMORIES:

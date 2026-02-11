@@ -4,23 +4,18 @@
 seed_balance: 50.00
 
 daemon:
-  interval_seconds: 900        # 15 minutes between cycles
+  interval_seconds: 600        # 10 minutes between cycles
   pid_file: vault.pid
   db_file: vault.db
 
 agent:
   default_model: claude-haiku-4-5-20251001
-  max_rounds_per_cycle: 3       # research + decision
+  max_rounds_per_cycle: 4       # research + search + bet + write_memory
   max_cycle_cost: 0.50          # circuit breaker per cycle
 
 trading:
   allowed_assets: []             # crypto trading disabled — Polymarket only
-  max_position_pct: 1.0
   simulated: true
-
-market_data:
-  cache_ttl_seconds: 300        # 5 min cache
-  coingecko_base: "https://api.coingecko.com/api/v3"
 
 polymarket:
   cache_ttl_seconds: 300        # 5 min cache for market data
