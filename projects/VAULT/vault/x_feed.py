@@ -63,17 +63,21 @@ def collect_x_data(conn, cycle_id: int, cfg: dict | None = None) -> list[dict]:
         for t in tweets:
             tid = t.get("id") or t.get("tweet_id") or t.get("id_str")
             if tid and tid not in all_tweets:
-                all_tweets[tid] = _normalize_tweet(t, tid)
+                normalized = _normalize_tweet(t, tid)
+                # Track who retweeted if the original author differs from the feed account
+                if normalized["author"].lower() != handle.lower():
+                    normalized["retweeted_by"] = handle
+                all_tweets[tid] = normalized
 
     # Store in DB
     stored = []
     for tid, tweet in all_tweets.items():
         try:
             conn.execute(
-                "INSERT OR IGNORE INTO x_posts (tweet_id, author, text, created_at, likes, retweets, cycle_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO x_posts (tweet_id, author, text, created_at, likes, retweets, retweeted_by, cycle_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (tid, tweet["author"], tweet["text"], tweet.get("created_at"),
-                 tweet.get("likes", 0), tweet.get("retweets", 0), cycle_id),
+                 tweet.get("likes", 0), tweet.get("retweets", 0), tweet.get("retweeted_by"), cycle_id),
             )
             stored.append(tweet)
         except Exception as e:
@@ -108,7 +112,7 @@ def _normalize_tweet(raw: dict, tweet_id: str) -> dict:
 def get_recent_tweets(conn, limit: int = 50) -> list[dict]:
     """Get recent tweets from the database."""
     rows = conn.execute(
-        "SELECT tweet_id, author, text, created_at, likes, retweets, cycle_id, collected_at "
+        "SELECT tweet_id, author, text, created_at, likes, retweets, retweeted_by, cycle_id, collected_at "
         "FROM x_posts ORDER BY id DESC LIMIT ?",
         (limit,),
     ).fetchall()

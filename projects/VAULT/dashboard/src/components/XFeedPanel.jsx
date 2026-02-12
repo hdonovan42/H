@@ -16,7 +16,10 @@ export default function XFeedPanel({ tweets }) {
       <div className="tweet-list">
         {tweets.map((t, i) => (
           <div key={t.tweet_id || i} className="tweet-item">
-            <div className="tweet-author">@{t.author}</div>
+            <div className="tweet-author">
+              @{t.author}
+              {t.retweeted_by && <span className="tweet-rt-by"> (RT by @{t.retweeted_by})</span>}
+            </div>
             <div className="tweet-text">{t.text}</div>
             <div className="tweet-meta">
               {t.likes > 0 && <span>{t.likes.toLocaleString()} likes</span>}

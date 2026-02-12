@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from vault.config_loader import get_db_path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -143,14 +143,15 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
 );
 
 CREATE TABLE IF NOT EXISTS x_posts (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    tweet_id    TEXT UNIQUE,
-    author      TEXT,
-    text        TEXT NOT NULL,
-    created_at  TEXT,
-    likes       INTEGER DEFAULT 0,
-    retweets    INTEGER DEFAULT 0,
-    cycle_id    INTEGER,
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    tweet_id     TEXT UNIQUE,
+    author       TEXT,
+    text         TEXT NOT NULL,
+    created_at   TEXT,
+    likes        INTEGER DEFAULT 0,
+    retweets     INTEGER DEFAULT 0,
+    retweeted_by TEXT,
+    cycle_id     INTEGER,
     collected_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     FOREIGN KEY (cycle_id) REFERENCES cycles(id)
 );
@@ -348,6 +349,20 @@ def _migrate(conn):
             "INSERT INTO meta (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             ("schema_version", "3"),
+        )
+        conn.commit()
+        version = 3
+
+    if version < 4:
+        # v4: add retweeted_by to x_posts
+        try:
+            conn.execute("ALTER TABLE x_posts ADD COLUMN retweeted_by TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "4"),
         )
         conn.commit()
 
