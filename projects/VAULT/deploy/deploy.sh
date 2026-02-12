@@ -41,12 +41,14 @@ fi
 .venv/bin/pip install -e . --quiet
 echo "Dependencies installed."
 
-# Install/reload vault-api systemd service
+# Install/reload systemd services
 sudo cp deploy/vault-api.service /etc/systemd/system/
+sudo cp deploy/vault-daemon.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable vault-api
+sudo systemctl enable vault-api vault-daemon
 sudo systemctl restart vault-api
-echo "vault-api service restarted."
+sudo systemctl restart vault-daemon
+echo "vault-api and vault-daemon services restarted."
 REMOTE
 
 echo ""

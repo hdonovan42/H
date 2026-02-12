@@ -14,7 +14,7 @@ _client = None
 def get_client() -> Anthropic:
     global _client
     if _client is None:
-        _client = Anthropic()  # uses ANTHROPIC_API_KEY env var
+        _client = Anthropic(timeout=120.0)  # uses ANTHROPIC_API_KEY env var
     return _client
 
 

@@ -5,6 +5,7 @@ import signal
 import sys
 import time
 import logging
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
 from vault.config_loader import load_config, get_pid_path
 from vault.db import init_db, get_meta, set_meta
@@ -124,12 +125,21 @@ def run_daemon(resurrect: bool = False):
                     time.sleep(1)
                 continue
 
-            # Run cycle
+            # Run cycle with timeout
             try:
-                result = run_cycle(conn)
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(run_cycle, conn)
+                    result = future.result(timeout=300)
                 if result.get("action") == "death":
                     log.critical("Agent died during cycle.")
                     break
+            except TimeoutError:
+                log.error("Cycle timed out after 300s")
+                conn.execute(
+                    "INSERT INTO events (event, detail) VALUES (?, ?)",
+                    ("error", "Cycle timed out after 300s"),
+                )
+                conn.commit()
             except Exception as e:
                 log.error(f"Cycle error: {e}", exc_info=True)
                 conn.execute(

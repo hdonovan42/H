@@ -1,0 +1,15 @@
+[Unit]
+Description=VAULT Autonomous Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=hq
+WorkingDirectory=/home/hq/vault
+ExecStart=/home/hq/vault/.venv/bin/vault start
+Restart=on-failure
+RestartSec=10
+EnvironmentFile=/home/hq/vault/.env
+
+[Install]
+WantedBy=multi-user.target
