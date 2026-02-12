@@ -22,7 +22,7 @@ export default function BetsPanel({ positions, predictions }) {
 
   return (
     <div className="card">
-      <div className="card-title">Bets</div>
+      <div className="card-title">Positions</div>
 
       {!hasData && <div className="empty">No bets yet</div>}
 
