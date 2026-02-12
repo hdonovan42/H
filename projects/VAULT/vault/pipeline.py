@@ -121,7 +121,7 @@ def get_pipeline_run(conn, cycle_id: int) -> dict | None:
 
     # Attach tweets
     run["tweets"] = [dict(r) for r in conn.execute(
-        "SELECT tweet_id, author, text, created_at, likes, retweets "
+        "SELECT tweet_id, author, text, created_at, likes, retweets, retweeted_by "
         "FROM x_posts WHERE cycle_id = ? ORDER BY id",
         (cycle_id,),
     ).fetchall()]
