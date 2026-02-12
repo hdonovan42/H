@@ -22,6 +22,24 @@ polymarket:
   trending_count: 5             # number of trending markets in system prompt
   max_bet_pct: 0.20             # max 20% of balance per bet
 
+pipeline:
+  enabled: true
+  focus: "musk_ecosystem"
+
+musk_ecosystem:
+  x_keywords: ["Tesla", "SpaceX", "Elon Musk", "xAI", "Neuralink", "Starship"]
+  x_accounts: ["elonmusk", "SawyerMerritt", "farzyness", "TeslaLarry", "jamesdouma"]
+  polymarket_keywords: ["Tesla", "SpaceX", "Elon", "Musk", "xAI", "Neuralink", "Starship"]
+  max_x_calls_per_cycle: 7
+  x_posts_per_call: 10
+
+edge:
+  margin_of_safety: 0.10
+  max_kelly_fraction: 0.25
+  risk_free_daily_rate: 0.0001
+  min_confidence: 0.4
+  estimator_model: claude-haiku-4-5-20251001
+
 # Model pricing (USD per 1M tokens) — updated for Claude 4.5/4.6
 # These are used to calculate cost from token counts
 pricing:

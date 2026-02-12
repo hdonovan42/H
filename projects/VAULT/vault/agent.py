@@ -4,11 +4,12 @@ import json
 import logging
 from vault.config_loader import load_config
 from vault.claude_client import call_claude
-from vault.prompts import build_system_prompt
+from vault.prompts import build_system_prompt, build_edge_prompt
 from vault.actuators import get_tool_schemas, get_actuator, ACTUATOR_MAP
 from vault import ledger
 from vault.guardrails import check_death, check_cycle_cost, check_trade_allowed
 from vault.polymarket import check_resolution
+from vault.pipeline import run_pipeline
 
 log = logging.getLogger("vault.agent")
 
@@ -56,8 +57,20 @@ def run_cycle(conn) -> dict:
         "balance": balance,
     }
 
-    # Build system prompt
-    system_prompt = build_system_prompt(conn)
+    # Run edge-detection pipeline if enabled
+    pipeline_cfg = cfg.get("pipeline", {})
+    pipeline_result = None
+    if pipeline_cfg.get("enabled", True):
+        try:
+            pipeline_result = run_pipeline(conn, cycle_id)
+        except Exception as e:
+            log.error(f"Pipeline failed, falling back to standard prompt: {e}")
+
+    # Build system prompt — edge-based if pipeline ran, standard otherwise
+    if pipeline_result and pipeline_result.enabled:
+        system_prompt = build_edge_prompt(conn, pipeline_result)
+    else:
+        system_prompt = build_system_prompt(conn)
 
     messages = [
         {"role": "user", "content": "What is your decision this cycle? Review the trending prediction markets and your open positions."}

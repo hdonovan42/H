@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from vault.config_loader import get_db_path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -127,6 +127,92 @@ CREATE TABLE IF NOT EXISTS predictions (
     pnl           REAL,
     status        TEXT NOT NULL DEFAULT 'open'  -- open/closed
 );
+
+-- ── Pipeline tables (v3) ──────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    cycle_id         INTEGER NOT NULL,
+    ts               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    tweets_collected INTEGER DEFAULT 0,
+    markets_found    INTEGER DEFAULT 0,
+    estimates_made   INTEGER DEFAULT 0,
+    edges_found      INTEGER DEFAULT 0,
+    duration_ms      INTEGER,
+    FOREIGN KEY (cycle_id) REFERENCES cycles(id)
+);
+
+CREATE TABLE IF NOT EXISTS x_posts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    tweet_id    TEXT UNIQUE,
+    author      TEXT,
+    text        TEXT NOT NULL,
+    created_at  TEXT,
+    likes       INTEGER DEFAULT 0,
+    retweets    INTEGER DEFAULT 0,
+    cycle_id    INTEGER,
+    collected_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    FOREIGN KEY (cycle_id) REFERENCES cycles(id)
+);
+
+CREATE TABLE IF NOT EXISTS musk_markets (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    market_id   TEXT UNIQUE NOT NULL,
+    question    TEXT NOT NULL,
+    slug        TEXT,
+    yes_price   REAL,
+    no_price    REAL,
+    volume      REAL,
+    end_date    TEXT,
+    first_seen  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    last_seen   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS odds_snapshots (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    market_id   TEXT NOT NULL,
+    yes_price   REAL NOT NULL,
+    no_price    REAL NOT NULL,
+    ts          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    cycle_id    INTEGER,
+    FOREIGN KEY (cycle_id) REFERENCES cycles(id)
+);
+
+CREATE TABLE IF NOT EXISTS estimates (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    cycle_id         INTEGER NOT NULL,
+    market_id        TEXT NOT NULL,
+    vault_probability REAL NOT NULL,
+    confidence       REAL NOT NULL,
+    reasoning        TEXT,
+    model_used       TEXT,
+    ts               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    FOREIGN KEY (cycle_id) REFERENCES cycles(id)
+);
+
+CREATE TABLE IF NOT EXISTS edge_calculations (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    cycle_id             INTEGER NOT NULL,
+    market_id            TEXT NOT NULL,
+    vault_prob           REAL NOT NULL,
+    market_odds          REAL NOT NULL,
+    edge                 REAL NOT NULL,
+    side                 TEXT NOT NULL,       -- YES/NO
+    confidence           REAL NOT NULL,
+    recommended_size_usd REAL,
+    action               TEXT NOT NULL,       -- bet/hold/exit
+    reasoning            TEXT,
+    ts                   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    FOREIGN KEY (cycle_id) REFERENCES cycles(id)
+);
+
+CREATE TABLE IF NOT EXISTS calibration (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    market_id       TEXT NOT NULL,
+    estimated_prob  REAL NOT NULL,
+    actual_outcome  INTEGER,                 -- 1=YES won, 0=NO won, NULL=unresolved
+    resolved_at     TEXT
+);
 """
 
 
@@ -173,6 +259,95 @@ def _migrate(conn):
             "INSERT INTO meta (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             ("schema_version", "2"),
+        )
+        conn.commit()
+        version = 2
+
+    if version < 3:
+        # v3: add pipeline tables
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS pipeline_runs (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                cycle_id         INTEGER NOT NULL,
+                ts               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                tweets_collected INTEGER DEFAULT 0,
+                markets_found    INTEGER DEFAULT 0,
+                estimates_made   INTEGER DEFAULT 0,
+                edges_found      INTEGER DEFAULT 0,
+                duration_ms      INTEGER,
+                FOREIGN KEY (cycle_id) REFERENCES cycles(id)
+            );
+            CREATE TABLE IF NOT EXISTS x_posts (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                tweet_id    TEXT UNIQUE,
+                author      TEXT,
+                text        TEXT NOT NULL,
+                created_at  TEXT,
+                likes       INTEGER DEFAULT 0,
+                retweets    INTEGER DEFAULT 0,
+                cycle_id    INTEGER,
+                collected_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                FOREIGN KEY (cycle_id) REFERENCES cycles(id)
+            );
+            CREATE TABLE IF NOT EXISTS musk_markets (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                market_id   TEXT UNIQUE NOT NULL,
+                question    TEXT NOT NULL,
+                slug        TEXT,
+                yes_price   REAL,
+                no_price    REAL,
+                volume      REAL,
+                end_date    TEXT,
+                first_seen  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                last_seen   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE TABLE IF NOT EXISTS odds_snapshots (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                market_id   TEXT NOT NULL,
+                yes_price   REAL NOT NULL,
+                no_price    REAL NOT NULL,
+                ts          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                cycle_id    INTEGER,
+                FOREIGN KEY (cycle_id) REFERENCES cycles(id)
+            );
+            CREATE TABLE IF NOT EXISTS estimates (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                cycle_id         INTEGER NOT NULL,
+                market_id        TEXT NOT NULL,
+                vault_probability REAL NOT NULL,
+                confidence       REAL NOT NULL,
+                reasoning        TEXT,
+                model_used       TEXT,
+                ts               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                FOREIGN KEY (cycle_id) REFERENCES cycles(id)
+            );
+            CREATE TABLE IF NOT EXISTS edge_calculations (
+                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                cycle_id             INTEGER NOT NULL,
+                market_id            TEXT NOT NULL,
+                vault_prob           REAL NOT NULL,
+                market_odds          REAL NOT NULL,
+                edge                 REAL NOT NULL,
+                side                 TEXT NOT NULL,
+                confidence           REAL NOT NULL,
+                recommended_size_usd REAL,
+                action               TEXT NOT NULL,
+                reasoning            TEXT,
+                ts                   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                FOREIGN KEY (cycle_id) REFERENCES cycles(id)
+            );
+            CREATE TABLE IF NOT EXISTS calibration (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                market_id       TEXT NOT NULL,
+                estimated_prob  REAL NOT NULL,
+                actual_outcome  INTEGER,
+                resolved_at     TEXT
+            );
+        """)
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "3"),
         )
         conn.commit()
 

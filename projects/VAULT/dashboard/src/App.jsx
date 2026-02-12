@@ -6,6 +6,7 @@ import CycleLog from './components/CycleLog';
 import CostBreakdown from './components/CostBreakdown';
 import BetsPanel from './components/BetsPanel';
 import EventTimeline from './components/EventTimeline';
+import PipelineView from './components/PipelineView';
 
 function useHash() {
   const [hash, setHash] = useState(window.location.hash || '#/');
@@ -97,7 +98,7 @@ function MemoryPage({ memories }) {
 
 export default function App() {
   const hash = useHash();
-  const { status, balanceHistory, cycles, costs, positions, events, memories, predictions, error, loading } = useVaultData();
+  const { status, balanceHistory, cycles, costs, positions, events, memories, predictions, calibration, error, loading } = useVaultData();
 
   const alive = status?.alive ?? true;
   const daemonRunning = status?.daemon_running ?? false;
@@ -106,12 +107,16 @@ export default function App() {
 
   const navItems = [
     { hash: '#/', label: 'Dashboard' },
+    { hash: '#/pipeline', label: 'Pipeline' },
     { hash: '#/log', label: 'Log' },
     { hash: '#/memory', label: 'Memory' },
   ];
 
   let page;
   switch (hash) {
+    case '#/pipeline':
+      page = <PipelineView calibration={calibration} />;
+      break;
     case '#/log':
       page = <LogPage cycles={cycles} costs={costs} events={events} />;
       break;

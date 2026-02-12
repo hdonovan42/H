@@ -283,6 +283,108 @@ def get_memories_endpoint(limit: int = Query(30, ge=1, le=200)):
         conn.close()
 
 
+# ── Pipeline ──────────────────────────────────────────────────────
+
+@app.get("/api/v1/pipeline/latest")
+def get_pipeline_latest():
+    conn = _conn()
+    try:
+        from vault.pipeline import get_latest_pipeline_run
+        result = get_latest_pipeline_run(conn)
+        return result or {"error": "No pipeline runs yet"}
+    finally:
+        conn.close()
+
+
+@app.get("/api/v1/pipeline/{cycle_id}")
+def get_pipeline_by_cycle(cycle_id: int):
+    conn = _conn()
+    try:
+        from vault.pipeline import get_pipeline_run
+        result = get_pipeline_run(conn, cycle_id)
+        return result or {"error": f"No pipeline run for cycle {cycle_id}"}
+    finally:
+        conn.close()
+
+
+# ── Estimates ─────────────────────────────────────────────────────
+
+@app.get("/api/v1/estimates")
+def get_estimates(limit: int = Query(100, ge=1, le=500)):
+    conn = _conn()
+    try:
+        from vault.estimator import get_recent_estimates
+        return get_recent_estimates(conn, limit=limit)
+    finally:
+        conn.close()
+
+
+# ── Calibration ───────────────────────────────────────────────────
+
+@app.get("/api/v1/calibration")
+def get_calibration():
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT market_id, estimated_prob, actual_outcome, resolved_at "
+            "FROM calibration ORDER BY id DESC"
+        ).fetchall()
+        results = [dict(r) for r in rows]
+
+        # Calculate calibration stats if enough data
+        if len(results) >= 5:
+            # Bucket by probability range
+            buckets = {}
+            for r in results:
+                if r["actual_outcome"] is None:
+                    continue
+                bucket = round(r["estimated_prob"] * 10) / 10  # 0.0, 0.1, ... 1.0
+                if bucket not in buckets:
+                    buckets[bucket] = {"estimated": bucket, "count": 0, "actual_yes": 0}
+                buckets[bucket]["count"] += 1
+                buckets[bucket]["actual_yes"] += r["actual_outcome"]
+
+            calibration_curve = []
+            for b in sorted(buckets.values(), key=lambda x: x["estimated"]):
+                if b["count"] > 0:
+                    b["actual_rate"] = round(b["actual_yes"] / b["count"], 3)
+                    calibration_curve.append(b)
+
+            return {"records": results, "calibration_curve": calibration_curve}
+
+        return {"records": results, "calibration_curve": []}
+    finally:
+        conn.close()
+
+
+# ── X Feed ────────────────────────────────────────────────────────
+
+@app.get("/api/v1/x-feed")
+def get_x_feed(limit: int = Query(50, ge=1, le=200)):
+    conn = _conn()
+    try:
+        from vault.x_feed import get_recent_tweets
+        return get_recent_tweets(conn, limit=limit)
+    finally:
+        conn.close()
+
+
+# ── Musk Markets ──────────────────────────────────────────────────
+
+@app.get("/api/v1/musk-markets")
+def get_musk_markets():
+    conn = _conn()
+    try:
+        from vault.musk_markets import get_tracked_markets, get_odds_history
+        markets = get_tracked_markets(conn)
+        # Attach recent odds history to each market
+        for m in markets:
+            m["odds_history"] = get_odds_history(conn, m["market_id"], hours=48)
+        return markets
+    finally:
+        conn.close()
+
+
 def run_api(host: str = "0.0.0.0", port: int = 3200):
     """Run the FastAPI server."""
     import uvicorn

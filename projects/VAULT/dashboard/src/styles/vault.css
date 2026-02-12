@@ -502,6 +502,225 @@ html, body {
   background: var(--text-dim);
 }
 
+/* ── Pipeline Page ───────────────────────────────────────────── */
+
+.pipeline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pipeline-stats {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.pipeline-stats span {
+  padding: 2px 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+/* ── Tweet Items ─────────────────────────────────────────────── */
+
+.tweet-list {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.tweet-item {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.tweet-item:last-child {
+  border-bottom: none;
+}
+
+.tweet-author {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--buy);
+}
+
+.tweet-text {
+  font-size: 12px;
+  color: var(--text);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.tweet-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+/* ── Market Items ────────────────────────────────────────────── */
+
+.market-list {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.market-item {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.market-item:last-child {
+  border-bottom: none;
+}
+
+.market-question {
+  font-size: 12px;
+  color: var(--text);
+}
+
+.market-odds {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+/* ── Edge Bar ────────────────────────────────────────────────── */
+
+.edge-bar-container {
+  margin: 8px 0;
+}
+
+.edge-bar-track {
+  position: relative;
+  height: 8px;
+  background: var(--bg-dark);
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+.edge-bar-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 4px;
+}
+
+.edge-bar-marker {
+  position: absolute;
+  top: -3px;
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  transform: translateX(-50%);
+}
+
+.edge-bar-marker.vault {
+  background: var(--warning);
+}
+
+.edge-bar-marker.market {
+  background: var(--text-dim);
+}
+
+.edge-bar-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  margin-top: 4px;
+}
+
+/* ── Estimate Cards ──────────────────────────────────────────── */
+
+.estimate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 12px;
+}
+
+.estimate-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.estimate-card.bet {
+  border-color: var(--warning);
+  border-width: 1px;
+  box-shadow: 0 0 8px rgba(255, 140, 0, 0.1);
+}
+
+.estimate-card.exit {
+  border-color: var(--sell);
+}
+
+.estimate-question {
+  font-size: 13px;
+  color: var(--text-bright);
+  margin-bottom: 8px;
+  line-height: 1.3;
+}
+
+.estimate-details {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.estimate-row {
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.estimate-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-bright);
+  margin-top: 2px;
+}
+
+.estimate-reasoning {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  line-height: 1.4;
+}
+
+/* ── Decision ────────────────────────────────────────────────── */
+
+.decision-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.decision-cost {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.decision-balance {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.decision-reasoning {
+  font-size: 12px;
+  color: var(--text);
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
 /* ── Responsive ──────────────────────────────────────────────── */
 
 @media (max-width: 800px) {
