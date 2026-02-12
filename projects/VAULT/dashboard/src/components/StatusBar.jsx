@@ -36,11 +36,11 @@ export default function StatusBar({ status }) {
       </div>
 
       <div className="stat">
-        <div className="stat-label">Burn Rate</div>
-        <div className="stat-value">
-          {burn_rate != null ? `${formatCost(burn_rate)}/day` : 'N/A'}
+        <div className="stat-label">Trading P&L</div>
+        <div className={`stat-value ${total_pnl >= 0 ? 'green' : 'red'}`}>
+          {total_pnl >= 0 ? '+' : ''}{formatCost(total_pnl)}
         </div>
-        <div className="stat-sub">API costs per day</div>
+        <div className="stat-sub">realized</div>
       </div>
 
       <div className="stat">
@@ -52,9 +52,11 @@ export default function StatusBar({ status }) {
       </div>
 
       <div className="stat">
-        <div className="stat-label">Cycles</div>
-        <div className="stat-value">{cycle_count}</div>
-        <div className="stat-sub">{alive_days > 0 ? `${alive_days} days alive` : ''}{paused ? ' (paused)' : ''}</div>
+        <div className="stat-label">Burn Rate</div>
+        <div className="stat-value">
+          {burn_rate != null ? `${formatCost(burn_rate)}/day` : 'N/A'}
+        </div>
+        <div className="stat-sub">API costs per day</div>
       </div>
 
       <div className="stat">
@@ -64,11 +66,9 @@ export default function StatusBar({ status }) {
       </div>
 
       <div className="stat">
-        <div className="stat-label">Trading P&L</div>
-        <div className={`stat-value ${total_pnl >= 0 ? 'green' : 'red'}`}>
-          {total_pnl >= 0 ? '+' : ''}{formatCost(total_pnl)}
-        </div>
-        <div className="stat-sub">realized</div>
+        <div className="stat-label">Cycles</div>
+        <div className="stat-value">{cycle_count}</div>
+        <div className="stat-sub">{alive_days > 0 ? `${alive_days} days alive` : ''}{paused ? ' (paused)' : ''}</div>
       </div>
     </div>
   );
