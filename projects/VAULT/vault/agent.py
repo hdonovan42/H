@@ -122,18 +122,29 @@ def run_cycle(conn) -> dict:
             result["reasoning"] = reasoning
             break
 
-        # Process first tool call
+        # Process first tool call (execute it), provide tool_result for ALL
         tool_call = tool_calls[0]
         actuator = get_actuator(tool_call["name"])
 
+        # Build tool_results for all tool_use blocks (API requires one per tool_use)
+        def _build_tool_results(primary_id, primary_result, all_calls):
+            """Return tool_result list covering every tool_use block."""
+            results = []
+            for tc in all_calls:
+                if tc["id"] == primary_id:
+                    results.append({"type": "tool_result", "tool_use_id": tc["id"],
+                                    "content": json.dumps(primary_result)})
+                else:
+                    results.append({"type": "tool_result", "tool_use_id": tc["id"],
+                                    "content": json.dumps({"skipped": True, "reason": "Only one tool executed per round"})})
+            return results
+
         if not actuator:
             log.error(f"Unknown tool: {tool_call['name']}")
-            # Send error back and continue
             messages.append({"role": "assistant", "content": response["content"]})
             messages.append({
                 "role": "user",
-                "content": [{"type": "tool_result", "tool_use_id": tool_call["id"],
-                             "content": json.dumps({"error": f"Unknown tool: {tool_call['name']}"})}],
+                "content": _build_tool_results(tool_call["id"], {"error": f"Unknown tool: {tool_call['name']}"}, tool_calls),
             })
             continue
 
@@ -147,8 +158,7 @@ def run_cycle(conn) -> dict:
                 messages.append({"role": "assistant", "content": response["content"]})
                 messages.append({
                     "role": "user",
-                    "content": [{"type": "tool_result", "tool_use_id": tool_call["id"],
-                                 "content": json.dumps({"success": False, "error": f"Guardrail: {reason}"})}],
+                    "content": _build_tool_results(tool_call["id"], {"success": False, "error": f"Guardrail: {reason}"}, tool_calls),
                 })
                 continue
 
@@ -162,8 +172,7 @@ def run_cycle(conn) -> dict:
                 messages.append({"role": "assistant", "content": response["content"]})
                 messages.append({
                     "role": "user",
-                    "content": [{"type": "tool_result", "tool_use_id": tool_call["id"],
-                                 "content": json.dumps({"success": False, "error": f"Guardrail: {reason}"})}],
+                    "content": _build_tool_results(tool_call["id"], {"success": False, "error": f"Guardrail: {reason}"}, tool_calls),
                 })
                 continue
 
@@ -181,8 +190,7 @@ def run_cycle(conn) -> dict:
             messages.append({"role": "assistant", "content": response["content"]})
             messages.append({
                 "role": "user",
-                "content": [{"type": "tool_result", "tool_use_id": tool_call["id"],
-                             "content": json.dumps(exec_result)}],
+                "content": _build_tool_results(tool_call["id"], exec_result, tool_calls),
             })
 
     # Update cycle record

@@ -8,11 +8,17 @@ from vault.config_loader import load_config
 log = logging.getLogger("vault.x_feed")
 
 
-def _run_bird(args: list[str], timeout: int = 30) -> list[dict]:
+def _run_bird(args: list[str], auth_token: str = "", ct0: str = "", timeout: int = 30) -> list[dict]:
     """Run a bird CLI command, return parsed JSON or empty list on failure."""
     try:
+        cmd = ["bird"]
+        if auth_token:
+            cmd += ["--auth-token", auth_token]
+        if ct0:
+            cmd += ["--ct0", ct0]
+        cmd += args
         result = subprocess.run(
-            ["bird"] + args,
+            cmd,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -47,6 +53,8 @@ def collect_x_data(conn, cycle_id: int, cfg: dict | None = None) -> list[dict]:
     accounts = musk_cfg.get("x_accounts", ["elonmusk"])
     max_calls = musk_cfg.get("max_x_calls_per_cycle", 3)
     posts_per_call = musk_cfg.get("x_posts_per_call", 10)
+    auth_token = musk_cfg.get("x_auth_token", "")
+    ct0 = musk_cfg.get("x_ct0", "")
 
     all_tweets = {}  # tweet_id -> tweet dict for dedup
     calls_made = 0
@@ -56,7 +64,7 @@ def collect_x_data(conn, cycle_id: int, cfg: dict | None = None) -> list[dict]:
     for keyword in keywords[:keyword_budget]:
         if calls_made >= max_calls:
             break
-        tweets = _run_bird(["search", keyword, "-n", str(posts_per_call), "--json"])
+        tweets = _run_bird(["search", keyword, "-n", str(posts_per_call), "--json"], auth_token, ct0)
         calls_made += 1
         for t in tweets:
             tid = t.get("id") or t.get("tweet_id") or t.get("id_str")
@@ -68,7 +76,7 @@ def collect_x_data(conn, cycle_id: int, cfg: dict | None = None) -> list[dict]:
         if calls_made >= max_calls:
             break
         handle = account.lstrip("@")
-        tweets = _run_bird(["user-tweets", f"@{handle}", "-n", str(posts_per_call), "--json"])
+        tweets = _run_bird(["user-tweets", f"@{handle}", "-n", str(posts_per_call), "--json"], auth_token, ct0)
         calls_made += 1
         for t in tweets:
             tid = t.get("id") or t.get("tweet_id") or t.get("id_str")
@@ -98,13 +106,20 @@ def collect_x_data(conn, cycle_id: int, cfg: dict | None = None) -> list[dict]:
 
 def _normalize_tweet(raw: dict, tweet_id: str) -> dict:
     """Normalize tweet data from bird CLI output to consistent format."""
+    # bird 0.8 uses nested author object with username/name
+    author_obj = raw.get("author", {})
+    if isinstance(author_obj, dict):
+        author = author_obj.get("username") or author_obj.get("screen_name") or "unknown"
+    else:
+        author = author_obj or raw.get("user", {}).get("screen_name") or raw.get("username", "unknown")
+
     return {
         "tweet_id": tweet_id,
-        "author": raw.get("user", {}).get("screen_name") or raw.get("author") or raw.get("username", "unknown"),
+        "author": author,
         "text": raw.get("full_text") or raw.get("text", ""),
-        "created_at": raw.get("created_at"),
-        "likes": raw.get("favorite_count") or raw.get("likes", 0),
-        "retweets": raw.get("retweet_count") or raw.get("retweets", 0),
+        "created_at": raw.get("createdAt") or raw.get("created_at"),
+        "likes": raw.get("likeCount") or raw.get("favorite_count") or raw.get("likes", 0),
+        "retweets": raw.get("retweetCount") or raw.get("retweet_count") or raw.get("retweets", 0),
     }
 
 

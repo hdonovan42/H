@@ -1,38 +1,84 @@
-"""Musk ecosystem market discovery — searches Polymarket for relevant markets."""
+"""Musk ecosystem market discovery — fetches Polymarket in bulk, filters locally."""
 
 import logging
+import re
+import httpx
 from vault.config_loader import load_config
-from vault.polymarket import search_markets, get_current_odds
+from vault.polymarket import _parse_market, _save_cache
 
 log = logging.getLogger("vault.musk_markets")
 
+GAMMA_BASE = "https://gamma-api.polymarket.com"
+
 
 def collect_musk_markets(conn, cycle_id: int, cfg: dict | None = None) -> list[dict]:
-    """Search Polymarket for Musk-ecosystem markets. Deduplicates across keyword searches.
+    """Fetch active Polymarket markets in bulk and filter locally for Musk ecosystem.
 
-    Stores/updates markets in musk_markets table and records odds snapshots.
-    Returns list of market dicts with current odds.
+    The Gamma API slug_keyword param is broken (returns unrelated markets),
+    so we fetch a large batch sorted by volume and filter by question text.
+    Stores/updates in musk_markets table and records odds snapshots.
     """
     if cfg is None:
         cfg = load_config()
 
     musk_cfg = cfg.get("musk_ecosystem", {})
-    keywords = musk_cfg.get("polymarket_keywords", ["Tesla", "SpaceX", "Elon", "Musk"])
+    raw_keywords = musk_cfg.get(
+        "polymarket_keywords", ["Tesla", "SpaceX", "Elon", "Musk"]
+    )
+    # Build word-boundary regex to avoid partial matches (e.g. "elon" in "Barcelona")
+    keyword_pattern = re.compile(
+        r'\b(' + '|'.join(re.escape(kw) for kw in raw_keywords) + r')\b',
+        re.IGNORECASE,
+    )
 
-    seen_ids = set()
-    markets = []
-
-    for keyword in keywords:
+    # Fetch in bulk — 3 pages of 100, sorted by volume
+    all_raw = []
+    for offset in [0, 100, 200]:
         try:
-            results = search_markets(conn, keyword, limit=10)
-            for m in results:
-                mid = m["id"]
-                if mid in seen_ids:
-                    continue
-                seen_ids.add(mid)
-                markets.append(m)
+            resp = httpx.get(
+                f"{GAMMA_BASE}/markets",
+                params={
+                    "active": "true",
+                    "closed": "false",
+                    "limit": 100,
+                    "offset": offset,
+                    "order": "volume",
+                    "ascending": "false",
+                },
+                timeout=10,
+            )
+            resp.raise_for_status()
+            batch = resp.json()
+            all_raw.extend(batch)
+            if len(batch) < 100:
+                break
         except Exception as e:
-            log.warning(f"Failed to search markets for '{keyword}': {e}")
+            log.warning(f"Failed to fetch markets (offset {offset}): {e}")
+            break
+
+    # Filter locally by keyword match in question text
+    markets = []
+    seen_ids = set()
+    for raw in all_raw:
+        parsed = _parse_market(raw)
+        if not parsed:
+            continue
+        mid = parsed["id"]
+        if mid in seen_ids:
+            continue
+
+        question = parsed.get("question", "")
+        if not keyword_pattern.search(question):
+            continue
+
+        # Skip extreme odds (resolved in all but name)
+        yes = parsed["yes_price"]
+        if yes < 0.05 or yes > 0.95:
+            continue
+
+        seen_ids.add(mid)
+        _save_cache(conn, mid, parsed, yes)
+        markets.append(parsed)
 
     # Store/update in musk_markets table and record odds snapshots
     for m in markets:
@@ -42,7 +88,10 @@ def collect_musk_markets(conn, cycle_id: int, cfg: dict | None = None) -> list[d
     if markets:
         conn.commit()
 
-    log.info(f"Musk markets: {len(markets)} found across {len(keywords)} keywords (cycle {cycle_id})")
+    log.info(
+        f"Musk markets: {len(markets)} found from {len(all_raw)} scanned "
+        f"(keywords: {raw_keywords}, cycle {cycle_id})"
+    )
     return markets
 
 
