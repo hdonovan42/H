@@ -40,16 +40,19 @@ if [ ! -f .venv/bin/python3 ]; then
 fi
 .venv/bin/pip install -e . --quiet
 echo "Dependencies installed."
-
-# Install/reload systemd services
-sudo cp deploy/vault-api.service /etc/systemd/system/
-sudo cp deploy/vault-daemon.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable vault-api vault-daemon
-sudo systemctl restart vault-api
-sudo systemctl restart vault-daemon
-echo "vault-api and vault-daemon services restarted."
 REMOTE
+
+# Install/reload systemd services (requires root)
+echo ">>> Restarting services..."
+ssh root@89.167.4.126 << 'ROOT'
+cp /home/hq/vault/deploy/vault-api.service /etc/systemd/system/
+cp /home/hq/vault/deploy/vault-daemon.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable vault-api vault-daemon
+systemctl restart vault-api
+systemctl restart vault-daemon
+echo "vault-api and vault-daemon services restarted."
+ROOT
 
 echo ""
 echo "=== Deploy complete ==="
