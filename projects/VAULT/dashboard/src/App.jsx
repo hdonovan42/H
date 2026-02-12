@@ -4,8 +4,7 @@ import StatusBar from './components/StatusBar';
 import BalanceChart from './components/BalanceChart';
 import CycleLog from './components/CycleLog';
 import CostBreakdown from './components/CostBreakdown';
-import PositionsPanel from './components/PositionsPanel';
-import PredictionsPanel from './components/PredictionsPanel';
+import BetsPanel from './components/BetsPanel';
 import EventTimeline from './components/EventTimeline';
 
 function useHash() {
@@ -18,23 +17,20 @@ function useHash() {
   return hash;
 }
 
-function DashboardPage({ status, balanceHistory, cycles, costs, positions, predictions, events }) {
+function DashboardPage({ status, balanceHistory, cycles, positions, predictions }) {
   return (
     <div className="page">
       <StatusBar status={status} />
       <BalanceChart data={balanceHistory} />
       <div className="grid" style={{ marginTop: '16px' }}>
         <CycleLog cycles={cycles} />
-        <PositionsPanel positions={positions} />
-        <PredictionsPanel predictions={predictions} />
-        <CostBreakdown costs={costs} />
-        <EventTimeline events={events} />
+        <BetsPanel positions={positions} predictions={predictions} />
       </div>
     </div>
   );
 }
 
-function LogPage({ cycles }) {
+function LogPage({ cycles, costs, events }) {
   return (
     <div className="page">
       <div className="card">
@@ -64,6 +60,10 @@ function LogPage({ cycles }) {
             ))}
           </ul>
         )}
+      </div>
+      <div className="grid" style={{ marginTop: '16px' }}>
+        <CostBreakdown costs={costs} />
+        <EventTimeline events={events} />
       </div>
     </div>
   );
@@ -113,7 +113,7 @@ export default function App() {
   let page;
   switch (hash) {
     case '#/log':
-      page = <LogPage cycles={cycles} />;
+      page = <LogPage cycles={cycles} costs={costs} events={events} />;
       break;
     case '#/memory':
       page = <MemoryPage memories={memories} />;
@@ -124,10 +124,8 @@ export default function App() {
           status={status}
           balanceHistory={balanceHistory}
           cycles={cycles}
-          costs={costs}
           positions={positions}
           predictions={predictions}
-          events={events}
         />
       );
   }
