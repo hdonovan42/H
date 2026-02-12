@@ -49,35 +49,17 @@ def collect_x_data(conn, cycle_id: int, cfg: dict | None = None) -> list[dict]:
         cfg = load_config()
 
     musk_cfg = cfg.get("musk_ecosystem", {})
-    keywords = musk_cfg.get("x_keywords", ["Tesla", "SpaceX", "Elon Musk"])
     accounts = musk_cfg.get("x_accounts", ["elonmusk"])
-    max_calls = musk_cfg.get("max_x_calls_per_cycle", 3)
     posts_per_call = musk_cfg.get("x_posts_per_call", 10)
     auth_token = musk_cfg.get("x_auth_token", "")
     ct0 = musk_cfg.get("x_ct0", "")
 
     all_tweets = {}  # tweet_id -> tweet dict for dedup
-    calls_made = 0
 
-    # Search by keywords (up to max_calls - 1, save one for account tweets)
-    keyword_budget = max(1, max_calls - len(accounts))
-    for keyword in keywords[:keyword_budget]:
-        if calls_made >= max_calls:
-            break
-        tweets = _run_bird(["search", keyword, "-n", str(posts_per_call), "--json"], auth_token, ct0)
-        calls_made += 1
-        for t in tweets:
-            tid = t.get("id") or t.get("tweet_id") or t.get("id_str")
-            if tid and tid not in all_tweets:
-                all_tweets[tid] = _normalize_tweet(t, tid)
-
-    # Fetch from specific accounts
+    # Fetch from curated accounts only (no keyword search — too much spam)
     for account in accounts:
-        if calls_made >= max_calls:
-            break
         handle = account.lstrip("@")
         tweets = _run_bird(["user-tweets", f"@{handle}", "-n", str(posts_per_call), "--json"], auth_token, ct0)
-        calls_made += 1
         for t in tweets:
             tid = t.get("id") or t.get("tweet_id") or t.get("id_str")
             if tid and tid not in all_tweets:
@@ -100,7 +82,7 @@ def collect_x_data(conn, cycle_id: int, cfg: dict | None = None) -> list[dict]:
     if stored:
         conn.commit()
 
-    log.info(f"X feed: {calls_made} bird calls, {len(stored)} tweets stored (cycle {cycle_id})")
+    log.info(f"X feed: {len(accounts)} accounts, {len(stored)} tweets stored (cycle {cycle_id})")
     return stored
 
 
