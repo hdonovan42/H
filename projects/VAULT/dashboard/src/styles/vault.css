@@ -749,3 +749,62 @@ html, body {
     font-size: 20px;
   }
 }
+
+/* ── Digest Cards ────────────────────────────────────────────── */
+
+.digest-card {
+  padding: 16px;
+}
+
+.digest-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.digest-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--alive);
+  background: var(--alive-glow);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.digest-card:not(:first-child) .digest-label {
+  color: var(--text-dim);
+  background: var(--bg-card-hover);
+}
+
+.digest-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.digest-text {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+/* ── Notes Link ──────────────────────────────────────────────── */
+
+.notes-link {
+  color: var(--alive);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-decoration: none;
+  text-transform: uppercase;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.notes-link:hover {
+  opacity: 1;
+  text-decoration: underline;
+}

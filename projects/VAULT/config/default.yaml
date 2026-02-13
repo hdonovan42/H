@@ -33,6 +33,11 @@ musk_ecosystem:
   max_x_calls_per_cycle: 7
   x_posts_per_call: 10
 
+digest:
+  max_age_hours: 4
+  hours_back: 48
+  model: claude-haiku-4-5-20251001
+
 edge:
   margin_of_safety: 0.10
   max_kelly_fraction: 0.25

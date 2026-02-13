@@ -11,6 +11,7 @@ async function fetchJSON(url) {
 
 export default function PipelineView({ calibration }) {
   const [pipeline, setPipeline] = useState(null);
+  const [digests, setDigests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [cycleId, setCycleId] = useState(null);
@@ -18,8 +19,12 @@ export default function PipelineView({ calibration }) {
   const fetchPipeline = useCallback(async (cid) => {
     try {
       const url = cid ? `/api/v1/pipeline/${cid}` : '/api/v1/pipeline/latest';
-      const data = await fetchJSON(url);
+      const [data, digestsData] = await Promise.all([
+        fetchJSON(url),
+        fetchJSON('/api/v1/digests').catch(() => []),
+      ]);
       setPipeline(data);
+      if (Array.isArray(digestsData)) setDigests(digestsData);
       setError(null);
       if (!cid && data.cycle_id) setCycleId(data.cycle_id);
     } catch (err) {
@@ -83,6 +88,26 @@ export default function PipelineView({ calibration }) {
         </div>
       </div>
 
+      {/* Intelligence Digests */}
+      {digests.length > 0 && (
+        <div style={{ marginTop: '16px' }}>
+          <div className="card-title" style={{ padding: '0 0 12px 0' }}>
+            Intelligence Digests ({digests.length})
+          </div>
+          {digests.map((d, i) => (
+            <div key={d.id || i} className="card digest-card" style={i > 0 ? { marginTop: '8px' } : undefined}>
+              <div className="digest-header">
+                <span className="digest-label">{i === 0 ? 'Current' : 'Previous'}</span>
+                <span className="digest-meta">
+                  {d.ts?.slice(0, 16).replace('T', ' ')} — {d.tweet_count} tweets
+                </span>
+              </div>
+              <div className="digest-text">{d.digest_text}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Phase 2 + 3: Estimates with edges */}
       {estimates.length > 0 && (
         <div style={{ marginTop: '16px' }}>
@@ -123,6 +148,18 @@ export default function PipelineView({ calibration }) {
       {/* Calibration */}
       <div style={{ marginTop: '16px' }}>
         <CalibrationChart data={calibration} />
+      </div>
+
+      {/* Notes link */}
+      <div style={{ marginTop: '24px', textAlign: 'center', paddingBottom: '16px' }}>
+        <a
+          href="/pipeline-notes.txt"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="notes-link"
+        >
+          Notes
+        </a>
       </div>
     </div>
   );

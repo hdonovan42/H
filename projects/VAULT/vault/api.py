@@ -357,6 +357,33 @@ def get_calibration():
         conn.close()
 
 
+# ── Digest ────────────────────────────────────────────────────────
+
+@app.get("/api/v1/digest/latest")
+def get_digest_latest():
+    conn = _conn()
+    try:
+        from vault.digest import get_latest_digest
+        result = get_latest_digest(conn)
+        return result or {"error": "No digests generated yet"}
+    finally:
+        conn.close()
+
+
+@app.get("/api/v1/digests")
+def get_digests(limit: int = Query(10, ge=1, le=50)):
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT id, ts, cycle_id, tweet_count, hours_back, digest_text, model_used, cost_usd "
+            "FROM digests ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 # ── X Feed ────────────────────────────────────────────────────────
 
 @app.get("/api/v1/x-feed")

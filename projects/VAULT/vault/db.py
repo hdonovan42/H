@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from vault.config_loader import get_db_path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -214,6 +214,18 @@ CREATE TABLE IF NOT EXISTS calibration (
     actual_outcome  INTEGER,                 -- 1=YES won, 0=NO won, NULL=unresolved
     resolved_at     TEXT
 );
+
+CREATE TABLE IF NOT EXISTS digests (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    cycle_id    INTEGER,
+    tweet_count INTEGER NOT NULL,
+    hours_back  INTEGER NOT NULL DEFAULT 48,
+    digest_text TEXT NOT NULL,
+    model_used  TEXT,
+    cost_usd    REAL DEFAULT 0,
+    FOREIGN KEY (cycle_id) REFERENCES cycles(id)
+);
 """
 
 
@@ -363,6 +375,29 @@ def _migrate(conn):
             "INSERT INTO meta (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             ("schema_version", "4"),
+        )
+        conn.commit()
+        version = 4
+
+    if version < 5:
+        # v5: add digests table
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS digests (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                cycle_id    INTEGER,
+                tweet_count INTEGER NOT NULL,
+                hours_back  INTEGER NOT NULL DEFAULT 48,
+                digest_text TEXT NOT NULL,
+                model_used  TEXT,
+                cost_usd    REAL DEFAULT 0,
+                FOREIGN KEY (cycle_id) REFERENCES cycles(id)
+            );
+        """)
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "5"),
         )
         conn.commit()
 

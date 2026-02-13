@@ -1,0 +1,168 @@
+VAULT Pipeline: Tweet Digest & Market Intelligence System
+=========================================================
+
+Overview
+--------
+The pipeline runs every cycle (~10 min) and transforms raw X/Twitter data
+into actionable prediction market intelligence. It has four phases:
+
+  Phase 1    Data Collection       $0       bird CLI fetches tweets + Polymarket scrape
+  Phase 1.5  Digest & Relevance    ~$0.003  rolling digest + per-market tweet matching
+  Phase 2    Probability Estimation ~$0.005  Claude estimates P(YES) blind to market odds
+  Phase 3    Edge Calculation       $0       pure math: edge = vault_prob - market_odds
+
+
+The Rolling Digest
+------------------
+The digest is a single evolving ~300-word intelligence briefing. It is NOT
+regenerated from scratch each time. Instead, each revision:
+
+  1. Fetches the PREVIOUS digest from the database
+  2. Queries only NEW tweets since that digest was created
+  3. Sends both to Haiku with the instruction:
+     "Update the previous briefing by incorporating the new tweets.
+      Add new themes. Update sentiment if shifted. Compress older items
+      that are no longer relevant -- do not drop them entirely, just
+      give them less space."
+  4. Stores the revised digest as a new row (audit trail)
+
+This means:
+  - Recent events get full detail
+  - Older events get progressively compressed into shorter mentions
+  - Nothing is ever completely forgotten -- it just takes less space
+  - Token cost stays flat regardless of how long VAULT has been running
+  - Each revision only processes NEW tweets, not the full archive
+
+If no new tweets exist since the last digest, the previous version is
+reused as-is (zero API cost). If generation fails, it falls back to
+the previous digest rather than returning nothing.
+
+First run (no previous digest): generates from scratch using the last
+48 hours of raw tweets.
+
+Caching: a digest is considered "fresh" for max_age_hours (default: 4h).
+During that window, the cached version is returned without any API call.
+
+
+Per-Market Relevance Filtering
+------------------------------
+For each market question, the system finds the most relevant tweets:
+
+  1. Extract keywords from the question
+     - Remove stopwords (the, and, will, etc.)
+     - Keep words >= 3 characters
+     - Example: "Will Goldman Sachs underwrite SpaceX IPO?"
+       -> [goldman, sachs, underwrite, spacex, ipo]
+
+  2. Search ALL tweets in the last 48h
+     - For each tweet, count how many keywords appear in the text
+     - Score = keyword_matches * (1 + likes/1000)
+     - Higher engagement boosts relevance
+
+  3. Return the top 5 tweets per market
+
+This is pure Python -- no API call, zero cost. Markets with no matching
+tweets show "(no relevant tweets found)" which signals low informational
+edge to the estimator.
+
+
+The Estimator Prompt
+--------------------
+The probability estimator (Haiku) sees a structured prompt:
+
+  INTELLIGENCE BRIEFING (rolling summary):
+    [the digest -- themes, sentiment, compressed history]
+
+  MARKETS AND EVIDENCE:
+    1. "Will Goldman Sachs underwrite SpaceX IPO?"
+       Relevant tweets:
+         @SawyerMerritt (6h ago): "Sources say..." [234 likes]
+
+    2. "Will Elon post 340-359 tweets?"
+       (no relevant tweets found -- limited information edge)
+
+  Rules:
+    - When no relevant tweets exist, confidence should be LOWER
+
+The estimator does NOT see Polymarket odds. This prevents anchoring
+bias -- the estimate is independent, and the edge calculator compares
+it against market odds afterwards.
+
+
+Edge Calculation (Phase 3)
+--------------------------
+Pure math, no API cost:
+
+  edge = vault_probability - market_odds
+
+If edge exceeds the margin of safety (default 10%) and confidence
+is above the minimum threshold (default 0.4), the market is flagged
+as "bet". Position sizing uses a Kelly criterion fraction.
+
+
+Data Flow Summary
+-----------------
+
+  x_posts table (all tweets ever collected)
+       |
+       +---> get_tweets_from_db(48h) ---> keyword match ---> per-market tweets
+       |
+       +---> new tweets since last digest ---> Haiku revision ---> rolling digest
+                                                                        |
+  musk_markets table (Polymarket scrape)                                |
+       |                                                                |
+       v                                                                v
+  estimate_probabilities(markets, digest, market_tweets)
+       |
+       v
+  edge = vault_prob - market_odds ---> bet / hold / exit recommendation
+       |
+       v
+  Decision agent sees: edge analysis + digest + open positions
+
+
+Cost Breakdown
+--------------
+  Digest revision:  ~$0.003 per generation, every 4h = ~$0.018/day
+  Estimator call:   ~$0.005 per cycle
+  Relevance filter: $0 (pure Python)
+  Edge calculation: $0 (pure math)
+
+  Total pipeline: ~$0.07/day at 10-min cycles
+
+
+Configuration (config/default.yaml)
+------------------------------------
+  digest:
+    max_age_hours: 4       # how long before regenerating
+    hours_back: 48         # first-run tweet window
+    model: claude-haiku-4-5-20251001
+
+  edge:
+    margin_of_safety: 0.10
+    min_confidence: 0.4
+    estimator_model: claude-haiku-4-5-20251001
+
+
+Database Tables
+---------------
+  digests:
+    id, ts, cycle_id, tweet_count, hours_back,
+    digest_text, model_used, cost_usd
+
+  Each row is a revision. The latest row is the current briefing.
+  Older rows are the audit trail showing how the briefing evolved.
+
+  x_posts:
+    tweet_id, author, text, created_at, likes, retweets,
+    retweeted_by, cycle_id, collected_at
+
+  All tweets ever collected. Used by both the digest generator
+  and the per-market relevance filter.
+
+
+API Endpoints
+-------------
+  GET /api/v1/digest/latest   Latest digest (single object)
+  GET /api/v1/digests         All digests (array, newest first)
+  GET /api/v1/pipeline/latest Full pipeline trace with all tweets

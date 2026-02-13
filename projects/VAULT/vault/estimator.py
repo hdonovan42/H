@@ -10,10 +10,12 @@ log = logging.getLogger("vault.estimator")
 
 
 def estimate_probabilities(conn, cycle_id: int, markets: list[dict],
-                           tweets: list[dict], cfg: dict | None = None) -> list[dict]:
+                           digest: str | None = None,
+                           market_tweets: dict[str, list[dict]] | None = None,
+                           cfg: dict | None = None) -> list[dict]:
     """Estimate probabilities for markets WITHOUT showing Polymarket odds.
 
-    Claude sees: market questions + relevant tweets + context.
+    Claude sees: digest briefing + per-market relevant tweets + questions.
     Claude does NOT see: Polymarket odds (prevents anchoring bias).
 
     Returns list of estimates: {market_id, vault_probability, confidence, reasoning}
@@ -30,7 +32,7 @@ def estimate_probabilities(conn, cycle_id: int, markets: list[dict],
     model = edge_cfg.get("estimator_model", cfg["agent"]["default_model"])
 
     # Build estimation prompt — deliberately excludes odds
-    prompt = _build_estimator_prompt(markets, tweets)
+    prompt = _build_estimator_prompt(markets, digest, market_tweets)
 
     # Include open positions for re-estimation
     open_preds = ledger.get_open_predictions(conn)
@@ -106,30 +108,54 @@ def estimate_probabilities(conn, cycle_id: int, markets: list[dict],
     return estimates
 
 
-def _build_estimator_prompt(markets: list[dict], tweets: list[dict]) -> str:
-    """Build the estimation prompt — deliberately excludes market odds."""
+def _build_estimator_prompt(markets: list[dict], digest: str | None = None,
+                            market_tweets: dict[str, list[dict]] | None = None) -> str:
+    """Build the estimation prompt — deliberately excludes market odds.
+
+    Uses rolling digest for broad context + per-market relevant tweets for evidence.
+    The digest is a single evolving document — it already contains compressed history.
+    """
     prompt = "For each market question below, estimate the probability of YES based on the evidence provided.\n"
     prompt += "You do NOT have access to market odds — form your own view.\n\n"
-    prompt += "MARKETS:\n"
+
+    # Rolling digest — contains both recent detail and compressed history
+    if digest:
+        prompt += "INTELLIGENCE BRIEFING (rolling summary — recent events in detail, older events compressed):\n"
+        prompt += f"  {digest}\n\n"
+    else:
+        prompt += "INTELLIGENCE BRIEFING: No intelligence available.\n\n"
+
+    # Markets with per-market evidence
+    prompt += "MARKETS AND EVIDENCE:\n"
+    if market_tweets is None:
+        market_tweets = {}
 
     for i, m in enumerate(markets):
-        prompt += f"  {i + 1}. \"{m.get('question', 'Unknown')}\"\n"
+        mid = m.get("id", "")
+        question = m.get("question", "Unknown")
+        prompt += f"  {i + 1}. \"{question}\"\n"
 
-    if tweets:
-        prompt += "\nRECENT X/TWITTER ACTIVITY:\n"
-        for t in tweets[:20]:  # Cap at 20 most recent tweets for token efficiency
-            author = t.get("author", "unknown")
-            text = t.get("text", "")[:200]  # Truncate long tweets
-            likes = t.get("likes", 0)
-            prompt += f"  @{author}: \"{text}\""
-            if likes and likes > 100:
-                prompt += f" [{likes} likes]"
-            prompt += "\n"
-    else:
-        prompt += "\nNo recent X/Twitter activity available.\n"
+        relevant = market_tweets.get(mid, [])
+        if relevant:
+            prompt += "     Relevant tweets:\n"
+            for t in relevant:
+                author = t.get("author", "unknown")
+                text = t.get("text", "")[:200]
+                likes = t.get("likes", 0)
+                age = _format_age(t.get("collected_at") or t.get("created_at"))
+                line = f"       @{author}"
+                if age:
+                    line += f" ({age})"
+                line += f": \"{text}\""
+                if likes and likes > 50:
+                    line += f" [{likes} likes]"
+                prompt += line + "\n"
+        else:
+            prompt += "     (no relevant tweets found — limited information edge)\n"
+        prompt += "\n"
 
     prompt += (
-        "\nFor each market, respond with a JSON array. Each element:\n"
+        "For each market, respond with a JSON array. Each element:\n"
         '{"market_index": 1, "probability": 0.65, "confidence": 0.7, '
         '"reasoning": "Brief 1-2 sentence explanation"}\n'
         "\nRules:\n"
@@ -137,8 +163,29 @@ def _build_estimator_prompt(markets: list[dict], tweets: list[dict]) -> str:
         "- confidence: how sure you are of your estimate (0.0 to 1.0)\n"
         "- reasoning: brief justification based on evidence\n"
         "- Be well-calibrated. Don't default to 50% — commit to a view.\n"
+        "- When no relevant tweets exist for a market, your confidence should be LOWER "
+        "(you have less informational edge).\n"
     )
     return prompt
+
+
+def _format_age(ts_str: str | None) -> str:
+    """Format a timestamp as a human-readable age like '6h ago'."""
+    if not ts_str:
+        return ""
+    try:
+        from datetime import datetime, timezone
+        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        delta = datetime.now(timezone.utc) - ts
+        hours = delta.total_seconds() / 3600
+        if hours < 1:
+            return f"{int(delta.total_seconds() / 60)}m ago"
+        elif hours < 24:
+            return f"{int(hours)}h ago"
+        else:
+            return f"{int(hours / 24)}d ago"
+    except Exception:
+        return ""
 
 
 def _parse_estimates(text: str, market_ids: list[str], questions: list[str], model: str) -> list[dict]:

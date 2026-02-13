@@ -8,6 +8,7 @@ from vault.x_feed import collect_x_data
 from vault.musk_markets import collect_musk_markets
 from vault.estimator import estimate_probabilities
 from vault.edge_calculator import calculate_edges
+from vault.digest import get_or_generate_digest, get_relevant_tweets
 
 log = logging.getLogger("vault.pipeline")
 
@@ -21,6 +22,8 @@ class PipelineResult:
     markets: list = field(default_factory=list)
     estimates: list = field(default_factory=list)
     edges: list = field(default_factory=list)
+    digest: str | None = None
+    market_tweets: dict = field(default_factory=dict)
     duration_ms: int = 0
     error: str | None = None
 
@@ -58,11 +61,32 @@ def run_pipeline(conn, cycle_id: int) -> PipelineResult:
             _record_run(conn, cycle_id, result)
             return result
 
+        # ── Phase 1.5: Digest + Per-Market Relevance ─────────────
+        log.info("Pipeline Phase 1.5: generating digest + relevance filtering")
+
+        result.digest = get_or_generate_digest(conn, cycle_id, cfg)
+
+        markets_with_tweets = 0
+        for m in result.markets:
+            mid = m.get("id", "")
+            question = m.get("question", "")
+            relevant = get_relevant_tweets(conn, question)
+            if relevant:
+                result.market_tweets[mid] = relevant
+                markets_with_tweets += 1
+
+        total_relevant = sum(len(v) for v in result.market_tweets.values())
+        log.info(
+            f"Relevance filter: {total_relevant} tweets across "
+            f"{markets_with_tweets}/{len(result.markets)} markets"
+        )
+
         # ── Phase 2: Probability Estimation ─────────────────────
         log.info(f"Pipeline Phase 2: estimating probabilities for {len(result.markets)} markets")
 
         result.estimates = estimate_probabilities(
-            conn, cycle_id, result.markets, result.tweets, cfg
+            conn, cycle_id, result.markets, result.digest,
+            result.market_tweets, cfg
         )
 
         if not result.estimates:
@@ -119,11 +143,10 @@ def get_pipeline_run(conn, cycle_id: int) -> dict | None:
 
     run = dict(run)
 
-    # Attach tweets
+    # Attach all tweets from DB (not just this cycle)
     run["tweets"] = [dict(r) for r in conn.execute(
-        "SELECT tweet_id, author, text, created_at, likes, retweets, retweeted_by "
-        "FROM x_posts WHERE cycle_id = ? ORDER BY id",
-        (cycle_id,),
+        "SELECT tweet_id, author, text, created_at, likes, retweets, retweeted_by, collected_at "
+        "FROM x_posts ORDER BY id DESC",
     ).fetchall()]
 
     # Attach estimates

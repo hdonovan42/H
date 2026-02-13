@@ -155,6 +155,11 @@ Every trade you make affects your balance. If your balance reaches $0, you die.
 ═══════════════════════════════════════
 """
 
+    # ── Twitter Intelligence Briefing ──
+    if pipeline_result and pipeline_result.digest:
+        prompt += "\n═══ TWITTER INTELLIGENCE BRIEFING ═══\n"
+        prompt += pipeline_result.digest + "\n"
+
     # ── Edge Analysis Section ──
     edges = pipeline_result.edges if pipeline_result else []
     bet_edges = [e for e in edges if e["action"] == "bet"]
