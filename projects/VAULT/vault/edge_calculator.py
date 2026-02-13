@@ -28,6 +28,7 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
     max_kelly = edge_cfg.get("max_kelly_fraction", 0.25)
     risk_free_rate = edge_cfg.get("risk_free_daily_rate", 0.0001)
     min_confidence = edge_cfg.get("min_confidence", 0.4)
+    market_duration_days = edge_cfg.get("market_duration_days", 30)  # assumed avg market duration
 
     balance = ledger.get_balance(conn)
     market_odds_map = {m["id"]: m for m in markets}
@@ -89,6 +90,11 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
 
         recommended_size = round(balance * adjusted_fraction, 2) if has_edge else 0
 
+        # Expected profit must beat risk-free return on the same capital
+        risk_free_return = recommended_size * risk_free_rate * market_duration_days
+        expected_profit = recommended_size * abs_edge * confidence
+        beats_risk_free = expected_profit > risk_free_return
+
         # Check if this is an open position
         open_pred = None
         for pred in open_preds:
@@ -102,11 +108,12 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
                 open_pred, vault_prob, confidence, market_yes, market_no,
                 risk_free_rate, margin_of_safety
             )
-        elif has_edge and recommended_size >= 0.50:  # Min bet $0.50
+        elif has_edge and recommended_size >= 0.50 and beats_risk_free:
             action = "bet"
             reasoning = (
                 f"{abs_edge:.0%} edge ({side}), confidence {confidence:.0%}, "
-                f"Kelly {adjusted_fraction:.1%} → ${recommended_size:.2f}"
+                f"Kelly {adjusted_fraction:.1%} → ${recommended_size:.2f}, "
+                f"expected profit ${expected_profit:.2f}"
             )
         else:
             action = "hold"
@@ -114,6 +121,10 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
                 reasoning = f"Edge {abs_edge:.0%} < margin {margin_of_safety:.0%}"
             elif confidence < min_confidence:
                 reasoning = f"Confidence {confidence:.0%} < minimum {min_confidence:.0%}"
+            elif not beats_risk_free:
+                reasoning = (
+                    f"Expected profit ${expected_profit:.2f} < risk-free ${risk_free_return:.2f}"
+                )
             else:
                 reasoning = f"Size ${recommended_size:.2f} below minimum"
 
@@ -197,10 +208,11 @@ def _analyze_open_position(pred: dict, vault_prob: float, confidence: float,
             f"P&L: ${unrealized_pnl:+.2f}"
         )
 
-    # 2. Remaining upside negligible (< risk-free return)
-    if remaining_ev < cost_basis * risk_free_rate * 7:  # Less than a week of risk-free
+    # 2. Remaining upside negligible (< risk-free return or < $0.50 absolute)
+    risk_free_threshold = max(cost_basis * risk_free_rate * 30, 0.50)
+    if remaining_ev < risk_free_threshold:
         return "exit", (
-            f"Remaining EV ${remaining_ev:.2f} < risk-free threshold, "
+            f"Remaining EV ${remaining_ev:.2f} < threshold ${risk_free_threshold:.2f}, "
             f"P&L: ${unrealized_pnl:+.2f}"
         )
 
