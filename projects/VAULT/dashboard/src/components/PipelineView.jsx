@@ -88,23 +88,21 @@ export default function PipelineView({ calibration }) {
         </div>
       </div>
 
-      {/* Intelligence Digests */}
+      {/* Intelligence Digest — latest only */}
       {digests.length > 0 && (
         <div style={{ marginTop: '16px' }}>
           <div className="card-title" style={{ padding: '0 0 12px 0' }}>
-            Intelligence Digests ({digests.length})
+            Intelligence Digest
           </div>
-          {digests.map((d, i) => (
-            <div key={d.id || i} className="card digest-card" style={i > 0 ? { marginTop: '8px' } : undefined}>
-              <div className="digest-header">
-                <span className="digest-label">{i === 0 ? 'Current' : 'Previous'}</span>
-                <span className="digest-meta">
-                  {d.ts?.slice(0, 16).replace('T', ' ')} — {d.tweet_count} tweets
-                </span>
-              </div>
-              <div className="digest-text">{d.digest_text}</div>
+          <div className="card digest-card">
+            <div className="digest-header">
+              <span className="digest-label">Current</span>
+              <span className="digest-meta">
+                {digests[0].ts?.slice(0, 16).replace('T', ' ')} — {digests[0].tweet_count} tweets
+              </span>
             </div>
-          ))}
+            <div className="digest-text">{digests[0].digest_text}</div>
+          </div>
         </div>
       )}
 
