@@ -402,7 +402,7 @@ def get_x_feed(limit: int = Query(50, ge=1, le=200)):
 def get_musk_markets():
     conn = _conn()
     try:
-        from vault.musk_markets import get_tracked_markets, get_odds_history
+        from vault.market_discovery import get_tracked_markets, get_odds_history
         markets = get_tracked_markets(conn)
         # Attach recent odds history to each market
         for m in markets:

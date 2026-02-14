@@ -160,6 +160,15 @@ Every trade you make affects your balance. If your balance reaches $0, you die.
         prompt += "\n═══ TWITTER INTELLIGENCE BRIEFING ═══\n"
         prompt += pipeline_result.digest + "\n"
 
+    # ── Actionable Themes ──
+    if pipeline_result and pipeline_result.themes:
+        prompt += "\n═══ ACTIONABLE THEMES ═══\n"
+        for t in pipeline_result.themes:
+            edge_type = t.get("edge_type", "event")
+            keywords = ", ".join(t.get("keywords", []))
+            prompt += f"  [{edge_type.upper()}] {t.get('theme', '')} — keywords: {keywords}\n"
+        prompt += "\n"
+
     # ── Edge Analysis Section ──
     edges = pipeline_result.edges if pipeline_result else []
     bet_edges = [e for e in edges if e["action"] == "bet"]
@@ -213,6 +222,13 @@ Every trade you make affects your balance. If your balance reaches $0, you die.
                     prompt += f" | expires {p['end_date'][:10]}"
                 prompt += "\n"
 
+                # Show entry thesis if available
+                if p.get("entry_edge") is not None:
+                    prompt += f"    entry edge: {p['entry_edge']:+.0%}"
+                    if p.get("entry_reasoning"):
+                        prompt += f" — {p['entry_reasoning'][:80]}"
+                    prompt += "\n"
+
                 if pos_edge:
                     prompt += (
                         f"    → RECOMMENDATION: {pos_edge['action'].upper()} — {pos_edge['reasoning']}\n"
@@ -258,5 +274,11 @@ RULES:
 - 'wait' is cheapest. 'hold' means you analyzed and decided not to trade.
 - You MUST end each cycle with exactly one terminal action: bet, sell_prediction, hold, or wait.
 - Use the market_id from the edge analysis when placing bets
+
+SELL DISCIPLINE — only sell when the thesis is INVALIDATED:
+- The market converging toward your estimate is a WIN, not an exit signal
+- Only sell when: your estimate flipped against your position, your thesis substantially weakened (< 50% of entry estimate), or remaining EV is negligible
+- DO NOT sell just because the edge narrowed — that means the market agrees with you
+- Let winners ride to resolution when the thesis is intact
 """
     return prompt

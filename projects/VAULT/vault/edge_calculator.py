@@ -178,12 +178,22 @@ def _analyze_open_position(pred: dict, vault_prob: float, confidence: float,
                            risk_free_rate: float, margin_of_safety: float) -> tuple[str, str]:
     """Analyze whether to hold or exit an open position.
 
+    Sell discipline: only exit when the THESIS is invalidated, not when the
+    market agrees with you (edge narrowing is a win, not an exit signal).
+
+    Exit triggers:
+    a) Estimate flipped against position (vault < 45% for your side, confidence >= 50%)
+    b) Estimate dropped to < 50% of entry estimate (thesis substantially weakened)
+    c) Remaining EV < risk-free return AND < $0.50 absolute
+
     Returns (action, reasoning) tuple.
     """
     side = pred["side"]
     shares = pred["shares"]
     cost_basis = pred["cost_basis"]
     entry_odds = pred["entry_odds"]
+    entry_edge = pred.get("entry_edge")
+    entry_reasoning = pred.get("entry_reasoning")
 
     if side == "YES":
         current_odds = market_yes
@@ -196,37 +206,52 @@ def _analyze_open_position(pred: dict, vault_prob: float, confidence: float,
     unrealized_pnl = current_value - cost_basis
 
     # Remaining expected value: what we expect to gain from here
-    expected_payout = shares * vault_estimate_for_side  # expected final value
+    expected_payout = shares * vault_estimate_for_side
     remaining_ev = expected_payout - current_value
 
-    # Exit conditions:
-    # 1. Edge has evaporated (market moved to match our estimate)
-    edge_remaining = abs(vault_estimate_for_side - current_odds)
-    if edge_remaining < margin_of_safety * 0.5:  # Edge mostly gone
+    # Entry thesis context for logging
+    thesis_str = ""
+    if entry_edge is not None:
+        thesis_str = f" Entry edge: {entry_edge:+.0%}."
+    if entry_reasoning:
+        thesis_str += f" Entry thesis: {entry_reasoning[:80]}"
+
+    # Exit condition (a): Estimate flipped against position
+    if vault_estimate_for_side < 0.45 and confidence >= 0.5:
         return "exit", (
-            f"Edge evaporated: VAULT {vault_estimate_for_side:.0%} ≈ market {current_odds:.0%}, "
-            f"P&L: ${unrealized_pnl:+.2f}"
+            f"Thesis invalidated: VAULT now {vault_estimate_for_side:.0%} for {side} "
+            f"(confidence {confidence:.0%}), P&L: ${unrealized_pnl:+.2f}.{thesis_str}"
         )
 
-    # 2. Remaining upside negligible (< risk-free return or < $0.50 absolute)
-    risk_free_threshold = max(cost_basis * risk_free_rate * 30, 0.50)
-    if remaining_ev < risk_free_threshold:
+    # Exit condition (b): Estimate dropped to < 50% of entry estimate
+    # entry_edge is raw edge (vault_prob - market_yes), entry_odds is the price of OUR side at entry
+    if entry_edge is not None:
+        if side == "YES":
+            # entry_odds = market_yes at entry, vault_estimate_for_YES = entry_odds + entry_edge
+            entry_estimate = min(0.99, max(0.01, entry_odds + entry_edge))
+        else:
+            # entry_odds = market_no at entry, entry_edge = vault_prob - (1 - entry_odds)
+            # vault_estimate_for_NO = 1 - vault_prob = 1 - (entry_edge + 1 - entry_odds) = entry_odds - entry_edge
+            entry_estimate = min(0.99, max(0.01, entry_odds - entry_edge))
+
+        if vault_estimate_for_side < entry_estimate * 0.5:
+            return "exit", (
+                f"Thesis weakened: VAULT {vault_estimate_for_side:.0%} < 50% of entry estimate "
+                f"{entry_estimate:.0%} for {side}, P&L: ${unrealized_pnl:+.2f}.{thesis_str}"
+            )
+
+    # Exit condition (c): Remaining EV below risk-free AND below $0.50 absolute
+    risk_free_threshold = cost_basis * risk_free_rate * 30
+    if remaining_ev < risk_free_threshold and remaining_ev < 0.50:
         return "exit", (
-            f"Remaining EV ${remaining_ev:.2f} < threshold ${risk_free_threshold:.2f}, "
-            f"P&L: ${unrealized_pnl:+.2f}"
+            f"Remaining EV ${remaining_ev:.2f} < risk-free ${risk_free_threshold:.2f} "
+            f"and < $0.50, P&L: ${unrealized_pnl:+.2f}.{thesis_str}"
         )
 
-    # 3. Our estimate flipped against us
-    if vault_estimate_for_side < 0.5 and confidence > 0.5:
-        return "exit", (
-            f"Estimate flipped: VAULT now {vault_estimate_for_side:.0%} for {side}, "
-            f"P&L: ${unrealized_pnl:+.2f}"
-        )
-
-    # Otherwise hold
+    # Otherwise hold — market converging toward our estimate is a WIN
     return "hold", (
         f"Holding: VAULT {vault_estimate_for_side:.0%} vs market {current_odds:.0%}, "
-        f"remaining EV ${remaining_ev:.2f}, P&L: ${unrealized_pnl:+.2f}"
+        f"remaining EV ${remaining_ev:.2f}, P&L: ${unrealized_pnl:+.2f}.{thesis_str}"
     )
 
 

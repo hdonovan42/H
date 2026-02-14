@@ -66,6 +66,10 @@ def run_cycle(conn) -> dict:
         except Exception as e:
             log.error(f"Pipeline failed, falling back to standard prompt: {e}")
 
+    # Pass pipeline edges to context for actuators
+    if pipeline_result and pipeline_result.edges:
+        context["pipeline_edges"] = pipeline_result.edges
+
     # Build system prompt — edge-based if pipeline ran, standard otherwise
     if pipeline_result and pipeline_result.enabled:
         system_prompt = build_edge_prompt(conn, pipeline_result)

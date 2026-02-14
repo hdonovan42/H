@@ -165,6 +165,11 @@ def _build_estimator_prompt(markets: list[dict], digest: str | None = None,
         "- Be well-calibrated. Don't default to 50% — commit to a view.\n"
         "- When no relevant tweets exist for a market, your confidence should be LOWER "
         "(you have less informational edge).\n"
+        "- STATISTICAL/COUNTING markets (tweet counts, follower milestones, weekly post counts, "
+        "engagement metrics) → SET CONFIDENCE TO 0.2-0.3. You have no informational edge on "
+        "these — they are essentially random.\n"
+        "- EVENT markets (policy decisions, product launches, regulatory actions, legal outcomes) → "
+        "confidence should reflect your SPECIFIC evidence for that event.\n"
     )
     return prompt
 

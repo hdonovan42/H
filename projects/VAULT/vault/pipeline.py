@@ -5,10 +5,10 @@ import time
 from dataclasses import dataclass, field
 from vault.config_loader import load_config
 from vault.x_feed import collect_x_data
-from vault.musk_markets import collect_musk_markets
+from vault.market_discovery import discover_markets
 from vault.estimator import estimate_probabilities
 from vault.edge_calculator import calculate_edges
-from vault.digest import get_or_generate_digest, get_relevant_tweets
+from vault.digest import get_or_generate_digest, get_relevant_tweets, extract_themes
 
 log = logging.getLogger("vault.pipeline")
 
@@ -23,6 +23,7 @@ class PipelineResult:
     estimates: list = field(default_factory=list)
     edges: list = field(default_factory=list)
     digest: str | None = None
+    themes: list = field(default_factory=list)
     market_tweets: dict = field(default_factory=dict)
     duration_ms: int = 0
     error: str | None = None
@@ -49,22 +50,42 @@ def run_pipeline(conn, cycle_id: int) -> PipelineResult:
     result = PipelineResult(cycle_id=cycle_id)
 
     try:
-        # ── Phase 1: Data Collection ────────────────────────────
-        log.info(f"Pipeline Phase 1: collecting data (cycle {cycle_id})")
-
+        # ── Phase 1a: Collect tweets ──────────────────────────────
+        log.info(f"Pipeline Phase 1a: collecting tweets (cycle {cycle_id})")
         result.tweets = collect_x_data(conn, cycle_id, cfg)
-        result.markets = collect_musk_markets(conn, cycle_id, cfg)
+
+        # ── Phase 1b: Generate/revise digest ──────────────────────
+        log.info("Pipeline Phase 1b: generating digest")
+        result.digest = get_or_generate_digest(conn, cycle_id, cfg)
+
+        # ── Phase 1c: Extract themes from digest ──────────────────
+        theme_cfg = cfg.get("theme_extraction", True)
+        if result.digest and theme_cfg:
+            log.info("Pipeline Phase 1c: extracting themes from digest")
+            result.themes = extract_themes(conn, cycle_id, result.digest, cfg)
+        else:
+            result.themes = []
+
+        # ── Phase 1d: Discover markets matching themes ────────────
+        log.info(f"Pipeline Phase 1d: discovering markets ({len(result.themes)} themes)")
+        result.markets = discover_markets(conn, cycle_id, result.themes, cfg)
 
         if not result.markets:
-            log.warning("Pipeline: no markets found, skipping estimation")
-            result.duration_ms = int((time.monotonic() - start) * 1000)
-            _record_run(conn, cycle_id, result)
-            return result
+            # Fallback: if no themed markets found, still re-estimate open positions
+            from vault import ledger as _ledger
+            open_preds = _ledger.get_open_predictions(conn)
+            if open_preds:
+                log.info("No themed markets but have open positions — running estimation for exits")
+                # Create minimal market list from open positions for re-estimation
+                result.markets = []
+            else:
+                log.warning("Pipeline: no markets found and no open positions, skipping estimation")
+                result.duration_ms = int((time.monotonic() - start) * 1000)
+                _record_run(conn, cycle_id, result)
+                return result
 
-        # ── Phase 1.5: Digest + Per-Market Relevance ─────────────
-        log.info("Pipeline Phase 1.5: generating digest + relevance filtering")
-
-        result.digest = get_or_generate_digest(conn, cycle_id, cfg)
+        # ── Phase 1e: Per-market relevance filtering ──────────────
+        log.info("Pipeline Phase 1e: per-market relevance filtering")
 
         markets_with_tweets = 0
         for m in result.markets:

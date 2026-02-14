@@ -67,6 +67,16 @@ class BetActuator(BaseActuator):
         if odds <= 0 or odds >= 1:
             return {"success": False, "error": f"Invalid odds: {odds}"}
 
+        # Look up edge data from pipeline if available
+        entry_edge = None
+        entry_reasoning_text = None
+        pipeline_edges = context.get("pipeline_edges", [])
+        for pe in pipeline_edges:
+            if pe.get("market_id") == market_id:
+                entry_edge = pe.get("edge")
+                entry_reasoning_text = pe.get("reasoning")
+                break
+
         prediction_id = ledger.record_prediction_buy(
             conn,
             market_id=market_id,
@@ -79,6 +89,8 @@ class BetActuator(BaseActuator):
             clob_token_id=None,
             end_date=market.get("end_date"),
             cycle_id=context.get("cycle_id"),
+            entry_edge=entry_edge,
+            entry_reasoning=entry_reasoning_text or reasoning,
         )
 
         new_balance = ledger.get_balance(conn)

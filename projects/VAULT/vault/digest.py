@@ -178,6 +178,108 @@ def get_or_generate_digest(conn, cycle_id: int, cfg: dict | None = None) -> str 
     return digest_text
 
 
+def extract_themes(conn, cycle_id: int, digest_text: str,
+                    cfg: dict | None = None) -> list[dict]:
+    """Extract actionable prediction market themes from the digest.
+
+    Haiku call (~$0.001) reads the digest and returns themes with keywords.
+    System prompt explicitly excludes statistical/counting markets.
+
+    Returns list of theme dicts: {theme, keywords, edge_type}
+    """
+    if cfg is None:
+        cfg = load_config()
+
+    model = cfg.get("digest", {}).get("model", cfg["agent"]["default_model"])
+
+    system = (
+        "You extract actionable prediction market themes from intelligence briefings. "
+        "For each theme, provide keywords that would match relevant Polymarket questions. "
+        "EXCLUDE themes about:\n"
+        "- Tweet counts, post counts, or social media statistics\n"
+        "- Follower milestones or engagement metrics\n"
+        "- Weekly/monthly/daily counting markets\n"
+        "Focus on EVENT-driven themes: policy decisions, product launches, regulatory actions, "
+        "executive moves, legal outcomes, scientific milestones, geopolitical events.\n"
+        "Respond ONLY with valid JSON — no markdown, no explanation outside the JSON."
+    )
+
+    user_prompt = (
+        f"Extract actionable prediction market themes from this briefing:\n\n"
+        f"{digest_text}\n\n"
+        f"For each theme, provide:\n"
+        f"- theme: short description (5-10 words)\n"
+        f"- keywords: list of 2-4 search terms that would match Polymarket questions\n"
+        f"- edge_type: 'event' (specific upcoming event) or 'sentiment' (directional view)\n\n"
+        f"Return a JSON array. Example:\n"
+        f'[{{"theme": "EPA emissions ruling expected", "keywords": ["EPA", "emissions", "regulation"], "edge_type": "event"}}]\n'
+        f"Return [] if no actionable themes."
+    )
+
+    try:
+        response = call_claude(
+            conn=conn,
+            ledger_mod=ledger,
+            model=model,
+            system=system,
+            messages=[{"role": "user", "content": user_prompt}],
+            cycle_id=cycle_id,
+            purpose="theme_extraction",
+        )
+    except Exception as e:
+        log.error(f"Theme extraction failed: {e}")
+        return []
+
+    text = ""
+    for block in response.get("content", []):
+        if block.get("type") == "text":
+            text += block["text"]
+
+    themes = _parse_themes(text)
+    cost = response.get("cost", 0)
+    log.info(f"Theme extraction: {len(themes)} themes (${cost:.4f})")
+    return themes
+
+
+def _parse_themes(text: str) -> list[dict]:
+    """Parse Claude's JSON response into theme dicts."""
+    import json
+
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+        text = text.strip()
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("[")
+        end = text.rfind("]")
+        if start >= 0 and end > start:
+            try:
+                parsed = json.loads(text[start:end + 1])
+            except json.JSONDecodeError:
+                log.warning(f"Failed to parse themes: {text[:200]}")
+                return []
+        else:
+            log.warning(f"No JSON array in themes response: {text[:200]}")
+            return []
+
+    if not isinstance(parsed, list):
+        return []
+
+    themes = []
+    for item in parsed:
+        if isinstance(item, dict) and "keywords" in item:
+            themes.append({
+                "theme": item.get("theme", ""),
+                "keywords": item.get("keywords", []),
+                "edge_type": item.get("edge_type", "event"),
+            })
+    return themes
+
+
 def get_relevant_tweets(conn, market_question: str, hours_back: int = 48, max_tweets: int = 5) -> list[dict]:
     """Pure Python keyword matching — find tweets relevant to a market question.
 
