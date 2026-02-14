@@ -314,6 +314,102 @@ def get_relevant_tweets(conn, market_question: str, hours_back: int = 48, max_tw
 
 
 
+def get_raw_tweets_for_prompt(conn, cfg: dict | None = None) -> str | None:
+    """Return raw tweets from last N hours, formatted and grouped by account.
+
+    Output format:
+      @elonmusk (37 posts, last 24h):
+        [2h ago] "Full tweet text here" [1.2k likes, 340 RT]
+
+    Only curated accounts + their retweets.
+    """
+    if cfg is None:
+        cfg = load_config()
+
+    intel_cfg = cfg.get("intelligence", {})
+    hours = intel_cfg.get("raw_tweet_hours", 24)
+    curated = set(cfg.get("musk_ecosystem", {}).get("x_accounts", []))
+
+    tweets = get_tweets_from_db(conn, hours)
+    if not tweets:
+        return None
+
+    # Filter to curated accounts (author or retweeted_by)
+    filtered = []
+    for t in tweets:
+        author = t.get("author", "")
+        rt_by = t.get("retweeted_by", "")
+        if author in curated or rt_by in curated:
+            filtered.append(t)
+
+    if not filtered:
+        return None
+
+    # Group by curated account
+    by_account = {}
+    for t in filtered:
+        # Group under the curated account that surfaced it
+        rt_by = t.get("retweeted_by", "")
+        group_key = rt_by if rt_by in curated else t.get("author", "unknown")
+        if group_key not in by_account:
+            by_account[group_key] = []
+        by_account[group_key].append(t)
+
+    lines = []
+    total = 0
+    for account in sorted(by_account, key=lambda a: -len(by_account[a])):
+        acct_tweets = by_account[account]
+        total += len(acct_tweets)
+        lines.append(f"@{account} ({len(acct_tweets)} posts, last {hours}h):")
+        for t in acct_tweets:
+            text = (t.get("text") or "")[:280]
+            likes = t.get("likes", 0) or 0
+            retweets = t.get("retweets", 0) or 0
+            age = _format_tweet_age(t.get("collected_at") or t.get("created_at"))
+            line = f"  [{age}] \"{text}\""
+            if likes > 50 or retweets > 10:
+                parts = []
+                if likes > 0:
+                    parts.append(f"{_compact_num(likes)} likes")
+                if retweets > 0:
+                    parts.append(f"{_compact_num(retweets)} RT")
+                line += f" [{', '.join(parts)}]"
+            if t.get("retweeted_by"):
+                line += f" (RT'd by @{t['retweeted_by']})"
+            lines.append(line)
+        lines.append("")
+
+    log.info(f"Raw tweets for prompt: {total} from {len(by_account)} accounts")
+    return "\n".join(lines)
+
+
+def _format_tweet_age(ts_str: str | None) -> str:
+    """Format a timestamp as a human-readable age."""
+    if not ts_str:
+        return "?"
+    try:
+        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        delta = datetime.now(timezone.utc) - ts
+        hours = delta.total_seconds() / 3600
+        if hours < 1:
+            return f"{int(delta.total_seconds() / 60)}m ago"
+        elif hours < 24:
+            return f"{int(hours)}h ago"
+        else:
+            return f"{int(hours / 24)}d ago"
+    except Exception:
+        return "?"
+
+
+def _compact_num(n: int) -> str:
+    """Format number compactly: 1234 → 1.2k."""
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    elif n >= 1_000:
+        return f"{n / 1_000:.1f}k"
+    return str(n)
+
+
 def get_latest_digest(conn) -> dict | None:
     """Get the most recent digest for the API endpoint."""
     row = conn.execute(

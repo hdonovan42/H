@@ -12,10 +12,11 @@ log = logging.getLogger("vault.estimator")
 def estimate_probabilities(conn, cycle_id: int, markets: list[dict],
                            digest: str | None = None,
                            market_tweets: dict[str, list[dict]] | None = None,
-                           cfg: dict | None = None) -> list[dict]:
+                           cfg: dict | None = None,
+                           raw_tweets: str | None = None) -> list[dict]:
     """Estimate probabilities for markets WITHOUT showing Polymarket odds.
 
-    Claude sees: digest briefing + per-market relevant tweets + questions.
+    Claude sees: master intelligence doc + raw tweets + per-market relevant tweets + questions.
     Claude does NOT see: Polymarket odds (prevents anchoring bias).
 
     Returns list of estimates: {market_id, vault_probability, confidence, reasoning}
@@ -32,7 +33,7 @@ def estimate_probabilities(conn, cycle_id: int, markets: list[dict],
     model = edge_cfg.get("estimator_model", cfg["agent"]["default_model"])
 
     # Build estimation prompt — deliberately excludes odds
-    prompt = _build_estimator_prompt(markets, digest, market_tweets)
+    prompt = _build_estimator_prompt(markets, digest, market_tweets, raw_tweets)
 
     # Include open positions for re-estimation
     open_preds = ledger.get_open_predictions(conn)
@@ -109,21 +110,27 @@ def estimate_probabilities(conn, cycle_id: int, markets: list[dict],
 
 
 def _build_estimator_prompt(markets: list[dict], digest: str | None = None,
-                            market_tweets: dict[str, list[dict]] | None = None) -> str:
+                            market_tweets: dict[str, list[dict]] | None = None,
+                            raw_tweets: str | None = None) -> str:
     """Build the estimation prompt — deliberately excludes market odds.
 
-    Uses rolling digest for broad context + per-market relevant tweets for evidence.
-    The digest is a single evolving document — it already contains compressed history.
+    Uses master intelligence doc for strategic context + raw tweets for granular evidence
+    + per-market relevant tweets for targeted evidence.
     """
     prompt = "For each market question below, estimate the probability of YES based on the evidence provided.\n"
     prompt += "You do NOT have access to market odds — form your own view.\n\n"
 
-    # Rolling digest — contains both recent detail and compressed history
+    # Master intelligence document — updated daily by Opus
     if digest:
-        prompt += "INTELLIGENCE BRIEFING (rolling summary — recent events in detail, older events compressed):\n"
+        prompt += "MASTER INTELLIGENCE (updated daily by senior analyst):\n"
         prompt += f"  {digest}\n\n"
     else:
-        prompt += "INTELLIGENCE BRIEFING: No intelligence available.\n\n"
+        prompt += "MASTER INTELLIGENCE: No intelligence document available.\n\n"
+
+    # Raw tweets — full signal, grouped by account
+    if raw_tweets:
+        prompt += "RAW TWEETS (last 24 hours, by source):\n"
+        prompt += f"{raw_tweets}\n\n"
 
     # Markets with per-market evidence
     prompt += "MARKETS AND EVIDENCE:\n"

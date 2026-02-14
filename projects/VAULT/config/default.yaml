@@ -38,7 +38,10 @@ digest:
   hours_back: 48
   model: claude-haiku-4-5-20251001
 
-theme_extraction: true
+intelligence:
+  model: claude-opus-4-6
+  update_hour_utc: 0
+  raw_tweet_hours: 24
 
 edge:
   margin_of_safety: 0.15

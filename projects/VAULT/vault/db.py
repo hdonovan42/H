@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from vault.config_loader import get_db_path
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -228,6 +228,16 @@ CREATE TABLE IF NOT EXISTS digests (
     cost_usd    REAL DEFAULT 0,
     FOREIGN KEY (cycle_id) REFERENCES cycles(id)
 );
+
+CREATE TABLE IF NOT EXISTS master_intelligence (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    document    TEXT NOT NULL,
+    themes_json TEXT,
+    tweet_count INTEGER DEFAULT 0,
+    model_used  TEXT,
+    cost_usd    REAL DEFAULT 0
+);
 """
 
 
@@ -415,6 +425,27 @@ def _migrate(conn):
             "INSERT INTO meta (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             ("schema_version", "6"),
+        )
+        conn.commit()
+        version = 6
+
+    if version < 7:
+        # v7: add master_intelligence table
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS master_intelligence (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                document    TEXT NOT NULL,
+                themes_json TEXT,
+                tweet_count INTEGER DEFAULT 0,
+                model_used  TEXT,
+                cost_usd    REAL DEFAULT 0
+            );
+        """)
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "7"),
         )
         conn.commit()
 

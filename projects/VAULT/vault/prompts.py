@@ -155,9 +155,9 @@ Every trade you make affects your balance. If your balance reaches $0, you die.
 ═══════════════════════════════════════
 """
 
-    # ── Twitter Intelligence Briefing ──
+    # ── Master Intelligence Document ──
     if pipeline_result and pipeline_result.digest:
-        prompt += "\n═══ TWITTER INTELLIGENCE BRIEFING ═══\n"
+        prompt += "\n═══ MASTER INTELLIGENCE ═══\n"
         prompt += pipeline_result.digest + "\n"
 
     # ── Actionable Themes ──
@@ -168,6 +168,11 @@ Every trade you make affects your balance. If your balance reaches $0, you die.
             keywords = ", ".join(t.get("keywords", []))
             prompt += f"  [{edge_type.upper()}] {t.get('theme', '')} — keywords: {keywords}\n"
         prompt += "\n"
+
+    # ── Raw tweet count context ──
+    if pipeline_result and pipeline_result.raw_tweets:
+        tweet_lines = pipeline_result.raw_tweets.count("\n")
+        prompt += f"(Raw tweets: ~{tweet_lines} lines from curated accounts fed to estimator)\n\n"
 
     # ── Edge Analysis Section ──
     edges = pipeline_result.edges if pipeline_result else []

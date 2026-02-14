@@ -1,5 +1,6 @@
 """Pipeline orchestrator — Data → Estimate → Edge in three phases."""
 
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -8,7 +9,8 @@ from vault.x_feed import collect_x_data
 from vault.market_discovery import discover_markets
 from vault.estimator import estimate_probabilities
 from vault.edge_calculator import calculate_edges
-from vault.digest import get_or_generate_digest, get_relevant_tweets, extract_themes
+from vault.digest import get_relevant_tweets, get_raw_tweets_for_prompt
+from vault.intelligence import should_update_intelligence, update_intelligence, get_latest_intelligence
 
 log = logging.getLogger("vault.pipeline")
 
@@ -24,6 +26,7 @@ class PipelineResult:
     edges: list = field(default_factory=list)
     digest: str | None = None
     themes: list = field(default_factory=list)
+    raw_tweets: str | None = None
     market_tweets: dict = field(default_factory=dict)
     duration_ms: int = 0
     error: str | None = None
@@ -54,20 +57,30 @@ def run_pipeline(conn, cycle_id: int) -> PipelineResult:
         log.info(f"Pipeline Phase 1a: collecting tweets (cycle {cycle_id})")
         result.tweets = collect_x_data(conn, cycle_id, cfg)
 
-        # ── Phase 1b: Generate/revise digest ──────────────────────
-        log.info("Pipeline Phase 1b: generating digest")
-        result.digest = get_or_generate_digest(conn, cycle_id, cfg)
-
-        # ── Phase 1c: Extract themes from digest ──────────────────
-        theme_cfg = cfg.get("theme_extraction", True)
-        if result.digest and theme_cfg:
-            log.info("Pipeline Phase 1c: extracting themes from digest")
-            result.themes = extract_themes(conn, cycle_id, result.digest, cfg)
+        # ── Phase 1b: Daily intelligence update if due ────────────
+        if should_update_intelligence(conn, cfg):
+            log.info("Pipeline Phase 1b: daily intelligence update (Opus)")
+            update_intelligence(conn, cycle_id, cfg)
         else:
+            log.info("Pipeline Phase 1b: intelligence document up to date")
+
+        # ── Phase 1c: Load master intelligence + themes ───────────
+        intel = get_latest_intelligence(conn)
+        if intel:
+            result.digest = intel["document"]
+            result.themes = json.loads(intel["themes_json"]) if intel.get("themes_json") else []
+            log.info(f"Pipeline Phase 1c: loaded intelligence ({len(result.digest)} chars, {len(result.themes)} themes)")
+        else:
+            log.warning("Pipeline Phase 1c: no intelligence document — seed one with 'vault seed-intel'")
+            result.digest = None
             result.themes = []
 
-        # ── Phase 1d: Discover markets matching themes ────────────
-        log.info(f"Pipeline Phase 1d: discovering markets ({len(result.themes)} themes)")
+        # ── Phase 1d: Load raw tweets for estimator ───────────────
+        result.raw_tweets = get_raw_tweets_for_prompt(conn, cfg)
+        log.info(f"Pipeline Phase 1d: raw tweets loaded ({len(result.raw_tweets)} chars)" if result.raw_tweets else "Pipeline Phase 1d: no raw tweets")
+
+        # ── Phase 1e: Discover markets matching themes ────────────
+        log.info(f"Pipeline Phase 1e: discovering markets ({len(result.themes)} themes)")
         result.markets = discover_markets(conn, cycle_id, result.themes, cfg)
 
         if not result.markets:
@@ -84,8 +97,8 @@ def run_pipeline(conn, cycle_id: int) -> PipelineResult:
                 _record_run(conn, cycle_id, result)
                 return result
 
-        # ── Phase 1e: Per-market relevance filtering ──────────────
-        log.info("Pipeline Phase 1e: per-market relevance filtering")
+        # ── Phase 1f: Per-market relevance filtering ──────────────
+        log.info("Pipeline Phase 1f: per-market relevance filtering")
 
         markets_with_tweets = 0
         for m in result.markets:
@@ -107,7 +120,7 @@ def run_pipeline(conn, cycle_id: int) -> PipelineResult:
 
         result.estimates = estimate_probabilities(
             conn, cycle_id, result.markets, result.digest,
-            result.market_tweets, cfg
+            result.market_tweets, cfg, raw_tweets=result.raw_tweets
         )
 
         if not result.estimates:

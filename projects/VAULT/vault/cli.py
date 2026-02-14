@@ -136,6 +136,40 @@ def resume():
     click.echo("VAULT resumed.")
 
 
+@cli.command("seed-intel")
+@click.argument("filepath", type=click.Path(exists=True))
+def seed_intel(filepath):
+    """Seed the master intelligence document from a file."""
+    from vault.intelligence import seed_intelligence
+
+    with open(filepath, "r") as f:
+        text = f.read().strip()
+
+    # Check for THEMES_JSON line
+    themes_json = None
+    if "THEMES_JSON:" in text:
+        parts = text.split("THEMES_JSON:")
+        document = parts[0].strip()
+        try:
+            import json
+            themes_json = json.dumps(json.loads(parts[1].strip()))
+        except (json.JSONDecodeError, IndexError):
+            document = text
+            click.echo("Warning: Could not parse THEMES_JSON line — storing document only.")
+    else:
+        document = text
+
+    conn = init_db()
+    seed_intelligence(conn, document, themes_json)
+    conn.close()
+
+    click.echo(f"Seeded master intelligence document ({len(document)} chars)")
+    if themes_json:
+        import json
+        themes = json.loads(themes_json)
+        click.echo(f"  with {len(themes)} themes")
+
+
 @cli.command()
 @click.option("--host", default="0.0.0.0", help="API host")
 @click.option("--port", "-p", default=3200, help="API port")

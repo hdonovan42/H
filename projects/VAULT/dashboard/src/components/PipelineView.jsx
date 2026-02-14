@@ -11,20 +11,21 @@ async function fetchJSON(url) {
 
 export default function PipelineView({ calibration }) {
   const [pipeline, setPipeline] = useState(null);
-  const [digests, setDigests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [cycleId, setCycleId] = useState(null);
 
+  const [intelligence, setIntelligence] = useState(null);
+
   const fetchPipeline = useCallback(async (cid) => {
     try {
       const url = cid ? `/api/v1/pipeline/${cid}` : '/api/v1/pipeline/latest';
-      const [data, digestsData] = await Promise.all([
+      const [data, intelData] = await Promise.all([
         fetchJSON(url),
-        fetchJSON('/api/v1/digests').catch(() => []),
+        fetchJSON('/api/v1/intelligence/latest').catch(() => null),
       ]);
       setPipeline(data);
-      if (Array.isArray(digestsData)) setDigests(digestsData);
+      if (intelData && !intelData.error) setIntelligence(intelData);
       setError(null);
       if (!cid && data.cycle_id) setCycleId(data.cycle_id);
     } catch (err) {
@@ -88,20 +89,21 @@ export default function PipelineView({ calibration }) {
         </div>
       </div>
 
-      {/* Intelligence Digest — latest only */}
-      {digests.length > 0 && (
+      {/* Master Intelligence Document */}
+      {intelligence && (
         <div style={{ marginTop: '16px' }}>
           <div className="card-title" style={{ padding: '0 0 12px 0' }}>
-            Intelligence Digest
+            Master Intelligence
           </div>
           <div className="card digest-card">
             <div className="digest-header">
-              <span className="digest-label">Current</span>
+              <span className="digest-label">{intelligence.model_used || 'Opus'}</span>
               <span className="digest-meta">
-                {digests[0].ts?.slice(0, 16).replace('T', ' ')} — {digests[0].tweet_count} tweets
+                {intelligence.ts?.slice(0, 16).replace('T', ' ')} — {intelligence.tweet_count} tweets analysed
+                {intelligence.cost_usd > 0 && ` — $${intelligence.cost_usd.toFixed(4)}`}
               </span>
             </div>
-            <div className="digest-text">{digests[0].digest_text}</div>
+            <div className="digest-text" style={{ whiteSpace: 'pre-wrap' }}>{intelligence.document}</div>
           </div>
         </div>
       )}

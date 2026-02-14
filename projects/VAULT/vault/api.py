@@ -357,7 +357,20 @@ def get_calibration():
         conn.close()
 
 
-# ── Digest ────────────────────────────────────────────────────────
+# ── Intelligence ─────────────────────────────────────────────────
+
+@app.get("/api/v1/intelligence/latest")
+def get_intelligence_latest():
+    conn = _conn()
+    try:
+        from vault.intelligence import get_latest_intelligence
+        result = get_latest_intelligence(conn)
+        return result or {"error": "No intelligence document yet — seed with 'vault seed-intel'"}
+    finally:
+        conn.close()
+
+
+# ── Digest (legacy) ──────────────────────────────────────────────
 
 @app.get("/api/v1/digest/latest")
 def get_digest_latest():
