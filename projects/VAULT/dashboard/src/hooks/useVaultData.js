@@ -26,7 +26,7 @@ export function useVaultData() {
       const [s, bh, cy, co, po, ev, me, pr, ca] = await Promise.all([
         fetchJSON('/api/v1/status'),
         fetchJSON('/api/v1/balance/history?limit=2000'),
-        fetchJSON('/api/v1/cycles?limit=50'),
+        fetchJSON('/api/v1/cycles?limit=200'),
         fetchJSON('/api/v1/costs'),
         fetchJSON('/api/v1/positions'),
         fetchJSON('/api/v1/events?limit=50'),
