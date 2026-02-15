@@ -48,10 +48,10 @@ sentinel:
   enabled: true
 
 edge:
-  margin_of_safety: 0.15
+  margin_of_safety: 0.10
   max_kelly_fraction: 0.25
   risk_free_daily_rate: 0.0001
-  min_confidence: 0.4
+  min_confidence: 0.3
   market_duration_days: 30             # assumed avg market duration for risk-free comparison
   estimator_model: claude-haiku-4-5-20251001
 
