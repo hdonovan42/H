@@ -136,13 +136,26 @@ def update_intelligence(conn, cycle_id: int, cfg: dict | None = None) -> tuple[s
             market_ids_in_list.add(pred["market_id"])
 
     # Build markets block for prompt (questions only, NO odds — anti-anchoring)
+    # Include velocity context where available (momentum info, not actual prices)
+    from vault.edge_calculator import calculate_velocity
+
     markets_block = ""
     if markets:
         markets_block = "\n\nMARKETS TO ESTIMATE:\n"
         markets_block += "For each market, estimate the probability of YES based on your analysis.\n"
         markets_block += "You do NOT have access to market odds — form your own independent view.\n\n"
         for i, m in enumerate(markets):
-            markets_block += f"  {i + 1}. \"{m.get('question', m['id'])}\"\n"
+            vel = calculate_velocity(conn, m["id"])
+            vel_note = ""
+            if vel:
+                parts = []
+                if vel.get("v_1h") is not None:
+                    parts.append(f"{vel['v_1h']:+.0%}/1h")
+                if vel.get("v_6h") is not None:
+                    parts.append(f"{vel['v_6h']:+.0%}/6h")
+                if parts:
+                    vel_note = f" [odds moved {', '.join(parts)}]"
+            markets_block += f"  {i + 1}. \"{m.get('question', m['id'])}\"{vel_note}\n"
 
     # ── Build system prompt ─────────────────────────────────────────
     estimation_rules = ""

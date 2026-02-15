@@ -68,6 +68,17 @@ def _get_actionable(pipeline_result) -> list[dict] | None:
                     "source": "sentinel",
                 })
 
+    # Log velocity alerts (can't bet without estimate, but surface for awareness)
+    velocity_alerts = [
+        e for e in (pipeline_result.edges or [])
+        if e.get("action") == "velocity_alert" and e.get("velocity_sharp")
+    ]
+    for va in velocity_alerts:
+        log.info(
+            f"Velocity alert (no estimate): {va.get('question', va['market_id'])[:60]} — "
+            f"{va.get('reasoning', '')[:100]}"
+        )
+
     return items if items else None
 
 

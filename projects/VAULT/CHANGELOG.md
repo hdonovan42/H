@@ -5,6 +5,32 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v8.2 — Odds Velocity Tracking
+**Deployed**: 2026-02-15 | **First cycle**: TBD
+
+### Changes
+- **Velocity calculation**: New `calculate_velocity()` in `edge_calculator.py` computes 1h and 6h price deltas from existing `odds_snapshots` table. No new API calls — pure math on data already being collected every cycle.
+- **Confidence adjustment**: When odds move sharply (5pp/1h or 10pp/6h) *away* from VAULT's estimate, confidence is reduced by 0.15 (market may know something). When moving *toward*, bumped by 0.05 (confirmation). Clamped to [0.1, 1.0].
+- **Velocity in prompts**: Decider and edge prompts now show velocity lines (e.g. `Velocity: +8%/1h, +12%/6h (market moving toward your estimate)`) when data is available.
+- **Velocity alerts**: Unestimated markets with sharp moves surface as `velocity_alert` edge results. These can't trigger bets (no estimate) but are logged and visible for the next daily Opus call.
+- **Opus context**: Daily intelligence update now includes velocity data for each market being estimated (e.g. `[odds moved +12%/1h]`), giving Opus momentum context when forming probability estimates.
+
+### Architecture
+- **No new tables** — uses existing `odds_snapshots` populated by `market_discovery.record_odds_snapshot()` every cycle
+- **No new API calls** — all velocity is computed from SQLite queries + arithmetic
+- **No schema migration** — no changes to DB schema
+- **Flow**: pipeline → Opus estimates (daily) → velocity calc (snapshot deltas) → edge calc (vault_prob vs market_odds + velocity) → decider
+
+### What to watch
+- Velocity data in edge calcs: check logs for "Velocity CAUTION" or "Velocity CONFIRM" in reasoning
+- Confidence adjustments: verify sharp moves correctly reduce/increase confidence
+- Velocity alerts: watch for "Velocity alert" log lines on unestimated markets
+- Decider prompts: verify velocity lines appear in bet/exit sections
+- Daily Opus: confirm velocity context shows in market estimation block
+- No cost increase: all velocity is pure math ($0)
+
+---
+
 ## v8.1 — Auto-Pilot Decider
 **Deployed**: 2026-02-15 | **First cycle**: TBD
 

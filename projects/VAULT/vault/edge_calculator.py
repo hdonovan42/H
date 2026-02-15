@@ -8,6 +8,54 @@ from vault.polymarket import get_current_odds
 log = logging.getLogger("vault.edge_calculator")
 
 
+def calculate_velocity(conn, market_id: str, vault_prob: float | None = None) -> dict | None:
+    """Calculate odds velocity from snapshot history. Pure math on existing data.
+
+    Returns dict with v_1h, v_6h, direction, sharp — or None if insufficient data.
+    """
+    from vault.market_discovery import get_odds_history
+
+    history_1h = get_odds_history(conn, market_id, hours=1)
+    history_6h = get_odds_history(conn, market_id, hours=6)
+
+    if not history_1h and not history_6h:
+        return None
+
+    # Current odds = most recent snapshot from either window
+    all_snaps = history_6h or history_1h
+    current_yes = all_snaps[-1]["yes_price"]
+
+    v_1h = None
+    if len(history_1h) >= 2:
+        v_1h = round(current_yes - history_1h[0]["yes_price"], 4)
+
+    v_6h = None
+    if len(history_6h) >= 2:
+        v_6h = round(current_yes - history_6h[0]["yes_price"], 4)
+
+    # Sharp detection: 5pp in 1h or 10pp in 6h
+    sharp = False
+    if v_1h is not None and abs(v_1h) >= 0.05:
+        sharp = True
+    if v_6h is not None and abs(v_6h) >= 0.10:
+        sharp = True
+
+    # Direction relative to VAULT estimate
+    direction = "neutral"
+    if vault_prob is not None:
+        move = v_1h if v_1h is not None else v_6h
+        if move is not None and abs(move) > 0.005:
+            # "toward" = odds moving closer to vault_prob
+            gap_before = abs(vault_prob - (current_yes - move))
+            gap_after = abs(vault_prob - current_yes)
+            if gap_after < gap_before:
+                direction = "toward"
+            elif gap_after > gap_before:
+                direction = "away"
+
+    return {"v_1h": v_1h, "v_6h": v_6h, "direction": direction, "sharp": sharp}
+
+
 def calculate_edges(conn, cycle_id: int, estimates: list[dict],
                     markets: list[dict], cfg: dict | None = None,
                     sentinel_results: dict | None = None) -> list[dict]:
@@ -136,6 +184,50 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
             else:
                 reasoning = f"Size ${recommended_size:.2f} below minimum"
 
+        # ── Velocity analysis ──
+        vel = calculate_velocity(conn, mid, vault_prob)
+        adj_confidence = confidence
+        vel_reasoning = ""
+
+        if vel and vel["sharp"]:
+            if vel["direction"] == "away":
+                adj_confidence = max(0.1, confidence - 0.15)
+                vel_reasoning = (
+                    f" Velocity CAUTION: {_fmt_velocity(vel)} moving AWAY from estimate "
+                    f"(confidence {confidence:.0%} → {adj_confidence:.0%})"
+                )
+            elif vel["direction"] == "toward":
+                adj_confidence = min(1.0, confidence + 0.05)
+                vel_reasoning = (
+                    f" Velocity CONFIRM: {_fmt_velocity(vel)} moving toward estimate "
+                    f"(confidence {confidence:.0%} → {adj_confidence:.0%})"
+                )
+            else:
+                vel_reasoning = f" Velocity: {_fmt_velocity(vel)} (sharp, neutral)"
+
+            # Recalculate sizing with adjusted confidence if it changed
+            if adj_confidence != confidence:
+                adjusted_fraction = kelly_fraction * adj_confidence
+                adjusted_fraction = max(0, min(adjusted_fraction, max_kelly))
+                recommended_size = round(balance * adjusted_fraction, 2) if has_edge else 0
+                expected_profit = recommended_size * abs_edge * adj_confidence
+                beats_risk_free = expected_profit > (recommended_size * risk_free_rate * market_duration_days)
+
+                # Recheck action with adjusted values
+                if not open_pred:
+                    if has_edge and recommended_size >= 0.50 and beats_risk_free:
+                        action = "bet"
+                        reasoning = (
+                            f"{abs_edge:.0%} edge ({side}), confidence {adj_confidence:.0%}, "
+                            f"Kelly {adjusted_fraction:.1%} → ${recommended_size:.2f}, "
+                            f"expected profit ${expected_profit:.2f}"
+                        )
+                    elif action == "bet":
+                        action = "hold"
+                        reasoning = f"Velocity adjustment dropped below threshold"
+
+            reasoning += vel_reasoning
+
         edge_result = {
             "market_id": mid,
             "question": market.get("question", est.get("question", "")),
@@ -144,12 +236,17 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
             "edge": round(edge, 4),
             "abs_edge": round(abs_edge, 4),
             "side": side,
-            "confidence": confidence,
+            "confidence": round(adj_confidence, 4),
+            "original_confidence": confidence,
             "kelly_fraction": round(adjusted_fraction, 4),
             "recommended_size_usd": recommended_size,
             "action": action,
             "reasoning": reasoning,
             "is_open_position": open_pred is not None,
+            "v_1h": vel["v_1h"] if vel else None,
+            "v_6h": vel["v_6h"] if vel else None,
+            "velocity_direction": vel["direction"] if vel else None,
+            "velocity_sharp": vel["sharp"] if vel else False,
         }
         results.append(edge_result)
 
@@ -160,7 +257,7 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
                 "(cycle_id, market_id, vault_prob, market_odds, edge, side, confidence, "
                 "recommended_size_usd, action, reasoning) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (cycle_id, mid, vault_prob, market_yes, round(edge, 4), side,
-                 confidence, recommended_size, action, reasoning),
+                 round(adj_confidence, 4), recommended_size, action, reasoning),
             )
         except Exception as e:
             log.warning(f"Failed to store edge calc for {mid}: {e}")
@@ -168,17 +265,67 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
     if results:
         conn.commit()
 
+    # ── Velocity alerts for unestimated markets ──
+    # Scan all tracked markets for sharp moves without an Opus estimate
+    estimated_ids = {est["market_id"] for est in estimates}
+    from vault.market_discovery import get_tracked_markets
+    tracked = get_tracked_markets(conn)
+
+    for m in tracked:
+        mid = m["market_id"]
+        if mid in estimated_ids:
+            continue  # Already covered by estimate loop
+
+        vel = calculate_velocity(conn, mid)
+        if vel and vel["sharp"]:
+            results.append({
+                "market_id": mid,
+                "question": m.get("question", ""),
+                "vault_prob": None,
+                "market_odds": m.get("yes_price", 0.5),
+                "edge": None,
+                "abs_edge": None,
+                "side": None,
+                "confidence": None,
+                "original_confidence": None,
+                "kelly_fraction": None,
+                "recommended_size_usd": 0,
+                "action": "velocity_alert",
+                "reasoning": f"Sharp move detected: {_fmt_velocity(vel)} (no estimate — needs Opus analysis)",
+                "is_open_position": False,
+                "v_1h": vel["v_1h"],
+                "v_6h": vel["v_6h"],
+                "velocity_direction": vel["direction"],
+                "velocity_sharp": True,
+            })
+            log.info(f"Velocity alert: {m.get('question', mid)[:60]} — {_fmt_velocity(vel)}")
+
     # Sort by opportunity quality: |edge| * confidence (best opportunities first)
-    results.sort(key=lambda r: r["abs_edge"] * r["confidence"], reverse=True)
+    # velocity_alert items have no edge, so sort them last
+    results.sort(
+        key=lambda r: (r["abs_edge"] or 0) * (r["confidence"] or 0),
+        reverse=True,
+    )
 
     bets = [r for r in results if r["action"] == "bet"]
     exits = [r for r in results if r["action"] == "exit"]
+    alerts = [r for r in results if r["action"] == "velocity_alert"]
     log.info(
         f"Edge calc: {len(results)} analysed, {len(bets)} bet opportunities, "
-        f"{len(exits)} exit signals (cycle {cycle_id})"
+        f"{len(exits)} exit signals, {len(alerts)} velocity alerts (cycle {cycle_id})"
     )
 
     return results
+
+
+def _fmt_velocity(vel: dict) -> str:
+    """Format velocity dict as human-readable string."""
+    parts = []
+    if vel.get("v_1h") is not None:
+        parts.append(f"{vel['v_1h']:+.0%}/1h")
+    if vel.get("v_6h") is not None:
+        parts.append(f"{vel['v_6h']:+.0%}/6h")
+    return ", ".join(parts) if parts else "no data"
 
 
 def _analyze_open_position(pred: dict, vault_prob: float, confidence: float,

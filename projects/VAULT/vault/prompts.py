@@ -34,6 +34,7 @@ def build_decider_prompt(conn, pipeline_result, actionable: list[dict]) -> tuple
         action = item.get("action")
 
         if action == "bet":
+            vel_line = _format_velocity_line(item)
             body += f"""
 ═══ BET OPPORTUNITY ═══
   "{item.get('question', item.get('market_id', '?'))[:80]}"
@@ -43,17 +44,22 @@ def build_decider_prompt(conn, pipeline_result, actionable: list[dict]) -> tuple
   Recommended:   ${item.get('recommended_size_usd', 0):.2f} (Kelly-adjusted)
   Market ID:     {item.get('market_id', '?')}
 """
+            if vel_line:
+                body += f"  {vel_line}\n"
 
         elif action == "exit":
             pred_id = item.get("prediction_id", "?")
             reason = item.get("reasoning", "thesis concern")
             source = item.get("source", "edge_calc")
+            vel_line = _format_velocity_line(item)
             body += f"""
 ═══ EXIT SIGNAL ═══
   Position [{pred_id}]: {reason}
   Source: {source}
   → SELL IMMEDIATELY
 """
+            if vel_line:
+                body += f"  {vel_line}\n"
 
     body += """
 Respond with a JSON array of actions:
@@ -263,22 +269,30 @@ Every trade you make affects your balance. If your balance reaches $0, you die.
 
         for e in bet_edges:
             arrow = "→ BET " + e["side"]
+            vel_line = _format_velocity_line(e)
             prompt += (
                 f"  Market: \"{e.get('question', e['market_id'])[:70]}\"\n"
                 f"    YOUR estimate: {e['vault_prob']:.0%} YES (confidence: {e['confidence']:.1f})\n"
                 f"    Market odds:   {e['market_odds']:.0%} YES\n"
                 f"    Edge:          {e['edge']:+.0%} {arrow}\n"
                 f"    Recommended:   ${e['recommended_size_usd']:.2f} (Kelly-adjusted)\n"
-                f"    Market ID:     {e['market_id']}\n\n"
+                f"    Market ID:     {e['market_id']}\n"
             )
+            if vel_line:
+                prompt += f"    {vel_line}\n"
+            prompt += "\n"
 
         for e in hold_edges:
+            vel_line = _format_velocity_line(e)
             prompt += (
                 f"  Market: \"{e.get('question', e['market_id'])[:70]}\"\n"
                 f"    YOUR estimate: {e['vault_prob']:.0%} YES (confidence: {e['confidence']:.1f})\n"
                 f"    Market odds:   {e['market_odds']:.0%} YES\n"
-                f"    Edge:          {e['edge']:+.0%} — {e['reasoning']}\n\n"
+                f"    Edge:          {e['edge']:+.0%} — {e['reasoning']}\n"
             )
+            if vel_line:
+                prompt += f"    {vel_line}\n"
+            prompt += "\n"
 
     # ── Open Positions ──
     predictions = ledger.get_open_predictions(conn)
@@ -373,3 +387,27 @@ SELL DISCIPLINE — only sell when the thesis is INVALIDATED:
 - Let winners ride to resolution when the thesis is intact
 """
     return prompt
+
+
+def _format_velocity_line(item: dict) -> str:
+    """Format a velocity line for prompts. Returns empty string if no velocity data."""
+    v_1h = item.get("v_1h")
+    v_6h = item.get("v_6h")
+    if v_1h is None and v_6h is None:
+        return ""
+
+    parts = []
+    if v_1h is not None:
+        parts.append(f"{v_1h:+.0%}/1h")
+    if v_6h is not None:
+        parts.append(f"{v_6h:+.0%}/6h")
+
+    direction = item.get("velocity_direction", "neutral")
+    if direction == "toward":
+        suffix = " (market moving toward your estimate)"
+    elif direction == "away":
+        suffix = " (market moving AWAY — caution)"
+    else:
+        suffix = ""
+
+    return f"Velocity: {', '.join(parts)}{suffix}"
