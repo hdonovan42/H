@@ -5,6 +5,67 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v9 — Loosen the Gates
+**Deployed**: 2026-02-15 | **Schema**: v9 | **First cycle**: 836 | **First bet**: cycle 845
+
+### Problem
+VAULT was sitting on $55 in cash with only 1 position open. Every discovered market failed either the edge gate (15%) or the confidence gate (0.4). The system was too conservative — Opus's stable daily estimates don't need the same cushion that noisy per-cycle Haiku estimates required. Additionally, markets with Opus estimates were silently dropped from edge calculations if keyword-based discovery didn't find them, meaning some of the best opportunities were invisible.
+
+### Changes
+
+**Lower `min_confidence` 0.4 → 0.3** (`config/default.yaml`, `edge_calculator.py`)
+- Unlocks markets where Opus has moderate confidence but fat edges (e.g. Starship +15.5% edge, 0.35 conf)
+- Kelly sizing already scales bet size with confidence — low confidence = small bet, risk is naturally managed
+- The 0.4 threshold was set when Haiku was estimating per-cycle. Opus daily estimates are more trustworthy.
+
+**Lower `margin_of_safety` 0.15 → 0.10** (`config/default.yaml`)
+- v6 bumped from 10% to 15% to compensate for noisy Haiku estimates. v8's stable Opus estimates make that cushion unnecessary.
+- 10% margin + 0.3 confidence + Kelly sizing = triple-layered protection.
+
+**Track `entry_confidence`** (`db.py`, `ledger.py`, `actuators/bet.py`)
+- New `entry_confidence REAL` column on predictions table (schema v9 migration)
+- Every new bet records the Opus confidence at entry
+- Enables future analysis: bucket P&L by confidence band to find the optimal threshold empirically
+
+**Fix estimated markets missing from edge calculations** (`edge_calculator.py`)
+- Opus estimated 7 markets but keyword discovery only found 4. The other 3 (including Starship) were silently skipped — no odds to calculate edge against.
+- Edge calculator now fetches live odds for any estimated market not found by discovery.
+- Immediately triggered the Starship FT12 bet — the market that was supposed to pass both gates all along.
+
+**Filter auto-hold from dashboard** (`api.py`, `CycleLog.jsx`)
+- Auto-hold cycles ($0 cost, no action) were flooding the Recent Decisions panel
+- Filtered server-side in SQL (`WHERE reasoning NOT LIKE 'auto-hold:%'`) so the API only returns actionable decisions
+
+### Baseline at deployment (cycle 836)
+- Balance: $55.27 | Total value: $62.97
+- 1 open position (Netflix/WB NO, $7.57)
+- API costs: $8.76 | Alive: 3.4 days
+
+### Result
+- Starship FT12 YES bet placed immediately (cycle 845): $5.00 at 46% odds, 16% edge, 0.35 confidence
+- 2 positions open, $12.57 deployed (~20% of total value)
+- Total value: $63.10 (+26.2% from $50 seed)
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/edge_calculator.py` | Lower default min_confidence 0.4→0.3, fetch odds for estimated markets missed by discovery |
+| `vault/db.py` | Schema v9: add `entry_confidence` column, migration |
+| `vault/ledger.py` | Accept + store `entry_confidence`, include in `get_open_predictions` |
+| `vault/actuators/bet.py` | Pass confidence from pipeline edge data to ledger |
+| `config/default.yaml` | `margin_of_safety` 0.15→0.10, `min_confidence` 0.4→0.3 |
+| `vault/api.py` | Filter auto-hold cycles from `/api/v1/cycles` endpoint |
+| `dashboard/src/components/CycleLog.jsx` | Clean empty state message |
+
+### What to watch
+- **Starship FT12**: first bet under new thresholds — does 0.35 confidence produce good outcomes?
+- **New bets after Opus update**: 00:00 UTC refresh may shift confidences and unlock more markets
+- **Capital deployment**: should increase from ~12% to ~20-30% as more edges pass the gates
+- **P&L by confidence band**: once trades resolve, bucket by `entry_confidence` to find optimal threshold
+- **Discovery gap**: the odds-fetch fallback adds API calls — watch for rate limiting on Polymarket
+
+---
+
 ## v8.4 — Git-backed Intelligence History
 **Deployed**: 2026-02-15
 
