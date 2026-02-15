@@ -44,11 +44,12 @@ def _git_commit_intelligence(document: str, themes_json: str | None, commit_msg:
             cwd=repo, capture_output=True, timeout=10,
         )
         if result.returncode != 0:
-            stderr = result.stderr.decode(errors="replace")
-            if "nothing to commit" in stderr:
+            output = (result.stdout.decode(errors="replace")
+                      + result.stderr.decode(errors="replace"))
+            if "nothing to commit" in output:
                 log.info("Git: no changes to commit")
                 return
-            log.warning(f"Git commit failed: {stderr}")
+            log.warning(f"Git commit failed: {output}")
             return
         push = subprocess.run(
             ["git", "push"],
