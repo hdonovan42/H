@@ -87,14 +87,32 @@ def run_pipeline(conn, cycle_id: int) -> PipelineResult:
         result.sentinel_results = run_sentinel(conn, cycle_id, cfg)
 
         # If sentinel detected a major event, trigger emergency Opus update
+        # But only if last intelligence update was >6h ago (cooldown)
         if result.sentinel_results.get("major_event"):
             event = result.sentinel_results["major_event"]
             log.info(f"Pipeline Phase 2: MAJOR EVENT detected — {event['event']}")
-            log.info("Pipeline Phase 2: triggering emergency Opus update + re-estimation")
-            doc, themes, estimates = update_intelligence(conn, cycle_id, cfg)
-            if doc:
-                result.digest = doc
-                result.themes = themes
+
+            last_intel = conn.execute(
+                "SELECT ts FROM master_intelligence ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            hours_since = 999
+            if last_intel:
+                from datetime import datetime, timezone
+                last_ts = datetime.fromisoformat(last_intel["ts"].replace("Z", "+00:00"))
+                hours_since = (datetime.now(timezone.utc) - last_ts).total_seconds() / 3600
+
+            cooldown_hours = cfg.get("intelligence", {}).get("emergency_cooldown_hours", 6)
+            if hours_since >= cooldown_hours:
+                log.info(f"Pipeline Phase 2: triggering emergency Opus update ({hours_since:.1f}h since last)")
+                doc, themes, estimates = update_intelligence(conn, cycle_id, cfg)
+                if doc:
+                    result.digest = doc
+                    result.themes = themes
+            else:
+                log.info(
+                    f"Pipeline Phase 2: emergency update suppressed — cooldown "
+                    f"({hours_since:.1f}h < {cooldown_hours}h since last update)"
+                )
 
         # ── Phase 2b: Load latest Opus estimates from DB ──────────
         log.info("Pipeline Phase 2b: loading Opus estimates")

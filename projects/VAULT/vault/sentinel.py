@@ -75,13 +75,20 @@ def run_sentinel(conn, cycle_id: int, cfg: dict | None = None) -> dict:
         "Speculation, opinion, and rumor are NOT evidence. "
         "When in doubt: INTACT. False alarms are worse than missed exits.\n\n"
         "JOB 2 — MAJOR EVENT DETECTION:\n"
-        "Flag if any tweet represents a MAJOR EVENT that could move prediction markets:\n"
-        "- Product launches or cancellations\n"
-        "- Regulatory actions or legal rulings\n"
-        "- Executive appointments or departures\n"
-        "- Policy decisions or legislative actions\n"
-        "- Scientific/engineering milestones or failures\n\n"
-        "Only flag genuine, concrete events — not speculation or opinion.\n\n"
+        "Flag a major_event ONLY if a tweet contains a CONCRETE, VERIFIED event that "
+        "would DIRECTLY change a buy/sell/hold decision on one of the open positions above "
+        "or on a tracked prediction market listed below. The bar is extremely high:\n"
+        "- The event must be CONFIRMED (official announcement, not rumor or speculation)\n"
+        "- It must have DIRECT, IMMEDIATE impact on a specific market's outcome probability\n"
+        "- It must be significant enough to warrant an emergency re-estimation of probabilities\n"
+        "- General news, industry trends, and tangential developments are NOT major events\n"
+        "- If a tweet is interesting but wouldn't flip any position or create an obvious new bet, "
+        "it is NOT a major event — it can wait for the daily analysis\n\n"
+        "Examples that ARE major events: 'Grok 5 officially released', 'Fed announces rate cut', "
+        "'SpaceX Starship explodes on launch'\n"
+        "Examples that are NOT: 'China releases AI film', 'Jobs data revised', "
+        "'Analyst predicts Tesla will...', industry commentary, retweets of general news\n\n"
+        "Default to null. When in doubt: null. False triggers waste $0.20 each.\n\n"
         "Output a JSON object:\n"
         '{"positions": [{"prediction_id": 1, "status": "INTACT|BROKEN", '
         '"event": "what happened (if BROKEN)", "source": "@handle"}], '
@@ -90,7 +97,16 @@ def run_sentinel(conn, cycle_id: int, cfg: dict | None = None) -> dict:
         "Respond ONLY with valid JSON — no markdown, no explanation outside the JSON."
     )
 
-    user_prompt = f"NEW TWEETS ({len(tweets)}):\n{tweet_block}\n{positions_block}"
+    # Build tracked markets block for major_event context
+    from vault.market_discovery import get_tracked_markets
+    tracked = get_tracked_markets(conn)
+    markets_block = ""
+    if tracked:
+        markets_block = "\nTRACKED PREDICTION MARKETS:\n"
+        for m in tracked[:15]:
+            markets_block += f"  \"{m['question'][:100]}\"\n"
+
+    user_prompt = f"NEW TWEETS ({len(tweets)}):\n{tweet_block}\n{positions_block}{markets_block}"
 
     try:
         response = call_claude(

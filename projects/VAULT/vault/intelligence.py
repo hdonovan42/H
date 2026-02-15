@@ -175,12 +175,19 @@ def update_intelligence(conn, cycle_id: int, cfg: dict | None = None) -> tuple[s
             "confidence should reflect your SPECIFIC evidence for that event.\n"
         )
 
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
     system = (
         "You are a senior intelligence analyst maintaining a master intelligence document "
         "for a prediction market trading system. This document is updated daily and used to "
         "inform betting decisions on Polymarket.\n\n"
+        f"CURRENT DATE/TIME: {now_str}\n\n"
         f"You are tracking these curated Twitter/X accounts:\n{acct_block}\n\n"
-        "Your task: Update the existing intelligence document by incorporating new tweets"
+        "Your task: UPDATE the existing intelligence document by incorporating new tweets. "
+        "This is a LIVING DOCUMENT — preserve all existing analysis that remains valid. "
+        "Only modify sections where new tweets provide new information. "
+        "Do not discard prior analysis just because this update has few tweets. "
+        "The document should grow more accurate over time, not get rewritten from scratch"
     )
     if markets:
         system += ", and estimate probabilities for prediction markets"
