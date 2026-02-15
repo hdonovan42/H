@@ -195,16 +195,22 @@ def update_intelligence(conn, cycle_id: int, cfg: dict | None = None) -> tuple[s
 
     system += (
         "Output a JSON object with these fields:\n"
-        '1. "document" — The updated master intelligence document. IMPORTANT: start from the '
-        "EXISTING document text and make targeted edits. Add new developments, update sections "
-        "where new information changes the picture, remove anything now outdated. "
-        "If only 1-2 tweets came in, the output should be ~95% identical to the input — "
-        "just with the new information woven in. Do NOT rewrite from scratch. "
-        "Do NOT change the date/period header unless the daily update window has actually changed. "
-        "The document should cover:\n"
-        "   - KEY DEVELOPMENTS — What happened? What changed?\n"
-        "   - NARRATIVE ARCS — Ongoing stories (regulatory, product, political, competitive)\n"
-        "   - SOURCE CREDIBILITY — Who is reporting vs speculating? Contradictions?\n"
+        '1. "document" — The updated master intelligence document.\n\n'
+        "   TARGET LENGTH: 1,500-2,000 words. This is a hard constraint.\n\n"
+        "   EDITING RULES:\n"
+        "   - Start from the EXISTING document and make targeted edits\n"
+        "   - Add new developments where tweets provide genuinely new information\n"
+        "   - DECAY: Developments older than ~7 days with no new signals → compress to one line or remove\n"
+        "   - PRUNE: Events that have fully resolved → remove entirely (they served their purpose)\n"
+        "   - PRUNE: Narrative arcs that played out or are no longer actionable → remove\n"
+        "   - If only 1-2 tweets came in, the output should be ~95% identical to the input\n"
+        "   - Do NOT rewrite from scratch. Do NOT let the document grow unbounded.\n"
+        "   - The document should always read like a FRESH BRIEFING for someone making trading "
+        "decisions TODAY — not a historical archive\n\n"
+        "   SECTIONS:\n"
+        "   - KEY DEVELOPMENTS — What happened? What changed? (only currently relevant items)\n"
+        "   - NARRATIVE ARCS — Ongoing stories (drop arcs that have concluded)\n"
+        "   - SOURCE CREDIBILITY — Who is reporting vs speculating? (compact table)\n"
         "   - PREDICTION MARKET IMPLICATIONS — Events that could resolve markets, tradeable edge\n\n"
         '2. "themes" — Array of actionable themes:\n'
         '   [{"theme": "...", "keywords": ["..."], "edge_type": "event|sentiment"}]\n\n'
