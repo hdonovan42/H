@@ -101,6 +101,19 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
                     "no_price": odds["no_price"],
                 }
 
+    # Also get odds for estimated markets not found by discovery
+    for est in estimates:
+        mid = est["market_id"]
+        if mid not in market_odds_map:
+            odds = get_current_odds(conn, mid)
+            if odds:
+                market_odds_map[mid] = {
+                    "id": mid,
+                    "question": est.get("question", ""),
+                    "yes_price": odds["yes_price"],
+                    "no_price": odds["no_price"],
+                }
+
     results = []
 
     for est in estimates:
