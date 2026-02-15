@@ -195,7 +195,13 @@ def update_intelligence(conn, cycle_id: int, cfg: dict | None = None) -> tuple[s
 
     system += (
         "Output a JSON object with these fields:\n"
-        '1. "document" — Updated ~500-800 word analysis covering:\n'
+        '1. "document" — The updated master intelligence document. IMPORTANT: start from the '
+        "EXISTING document text and make targeted edits. Add new developments, update sections "
+        "where new information changes the picture, remove anything now outdated. "
+        "If only 1-2 tweets came in, the output should be ~95% identical to the input — "
+        "just with the new information woven in. Do NOT rewrite from scratch. "
+        "Do NOT change the date/period header unless the daily update window has actually changed. "
+        "The document should cover:\n"
         "   - KEY DEVELOPMENTS — What happened? What changed?\n"
         "   - NARRATIVE ARCS — Ongoing stories (regulatory, product, political, competitive)\n"
         "   - SOURCE CREDIBILITY — Who is reporting vs speculating? Contradictions?\n"
