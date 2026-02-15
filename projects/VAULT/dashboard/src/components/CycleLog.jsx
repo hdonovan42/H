@@ -6,11 +6,7 @@ function formatTs(ts) {
 }
 
 export default function CycleLog({ cycles }) {
-  const meaningful = (cycles || []).filter(
-    (c) => !(c.reasoning || '').startsWith('auto-hold:')
-  );
-
-  if (meaningful.length === 0) {
+  if (!cycles || cycles.length === 0) {
     return (
       <div className="card">
         <div className="card-title">Recent Decisions</div>
@@ -23,7 +19,7 @@ export default function CycleLog({ cycles }) {
     <div className="card">
       <div className="card-title">Recent Decisions</div>
       <ul className="cycle-list">
-        {meaningful.map((c) => (
+        {cycles.map((c) => (
           <li key={c.id} className="cycle-item">
             <span className={`action-badge ${c.action || 'wait'}`}>
               {c.action || 'pending'}
