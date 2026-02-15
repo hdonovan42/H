@@ -297,21 +297,17 @@ def get_total_api_costs(conn) -> float:
 
 
 def get_burn_rate(conn) -> float | None:
-    """Average daily API cost burn rate. None if < 1 day of data."""
-    rows = conn.execute(
-        "SELECT MIN(ts) as first_ts, MAX(ts) as last_ts, SUM(cost_usd) as total "
-        "FROM api_calls"
+    """Daily API cost burn rate based on last 24 hours of spend."""
+    row = conn.execute(
+        "SELECT COALESCE(SUM(cost_usd), 0) as total "
+        "FROM api_calls "
+        "WHERE ts >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')"
     ).fetchone()
 
-    if not rows or not rows["first_ts"] or rows["total"] == 0:
+    if not row or row["total"] == 0:
         return None
 
-    from datetime import datetime, timezone
-    first = datetime.fromisoformat(rows["first_ts"].replace("Z", "+00:00"))
-    last = datetime.fromisoformat(rows["last_ts"].replace("Z", "+00:00"))
-    days = max((last - first).total_seconds() / 86400, 0.01)  # At least ~15 min
-
-    return round(rows["total"] / days, 4)
+    return round(row["total"], 4)
 
 
 def get_runway(conn) -> float | None:
