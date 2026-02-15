@@ -137,6 +137,18 @@ def get_balance_history(limit: int = Query(500, ge=1, le=5000)):
         # Get live market values for currently-open positions
         open_marked = {p["id"]: p for p in _mark_to_market(conn, ledger.get_open_positions(conn))}
 
+        # Get live market values for currently-open predictions
+        from vault.polymarket import get_current_odds
+        open_preds = ledger.get_open_predictions(conn)
+        pred_market_values = {}
+        for p in open_preds:
+            odds = get_current_odds(conn, p["market_id"])
+            if odds:
+                current = odds["yes_price"] if p["side"] == "YES" else odds["no_price"]
+                pred_market_values[p["id"]] = round(p["shares"] * current, 6)
+            else:
+                pred_market_values[p["id"]] = p["cost_basis"]
+
         # Track open positions to compute total value at each point.
         # trade_buy: cash drops, position value goes up
         # trade_sell: cash goes up, position closes
@@ -154,7 +166,11 @@ def get_balance_history(limit: int = Query(500, ge=1, le=5000)):
             elif entry_type == "trade_sell" and ref_id is not None:
                 open_positions.pop(ref_id, None)
             elif entry_type == "prediction_buy" and ref_id is not None:
-                open_positions[f"pred_{ref_id}"] = abs(r["amount"])
+                # Use live market value if still open, otherwise cost basis
+                if ref_id in pred_market_values:
+                    open_positions[f"pred_{ref_id}"] = pred_market_values[ref_id]
+                else:
+                    open_positions[f"pred_{ref_id}"] = abs(r["amount"])
             elif entry_type in ("prediction_resolve", "prediction_sell") and ref_id is not None:
                 open_positions.pop(f"pred_{ref_id}", None)
 
