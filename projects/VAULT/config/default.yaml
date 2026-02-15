@@ -4,7 +4,7 @@
 seed_balance: 50.00
 
 daemon:
-  interval_seconds: 600        # 10 minutes between cycles
+  interval_seconds: 60         # 1 minute between cycles (auto-hold makes idle cycles free)
   pid_file: vault.pid
   db_file: vault.db
 
