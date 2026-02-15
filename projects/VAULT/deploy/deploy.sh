@@ -30,6 +30,7 @@ rsync -avz --delete \
     --exclude '.venv' \
     --exclude 'config.yaml' \
     --exclude 'dashboard/node_modules' \
+    --exclude 'intelligence/' \
     "$LOCAL_DIR/" "$VPS_HOST:$REMOTE_DIR/"
 
 # Setup venv and install on remote

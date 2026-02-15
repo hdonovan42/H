@@ -5,6 +5,34 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v8.4 — Git-backed Intelligence History
+**Deployed**: 2026-02-15
+
+### Problem
+The `master_intelligence` table appended a full copy of the document (~8-13k chars) on every Opus update. Only the latest row is ever read — the rest is dead weight. 8 rows in one day = 55k chars of duplicated text. No way to see what actually changed between versions.
+
+### Fix
+The master doc now lives as a file in a dedicated git repo on the VPS, pushed to GitHub after each update. GitHub provides free diff visualization, full history, and storage efficiency. The DB keeps a single row for the pipeline to query quickly.
+
+- **Git repo**: `hdonovan42/vault-intelligence` (private) — `/home/hq/vault/intelligence/` on VPS
+- **`_git_commit_intelligence()`**: New helper writes `master_intelligence.md` + `themes.json` to git, commits with tweet count + cost, pushes to GitHub. Wrapped in try/except — git failure never breaks the pipeline.
+- **DB pruning**: After each INSERT + git commit, old rows are deleted (`DELETE WHERE id < MAX(id)`). Orphaned `opus_estimates` rows pruned too.
+- **Deploy safe**: `intelligence/` added to rsync excludes so deploy's `--delete` doesn't wipe the git repo.
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/intelligence.py` | Add `_git_commit_intelligence()`, call after INSERT in `update_intelligence()` and `seed_intelligence()`, prune old DB rows |
+| `deploy/deploy.sh` | Add `--exclude 'intelligence/'` to rsync |
+
+### What to watch
+- GitHub repo: each daily Opus update should produce a new commit with a clean diff
+- DB size: `SELECT COUNT(*) FROM master_intelligence` should always be 1
+- Pipeline reads: unchanged — `get_latest_intelligence()` still returns the single row
+- Deploy: `intelligence/` git repo must survive rsync `--delete`
+
+---
+
 ## v8.3 — Intelligence Document Fixes
 **Deployed**: 2026-02-15 | **First cycle**: 567+
 

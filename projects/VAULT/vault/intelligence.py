@@ -2,10 +2,13 @@
 
 import json
 import logging
+import subprocess
 from datetime import datetime, timezone, timedelta
 from vault.config_loader import load_config
 from vault.claude_client import call_claude
 from vault import ledger
+
+INTELLIGENCE_REPO_PATH = "/home/hq/vault/intelligence"
 
 log = logging.getLogger("vault.intelligence")
 
@@ -19,6 +22,46 @@ ACCOUNT_DESCRIPTIONS = {
 }
 
 
+def _git_commit_intelligence(document: str, themes_json: str | None, commit_msg: str):
+    """Write intelligence doc + themes to git repo and push to GitHub.
+
+    Never breaks the pipeline — git failures are warnings only.
+    """
+    try:
+        repo = INTELLIGENCE_REPO_PATH
+        with open(f"{repo}/master_intelligence.md", "w") as f:
+            f.write(document)
+        if themes_json:
+            themes = json.loads(themes_json)
+            with open(f"{repo}/themes.json", "w") as f:
+                json.dump(themes, f, indent=2)
+        subprocess.run(
+            ["git", "add", "-A"],
+            cwd=repo, capture_output=True, timeout=10,
+        )
+        result = subprocess.run(
+            ["git", "commit", "-m", commit_msg],
+            cwd=repo, capture_output=True, timeout=10,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.decode(errors="replace")
+            if "nothing to commit" in stderr:
+                log.info("Git: no changes to commit")
+                return
+            log.warning(f"Git commit failed: {stderr}")
+            return
+        push = subprocess.run(
+            ["git", "push"],
+            cwd=repo, capture_output=True, timeout=30,
+        )
+        if push.returncode != 0:
+            log.warning(f"Git push failed: {push.stderr.decode(errors='replace')}")
+        else:
+            log.info(f"Git: committed and pushed — {commit_msg}")
+    except Exception as e:
+        log.warning(f"Git intelligence commit failed (non-fatal): {e}")
+
+
 def seed_intelligence(conn, document_text: str, themes_json: str | None = None):
     """Insert initial user-provided document into master_intelligence.
 
@@ -30,6 +73,7 @@ def seed_intelligence(conn, document_text: str, themes_json: str | None = None):
         (document_text, themes_json),
     )
     conn.commit()
+    _git_commit_intelligence(document_text, themes_json, "Seed: user-provided")
     log.info(f"Seeded master intelligence document ({len(document_text)} chars)")
 
 
@@ -276,6 +320,18 @@ def update_intelligence(conn, cycle_id: int, cfg: dict | None = None) -> tuple[s
     estimates = _resolve_estimates(raw_estimates, markets, model)
     if estimates:
         store_opus_estimates(conn, estimates, intel_id)
+
+    # Git-back the intelligence document
+    _git_commit_intelligence(document, themes_json, f"{len(tweets)} tweets, ${cost:.4f}")
+
+    # Prune old intelligence rows (keep only latest)
+    conn.execute(
+        "DELETE FROM master_intelligence WHERE id < (SELECT MAX(id) FROM master_intelligence)"
+    )
+    conn.execute(
+        "DELETE FROM opus_estimates WHERE intelligence_id NOT IN (SELECT id FROM master_intelligence)"
+    )
+    conn.commit()
 
     log.info(
         f"Intelligence update: {len(tweets)} tweets → {len(document)} chars, "
