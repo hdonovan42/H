@@ -22,6 +22,8 @@ echo ">>> Syncing files..."
 rsync -avz --delete \
     --exclude '.env' \
     --exclude 'vault.db' \
+    --exclude 'vault.db-wal' \
+    --exclude 'vault.db-shm' \
     --exclude 'vault.pid' \
     --exclude '__pycache__' \
     --exclude '*.pyc' \
