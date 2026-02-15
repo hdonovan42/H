@@ -76,7 +76,7 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
     margin_of_safety = edge_cfg.get("margin_of_safety", 0.10)
     max_kelly = edge_cfg.get("max_kelly_fraction", 0.25)
     risk_free_rate = edge_cfg.get("risk_free_daily_rate", 0.0001)
-    min_confidence = edge_cfg.get("min_confidence", 0.4)
+    min_confidence = edge_cfg.get("min_confidence", 0.3)
     market_duration_days = edge_cfg.get("market_duration_days", 30)  # assumed avg market duration
 
     balance = ledger.get_balance(conn)

@@ -131,6 +131,7 @@ def record_prediction_buy(conn, market_id: str, condition_id: str | None,
                           end_date: str | None = None,
                           cycle_id: int | None = None,
                           entry_edge: float | None = None,
+                          entry_confidence: float | None = None,
                           entry_reasoning: str | None = None) -> int:
     """Place a prediction bet. Deducts from balance. Returns prediction_id."""
     balance = get_balance(conn)
@@ -141,10 +142,10 @@ def record_prediction_buy(conn, market_id: str, condition_id: str | None,
 
     cur = conn.execute(
         "INSERT INTO predictions (market_id, condition_id, question, slug, side, shares, "
-        "entry_odds, cost_basis, clob_token_id, end_date, entry_edge, entry_reasoning) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "entry_odds, cost_basis, clob_token_id, end_date, entry_edge, entry_confidence, entry_reasoning) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (market_id, condition_id, question, slug, side, shares,
-         odds, amount_usd, clob_token_id, end_date, entry_edge, entry_reasoning),
+         odds, amount_usd, clob_token_id, end_date, entry_edge, entry_confidence, entry_reasoning),
     )
     prediction_id = cur.lastrowid
 
@@ -239,7 +240,7 @@ def get_open_predictions(conn) -> list[dict]:
     """Get all open predictions."""
     rows = conn.execute(
         "SELECT id, market_id, question, slug, side, shares, entry_odds, "
-        "cost_basis, end_date, opened_at, entry_edge, entry_reasoning "
+        "cost_basis, end_date, opened_at, entry_edge, entry_confidence, entry_reasoning "
         "FROM predictions WHERE status = 'open'"
     ).fetchall()
     return [dict(r) for r in rows]

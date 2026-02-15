@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from vault.config_loader import get_db_path
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     clob_token_id TEXT,
     end_date      TEXT,
     entry_edge    REAL,                    -- edge at time of entry (v6)
+    entry_confidence REAL,               -- confidence at time of entry (v9)
     entry_reasoning TEXT,                 -- why we entered (v6)
     opened_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     closed_at     TEXT,
@@ -500,6 +501,20 @@ def _migrate(conn):
             "INSERT INTO meta (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             ("schema_version", "8"),
+        )
+        conn.commit()
+        version = 8
+
+    if version < 9:
+        # v9: add entry_confidence to predictions
+        try:
+            conn.execute("ALTER TABLE predictions ADD COLUMN entry_confidence REAL")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "9"),
         )
         conn.commit()
 

@@ -69,11 +69,13 @@ class BetActuator(BaseActuator):
 
         # Look up edge data from pipeline if available
         entry_edge = None
+        entry_confidence = None
         entry_reasoning_text = None
         pipeline_edges = context.get("pipeline_edges", [])
         for pe in pipeline_edges:
             if pe.get("market_id") == market_id:
                 entry_edge = pe.get("edge")
+                entry_confidence = pe.get("confidence")
                 entry_reasoning_text = pe.get("reasoning")
                 break
 
@@ -90,6 +92,7 @@ class BetActuator(BaseActuator):
             end_date=market.get("end_date"),
             cycle_id=context.get("cycle_id"),
             entry_edge=entry_edge,
+            entry_confidence=entry_confidence,
             entry_reasoning=entry_reasoning_text or reasoning,
         )
 
