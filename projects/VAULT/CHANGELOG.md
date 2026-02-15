@@ -5,6 +5,38 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v8.1 — Auto-Pilot Decider
+**Deployed**: 2026-02-15 | **First cycle**: TBD
+
+### Changes
+- **Auto-hold on quiet cycles**: When the pipeline finds no actionable edges (no `bet` or `exit` signals, no sentinel BROKEN alerts), the cycle auto-holds with 0 rounds and $0 cost. No Claude call at all.
+- **Single-shot decider**: When actionable opportunities exist, calls Haiku once with a focused JSON-only prompt (`build_decider_prompt`). No tool-use loop, no `research_markets` calls. Decider sees only the specific opportunities and responds with a JSON action array.
+- **Direct actuator execution**: After parsing the decider's JSON response, the agent executes `BetActuator` or `SellPredictionActuator` directly with guardrail checks. No tool-use round-trip overhead.
+- **Legacy fallback**: If the pipeline is disabled or fails, falls back to the original tool-use loop (`_run_tool_loop`) with full system prompt and tools. Ensures no regression if pipeline has issues.
+- **Refactored agent.py**: Extracted `_get_actionable()` (scans pipeline edges + sentinel for actionable items), `_run_decider()` (single-shot Haiku call + execution), `_run_tool_loop()` (legacy path), and `_parse_decider_json()` (tolerant JSON parser).
+
+### Architecture
+- **Auto-pilot flow**: pipeline → `_get_actionable()` → NO items → auto-hold ($0.00) | YES items → `build_decider_prompt()` → Haiku 1 round no tools → execute ($0.005)
+- **Cost savings**: ~90% reduction in decider spend. Normal cycles (no edges) cost $0 instead of ~$0.019.
+
+### Cost Projection
+| Scenario | v8 | v8.1 |
+|---|---|---|
+| Normal cycle (no edges) | $0.019 | $0.00 |
+| Cycle with bet/exit | $0.019 | ~$0.005 |
+| Daily Opus call | $0.25 | $0.25 |
+| Sentinel (when tweets) | $0.001 | $0.001 |
+| **Daily total (est.)** | **~$2.85** | **~$0.40** |
+
+### What to watch
+- Auto-hold cycles: should appear as action="hold", cost=$0, rounds=0
+- Decider JSON parsing: check logs for parse errors on actionable cycles
+- Bet/sell execution: verify actuators fire correctly from decider path
+- Fallback path: if pipeline disabled, tool loop should still work normally
+- Burn rate: should drop from ~$2.85/day to ~$0.40/day
+
+---
+
 ## v8 — Stable Opus Estimates + Haiku Sentinel
 **Deployed**: 2026-02-15 | **First cycle**: 423
 

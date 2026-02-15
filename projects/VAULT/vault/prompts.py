@@ -8,6 +8,67 @@ from vault.cost_tracker import format_cost
 from vault.polymarket import fetch_trending, get_current_odds
 
 
+def build_decider_prompt(conn, pipeline_result, actionable: list[dict]) -> tuple[str, str]:
+    """Build focused prompt for single-shot decider. No tools, JSON response only.
+
+    Returns (system_prompt, user_prompt) tuple.
+    """
+    balance = ledger.get_balance(conn)
+    burn_rate = ledger.get_burn_rate(conn)
+    runway = ledger.get_runway(conn)
+
+    system = (
+        "You are a prediction market trader making quick decisions on pre-analysed opportunities. "
+        "Respond ONLY with a valid JSON array. No explanation, no markdown, just JSON."
+    )
+
+    header = f"You are VAULT. Balance: ${balance:.2f}"
+    if burn_rate:
+        header += f" | Burn: ${burn_rate:.2f}/day"
+    if runway:
+        header += f" | Runway: {runway:.0f} days"
+
+    body = f"{header}\n\nThe pipeline found these opportunities requiring your decision:\n"
+
+    for item in actionable:
+        action = item.get("action")
+
+        if action == "bet":
+            body += f"""
+═══ BET OPPORTUNITY ═══
+  "{item.get('question', item.get('market_id', '?'))[:80]}"
+  YOUR estimate: {item.get('vault_prob', 0):.0%} {item.get('side', 'YES')} (confidence: {item.get('confidence', 0):.1f})
+  Market odds:   {item.get('market_odds', 0):.0%} YES
+  Edge:          {item.get('edge', 0):+.0%} → BET {item.get('side', 'YES')}
+  Recommended:   ${item.get('recommended_size_usd', 0):.2f} (Kelly-adjusted)
+  Market ID:     {item.get('market_id', '?')}
+"""
+
+        elif action == "exit":
+            pred_id = item.get("prediction_id", "?")
+            reason = item.get("reasoning", "thesis concern")
+            source = item.get("source", "edge_calc")
+            body += f"""
+═══ EXIT SIGNAL ═══
+  Position [{pred_id}]: {reason}
+  Source: {source}
+  → SELL IMMEDIATELY
+"""
+
+    body += """
+Respond with a JSON array of actions:
+[{"action": "bet", "market_id": "ID", "side": "YES", "amount_usd": 5.00, "reasoning": "..."}]
+or
+[{"action": "sell", "prediction_id": 89, "reasoning": "..."}]
+or
+[{"action": "hold", "reasoning": "..."}]
+
+You may act on multiple opportunities. You may override any recommendation with "hold" if you disagree.
+Rules: One bet or sell per cycle. If you want to act on multiple, pick the highest-quality one."""
+
+    return system, body
+
+
 def build_system_prompt(conn) -> str:
     """Build the full system prompt with survival context."""
     cfg = load_config()
