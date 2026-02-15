@@ -232,7 +232,7 @@ def update_intelligence(conn, cycle_id: int, cfg: dict | None = None) -> tuple[s
             messages=[{"role": "user", "content": user_prompt}],
             cycle_id=cycle_id,
             purpose="intelligence_update",
-            max_tokens=4096,
+            max_tokens=8192,
         )
     except Exception as e:
         log.error(f"Intelligence update failed: {e}")
