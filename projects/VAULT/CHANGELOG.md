@@ -5,6 +5,42 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v8.3 — Intelligence Document Fixes
+**Deployed**: 2026-02-15 | **First cycle**: 567+
+
+### Problem
+The master intelligence document — intended as a curated living briefing — was being destroyed on every update. Five emergency Opus rewrites in one day ($1.06 wasted) because the sentinel flagged routine tweets as "major events". Each rewrite produced a standalone report instead of updating the existing document. The original hand-crafted seed (8,021 chars) was completely discarded on the first Opus call. The final document had wrong dates, only referenced 1 tweet, and lost all prior analysis.
+
+### Root causes
+1. **Sentinel too trigger-happy**: Haiku flagged routine tweets (China AI film, jobs data) as `major_event`, triggering emergency Opus rewrites. Every single intelligence update today was sentinel-triggered, not the daily schedule.
+2. **Opus prompt asked for a new report, not an edit**: The output instruction said "Updated ~500-800 word analysis covering..." — Opus treated this as a brief for a fresh report, not a surgical edit to the existing document.
+3. **No date in prompt**: Opus hallucinated dates (wrote "Feb 18-19" when it was Feb 15) because the prompt never included the current date.
+4. **No size constraint**: Without a cap, the document grew from 8k to 13k chars in one day. At that rate: ~480k chars in 3 months.
+5. **max_tokens too low**: Original seed (8,021 chars) + edits + themes + estimates JSON exceeded the 4,096 token output limit, causing parse failures.
+
+### Fixes
+- **Sentinel `major_event` tightened** (`sentinel.py`): Now requires a confirmed event with direct impact on a tracked market or open position, significant enough to change a buy/sell/hold decision. Tracked markets list included in prompt for context. Explicit examples of what qualifies vs doesn't. Default: null.
+- **Living document prompt** (`intelligence.py`): Opus now told to start from the existing text and make targeted edits. If 1-2 tweets came in, output should be ~95% identical to input. Never rewrite from scratch.
+- **Current date injected** (`intelligence.py`): `CURRENT DATE/TIME: {now}` in system prompt. No more hallucinated dates.
+- **Document size cap** (`intelligence.py`): Hard constraint of 1,500-2,000 words. Decay rule: developments >7 days with no new signals get compressed to one line or removed. Resolved events pruned entirely. Document should always read like a fresh briefing for today's decisions.
+- **max_tokens 4096→8192** (`intelligence.py`): Enough room for the full document + themes + estimates JSON without truncation.
+- **Original seed restored on VPS**: Backdated timestamp so all 39 accumulated tweets were incorporated in one update. Result: original seed preserved with new developments woven in surgically.
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/sentinel.py` | Tightened `major_event` prompt, added tracked markets to context |
+| `vault/intelligence.py` | Living doc prompt, current date, size cap, decay/prune rules, max_tokens bump |
+| `vault/pipeline.py` | (no net change — cooldown added then removed) |
+
+### What to watch
+- Next daily Opus call (00:00 UTC): should compress the 13k doc back to ~8k while preserving current analysis
+- Sentinel `major_event`: should stop firing on routine tweets — check logs for "MAJOR EVENT" lines
+- Document continuity: subsequent updates should be surgical edits, not rewrites
+- Document size over time: should stabilise at ~6,000-8,000 chars, not grow unbounded
+
+---
+
 ## v8.2 — Odds Velocity Tracking
 **Deployed**: 2026-02-15 | **First cycle**: TBD
 
