@@ -319,6 +319,30 @@ def get_estimates(limit: int = Query(100, ge=1, le=500)):
         conn.close()
 
 
+# ── Opus Estimates ───────────────────────────────────────────────
+
+@app.get("/api/v1/opus-estimates")
+def get_opus_estimates():
+    conn = _conn()
+    try:
+        from vault.intelligence import get_latest_opus_estimates
+        return get_latest_opus_estimates(conn)
+    finally:
+        conn.close()
+
+
+# ── Sentinel Alerts ──────────────────────────────────────────────
+
+@app.get("/api/v1/sentinel/alerts")
+def get_sentinel_alerts(limit: int = Query(50, ge=1, le=200)):
+    conn = _conn()
+    try:
+        from vault.sentinel import get_recent_alerts
+        return get_recent_alerts(conn, limit=limit)
+    finally:
+        conn.close()
+
+
 # ── Calibration ───────────────────────────────────────────────────
 
 @app.get("/api/v1/calibration")

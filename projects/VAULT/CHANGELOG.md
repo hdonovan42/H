@@ -5,6 +5,45 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v8 — Stable Opus Estimates + Haiku Sentinel
+**Deployed**: 2026-02-15 | **First cycle**: 423
+
+### Changes
+- **Opus probability estimation**: Moved probability estimation from per-cycle Haiku calls to the daily Opus intelligence update. Opus estimates are stable across cycles (updated once daily), eliminating the noise that caused premature exits. Estimates stored in new `opus_estimates` table.
+- **Haiku sentinel**: New per-cycle sentinel module replaces Haiku estimator. Binary thesis monitoring (INTACT/BROKEN) instead of noisy probability estimation. Only fires when new tweets exist. Also detects major events that trigger emergency Opus re-estimation.
+- **Sentinel exit condition**: New highest-priority exit trigger — when the sentinel detects concrete evidence breaking an open position's thesis (official announcements, regulatory decisions, confirmed cancellations), it triggers immediate sell.
+- **Emergency Opus re-estimation**: When sentinel detects a major event (product launch, regulatory action, policy decision), triggers an out-of-schedule Opus update + fresh estimates.
+- **Removed per-cycle Haiku estimation**: Eliminates ~144 Haiku estimator calls/day (~$0.50-0.70/day). Replaced with ~100 sentinel calls (~$0.10/day, many skipped when no new tweets).
+- **Removed per-market relevance filtering**: No longer needed — Opus gets raw tweets directly, sentinel gets delta tweets only.
+- **Schema v8**: New `opus_estimates` table (intelligence-linked estimates) and `sentinel_alerts` table (BROKEN thesis records).
+- **New API endpoints**: `GET /api/v1/opus-estimates` and `GET /api/v1/sentinel/alerts`.
+- **Dashboard**: Shows sentinel alerts (red, breaking) and Opus estimate source (model, timestamp).
+
+### Architecture
+- **Daily Opus call** (00:00 UTC): intelligence document + themes + probability estimates for all discovered markets + open positions. Single call, stable output.
+- **Per-cycle flow**: collect tweets → sentinel scan (Haiku, ~$0.001) → load Opus estimates (free) → edge calculation (math, free) → decider (Haiku, ~$0.002).
+- **Cost**: ~$0.15/day (sentinel) + ~$0.20/day (Opus daily) = ~$0.35/day total, down from ~$0.70/day.
+
+### Baseline at deployment (cycle 423)
+- Balance: $36.06 | Total value: $72.95
+- API costs: $6.31 | Alive: 3.0 days
+- Realized P&L: +$25.33
+- 3 open positions, 8 Opus estimates from first manual run
+
+### Problem this solves
+- 87 closed positions, ALL sold early, 38 with zero P&L, average hold time ~2 hours.
+- Root cause: Haiku gives wildly different probability estimates cycle-to-cycle with identical information. Exit conditions compare current vs entry estimates, so random noise crosses thresholds even when nothing changed.
+- Fix: Opus estimates are stable (updated daily), so exit conditions only fire when Opus genuinely changes its mind. Sentinel handles breaking news exits with binary clarity.
+
+### What to watch
+- Hold duration: should increase dramatically from ~2h average
+- First market resolution (won/lost): positions should now ride to completion
+- Sentinel false positive rate: should be near zero (conservative prompt)
+- Opus estimate quality: daily cadence should produce well-calibrated, stable estimates
+- Cost per day: should drop from ~$0.70 to ~$0.35
+
+---
+
 ## v7 — Opus Master Intelligence + Raw Tweet Pipeline
 **Deployed**: 2026-02-15 | **Commit**: `f51ee06` | **First cycle**: 414
 

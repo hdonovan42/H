@@ -43,6 +43,10 @@ intelligence:
   update_hour_utc: 0
   raw_tweet_hours: 24
 
+sentinel:
+  model: claude-haiku-4-5-20251001
+  enabled: true
+
 edge:
   margin_of_safety: 0.15
   max_kelly_fraction: 0.25

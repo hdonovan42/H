@@ -1,4 +1,4 @@
-"""Master intelligence document — Opus-maintained daily analysis."""
+"""Master intelligence document — Opus-maintained daily analysis + probability estimation."""
 
 import json
 import logging
@@ -59,13 +59,14 @@ def should_update_intelligence(conn, cfg: dict | None = None) -> bool:
     return last_ts < today_update
 
 
-def update_intelligence(conn, cycle_id: int, cfg: dict | None = None) -> tuple[str, list]:
-    """Update the master intelligence document with an Opus call.
+def update_intelligence(conn, cycle_id: int, cfg: dict | None = None) -> tuple[str, list, list]:
+    """Update the master intelligence document + estimate probabilities with a single Opus call.
 
-    Loads current document + all tweets since last update, sends to Opus,
-    stores new row in master_intelligence.
+    Loads current document + all tweets since last update + discoverable markets,
+    sends to Opus for combined intelligence analysis + probability estimation.
+    Stores new row in master_intelligence and opus_estimates.
 
-    Returns (document, themes).
+    Returns (document, themes, estimates).
     """
     if cfg is None:
         cfg = load_config()
@@ -80,7 +81,7 @@ def update_intelligence(conn, cycle_id: int, cfg: dict | None = None) -> tuple[s
 
     if not current:
         log.warning("No master intelligence document to update — seed one first")
-        return ("", [])
+        return ("", [], [])
 
     current_doc = current["document"]
     last_ts = current["ts"]
@@ -95,13 +96,13 @@ def update_intelligence(conn, cycle_id: int, cfg: dict | None = None) -> tuple[s
 
     if not tweets:
         log.info("No new tweets since last intelligence update — keeping current document")
-        return (current_doc, json.loads(current["themes_json"]) if current["themes_json"] else [])
+        themes = json.loads(current["themes_json"]) if current["themes_json"] else []
+        return (current_doc, themes, [])
 
     # Group tweets by account
     by_account = {}
     for t in tweets:
         author = t.get("author", "unknown")
-        # If retweeted, group under the retweeter (curated account)
         group_key = t.get("retweeted_by") or author
         if group_key not in by_account:
             by_account[group_key] = []
@@ -117,20 +118,73 @@ def update_intelligence(conn, cycle_id: int, cfg: dict | None = None) -> tuple[s
         acct_lines.append(f"- @{handle} ({count} posts) — {desc}")
     acct_block = "\n".join(acct_lines)
 
+    # ── Gather markets to estimate ──────────────────────────────────
+    # Discover markets using current themes (before update)
+    from vault.market_discovery import discover_markets
+    current_themes = json.loads(current["themes_json"]) if current["themes_json"] else []
+    markets = discover_markets(conn, cycle_id, current_themes, cfg)
+
+    # Also include open positions not already in discovered markets
+    open_preds = ledger.get_open_predictions(conn)
+    market_ids_in_list = {m["id"] for m in markets}
+    for pred in open_preds:
+        if pred["market_id"] not in market_ids_in_list:
+            markets.append({
+                "id": pred["market_id"],
+                "question": pred["question"],
+            })
+            market_ids_in_list.add(pred["market_id"])
+
+    # Build markets block for prompt (questions only, NO odds — anti-anchoring)
+    markets_block = ""
+    if markets:
+        markets_block = "\n\nMARKETS TO ESTIMATE:\n"
+        markets_block += "For each market, estimate the probability of YES based on your analysis.\n"
+        markets_block += "You do NOT have access to market odds — form your own independent view.\n\n"
+        for i, m in enumerate(markets):
+            markets_block += f"  {i + 1}. \"{m.get('question', m['id'])}\"\n"
+
+    # ── Build system prompt ─────────────────────────────────────────
+    estimation_rules = ""
+    if markets:
+        estimation_rules = (
+            '\n3. "estimates" — Array of probability estimates for each market:\n'
+            '   [{"market_index": 1, "probability": 0.65, "confidence": 0.7, '
+            '"reasoning": "Brief 1-2 sentence explanation"}]\n\n'
+            "Estimation rules:\n"
+            "- probability: your estimate of YES happening (0.0 to 1.0)\n"
+            "- confidence: how sure you are of your estimate (0.0 to 1.0)\n"
+            "- Be well-calibrated. Don't default to 50% — commit to a view.\n"
+            "- STATISTICAL/COUNTING markets (tweet counts, follower milestones, weekly post counts, "
+            "engagement metrics) → SET CONFIDENCE TO 0.2-0.3. You have no informational edge on "
+            "these — they are essentially random.\n"
+            "- EVENT markets (policy decisions, product launches, regulatory actions, legal outcomes) → "
+            "confidence should reflect your SPECIFIC evidence for that event.\n"
+        )
+
     system = (
         "You are a senior intelligence analyst maintaining a master intelligence document "
         "for a prediction market trading system. This document is updated daily and used to "
         "inform betting decisions on Polymarket.\n\n"
         f"You are tracking these curated Twitter/X accounts:\n{acct_block}\n\n"
-        "Your task: Update the existing intelligence document by incorporating new tweets.\n\n"
-        "Output a JSON object with two fields:\n"
+        "Your task: Update the existing intelligence document by incorporating new tweets"
+    )
+    if markets:
+        system += ", and estimate probabilities for prediction markets"
+    system += ".\n\n"
+
+    system += (
+        "Output a JSON object with these fields:\n"
         '1. "document" — Updated ~500-800 word analysis covering:\n'
         "   - KEY DEVELOPMENTS — What happened? What changed?\n"
         "   - NARRATIVE ARCS — Ongoing stories (regulatory, product, political, competitive)\n"
         "   - SOURCE CREDIBILITY — Who is reporting vs speculating? Contradictions?\n"
         "   - PREDICTION MARKET IMPLICATIONS — Events that could resolve markets, tradeable edge\n\n"
         '2. "themes" — Array of actionable themes:\n'
-        '   [{\"theme\": \"...\", \"keywords\": [\"...\"], \"edge_type\": \"event|sentiment\"}]\n\n'
+        '   [{"theme": "...", "keywords": ["..."], "edge_type": "event|sentiment"}]\n\n'
+    )
+    system += estimation_rules
+    system += (
         "Exclude themes about: tweet counts, follower milestones, engagement metrics.\n"
         "Focus on: policy decisions, product launches, regulatory actions, executive moves, "
         "legal outcomes, scientific/engineering milestones.\n\n"
@@ -140,6 +194,7 @@ def update_intelligence(conn, cycle_id: int, cfg: dict | None = None) -> tuple[s
     user_prompt = (
         f"CURRENT INTELLIGENCE DOCUMENT:\n\n{current_doc}\n\n"
         f"NEW TWEETS SINCE LAST UPDATE ({len(tweets)} total):\n\n{tweet_block}"
+        f"{markets_block}"
     )
 
     try:
@@ -151,10 +206,12 @@ def update_intelligence(conn, cycle_id: int, cfg: dict | None = None) -> tuple[s
             messages=[{"role": "user", "content": user_prompt}],
             cycle_id=cycle_id,
             purpose="intelligence_update",
+            max_tokens=4096,
         )
     except Exception as e:
         log.error(f"Intelligence update failed: {e}")
-        return (current_doc, json.loads(current["themes_json"]) if current["themes_json"] else [])
+        themes = json.loads(current["themes_json"]) if current["themes_json"] else []
+        return (current_doc, themes, [])
 
     # Parse response
     text = ""
@@ -162,16 +219,17 @@ def update_intelligence(conn, cycle_id: int, cfg: dict | None = None) -> tuple[s
         if block.get("type") == "text":
             text += block["text"]
 
-    document, themes = _parse_intelligence_response(text)
+    document, themes, raw_estimates = _parse_intelligence_response(text)
     cost = response.get("cost", 0)
 
     if not document:
         log.warning("Empty document from intelligence update — keeping current")
-        return (current_doc, json.loads(current["themes_json"]) if current["themes_json"] else [])
+        themes = json.loads(current["themes_json"]) if current["themes_json"] else []
+        return (current_doc, themes, [])
 
     themes_json = json.dumps(themes) if themes else None
 
-    # Store new row
+    # Store new intelligence row
     conn.execute(
         "INSERT INTO master_intelligence (document, themes_json, tweet_count, model_used, cost_usd) "
         "VALUES (?, ?, ?, ?, ?)",
@@ -179,11 +237,19 @@ def update_intelligence(conn, cycle_id: int, cfg: dict | None = None) -> tuple[s
     )
     conn.commit()
 
+    # Get the intelligence_id we just inserted
+    intel_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+    # Parse and store Opus estimates
+    estimates = _resolve_estimates(raw_estimates, markets, model)
+    if estimates:
+        store_opus_estimates(conn, estimates, intel_id)
+
     log.info(
         f"Intelligence update: {len(tweets)} tweets → {len(document)} chars, "
-        f"{len(themes)} themes (${cost:.4f})"
+        f"{len(themes)} themes, {len(estimates)} estimates (${cost:.4f})"
     )
-    return (document, themes)
+    return (document, themes, estimates)
 
 
 def get_latest_intelligence(conn) -> dict | None:
@@ -247,8 +313,67 @@ def _compact_number(n: int) -> str:
     return str(n)
 
 
-def _parse_intelligence_response(text: str) -> tuple[str, list]:
-    """Parse Opus JSON response into (document, themes)."""
+def store_opus_estimates(conn, estimates: list[dict], intelligence_id: int):
+    """Write Opus probability estimates to opus_estimates table."""
+    for est in estimates:
+        try:
+            conn.execute(
+                "INSERT INTO opus_estimates "
+                "(intelligence_id, market_id, question, vault_probability, confidence, reasoning) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (intelligence_id, est["market_id"], est.get("question", ""),
+                 est["vault_probability"], est["confidence"], est.get("reasoning", "")),
+            )
+        except Exception as e:
+            log.warning(f"Failed to store opus estimate for {est['market_id']}: {e}")
+    if estimates:
+        conn.commit()
+    log.info(f"Stored {len(estimates)} Opus estimates (intelligence_id={intelligence_id})")
+
+
+def get_latest_opus_estimates(conn) -> list[dict]:
+    """Return the latest Opus estimate per market_id (from the most recent intelligence run)."""
+    # Get the latest intelligence_id that has estimates
+    latest = conn.execute(
+        "SELECT MAX(intelligence_id) as max_id FROM opus_estimates"
+    ).fetchone()
+    if not latest or not latest["max_id"]:
+        return []
+
+    rows = conn.execute(
+        "SELECT oe.market_id, oe.question, oe.vault_probability, oe.confidence, "
+        "oe.reasoning, oe.intelligence_id, oe.ts, mi.model_used "
+        "FROM opus_estimates oe "
+        "LEFT JOIN master_intelligence mi ON oe.intelligence_id = mi.id "
+        "WHERE oe.intelligence_id = ?",
+        (latest["max_id"],),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _resolve_estimates(raw_estimates: list[dict], markets: list[dict], model: str) -> list[dict]:
+    """Map raw estimate dicts (with market_index) to market_ids."""
+    estimates = []
+    for item in raw_estimates:
+        idx = item.get("market_index", 0) - 1  # 1-indexed to 0-indexed
+        if 0 <= idx < len(markets):
+            prob = float(item.get("probability", 0.5))
+            conf = float(item.get("confidence", 0.5))
+            prob = max(0.01, min(0.99, prob))
+            conf = max(0.1, min(1.0, conf))
+            estimates.append({
+                "market_id": markets[idx]["id"],
+                "question": markets[idx].get("question", ""),
+                "vault_probability": prob,
+                "confidence": conf,
+                "reasoning": item.get("reasoning", ""),
+                "model_used": model,
+            })
+    return estimates
+
+
+def _parse_intelligence_response(text: str) -> tuple[str, list, list]:
+    """Parse Opus JSON response into (document, themes, estimates)."""
     text = text.strip()
     if text.startswith("```"):
         lines = text.split("\n")
@@ -266,13 +391,14 @@ def _parse_intelligence_response(text: str) -> tuple[str, list]:
                 parsed = json.loads(text[start:end + 1])
             except json.JSONDecodeError:
                 log.warning(f"Failed to parse intelligence response: {text[:200]}")
-                return ("", [])
+                return ("", [], [])
         else:
             log.warning(f"No JSON in intelligence response: {text[:200]}")
-            return ("", [])
+            return ("", [], [])
 
     document = parsed.get("document", "")
     themes = parsed.get("themes", [])
+    estimates = parsed.get("estimates", [])
 
     # Validate themes
     valid_themes = []
@@ -284,4 +410,10 @@ def _parse_intelligence_response(text: str) -> tuple[str, list]:
                 "edge_type": t.get("edge_type", "event"),
             })
 
-    return (document, valid_themes)
+    # Validate estimates (raw — will be resolved by caller)
+    valid_estimates = []
+    for e in estimates:
+        if isinstance(e, dict) and "market_index" in e:
+            valid_estimates.append(e)
+
+    return (document, valid_themes, valid_estimates)

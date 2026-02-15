@@ -9,7 +9,8 @@ log = logging.getLogger("vault.edge_calculator")
 
 
 def calculate_edges(conn, cycle_id: int, estimates: list[dict],
-                    markets: list[dict], cfg: dict | None = None) -> list[dict]:
+                    markets: list[dict], cfg: dict | None = None,
+                    sentinel_results: dict | None = None) -> list[dict]:
     """Calculate edge for each estimated market. Pure math — no Claude call.
 
     For each market with an estimate:
@@ -32,6 +33,12 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
 
     balance = ledger.get_balance(conn)
     market_odds_map = {m["id"]: m for m in markets}
+
+    # Build sentinel alert lookup by prediction_id
+    sentinel_alert_map = {}
+    if sentinel_results and sentinel_results.get("position_alerts"):
+        for alert in sentinel_results["position_alerts"]:
+            sentinel_alert_map[alert["prediction_id"]] = alert
 
     # Also get odds for open positions
     open_preds = ledger.get_open_predictions(conn)
@@ -104,9 +111,10 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
 
         # Determine action
         if open_pred:
+            sentinel_alert = sentinel_alert_map.get(open_pred["id"])
             action, reasoning = _analyze_open_position(
                 open_pred, vault_prob, confidence, market_yes, market_no,
-                risk_free_rate, margin_of_safety
+                risk_free_rate, margin_of_safety, sentinel_alert=sentinel_alert
             )
         elif has_edge and recommended_size >= 0.50 and beats_risk_free:
             action = "bet"
@@ -175,13 +183,15 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
 
 def _analyze_open_position(pred: dict, vault_prob: float, confidence: float,
                            market_yes: float, market_no: float,
-                           risk_free_rate: float, margin_of_safety: float) -> tuple[str, str]:
+                           risk_free_rate: float, margin_of_safety: float,
+                           sentinel_alert: dict | None = None) -> tuple[str, str]:
     """Analyze whether to hold or exit an open position.
 
     Sell discipline: only exit when the THESIS is invalidated, not when the
     market agrees with you (edge narrowing is a win, not an exit signal).
 
-    Exit triggers:
+    Exit triggers (in priority order):
+    d) Sentinel detected thesis break (breaking news, HIGHEST PRIORITY)
     a) Estimate flipped against position (vault < 45% for your side, confidence >= 50%)
     b) Estimate dropped to < 50% of entry estimate (thesis substantially weakened)
     c) Remaining EV < risk-free return AND < $0.50 absolute
@@ -215,6 +225,13 @@ def _analyze_open_position(pred: dict, vault_prob: float, confidence: float,
         thesis_str = f" Entry edge: {entry_edge:+.0%}."
     if entry_reasoning:
         thesis_str += f" Entry thesis: {entry_reasoning[:80]}"
+
+    # Exit condition (d): Sentinel detected thesis break — CHECK FIRST
+    if sentinel_alert and sentinel_alert.get("status") == "BROKEN":
+        return "exit", (
+            f"SENTINEL: {sentinel_alert.get('event', 'thesis broken')}. "
+            f"P&L: ${unrealized_pnl:+.2f}.{thesis_str}"
+        )
 
     # Exit condition (a): Estimate flipped against position
     if vault_estimate_for_side < 0.45 and confidence >= 0.5:

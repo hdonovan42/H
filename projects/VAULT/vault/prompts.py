@@ -169,10 +169,26 @@ Every trade you make affects your balance. If your balance reaches $0, you die.
             prompt += f"  [{edge_type.upper()}] {t.get('theme', '')} — keywords: {keywords}\n"
         prompt += "\n"
 
-    # ── Raw tweet count context ──
-    if pipeline_result and pipeline_result.raw_tweets:
-        tweet_lines = pipeline_result.raw_tweets.count("\n")
-        prompt += f"(Raw tweets: ~{tweet_lines} lines from curated accounts fed to estimator)\n\n"
+    # ── Sentinel Alerts ──
+    sentinel = pipeline_result.sentinel_results if pipeline_result else {}
+    broken_alerts = [a for a in sentinel.get("position_alerts", []) if a.get("status") == "BROKEN"]
+    if broken_alerts:
+        prompt += "\n═══ SENTINEL ALERTS ═══\n"
+        for alert in broken_alerts:
+            prompt += f"  BREAKING: Position [{alert['prediction_id']}] thesis broken\n"
+            if alert.get("event"):
+                prompt += f"    Event: {alert['event']}\n"
+            if alert.get("source"):
+                prompt += f"    Source: {alert['source']}\n"
+            prompt += "    → SELL IMMEDIATELY\n\n"
+
+    if sentinel.get("major_event"):
+        event = sentinel["major_event"]
+        prompt += "\n═══ MAJOR EVENT DETECTED ═══\n"
+        prompt += f"  {event['event']}\n"
+        if event.get("source"):
+            prompt += f"  Source: {event['source']}\n"
+        prompt += "  (Emergency Opus re-estimation triggered)\n\n"
 
     # ── Edge Analysis Section ──
     edges = pipeline_result.edges if pipeline_result else []
@@ -260,10 +276,16 @@ Every trade you make affects your balance. If your balance reaches $0, you die.
 
     # Pipeline stats
     if pipeline_result:
+        sentinel_status = "clean"
+        if broken_alerts:
+            sentinel_status = f"{len(broken_alerts)} BROKEN"
+        elif sentinel.get("skipped"):
+            sentinel_status = "skipped (no new tweets)"
         prompt += (
             f"Pipeline: {len(pipeline_result.tweets)} tweets, "
             f"{len(pipeline_result.markets)} markets scanned, "
-            f"{len(pipeline_result.estimates)} estimated, "
+            f"{len(pipeline_result.estimates)} Opus estimates, "
+            f"sentinel: {sentinel_status}, "
             f"{len(actionable)} actionable ({pipeline_result.duration_ms}ms)\n\n"
         )
 
@@ -281,8 +303,11 @@ RULES:
 - Use the market_id from the edge analysis when placing bets
 
 SELL DISCIPLINE — only sell when the thesis is INVALIDATED:
+- Probability estimates are from daily Opus analysis (stable across cycles)
+- Exit signals come from sentinel thesis monitoring (breaking news) or Opus estimate changes
 - The market converging toward your estimate is a WIN, not an exit signal
-- Only sell when: your estimate flipped against your position, your thesis substantially weakened (< 50% of entry estimate), or remaining EV is negligible
+- Only sell when: sentinel detects thesis break, your estimate flipped against your position, your thesis substantially weakened (< 50% of entry estimate), or remaining EV is negligible
+- If a SENTINEL ALERT says SELL IMMEDIATELY — do it, the thesis has been broken by concrete evidence
 - DO NOT sell just because the edge narrowed — that means the market agrees with you
 - Let winners ride to resolution when the thesis is intact
 """

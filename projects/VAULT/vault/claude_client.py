@@ -28,6 +28,7 @@ def call_claude(
     tools: list[dict] | None = None,
     cycle_id: int | None = None,
     purpose: str = "decision",
+    max_tokens: int = 1024,
 ) -> dict:
     """Call Claude API, log cost, deduct from balance. Returns full response dict.
 
@@ -41,7 +42,7 @@ def call_claude(
 
     kwargs = {
         "model": model,
-        "max_tokens": 1024,
+        "max_tokens": max_tokens,
         "system": system,
         "messages": messages,
     }

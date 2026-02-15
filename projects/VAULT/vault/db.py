@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from vault.config_loader import get_db_path
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -238,6 +238,28 @@ CREATE TABLE IF NOT EXISTS master_intelligence (
     model_used  TEXT,
     cost_usd    REAL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS opus_estimates (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    intelligence_id  INTEGER NOT NULL,
+    market_id        TEXT NOT NULL,
+    question         TEXT,
+    vault_probability REAL NOT NULL,
+    confidence       REAL NOT NULL,
+    reasoning        TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sentinel_alerts (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    cycle_id         INTEGER NOT NULL,
+    prediction_id    INTEGER NOT NULL,
+    market_id        TEXT NOT NULL,
+    status           TEXT NOT NULL,
+    event            TEXT,
+    source           TEXT
+);
 """
 
 
@@ -446,6 +468,38 @@ def _migrate(conn):
             "INSERT INTO meta (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             ("schema_version", "7"),
+        )
+        conn.commit()
+        version = 7
+
+    if version < 8:
+        # v8: add opus_estimates + sentinel_alerts tables
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS opus_estimates (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                intelligence_id  INTEGER NOT NULL,
+                market_id        TEXT NOT NULL,
+                question         TEXT,
+                vault_probability REAL NOT NULL,
+                confidence       REAL NOT NULL,
+                reasoning        TEXT
+            );
+            CREATE TABLE IF NOT EXISTS sentinel_alerts (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                cycle_id         INTEGER NOT NULL,
+                prediction_id    INTEGER NOT NULL,
+                market_id        TEXT NOT NULL,
+                status           TEXT NOT NULL,
+                event            TEXT,
+                source           TEXT
+            );
+        """)
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "8"),
         )
         conn.commit()
 

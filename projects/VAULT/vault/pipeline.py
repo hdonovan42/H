@@ -1,4 +1,4 @@
-"""Pipeline orchestrator — Data → Estimate → Edge in three phases."""
+"""Pipeline orchestrator — Collect → Sentinel → Edge in streamlined phases."""
 
 import json
 import logging
@@ -7,10 +7,12 @@ from dataclasses import dataclass, field
 from vault.config_loader import load_config
 from vault.x_feed import collect_x_data
 from vault.market_discovery import discover_markets
-from vault.estimator import estimate_probabilities
 from vault.edge_calculator import calculate_edges
-from vault.digest import get_relevant_tweets, get_raw_tweets_for_prompt
-from vault.intelligence import should_update_intelligence, update_intelligence, get_latest_intelligence
+from vault.sentinel import run_sentinel
+from vault.intelligence import (
+    should_update_intelligence, update_intelligence,
+    get_latest_intelligence, get_latest_opus_estimates,
+)
 
 log = logging.getLogger("vault.pipeline")
 
@@ -24,10 +26,9 @@ class PipelineResult:
     markets: list = field(default_factory=list)
     estimates: list = field(default_factory=list)
     edges: list = field(default_factory=list)
+    sentinel_results: dict = field(default_factory=dict)
     digest: str | None = None
     themes: list = field(default_factory=list)
-    raw_tweets: str | None = None
-    market_tweets: dict = field(default_factory=dict)
     duration_ms: int = 0
     error: str | None = None
 
@@ -35,9 +36,13 @@ class PipelineResult:
 def run_pipeline(conn, cycle_id: int) -> PipelineResult:
     """Run the full edge-detection pipeline.
 
-    Phase 1: Collect data (X tweets + Polymarket markets) — $0
-    Phase 2: Estimate probabilities (Claude call, blind to odds) — ~$0.003-0.005
-    Phase 3: Calculate edges (pure Python math) — $0
+    Phase 1: Collect tweets — $0
+    Phase 1b: Daily intelligence update if due (Opus: analysis + estimation) — ~$0.20
+    Phase 1c: Load master intelligence + themes — $0
+    Phase 2: Sentinel check (Haiku: thesis monitoring + event detection) — ~$0.001
+    Phase 2b: Load latest Opus estimates from DB — $0
+    Phase 3: Discover markets — $0
+    Phase 4: Calculate edges (pure math) — $0
 
     Returns PipelineResult with all data for the prompt builder.
     """
@@ -58,8 +63,9 @@ def run_pipeline(conn, cycle_id: int) -> PipelineResult:
         result.tweets = collect_x_data(conn, cycle_id, cfg)
 
         # ── Phase 1b: Daily intelligence update if due ────────────
+        # Now also produces Opus probability estimates
         if should_update_intelligence(conn, cfg):
-            log.info("Pipeline Phase 1b: daily intelligence update (Opus)")
+            log.info("Pipeline Phase 1b: daily intelligence update + estimation (Opus)")
             update_intelligence(conn, cycle_id, cfg)
         else:
             log.info("Pipeline Phase 1b: intelligence document up to date")
@@ -75,65 +81,47 @@ def run_pipeline(conn, cycle_id: int) -> PipelineResult:
             result.digest = None
             result.themes = []
 
-        # ── Phase 1d: Load raw tweets for estimator ───────────────
-        result.raw_tweets = get_raw_tweets_for_prompt(conn, cfg)
-        log.info(f"Pipeline Phase 1d: raw tweets loaded ({len(result.raw_tweets)} chars)" if result.raw_tweets else "Pipeline Phase 1d: no raw tweets")
+        # ── Phase 2: Sentinel check ───────────────────────────────
+        # Scans new tweets for thesis breaks + major events
+        log.info("Pipeline Phase 2: sentinel check")
+        result.sentinel_results = run_sentinel(conn, cycle_id, cfg)
 
-        # ── Phase 1e: Discover markets matching themes ────────────
-        log.info(f"Pipeline Phase 1e: discovering markets ({len(result.themes)} themes)")
-        result.markets = discover_markets(conn, cycle_id, result.themes, cfg)
+        # If sentinel detected a major event, trigger emergency Opus update
+        if result.sentinel_results.get("major_event"):
+            event = result.sentinel_results["major_event"]
+            log.info(f"Pipeline Phase 2: MAJOR EVENT detected — {event['event']}")
+            log.info("Pipeline Phase 2: triggering emergency Opus update + re-estimation")
+            doc, themes, estimates = update_intelligence(conn, cycle_id, cfg)
+            if doc:
+                result.digest = doc
+                result.themes = themes
 
-        if not result.markets:
-            # Fallback: if no themed markets found, still re-estimate open positions
+        # ── Phase 2b: Load latest Opus estimates from DB ──────────
+        log.info("Pipeline Phase 2b: loading Opus estimates")
+        result.estimates = get_latest_opus_estimates(conn)
+        log.info(f"Pipeline Phase 2b: {len(result.estimates)} Opus estimates loaded")
+
+        if not result.estimates:
             from vault import ledger as _ledger
             open_preds = _ledger.get_open_predictions(conn)
-            if open_preds:
-                log.info("No themed markets but have open positions — running estimation for exits")
-                # Create minimal market list from open positions for re-estimation
-                result.markets = []
-            else:
-                log.warning("Pipeline: no markets found and no open positions, skipping estimation")
+            if not open_preds:
+                log.warning("Pipeline: no Opus estimates and no open positions — waiting for next Opus run")
                 result.duration_ms = int((time.monotonic() - start) * 1000)
                 _record_run(conn, cycle_id, result)
                 return result
+            else:
+                log.info("No Opus estimates but have open positions — edge calc will handle exits via sentinel")
 
-        # ── Phase 1f: Per-market relevance filtering ──────────────
-        log.info("Pipeline Phase 1f: per-market relevance filtering")
+        # ── Phase 3: Discover markets ─────────────────────────────
+        log.info(f"Pipeline Phase 3: discovering markets ({len(result.themes)} themes)")
+        result.markets = discover_markets(conn, cycle_id, result.themes, cfg)
 
-        markets_with_tweets = 0
-        for m in result.markets:
-            mid = m.get("id", "")
-            question = m.get("question", "")
-            relevant = get_relevant_tweets(conn, question)
-            if relevant:
-                result.market_tweets[mid] = relevant
-                markets_with_tweets += 1
-
-        total_relevant = sum(len(v) for v in result.market_tweets.values())
-        log.info(
-            f"Relevance filter: {total_relevant} tweets across "
-            f"{markets_with_tweets}/{len(result.markets)} markets"
-        )
-
-        # ── Phase 2: Probability Estimation ─────────────────────
-        log.info(f"Pipeline Phase 2: estimating probabilities for {len(result.markets)} markets")
-
-        result.estimates = estimate_probabilities(
-            conn, cycle_id, result.markets, result.digest,
-            result.market_tweets, cfg, raw_tweets=result.raw_tweets
-        )
-
-        if not result.estimates:
-            log.warning("Pipeline: no estimates produced")
-            result.duration_ms = int((time.monotonic() - start) * 1000)
-            _record_run(conn, cycle_id, result)
-            return result
-
-        # ── Phase 3: Edge Calculation ───────────────────────────
-        log.info(f"Pipeline Phase 3: calculating edges for {len(result.estimates)} estimates")
+        # ── Phase 4: Edge Calculation ─────────────────────────────
+        log.info(f"Pipeline Phase 4: calculating edges for {len(result.estimates)} estimates")
 
         result.edges = calculate_edges(
-            conn, cycle_id, result.estimates, result.markets, cfg
+            conn, cycle_id, result.estimates, result.markets, cfg,
+            sentinel_results=result.sentinel_results,
         )
 
     except Exception as e:
@@ -144,9 +132,10 @@ def run_pipeline(conn, cycle_id: int) -> PipelineResult:
     _record_run(conn, cycle_id, result)
 
     bets = [e for e in result.edges if e["action"] == "bet"]
+    exits = [e for e in result.edges if e["action"] == "exit"]
     log.info(
         f"Pipeline complete: {len(result.tweets)} tweets, {len(result.markets)} markets, "
-        f"{len(result.estimates)} estimates, {len(bets)} actionable edges "
+        f"{len(result.estimates)} Opus estimates, {len(bets)} bets, {len(exits)} exits "
         f"({result.duration_ms}ms, cycle {cycle_id})"
     )
 

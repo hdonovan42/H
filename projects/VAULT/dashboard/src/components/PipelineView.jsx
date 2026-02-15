@@ -16,16 +16,22 @@ export default function PipelineView({ calibration }) {
   const [cycleId, setCycleId] = useState(null);
 
   const [intelligence, setIntelligence] = useState(null);
+  const [opusEstimates, setOpusEstimates] = useState([]);
+  const [sentinelAlerts, setSentinelAlerts] = useState([]);
 
   const fetchPipeline = useCallback(async (cid) => {
     try {
       const url = cid ? `/api/v1/pipeline/${cid}` : '/api/v1/pipeline/latest';
-      const [data, intelData] = await Promise.all([
+      const [data, intelData, opusData, alertsData] = await Promise.all([
         fetchJSON(url),
         fetchJSON('/api/v1/intelligence/latest').catch(() => null),
+        fetchJSON('/api/v1/opus-estimates').catch(() => []),
+        fetchJSON('/api/v1/sentinel/alerts?limit=10').catch(() => []),
       ]);
       setPipeline(data);
       if (intelData && !intelData.error) setIntelligence(intelData);
+      if (Array.isArray(opusData)) setOpusEstimates(opusData);
+      if (Array.isArray(alertsData)) setSentinelAlerts(alertsData);
       setError(null);
       if (!cid && data.cycle_id) setCycleId(data.cycle_id);
     } catch (err) {
@@ -108,14 +114,39 @@ export default function PipelineView({ calibration }) {
         </div>
       )}
 
-      {/* Phase 2 + 3: Estimates with edges */}
-      {estimates.length > 0 && (
+      {/* Sentinel Alerts */}
+      {sentinelAlerts.length > 0 && (
         <div style={{ marginTop: '16px' }}>
-          <div className="card-title" style={{ padding: '0 0 12px 0' }}>
+          <div className="card-title" style={{ padding: '0 0 12px 0', color: '#ff4444' }}>
+            Sentinel Alerts
+          </div>
+          {sentinelAlerts.map((alert, i) => (
+            <div key={alert.id || i} className="card" style={{ borderLeft: '3px solid #ff4444', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: '#ff4444', fontWeight: 'bold' }}>BROKEN — Position [{alert.prediction_id}]</span>
+                <span className="digest-meta">{alert.ts?.slice(0, 16).replace('T', ' ')}</span>
+              </div>
+              {alert.question && <div style={{ marginTop: '4px', opacity: 0.8 }}>{alert.question}</div>}
+              {alert.event && <div style={{ marginTop: '4px' }}>Event: {alert.event}</div>}
+              {alert.source && <div style={{ opacity: 0.6 }}>Source: {alert.source}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Opus Estimates + Edge Analysis */}
+      {(opusEstimates.length > 0 || estimates.length > 0) && (
+        <div style={{ marginTop: '16px' }}>
+          <div className="card-title" style={{ padding: '0 0 4px 0' }}>
             Probability Estimates &amp; Edge Analysis
           </div>
+          {opusEstimates.length > 0 && (
+            <div className="digest-meta" style={{ marginBottom: '12px' }}>
+              Source: Opus daily analysis ({opusEstimates[0]?.model_used || 'opus'}) — {opusEstimates[0]?.ts?.slice(0, 16).replace('T', ' ')} — {opusEstimates.length} markets
+            </div>
+          )}
           <div className="estimate-grid">
-            {estimates.map((est, i) => (
+            {(opusEstimates.length > 0 ? opusEstimates : estimates).map((est, i) => (
               <EstimateCard
                 key={est.market_id || i}
                 estimate={est}
