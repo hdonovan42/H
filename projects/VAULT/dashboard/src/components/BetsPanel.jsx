@@ -7,7 +7,7 @@ function formatCost(n) {
 
 function formatPct(n) {
   if (n == null) return '?';
-  return `${(n * 100).toFixed(0)}%`;
+  return `${(n * 100).toFixed(2)}%`;
 }
 
 const SOURCE_STYLES = {
