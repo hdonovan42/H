@@ -4,6 +4,7 @@ import logging
 from vault.config_loader import load_config
 from vault import ledger
 from vault.polymarket import get_current_odds
+from vault.market_discovery import record_odds_snapshot
 
 log = logging.getLogger("vault.edge_calculator")
 
@@ -100,6 +101,8 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
                     "yes_price": odds["yes_price"],
                     "no_price": odds["no_price"],
                 }
+                record_odds_snapshot(conn, pred["market_id"],
+                                     odds["yes_price"], odds["no_price"], cycle_id)
 
     # Also get odds for estimated markets not found by discovery
     for est in estimates:
@@ -113,6 +116,8 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
                     "yes_price": odds["yes_price"],
                     "no_price": odds["no_price"],
                 }
+                record_odds_snapshot(conn, mid,
+                                     odds["yes_price"], odds["no_price"], cycle_id)
 
     results = []
 
