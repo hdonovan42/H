@@ -58,42 +58,10 @@ def run_pipeline(conn, cycle_id: int) -> PipelineResult:
     result = PipelineResult(cycle_id=cycle_id)
 
     try:
-        # ── Phase 1a: Collect tweets ──────────────────────────────
-        log.info(f"Pipeline Phase 1a: collecting tweets (cycle {cycle_id})")
-        result.tweets = collect_x_data(conn, cycle_id, cfg)
-
-        # ── Phase 1b: Daily intelligence update if due ────────────
-        # Now also produces Opus probability estimates
-        log.info("Pipeline Phase 1b: intelligence updates paused (intel disabled)")
-
-        # ── Phase 1c: Load master intelligence + themes ───────────
-        intel = get_latest_intelligence(conn)
-        if intel:
-            result.digest = intel["document"]
-            result.themes = json.loads(intel["themes_json"]) if intel.get("themes_json") else []
-            log.info(f"Pipeline Phase 1c: loaded intelligence ({len(result.digest)} chars, {len(result.themes)} themes)")
-        else:
-            log.warning("Pipeline Phase 1c: no intelligence document — seed one with 'vault seed-intel'")
-            result.digest = None
-            result.themes = []
-
-        # ── Phase 2: Sentinel check ───────────────────────────────
-        # Scans new tweets for thesis breaks + major events
-        log.info("Pipeline Phase 2: sentinel check")
-        result.sentinel_results = run_sentinel(conn, cycle_id, cfg)
-
-        # Emergency Opus re-estimation paused (intel disabled)
-        if result.sentinel_results.get("major_event"):
-            event = result.sentinel_results["major_event"]
-            log.info(f"Pipeline Phase 2: MAJOR EVENT detected — {event['event']} (intel paused, skipping Opus)")
-
-        # ── Phase 2b: Load latest Opus estimates from DB ──────────
-        log.info("Pipeline Phase 2b: loading Opus estimates")
-        result.estimates = get_latest_opus_estimates(conn)
-        log.info(f"Pipeline Phase 2b: {len(result.estimates)} Opus estimates loaded")
-
-        if not result.estimates:
-            log.info("Pipeline Phase 2b: no Opus estimates (intel paused) — continuing for velocity detection")
+        # ── Phase 1a–2b: Intel pipeline disabled (momentum-only mode) ──
+        # Tweets, sentinel, intelligence, and Opus estimates all skipped.
+        # Momentum works purely on price velocity from odds snapshots.
+        log.info(f"Pipeline Phase 1–2: skipped (momentum-only mode, cycle {cycle_id})")
 
         # ── Phase 3: Discover markets ─────────────────────────────
         log.info(f"Pipeline Phase 3: discovering markets ({len(result.themes)} themes)")

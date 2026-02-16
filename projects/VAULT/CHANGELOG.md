@@ -5,6 +5,31 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v13.5 — Disable Tweets, Sentinel & Intelligence (Momentum-Only Mode)
+**Deployed**: 2026-02-16 | **Baseline**: $75.98 balance, 58.1d runway, +$36.03 trading P&L
+
+Pipeline phases 1a–2b fully skipped: tweet collection, intelligence loading, sentinel, and Opus estimates. Momentum works purely on price velocity from odds snapshots — none of these fed into it. Removes wasted subprocess calls (bird CLI) and occasional Haiku calls (sentinel).
+
+### Changes
+- Phases 1a (tweets), 1b (Opus intel), 1c (intelligence loading), 2 (sentinel), 2b (Opus estimates) replaced with single skip log line
+- Market discovery (Phase 3) unaffected — falls back to config keywords, momentum uses volume path
+- Edge calculation (Phase 4) unaffected — velocity alerts still fire normally
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/pipeline.py` | Replace phases 1a–2b with momentum-only skip |
+
+### Reversibility
+Restore the original phase blocks to re-enable. All DB tables (x_posts, sentinel_alerts, opus_estimates, intelligence) preserved.
+
+### What to Watch
+- Cycles should show $0.0000 cost when no momentum alerts fire (no more sentinel Haiku calls)
+- Momentum bets should still trigger on sharp velocity moves
+- Market discovery still tracking high-volume markets for snapshots
+
+---
+
 ## v13.4 — Collapse Closed Positions by Default
 **Deployed**: 2026-02-16 | **Baseline**: $76.00 balance, 58.6d runway, +$36.03 trading P&L
 
