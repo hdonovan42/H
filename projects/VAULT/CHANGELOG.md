@@ -5,6 +5,39 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v14 — Pure Velocity-Following Momentum System
+**Deployed**: 2026-02-16 | **Baseline**: $55.23 balance, 39.2d runway, +$39.80 trading P&L
+
+Replaces the "Haiku estimates probability + edge" momentum system with a pure velocity-following approach. Direction is now mechanical (velocity sign), sizing scales with velocity magnitude, and Haiku's role is reduced to binary follow/no-follow validation. Momentum bets execute directly — no decider Haiku call.
+
+**Why**: The old system asked Haiku to estimate probability and calculate edge, producing fake numbers (e.g. declaring "6% edge" on an 86% NO market). Profitable bets (T20 +$4.19, CS:GO +$10.11) succeeded because they followed strong velocity, not because of Haiku's probability estimates.
+
+### Architecture change
+1. **Mechanical direction**: `v_1h < 0` → bet NO, `v_1h > 0` → bet YES
+2. **Velocity-scaled sizing**: $2 base, $3 at |v_1h| >= 20%, $4 at |v_1h| >= 40%
+3. **Haiku validates** "should we follow?" (binary follow + confidence), not "what's the probability?"
+4. **Direct execution**: bypasses decider Haiku call, saves ~$0.0007/cycle
+5. **Confidence gate**: Haiku must return `follow: true` with confidence >= 0.6
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/prompts.py` | `build_momentum_prompt()` now takes side/entry_price/remaining; asks follow/no-follow instead of probability |
+| `vault/agent.py` | `_analyze_momentum_opportunities()` rewritten: mechanical direction, velocity sizing, new response parsing |
+| `vault/agent.py` | New `_execute_momentum_bets()`: picks best by |v_1h| * confidence, calls bet actuator directly |
+| `vault/agent.py` | `run_cycle()` momentum path short-circuits decider; `_parse_momentum_response()` parses follow/confidence |
+| `config/default.yaml` | Replaced `momentum_min_edge`/`momentum_min_confidence` with `momentum_follow_confidence`, `momentum_base_bet_usd`, `momentum_vel_scale_20/40` |
+
+### What to Watch
+- Haiku receives new follow/no-follow prompt (check VPS logs for `momentum_validation`)
+- Direction matches velocity sign (side not chosen by Haiku)
+- Sizing scales with velocity magnitude ($2/$3/$4)
+- `entry_confidence` stores follow confidence (0.6-1.0), `entry_edge` stores velocity magnitude
+- No decider API cost on momentum cycles (only the validation Haiku call)
+- Barcelona-type bets (high odds, low remaining upside) should get `follow: false`
+
+---
+
 ## v13.7 — Pre-filter Extreme Odds from Momentum Pipeline
 **Deployed**: 2026-02-16 | **Baseline**: $55.96 balance, 42.0d runway, +$36.03 trading P&L
 

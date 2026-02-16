@@ -440,12 +440,19 @@ def _run_tool_loop(conn, cycle_id, system_prompt, context, cfg) -> dict:
 
 
 def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: dict) -> list[dict]:
-    """Analyze velocity alerts for momentum bet opportunities using Haiku."""
+    """Analyze velocity alerts for pure velocity-following momentum bets.
+
+    Direction is mechanical (from velocity sign), sizing scales with velocity
+    magnitude, and Haiku validates follow/no-follow (no probability estimation).
+    """
     vel_cfg = cfg.get("velocity", {})
     max_per_cycle = vel_cfg.get("max_momentum_per_cycle", 3)
-    min_confidence = vel_cfg.get("momentum_min_confidence", 0.5)
-    min_edge = vel_cfg.get("momentum_min_edge", 0.05)
-    max_bet = vel_cfg.get("momentum_max_bet_usd", 2.00)
+    follow_confidence = vel_cfg.get("momentum_follow_confidence", 0.6)
+    base_bet = vel_cfg.get("momentum_base_bet_usd", 2.00)
+    max_bet = vel_cfg.get("momentum_max_bet_usd", 4.00)
+    vel_scale_20 = vel_cfg.get("momentum_vel_scale_20", 1.5)
+    vel_scale_40 = vel_cfg.get("momentum_vel_scale_40", 2.0)
+    model = vel_cfg.get("momentum_model", "claude-haiku-4-5-20251001")
 
     velocity_alerts = [
         e for e in (pipeline_result.edges or [])
@@ -474,96 +481,38 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             value_by_market[mid] = value_by_market.get(mid, 0) + p["cost_basis"]
 
     items = []
+    total_api_cost = 0  # Track all Haiku calls including skipped signals
     for alert in velocity_alerts[:max_per_cycle]:
         question = alert.get("question", alert["market_id"])
         market_odds = alert.get("market_odds", 0.5)
         v_1h = alert.get("v_1h")
         v_6h = alert.get("v_6h")
 
-        # Skip markets at extreme odds — would be blocked by opportunity cost gate anyway
+        # 1. Extreme odds filter
         if market_odds >= 0.995 or market_odds <= 0.005:
             log.info(f"Momentum skip (extreme odds): {question[:50]} @ {market_odds:.2%}")
             continue
 
-        analysis = _call_momentum_haiku(conn, cycle_id, question, v_1h, v_6h, market_odds, cfg)
-        if not analysis:
-            _log_smart_money_event(
-                conn, cycle_id=cycle_id, market_id=alert["market_id"],
-                question=question,
-                vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
-                action_taken="momentum_skip",
-                market_odds=market_odds,
-            )
+        # 2. Mechanical direction: v_1h sign → side
+        if v_1h is None or v_1h == 0:
+            log.info(f"Momentum skip (no v_1h): {question[:50]}")
             continue
+        side = "NO" if v_1h < 0 else "YES"
+        entry_price = market_odds if side == "YES" else (1 - market_odds)
+        remaining = _remaining_return_pct(entry_price)
 
-        prob = analysis["probability"]
-        conf = analysis["confidence"]
-        side = analysis["side"]
-
-        # Calculate edge
-        if side == "YES":
-            edge = prob - market_odds
+        # 3. Velocity-scaled sizing
+        abs_v = abs(v_1h)
+        if abs_v >= 0.40:
+            vel_mult = vel_scale_40
+        elif abs_v >= 0.20:
+            vel_mult = vel_scale_20
         else:
-            edge = (1 - prob) - (1 - market_odds)
-
-        if conf < min_confidence or abs(edge) < min_edge:
-            log.info(
-                f"Momentum skip: {question[:50]} — conf {conf:.0%} < {min_confidence:.0%} "
-                f"or edge {abs(edge):.0%} < {min_edge:.0%}"
-            )
-            _log_smart_money_event(
-                conn, cycle_id=cycle_id, market_id=alert["market_id"],
-                question=question,
-                vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
-                action_taken="momentum_skip",
-                vault_estimate=prob, market_odds=market_odds, side=side,
-            )
-            continue
-
-        # Opportunity cost gate — don't enter if remaining return < risk-free
-        our_entry_price = market_odds if side == "YES" else (1 - market_odds)
-        remaining = _remaining_return_pct(our_entry_price)
-        end_date = conn.execute(
-            "SELECT end_date FROM musk_markets WHERE market_id = ?",
-            (alert["market_id"],),
-        ).fetchone()
-        annual_rate = vel_cfg.get("opportunity_cost_annual", 0.10)
-        default_days = vel_cfg.get("opportunity_cost_default_days", 30)
-        days = _days_to_resolution(end_date[0] if end_date else None, default_days)
-        risk_free = annual_rate * (days / 365)
-        if our_entry_price >= 0.995 or remaining <= risk_free:
-            log.info(
-                f"Momentum skip (opportunity cost): {question[:40]} — "
-                f"remaining {remaining:.2%} < risk-free {risk_free:.2%} ({days:.0f}d)"
-            )
-            _log_smart_money_event(
-                conn, cycle_id=cycle_id, market_id=alert["market_id"],
-                question=question,
-                vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
-                action_taken="momentum_skip",
-                vault_estimate=prob, market_odds=market_odds, side=side,
-            )
-            continue
-
-        # Exposure cap — don't over-concentrate on one market
-        current_exposure = exposure_by_market.get(alert["market_id"], 0)
-        max_exposure_usd = balance * max_exposure_pct
-        if current_exposure >= max_exposure_usd:
-            log.info(
-                f"Momentum skip: {question[:50]} — exposure ${current_exposure:.2f} "
-                f">= {max_exposure_pct:.0%} cap (${max_exposure_usd:.2f})"
-            )
-            _log_smart_money_event(
-                conn, cycle_id=cycle_id, market_id=alert["market_id"],
-                question=question,
-                vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
-                action_taken="momentum_skip",
-                vault_estimate=prob, market_odds=market_odds, side=side,
-            )
-            continue
+            vel_mult = 1.0
+        raw_bet = min(base_bet * vel_mult, max_bet, balance * 0.10)
 
         # Pyramiding: scale bet size based on unrealised ROI of existing exposure
-        # If we're profitable, the signal is confirmed — bet bigger
+        current_exposure = exposure_by_market.get(alert["market_id"], 0)
         current_value = value_by_market.get(alert["market_id"], 0)
         unrealised_roi = (current_value - current_exposure) / current_exposure if current_exposure > 0 else 0
         if unrealised_roi >= 0.25:
@@ -573,11 +522,25 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         else:
             pyramid_mult = 1.0
 
-        # Cap bet size (also respect remaining room under exposure cap)
+        # Cap bet size (respect remaining room under exposure cap)
+        max_exposure_usd = balance * max_exposure_pct
         remaining_room = max_exposure_usd - current_exposure
-        base_bet = min(max_bet, balance * 0.10)
-        bet_size = min(base_bet * pyramid_mult, remaining_room)
-        bet_size = round(bet_size, 2)
+        bet_size = min(raw_bet * pyramid_mult, remaining_room, max_bet)
+        bet_size = round(max(bet_size, 0), 2)
+
+        if bet_size <= 0:
+            log.info(
+                f"Momentum skip: {question[:50]} — exposure ${current_exposure:.2f} "
+                f">= {max_exposure_pct:.0%} cap (${max_exposure_usd:.2f})"
+            )
+            _log_smart_money_event(
+                conn, cycle_id=cycle_id, market_id=alert["market_id"],
+                question=question,
+                vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
+                action_taken="momentum_skip",
+                market_odds=market_odds, side=side,
+            )
+            continue
 
         if pyramid_mult > 1:
             log.info(
@@ -585,26 +548,79 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
                 f"{pyramid_mult:.0f}x size (${bet_size:.2f})"
             )
 
+        # 4. Haiku validation: "follow this signal?"
+        analysis = _call_momentum_haiku(
+            conn, cycle_id, question, v_1h, v_6h, market_odds,
+            side, entry_price, remaining, model, cfg,
+        )
+        if not analysis:
+            _log_smart_money_event(
+                conn, cycle_id=cycle_id, market_id=alert["market_id"],
+                question=question,
+                vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
+                action_taken="momentum_skip",
+                market_odds=market_odds, side=side,
+            )
+            continue
+
+        total_api_cost += analysis.get("api_cost", 0)
+        follow = analysis["follow"]
+        conf = analysis["confidence"]
+        reasoning = analysis["reasoning"]
+
+        # 5. Confidence gate
+        if not follow or conf < follow_confidence:
+            log.info(
+                f"Momentum skip: {question[:50]} — follow={follow}, "
+                f"conf {conf:.0%} < {follow_confidence:.0%}"
+            )
+            _log_smart_money_event(
+                conn, cycle_id=cycle_id, market_id=alert["market_id"],
+                question=question,
+                vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
+                action_taken="momentum_skip",
+                market_odds=market_odds, side=side,
+            )
+            continue
+
+        # 6. Opportunity cost gate — don't enter if remaining return < risk-free
+        end_date = conn.execute(
+            "SELECT end_date FROM musk_markets WHERE market_id = ?",
+            (alert["market_id"],),
+        ).fetchone()
+        annual_rate = vel_cfg.get("opportunity_cost_annual", 0.10)
+        default_days = vel_cfg.get("opportunity_cost_default_days", 30)
+        days = _days_to_resolution(end_date[0] if end_date else None, default_days)
+        risk_free = annual_rate * (days / 365)
+        if entry_price >= 0.995 or remaining <= risk_free:
+            log.info(
+                f"Momentum skip (opportunity cost): {question[:40]} — "
+                f"remaining {remaining:.2%} < risk-free {risk_free:.2%} ({days:.0f}d)"
+            )
+            _log_smart_money_event(
+                conn, cycle_id=cycle_id, market_id=alert["market_id"],
+                question=question,
+                vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
+                action_taken="momentum_skip",
+                market_odds=market_odds, side=side,
+            )
+            continue
+
         item = {
             "market_id": alert["market_id"],
             "question": question,
-            "vault_prob": prob,
             "market_odds": market_odds,
-            "edge": round(edge, 4),
-            "abs_edge": round(abs(edge), 4),
             "side": side,
-            "confidence": round(conf, 4),
-            "original_confidence": conf,
-            "kelly_fraction": 0,
-            "recommended_size_usd": bet_size,
-            "action": "bet",
-            "reasoning": f"Momentum: {analysis['reasoning']}",
-            "is_open_position": False,
+            "entry_price": entry_price,
             "v_1h": v_1h,
             "v_6h": v_6h,
-            "velocity_direction": "neutral",
+            "abs_v_1h": abs_v,
+            "follow_confidence": round(conf, 4),
+            "reasoning": f"Momentum follow: {reasoning}",
+            "recommended_size_usd": bet_size,
             "velocity_sharp": True,
             "source": "momentum",
+            "api_cost": analysis.get("api_cost", 0),
         }
         items.append(item)
 
@@ -613,20 +629,22 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             question=question,
             vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
             action_taken="momentum_bet",
-            vault_estimate=prob, market_odds=market_odds,
-            side=side, amount_usd=bet_size,
+            market_odds=market_odds, side=side, amount_usd=bet_size,
         )
-        log.info(f"Momentum bet candidate: {question[:50]} — {side} ${bet_size:.2f}")
+        log.info(
+            f"Momentum bet candidate: {question[:50]} — {side} ${bet_size:.2f} "
+            f"(v={v_1h:+.0%}/1h, conf={conf:.0%})"
+        )
 
-    return items
+    return items, total_api_cost
 
 
-def _call_momentum_haiku(conn, cycle_id, question, v_1h, v_6h, market_odds, cfg):
-    """Call Haiku for momentum analysis. Returns parsed dict or None."""
-    vel_cfg = cfg.get("velocity", {})
-    model = vel_cfg.get("momentum_model", "claude-haiku-4-5-20251001")
-
-    system, user = build_momentum_prompt(question, v_1h, v_6h, market_odds)
+def _call_momentum_haiku(conn, cycle_id, question, v_1h, v_6h, market_odds,
+                         side, entry_price, remaining, model, cfg):
+    """Call Haiku for momentum follow/no-follow validation. Returns parsed dict or None."""
+    system, user = build_momentum_prompt(
+        question, v_1h, v_6h, market_odds, side, entry_price, remaining,
+    )
 
     try:
         response = call_claude(
@@ -636,38 +654,45 @@ def _call_momentum_haiku(conn, cycle_id, question, v_1h, v_6h, market_odds, cfg)
             system=system,
             messages=[{"role": "user", "content": user}],
             cycle_id=cycle_id,
-            purpose="momentum_analysis",
+            purpose="momentum_validation",
             max_tokens=256,
         )
         text = " ".join(b["text"] for b in response["content"] if b["type"] == "text")
-        return _parse_momentum_response(text)
+        cost = response.get("cost", 0)
+        result = _parse_momentum_response(text)
+        if result:
+            result["api_cost"] = cost
+        return result
     except Exception as e:
         log.warning(f"Momentum Haiku call failed: {e}")
         return None
 
 
 def _parse_momentum_response(text: str) -> dict | None:
-    """Parse JSON response from momentum Haiku. Returns dict or None."""
+    """Parse JSON response from momentum Haiku (follow/confidence/reasoning)."""
     text = text.strip()
     if text.startswith("```"):
         lines = text.split("\n")
         lines = [l for l in lines if not l.strip().startswith("```")]
         text = "\n".join(lines).strip()
 
+    def _extract(parsed):
+        if not isinstance(parsed, dict):
+            return None
+        follow = parsed.get("follow")
+        conf = parsed.get("confidence")
+        if follow is None or conf is None:
+            return None
+        return {
+            "follow": bool(follow),
+            "confidence": float(conf),
+            "reasoning": parsed.get("reasoning", ""),
+        }
+
     try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict):
-            prob = parsed.get("probability")
-            conf = parsed.get("confidence")
-            side = parsed.get("side", "YES").upper()
-            reasoning = parsed.get("reasoning", "")
-            if prob is not None and conf is not None:
-                return {
-                    "probability": float(prob),
-                    "confidence": float(conf),
-                    "side": side,
-                    "reasoning": reasoning,
-                }
+        result = _extract(json.loads(text))
+        if result:
+            return result
     except (json.JSONDecodeError, ValueError, TypeError):
         pass
 
@@ -676,20 +701,86 @@ def _parse_momentum_response(text: str) -> dict | None:
     end = text.rfind("}")
     if start != -1 and end != -1 and end > start:
         try:
-            parsed = json.loads(text[start:end + 1])
-            prob = parsed.get("probability")
-            conf = parsed.get("confidence")
-            if prob is not None and conf is not None:
-                return {
-                    "probability": float(prob),
-                    "confidence": float(parsed.get("confidence", 0)),
-                    "side": parsed.get("side", "YES").upper(),
-                    "reasoning": parsed.get("reasoning", ""),
-                }
+            result = _extract(json.loads(text[start:end + 1]))
+            if result:
+                return result
         except (json.JSONDecodeError, ValueError, TypeError):
             pass
 
     return None
+
+
+def _execute_momentum_bets(conn, cycle_id: int, momentum_items: list[dict],
+                           context: dict) -> dict:
+    """Execute best momentum bet directly — bypasses decider.
+
+    Picks the best candidate by |v_1h| * haiku_confidence, then calls the
+    bet actuator. Returns a cycle result dict.
+    """
+    result = {"cycle_id": cycle_id, "action": None, "rounds": 0, "total_cost": 0}
+
+    if not momentum_items:
+        result["action"] = "hold"
+        result["reasoning"] = "no momentum candidates passed validation"
+        return result
+
+    # Pick best by |v_1h| * haiku_confidence
+    momentum_items.sort(
+        key=lambda x: x.get("abs_v_1h", 0) * x.get("follow_confidence", 0),
+        reverse=True,
+    )
+    best = momentum_items[0]
+
+    market_id = best["market_id"]
+    side = best["side"]
+    amount_usd = best["recommended_size_usd"]
+    reasoning = best["reasoning"]
+
+    # Guardrail check
+    allowed, block_reason = check_trade_allowed(conn, amount_usd, "PREDICTION")
+    if not allowed:
+        log.warning(f"Momentum bet blocked by guardrail: {block_reason}")
+        result["action"] = "hold"
+        result["reasoning"] = f"momentum bet blocked: {block_reason}"
+        return result
+
+    # Death check
+    if check_death(conn):
+        result["action"] = "death"
+        return result
+
+    # Inject momentum data into pipeline_edges so bet actuator picks it up
+    if "pipeline_edges" not in context:
+        context["pipeline_edges"] = []
+    context["pipeline_edges"].append({
+        "market_id": market_id,
+        "edge": best.get("abs_v_1h", 0),       # Store velocity magnitude as entry_edge
+        "confidence": best.get("follow_confidence", 0),
+        "reasoning": reasoning,
+    })
+
+    bet_actuator = get_actuator("bet")
+    exec_result = bet_actuator.execute(conn, {
+        "market_id": market_id,
+        "side": side,
+        "amount_usd": amount_usd,
+        "reasoning": reasoning,
+    }, context)
+
+    if exec_result.get("success"):
+        result["action"] = "bet"
+        result["reasoning"] = reasoning
+        result["exec_result"] = exec_result
+        log.info(
+            f"Momentum direct exec: BET {side} ${amount_usd:.2f} on "
+            f"{best['question'][:50]} (v={best.get('v_1h', 0):+.0%}/1h)"
+        )
+    else:
+        result["action"] = "hold"
+        result["reasoning"] = f"momentum bet failed: {exec_result.get('error', 'unknown')}"
+        log.warning(f"Momentum bet failed: {exec_result.get('error')}")
+
+    return result
 
 
 def _remaining_return_pct(our_price: float) -> float:
@@ -837,33 +928,29 @@ def run_cycle(conn) -> dict:
 
     # ── Auto-pilot: pipeline-driven decision ──
     if pipeline_result and pipeline_result.enabled:
-        actionable = None  # Intel bets paused — momentum only
-
-        # Momentum analysis: sharp moves on unestimated markets
+        # Momentum analysis: sharp velocity moves → direct execution (no decider)
         vel_cfg = cfg.get("velocity", {})
+        momentum_items = []
+        momentum_api_cost = 0
         if vel_cfg.get("momentum_enabled", False) and pipeline_result.edges:
-            momentum_items = _analyze_momentum_opportunities(
+            momentum_items, momentum_api_cost = _analyze_momentum_opportunities(
                 conn, cycle_id, pipeline_result, cfg
             )
-            if momentum_items:
-                if actionable is None:
-                    actionable = []
-                actionable.extend(momentum_items)
-                log.info(f"Cycle {cycle_id}: {len(momentum_items)} momentum opportunities added")
 
-        if not actionable:
-            # Auto-hold — no Claude call, $0 cost
+        if momentum_items:
+            log.info(f"Cycle {cycle_id}: {len(momentum_items)} momentum candidates — executing directly")
+            result = _execute_momentum_bets(conn, cycle_id, momentum_items, context)
+            result["total_cost"] += momentum_api_cost  # Include all Haiku calls (even skipped signals)
+        else:
+            # Auto-hold — include any Haiku costs from validation calls that all got skipped
             result = {
                 "cycle_id": cycle_id,
                 "action": "hold",
-                "reasoning": "auto-hold: pipeline found no actionable opportunities",
+                "reasoning": "auto-hold: no velocity signals passed validation",
                 "rounds": 0,
-                "total_cost": 0,
+                "total_cost": momentum_api_cost,
             }
-            log.info(f"Cycle {cycle_id}: auto-hold (no actionable edges)")
-        else:
-            log.info(f"Cycle {cycle_id}: {len(actionable)} actionable items — calling decider")
-            result = _run_decider(conn, cycle_id, pipeline_result, actionable, context, cfg)
+            log.info(f"Cycle {cycle_id}: auto-hold (no momentum signals)")
     else:
         # ── Fallback: legacy tool-use loop ──
         log.info(f"Cycle {cycle_id}: pipeline disabled/failed — using tool loop")

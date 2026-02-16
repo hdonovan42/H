@@ -63,9 +63,11 @@ velocity:
   haircut_amount: 0.15
   momentum_enabled: true
   momentum_model: claude-haiku-4-5-20251001
-  momentum_max_bet_usd: 4.00
-  momentum_min_confidence: 0.5
-  momentum_min_edge: 0.05
+  momentum_follow_confidence: 0.6   # Haiku must be this confident to follow
+  momentum_base_bet_usd: 2.00       # base bet size
+  momentum_max_bet_usd: 4.00        # hard cap
+  momentum_vel_scale_20: 1.5        # 1.5x at |v_1h| >= 20%
+  momentum_vel_scale_40: 2.0        # 2x at |v_1h| >= 40%
   max_momentum_per_cycle: 3
   momentum_max_exposure_pct: 0.50
   momentum_min_volume: 10000     # skip markets below $10k volume (thin/manipulable)

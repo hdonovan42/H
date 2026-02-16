@@ -405,36 +405,41 @@ SELL DISCIPLINE — only sell when the thesis is INVALIDATED:
 
 
 def build_momentum_prompt(question: str, v_1h: float | None, v_6h: float | None,
-                          market_odds: float) -> tuple[str, str]:
-    """Build prompt for Haiku momentum analysis of a sharp-moving unestimated market.
+                          market_odds: float, side: str, entry_price: float,
+                          remaining: float) -> tuple[str, str]:
+    """Build prompt for Haiku momentum validation — follow/no-follow on a sharp move.
+
+    Direction and sizing are determined mechanically before this call.
+    Haiku's job is to validate: "should we follow this momentum?"
 
     Returns (system_prompt, user_prompt) tuple.
     """
     system = (
-        "You are a prediction market analyst. A sharp price move has been detected on a market "
-        "that VAULT hasn't estimated yet. Analyze whether the move represents informed money "
-        "and whether we should follow with a small momentum bet. "
+        "You are a prediction market momentum validator. "
+        "A sharp price move has been detected and a bet direction has been determined mechanically. "
+        "Your job: decide whether to FOLLOW or SKIP this signal. "
         "Respond ONLY with valid JSON: "
-        '{"probability": 0.65, "confidence": 0.6, "side": "YES", "reasoning": "..."}'
+        '{"follow": true, "confidence": 0.8, "reasoning": "..."}'
     )
 
     vel_parts = []
     if v_1h is not None:
-        vel_parts.append(f"{v_1h:+.0%} in the last 1 hour")
+        vel_parts.append(f"{v_1h:+.0%}/1h")
     if v_6h is not None:
-        vel_parts.append(f"{v_6h:+.0%} in the last 6 hours")
-    vel_desc = " and ".join(vel_parts)
+        vel_parts.append(f"{v_6h:+.0%}/6h")
+    vel_desc = ", ".join(vel_parts)
 
     user = (
-        f"Market: \"{question}\"\n"
-        f"Current YES odds: {market_odds:.0%}\n"
-        f"Sharp move detected: {vel_desc}\n\n"
-        f"Does this sharp move make fundamental sense? Is it likely informed money (insiders, "
-        f"people with better information) or noise/manipulation? Should we follow with a small bet?\n\n"
-        f"Consider: What could drive this move? Is there a news catalyst? "
-        f"Does the direction align with public information?\n\n"
-        f"Respond JSON only: probability (your estimate of YES), confidence (0-1), "
-        f"side (YES/NO), reasoning (1-2 sentences)."
+        f'A sharp price move detected on a prediction market.\n\n'
+        f'Market: "{question}"\n'
+        f'Current odds: {market_odds:.0%} YES / {1 - market_odds:.0%} NO\n'
+        f'Velocity: {vel_desc}\n'
+        f'Proposed bet: {side} at {entry_price:.0%} (remaining upside: {remaining:.0%})\n\n'
+        f'Should we follow this momentum? Consider:\n'
+        f'1. Is this move likely event-driven (live match, breaking news) or noise?\n'
+        f'2. At {entry_price:.0%} entry, is the remaining {remaining:.0%} upside worth the risk?\n'
+        f'3. Is the velocity magnitude ({abs(v_1h) if v_1h else 0:.0%}/1h) significant enough?\n\n'
+        f'JSON only: {{"follow": true/false, "confidence": 0.0-1.0, "reasoning": "..."}}'
     )
 
     return system, user
