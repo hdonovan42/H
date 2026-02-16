@@ -432,13 +432,20 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
     max_exposure_pct = vel_cfg.get("momentum_max_exposure_pct", 0.50)
     balance = ledger.get_balance(conn)
 
-    # Build current exposure per market for position-size awareness
+    # Build current exposure + market value per market for position-size awareness
+    from vault.polymarket import get_current_odds
     open_preds = ledger.get_open_predictions(conn)
     exposure_by_market = {}
+    value_by_market = {}
     for p in open_preds:
-        exposure_by_market[p["market_id"]] = (
-            exposure_by_market.get(p["market_id"], 0) + p["cost_basis"]
-        )
+        mid = p["market_id"]
+        exposure_by_market[mid] = exposure_by_market.get(mid, 0) + p["cost_basis"]
+        odds = get_current_odds(conn, mid)
+        if odds:
+            cp = odds["yes_price"] if p["side"] == "YES" else odds["no_price"]
+            value_by_market[mid] = value_by_market.get(mid, 0) + p["shares"] * cp
+        else:
+            value_by_market[mid] = value_by_market.get(mid, 0) + p["cost_basis"]
 
     items = []
     for alert in velocity_alerts[:max_per_cycle]:
@@ -499,10 +506,28 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             )
             continue
 
+        # Pyramiding: scale bet size based on unrealised ROI of existing exposure
+        # If we're profitable, the signal is confirmed — bet bigger
+        current_value = value_by_market.get(alert["market_id"], 0)
+        unrealised_roi = (current_value - current_exposure) / current_exposure if current_exposure > 0 else 0
+        if unrealised_roi >= 0.25:
+            pyramid_mult = 3.0
+        elif unrealised_roi >= 0.10:
+            pyramid_mult = 2.0
+        else:
+            pyramid_mult = 1.0
+
         # Cap bet size (also respect remaining room under exposure cap)
         remaining_room = max_exposure_usd - current_exposure
-        bet_size = min(max_bet, balance * 0.05, remaining_room)
+        base_bet = min(max_bet, balance * 0.05)
+        bet_size = min(base_bet * pyramid_mult, remaining_room)
         bet_size = round(bet_size, 2)
+
+        if pyramid_mult > 1:
+            log.info(
+                f"Momentum pyramid: {question[:40]} — ROI {unrealised_roi:+.0%} → "
+                f"{pyramid_mult:.0f}x size (${bet_size:.2f})"
+            )
 
         item = {
             "market_id": alert["market_id"],

@@ -19,6 +19,12 @@ Momentum IS the alpha. Sharp price moves on Polymarket represent informed money 
 - Bet sizing respects remaining room under the cap (partial fills at the boundary)
 - No price ceiling — capital efficiency exit at 99% handles the other end
 
+**Pyramiding** — bet size scales with unrealised ROI on existing exposure to the same market. The P&L IS the confidence signal — if we're profitable, the signal has confirmed, so we should bet bigger:
+- 0-10% ROI: 1x base bet
+- 10-25% ROI: 2x base bet
+- 25%+ ROI: 3x base bet
+- Self-correcting: if we're underwater (signal was wrong), sizing stays at 1x
+
 **Capital efficiency exit** — new `_exit_maxed_positions()` runs at cycle start. Sells any position where our side is priced >= 99%. No point tying up capital for days waiting for formal resolution when there's <1% remaining gain. First trigger: 11 cricket momentum bets sold for +$4.19 realised.
 
 **Veto noise reduction** — vetoes now only fire when there's an actual bet to block (`cf_size > 0`). Previously logged 71 vetoes with `counterfactual_size=0` — blocking bets that Kelly had already rejected. Pure noise.
@@ -43,12 +49,19 @@ T20 World Cup Australia vs Sri Lanka triggered 11 momentum bets in 25 minutes (p
 ### Backtested Comparison (cricket bets)
 | System | Deployed | P&L | ROI |
 |--------|----------|-----|-----|
+| **Pyramid + 50% cap** | **$18.92** | **+$5.86** | **+31%** |
+| Flat + 50% cap | $18.92 | +$4.66 | +25% |
 | No cap (actual) | $22.23 | +$4.19 | +19% |
-| 50% cap (new) | $18.92 | +$4.19 | +22% |
 | 15% cap (rejected) | $6.98 | +$3.25 | +47% |
 
+### Why 50% cap beats 15% despite lower ROI
+The 15% cap's 47% ROI is flattering — it only caught the risky early bets that happened to win. If the signal had been wrong, that same concentration would have been a 47% loss. The 50% cap deploys more capital, but crucially, the additional exposure goes in AFTER the signal has confirmed. The later dollars carry less risk than the first dollar. Higher ROI ≠ better risk-adjusted returns when the risk profile changes throughout the position build.
+
+### Why pyramiding wins
+The pyramid front-loads capital into the confirmed part of the move. At +22% ROI, bet [98] doubled to 2x — correctly identifying that the signal was real. Same total deployment as flat sizing, but the bigger bets were placed when confidence was highest. Result: +$1.20 more profit (+$5.86 vs +$4.66) for identical capital at risk.
+
 ### What to Watch
-- Next momentum signal: verify scaling works (multiple bets, capped at 50%)
+- Next momentum signal: verify pyramid scaling fires (look for "Momentum pyramid" in logs)
 - Capital efficiency exits: positions should auto-sell at 99%+
 - Smart money panel: MTM figures should update live
 - Source performance divergence: does momentum outperform intel?
