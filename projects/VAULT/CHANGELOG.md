@@ -5,6 +5,56 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v12 — Momentum-First Architecture
+**Deployed**: 2026-02-16 | **Baseline**: $41.72 balance, 19.1d runway, +$25.78 trading P&L
+
+### Thesis
+Momentum IS the alpha. Sharp price moves on Polymarket represent informed money — our edge is riding that signal, not independent analysis. The system should scale aggressively into confirmed signals while protecting against capital waste.
+
+### Changes
+
+**Smart momentum scaling** — removed hard deduplication rule that blocked additional bets on markets with open positions. Momentum bets now scale into confirmed signals:
+- Each cycle still gets a fresh Haiku analysis, so signal quality is re-evaluated
+- Exposure cap at **50% of balance per market** — prevents one market consuming everything
+- Bet sizing respects remaining room under the cap (partial fills at the boundary)
+- No price ceiling — capital efficiency exit at 99% handles the other end
+
+**Capital efficiency exit** — new `_exit_maxed_positions()` runs at cycle start. Sells any position where our side is priced >= 99%. No point tying up capital for days waiting for formal resolution when there's <1% remaining gain. First trigger: 11 cricket momentum bets sold for +$4.19 realised.
+
+**Veto noise reduction** — vetoes now only fire when there's an actual bet to block (`cf_size > 0`). Previously logged 71 vetoes with `counterfactual_size=0` — blocking bets that Kelly had already rejected. Pure noise.
+
+**Mark-to-market smart money stats** — API summary endpoint now computes unrealised P&L for pending momentum/boost entries by looking up open predictions and current market odds, instead of showing $0 until resolution.
+
+**Source classification** — predictions tagged as `pipeline` (Opus intel), `momentum` (smart money velocity), or `legacy` (old tool-loop). Three-way classification based on `entry_confidence` and `entry_reasoning`.
+
+**Dashboard updates**:
+- Source tags (INTEL/MOMENTUM/LEGACY) on every position with colour-coded chips
+- Source performance summary card — deployed capital, unrealised + realised P&L, W/L per source
+- Legacy positions collapsed by default — click to expand, shows aggregate P&L in header
+- Odds shown to 2 decimal places (was 0dp — masked 99.95% as 100%)
+
+### Cricket Incident (the case study)
+T20 World Cup Australia vs Sri Lanka triggered 11 momentum bets in 25 minutes (pre-fix). Market moved from 38% → 0.05% YES. All NO bets profitable. Under the new 50% cap system:
+- Bets 96-101 (entry 62-76%): **PASS** — captured +$4.18 of profit
+- Bets 102-108 (entry 99-100%): mostly **PASS** but +$0.01 total — capital efficiency exit sold them all at 99%+
+- Only the last 1-2 bets would be **BLOCKED** by cap — dead money at 100%
+- Result: same +$4.19 P&L, capital freed immediately instead of locked for days
+
+### Backtested Comparison (cricket bets)
+| System | Deployed | P&L | ROI |
+|--------|----------|-----|-----|
+| No cap (actual) | $22.23 | +$4.19 | +19% |
+| 50% cap (new) | $18.92 | +$4.19 | +22% |
+| 15% cap (rejected) | $6.98 | +$3.25 | +47% |
+
+### What to Watch
+- Next momentum signal: verify scaling works (multiple bets, capped at 50%)
+- Capital efficiency exits: positions should auto-sell at 99%+
+- Smart money panel: MTM figures should update live
+- Source performance divergence: does momentum outperform intel?
+
+---
+
 ## v11 — Performance Mirror (Layer 1 Self-Recursion)
 **Deployed**: 2026-02-16
 
