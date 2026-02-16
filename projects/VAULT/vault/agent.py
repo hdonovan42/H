@@ -517,30 +517,15 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             log.info(f"Momentum skip (extreme entry): {question[:50]} — {side} @ {entry_price:.2%}")
             continue
 
-        # 3. Velocity-scaled sizing: raw velocity sets base, z-score amplifies
+        # 3. Velocity-scaled sizing (pure raw velocity)
         z_1h = alert.get("z_1h")
-        z_sizing_high = vel_cfg.get("z_sizing_high", 4.0)
-        z_sizing_low = vel_cfg.get("z_sizing_low", 3.0)
-        z_boost_low = vel_cfg.get("z_boost_low", 1.5)    # multiplier at z >= z_sizing_low
-        z_boost_high = vel_cfg.get("z_boost_high", 2.5)   # multiplier at z >= z_sizing_high
         abs_v = abs(v_1h)
-
-        # Base multiplier from raw velocity (unchanged — all markets get this)
         if abs_v >= 0.40:
             vel_mult = vel_scale_40
         elif abs_v >= 0.20:
             vel_mult = vel_scale_20
         else:
             vel_mult = 1.0
-
-        # Z-score amplifier on top: high-conviction signals get bigger positions
-        if z_1h is not None:
-            abs_z = abs(z_1h)
-            if abs_z >= z_sizing_high:
-                vel_mult *= z_boost_high
-            elif abs_z >= z_sizing_low:
-                vel_mult *= z_boost_low
-
         raw_bet = min(base_bet * vel_mult, max_bet, balance * 0.10)
 
         # Pyramiding: scale bet size based on unrealised ROI of existing exposure
@@ -631,6 +616,19 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             follow = analysis["follow"]
             conf = analysis["confidence"]
             reasoning = analysis["reasoning"]
+
+        # 4b. Z-score confidence adjustment (high z = boost, low z = haircut)
+        #     Profitable adds are exempt from haircut — don't neuter winners
+        z_conf_boost = vel_cfg.get("z_confidence_boost", 0.15)
+        z_conf_haircut = vel_cfg.get("z_confidence_haircut", 0.10)
+        z_high_threshold = vel_cfg.get("z_sizing_high", 4.0)
+        z_low_threshold = vel_cfg.get("z_sizing_low", 3.0)
+        if z_1h is not None and follow:
+            abs_z = abs(z_1h)
+            if abs_z >= z_high_threshold:
+                conf = min(1.0, conf + z_conf_boost)
+            elif abs_z < z_low_threshold and not is_add:
+                conf = max(0.1, conf - z_conf_haircut)
 
         # 5. Confidence gate (applies to both adds and new entries)
         if not follow or conf < follow_confidence:
