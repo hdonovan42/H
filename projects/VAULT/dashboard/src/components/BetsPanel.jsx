@@ -52,6 +52,9 @@ function SourceSummary({ bySource }) {
             </div>
             <div style={{ fontSize: '16px', fontWeight: 600, color: total >= 0 ? '#44ff88' : '#ff4444' }}>
               {total >= 0 ? '+' : ''}{formatCost(total)}
+              {s.total_cost > 0 && <span style={{ fontSize: '11px', fontWeight: 400, color: 'var(--text-dim)', marginLeft: '6px' }}>
+                ({((total / s.total_cost) * 100).toFixed(0)}%)
+              </span>}
             </div>
             <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px' }}>
               {s.open > 0 && <span>{s.open} open (${s.cost.toFixed(2)} deployed)</span>}

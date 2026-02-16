@@ -288,16 +288,18 @@ def get_predictions():
         for p in open_preds:
             s = p["source"]
             if s not in by_source:
-                by_source[s] = {"cost": 0, "value": 0, "unrealized": 0, "realized": 0, "open": 0, "won": 0, "lost": 0}
+                by_source[s] = {"cost": 0, "value": 0, "unrealized": 0, "realized": 0, "total_cost": 0, "open": 0, "won": 0, "lost": 0}
             by_source[s]["cost"] += p["cost_basis"]
+            by_source[s]["total_cost"] += p["cost_basis"]
             by_source[s]["value"] += p["market_value"]
             by_source[s]["unrealized"] += p["unrealized_pnl"]
             by_source[s]["open"] += 1
         for p in closed_preds:
             s = p["source"]
             if s not in by_source:
-                by_source[s] = {"cost": 0, "value": 0, "unrealized": 0, "realized": 0, "open": 0, "won": 0, "lost": 0}
+                by_source[s] = {"cost": 0, "value": 0, "unrealized": 0, "realized": 0, "total_cost": 0, "open": 0, "won": 0, "lost": 0}
             by_source[s]["realized"] += (p.get("pnl") or 0)
+            by_source[s]["total_cost"] += (p.get("cost_basis") or 0)
             pnl = p.get("pnl") or 0
             if p.get("resolution") == "won" or (p.get("resolution") == "sold" and pnl > 0):
                 by_source[s]["won"] += 1
@@ -305,7 +307,7 @@ def get_predictions():
                 by_source[s]["lost"] += 1
         # Round everything
         for s in by_source:
-            for k in ("cost", "value", "unrealized", "realized"):
+            for k in ("cost", "value", "unrealized", "realized", "total_cost"):
                 by_source[s][k] = round(by_source[s][k], 2)
 
         return {"open": open_preds, "closed": closed_preds, "by_source": by_source}
