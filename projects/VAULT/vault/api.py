@@ -135,45 +135,74 @@ def get_status():
 # ── Balance History ─────────────────────────────────────────────────
 
 @app.get("/api/v1/balance/history")
-def get_balance_history(limit: int = Query(2000, ge=1, le=10000)):
-    """Balance lifeline — objectives snapshots with positions value.
+def get_balance_history():
+    """Balance lifeline with tiered downsampling.
 
-    Recent rows (positions_value populated): use recorded MTM snapshot.
-    Old rows (positions_value NULL/0): reconstruct from ledger using cost_basis.
+    Last 24h: every point (~1440 max).  1-7 days ago: hourly.  7+ days: daily.
+    Positions value: recorded MTM for new rows, cost_basis reconstruction for old.
     """
     conn = _conn()
     try:
-        rows = conn.execute(
-            "SELECT id, ts, balance, positions_value FROM objectives ORDER BY id ASC LIMIT ?",
-            (limit,),
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        ts_24h = (now - timedelta(hours=24)).isoformat()
+        ts_7d = (now - timedelta(days=7)).isoformat()
+
+        # Tier 1: 7+ days ago — daily (pick last row per day)
+        old_daily = conn.execute(
+            "SELECT id, ts, balance, positions_value FROM objectives "
+            "WHERE ts < ? AND id IN ("
+            "  SELECT MAX(id) FROM objectives WHERE ts < ? GROUP BY DATE(ts)"
+            ") ORDER BY id",
+            (ts_7d, ts_7d),
         ).fetchall()
 
-        # Find the first row with real positions_value data
+        # Tier 2: 1-7 days ago — hourly (pick last row per hour)
+        mid_hourly = conn.execute(
+            "SELECT id, ts, balance, positions_value FROM objectives "
+            "WHERE ts >= ? AND ts < ? AND id IN ("
+            "  SELECT MAX(id) FROM objectives WHERE ts >= ? AND ts < ? "
+            "  GROUP BY STRFTIME('%Y-%m-%d %H', ts)"
+            ") ORDER BY id",
+            (ts_7d, ts_24h, ts_7d, ts_24h),
+        ).fetchall()
+
+        # Tier 3: last 24h — every point
+        recent = conn.execute(
+            "SELECT id, ts, balance, positions_value FROM objectives "
+            "WHERE ts >= ? ORDER BY id",
+            (ts_24h,),
+        ).fetchall()
+
+        all_rows = list(old_daily) + list(mid_hourly) + list(recent)
+
+        # Find first row with real MTM data
         first_mtm_id = None
-        for r in rows:
+        for r in all_rows:
             if r["positions_value"] and r["positions_value"] > 0:
                 first_mtm_id = r["id"]
                 break
 
-        # For rows before MTM data, reconstruct from predictions open/close timestamps
-        # Build a timeline of position opens and closes
-        preds = conn.execute(
-            "SELECT id, cost_basis, opened_at, closed_at FROM predictions ORDER BY id"
-        ).fetchall()
+        # For old rows without MTM, reconstruct from prediction timestamps
+        preds = None
+        if first_mtm_id is None or (all_rows and all_rows[0]["id"] < first_mtm_id):
+            preds = conn.execute(
+                "SELECT id, cost_basis, opened_at, closed_at FROM predictions ORDER BY id"
+            ).fetchall()
 
         result = []
-        for r in rows:
+        for r in all_rows:
             if first_mtm_id and r["id"] >= first_mtm_id:
-                # Use recorded MTM snapshot
                 pv = r["positions_value"] or 0
-            else:
-                # Reconstruct: sum cost_basis of predictions open at this timestamp
+            elif preds is not None:
                 ts = r["ts"]
+                pv = sum(
+                    p["cost_basis"] for p in preds
+                    if p["opened_at"] and p["opened_at"] <= ts
+                    and (not p["closed_at"] or p["closed_at"] > ts)
+                )
+            else:
                 pv = 0.0
-                for p in preds:
-                    if p["opened_at"] and p["opened_at"] <= ts:
-                        if not p["closed_at"] or p["closed_at"] > ts:
-                            pv += p["cost_basis"]
 
             result.append({
                 "ts": r["ts"],
