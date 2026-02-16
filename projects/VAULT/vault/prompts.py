@@ -406,7 +406,7 @@ SELL DISCIPLINE — only sell when the thesis is INVALIDATED:
 
 def build_momentum_prompt(question: str, v_1h: float | None, v_6h: float | None,
                           market_odds: float, side: str, entry_price: float,
-                          remaining: float) -> tuple[str, str]:
+                          remaining: float, z_1h: float | None = None) -> tuple[str, str]:
     """Build prompt for Haiku momentum validation — follow/no-follow on a sharp move.
 
     Direction and sizing are determined mechanically before this call.
@@ -427,6 +427,8 @@ def build_momentum_prompt(question: str, v_1h: float | None, v_6h: float | None,
         vel_parts.append(f"{v_1h:+.0%}/1h")
     if v_6h is not None:
         vel_parts.append(f"{v_6h:+.0%}/6h")
+    if z_1h is not None:
+        vel_parts.append(f"z-score={z_1h:.1f} (move significance vs 24h baseline)")
     vel_desc = ", ".join(vel_parts)
 
     user = (

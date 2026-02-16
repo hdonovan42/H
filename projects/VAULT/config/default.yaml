@@ -72,6 +72,10 @@ velocity:
   max_momentum_per_cycle: 3
   momentum_max_exposure_pct: 0.50
   momentum_min_volume: 10000     # skip markets below $10k volume (thin/manipulable)
+  z_sharp_threshold: 2.0        # z >= 2.0 = sharp (replaces raw 5%/10% when z available)
+  z_min_snapshots: 30            # need 30+ snapshots in 24h for reliable z-score
+  z_sizing_low: 3.0              # 1.5x sizing at z >= 3
+  z_sizing_high: 4.0             # 2.0x sizing at z >= 4
   opportunity_cost_annual: 0.10  # 10% annual — exit when remaining return < risk-free over same period
   opportunity_cost_default_days: 30  # fallback when market has no end_date
 

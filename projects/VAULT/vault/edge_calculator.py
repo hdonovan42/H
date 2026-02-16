@@ -52,12 +52,36 @@ def calculate_velocity(conn, market_id: str, vault_prob: float | None = None,
     if len(history_6h) >= 2:
         v_6h = round(current_yes - history_6h[0]["yes_price"], 4)
 
-    # Sharp detection: configurable thresholds
+    # Z-score: normalize v_1h against 24h volatility baseline
+    z_min_snapshots = vel_cfg.get("z_min_snapshots", 30)
+    z_sharp = vel_cfg.get("z_sharp_threshold", 2.0)
+    z_1h = None
+
+    if v_1h is not None:
+        from vault.market_discovery import get_odds_history as _get_24h
+        history_24h = _get_24h(conn, market_id, hours=24)
+        if len(history_24h) >= z_min_snapshots:
+            deltas = [history_24h[i + 1]["yes_price"] - history_24h[i]["yes_price"]
+                      for i in range(len(history_24h) - 1)]
+            if len(deltas) >= 2:
+                from statistics import stdev
+                stddev_delta = stdev(deltas)
+                snaps_per_hour = len(history_24h) / 24
+                stddev_1h = stddev_delta * (snaps_per_hour ** 0.5)
+                if stddev_1h > 0.001:  # floor to avoid div-by-zero on flat markets
+                    z_1h = round(v_1h / stddev_1h, 2)
+
+    # Sharp detection: z-score-first, raw-velocity fallback
     sharp = False
-    if v_1h is not None and abs(v_1h) >= sharp_1h:
-        sharp = True
-    if v_6h is not None and abs(v_6h) >= sharp_6h:
-        sharp = True
+    if z_1h is not None:
+        if abs(z_1h) >= z_sharp:
+            sharp = True
+    else:
+        # Fallback for new markets with insufficient history
+        if v_1h is not None and abs(v_1h) >= sharp_1h:
+            sharp = True
+        if v_6h is not None and abs(v_6h) >= sharp_6h:
+            sharp = True
 
     # Direction relative to VAULT estimate
     direction = "neutral"
@@ -72,7 +96,7 @@ def calculate_velocity(conn, market_id: str, vault_prob: float | None = None,
             elif gap_after > gap_before:
                 direction = "away"
 
-    return {"v_1h": v_1h, "v_6h": v_6h, "direction": direction, "sharp": sharp}
+    return {"v_1h": v_1h, "v_6h": v_6h, "z_1h": z_1h, "direction": direction, "sharp": sharp}
 
 
 def _log_smart_money_event(conn, *, cycle_id, market_id, question=None,
@@ -357,6 +381,7 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
             "is_open_position": open_pred is not None,
             "v_1h": vel["v_1h"] if vel else None,
             "v_6h": vel["v_6h"] if vel else None,
+            "z_1h": vel["z_1h"] if vel else None,
             "velocity_direction": vel["direction"] if vel else None,
             "velocity_sharp": vel["sharp"] if vel else False,
         }
@@ -407,6 +432,7 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
                 "is_open_position": False,
                 "v_1h": vel["v_1h"],
                 "v_6h": vel["v_6h"],
+                "z_1h": vel["z_1h"],
                 "velocity_direction": vel["direction"],
                 "velocity_sharp": True,
             })
@@ -437,6 +463,8 @@ def _fmt_velocity(vel: dict) -> str:
         parts.append(f"{vel['v_1h']:+.0%}/1h")
     if vel.get("v_6h") is not None:
         parts.append(f"{vel['v_6h']:+.0%}/6h")
+    if vel.get("z_1h") is not None:
+        parts.append(f"z={vel['z_1h']:.1f}")
     return ", ".join(parts) if parts else "no data"
 
 

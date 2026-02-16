@@ -457,7 +457,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
     velocity_alerts = sorted(
         [e for e in (pipeline_result.edges or [])
          if e.get("action") == "velocity_alert" and e.get("velocity_sharp")],
-        key=lambda e: abs(e.get("v_1h") or 0),
+        key=lambda e: abs(e.get("z_1h") or 0) or abs(e.get("v_1h") or 0),
         reverse=True,
     )
 
@@ -517,14 +517,26 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             log.info(f"Momentum skip (extreme entry): {question[:50]} — {side} @ {entry_price:.2%}")
             continue
 
-        # 3. Velocity-scaled sizing
+        # 3. Velocity-scaled sizing (z-score-first, raw-velocity fallback)
+        z_1h = alert.get("z_1h")
+        z_sizing_high = vel_cfg.get("z_sizing_high", 4.0)
+        z_sizing_low = vel_cfg.get("z_sizing_low", 3.0)
         abs_v = abs(v_1h)
-        if abs_v >= 0.40:
-            vel_mult = vel_scale_40
-        elif abs_v >= 0.20:
-            vel_mult = vel_scale_20
+        if z_1h is not None:
+            abs_z = abs(z_1h)
+            if abs_z >= z_sizing_high:
+                vel_mult = vel_scale_40
+            elif abs_z >= z_sizing_low:
+                vel_mult = vel_scale_20
+            else:
+                vel_mult = 1.0
         else:
-            vel_mult = 1.0
+            if abs_v >= 0.40:
+                vel_mult = vel_scale_40
+            elif abs_v >= 0.20:
+                vel_mult = vel_scale_20
+            else:
+                vel_mult = 1.0
         raw_bet = min(base_bet * vel_mult, max_bet, balance * 0.10)
 
         # Pyramiding: scale bet size based on unrealised ROI of existing exposure
@@ -552,7 +564,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             _log_smart_money_event(
                 conn, cycle_id=cycle_id, market_id=alert["market_id"],
                 question=question,
-                vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
+                vel={"v_1h": v_1h, "v_6h": v_6h, "z_1h": z_1h, "direction": "neutral", "sharp": True},
                 action_taken="momentum_skip",
                 market_odds=market_odds, side=side,
             )
@@ -577,7 +589,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
                 _log_smart_money_event(
                     conn, cycle_id=cycle_id, market_id=alert["market_id"],
                     question=question,
-                    vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
+                    vel={"v_1h": v_1h, "v_6h": v_6h, "z_1h": z_1h, "direction": "neutral", "sharp": True},
                     action_taken="momentum_skip",
                     market_odds=market_odds, side=side,
                 )
@@ -599,12 +611,13 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             analysis = _call_momentum_haiku(
                 conn, cycle_id, question, v_1h, v_6h, market_odds,
                 side, entry_price, remaining, model, cfg,
+                z_1h=z_1h,
             )
             if not analysis:
                 _log_smart_money_event(
                     conn, cycle_id=cycle_id, market_id=alert["market_id"],
                     question=question,
-                    vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
+                    vel={"v_1h": v_1h, "v_6h": v_6h, "z_1h": z_1h, "direction": "neutral", "sharp": True},
                     action_taken="momentum_skip",
                     market_odds=market_odds, side=side,
                 )
@@ -624,7 +637,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             _log_smart_money_event(
                 conn, cycle_id=cycle_id, market_id=alert["market_id"],
                 question=question,
-                vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
+                vel={"v_1h": v_1h, "v_6h": v_6h, "z_1h": z_1h, "direction": "neutral", "sharp": True},
                 action_taken="momentum_skip",
                 market_odds=market_odds, side=side,
             )
@@ -647,7 +660,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             _log_smart_money_event(
                 conn, cycle_id=cycle_id, market_id=alert["market_id"],
                 question=question,
-                vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
+                vel={"v_1h": v_1h, "v_6h": v_6h, "z_1h": z_1h, "direction": "neutral", "sharp": True},
                 action_taken="momentum_skip",
                 market_odds=market_odds, side=side,
             )
@@ -662,6 +675,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             "entry_price": entry_price,
             "v_1h": v_1h,
             "v_6h": v_6h,
+            "z_1h": z_1h,
             "abs_v_1h": abs_v,
             "follow_confidence": round(conf, 4),
             "reasoning": f"Momentum {'add' if is_add else 'follow'}: {reasoning}",
@@ -675,23 +689,26 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         _log_smart_money_event(
             conn, cycle_id=cycle_id, market_id=alert["market_id"],
             question=question,
-            vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
+            vel={"v_1h": v_1h, "v_6h": v_6h, "z_1h": z_1h, "direction": "neutral", "sharp": True},
             action_taken=action_tag,
             market_odds=market_odds, side=side, amount_usd=bet_size,
         )
+        z_part = f", z={z_1h:.1f}" if z_1h is not None else ""
         log.info(
             f"Momentum {action_tag} candidate: {question[:50]} — {side} ${bet_size:.2f} "
-            f"(v={v_1h:+.0%}/1h, conf={conf:.0%})"
+            f"(v={v_1h:+.0%}/1h{z_part}, conf={conf:.0%})"
         )
 
     return items, total_api_cost
 
 
 def _call_momentum_haiku(conn, cycle_id, question, v_1h, v_6h, market_odds,
-                         side, entry_price, remaining, model, cfg):
+                         side, entry_price, remaining, model, cfg,
+                         z_1h=None):
     """Call Haiku for momentum follow/no-follow validation. Returns parsed dict or None."""
     system, user = build_momentum_prompt(
         question, v_1h, v_6h, market_odds, side, entry_price, remaining,
+        z_1h=z_1h,
     )
 
     try:
@@ -772,9 +789,9 @@ def _execute_momentum_bets(conn, cycle_id: int, momentum_items: list[dict],
         result["reasoning"] = "no momentum candidates passed validation"
         return result
 
-    # Pick best by |v_1h| * haiku_confidence
+    # Pick best by signal strength * haiku_confidence (z-score preferred, raw fallback)
     momentum_items.sort(
-        key=lambda x: x.get("abs_v_1h", 0) * x.get("follow_confidence", 0),
+        key=lambda x: (abs(x.get("z_1h") or 0) or x.get("abs_v_1h", 0)) * x.get("follow_confidence", 0),
         reverse=True,
     )
     best = momentum_items[0]
