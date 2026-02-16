@@ -136,19 +136,52 @@ def get_status():
 
 @app.get("/api/v1/balance/history")
 def get_balance_history(limit: int = Query(2000, ge=1, le=10000)):
-    """Balance lifeline from objectives snapshots — one point per cycle, recorded at the time."""
+    """Balance lifeline — objectives snapshots with positions value.
+
+    Recent rows (positions_value populated): use recorded MTM snapshot.
+    Old rows (positions_value NULL/0): reconstruct from ledger using cost_basis.
+    """
     conn = _conn()
     try:
         rows = conn.execute(
-            "SELECT ts, balance, positions_value FROM objectives ORDER BY id ASC LIMIT ?",
+            "SELECT id, ts, balance, positions_value FROM objectives ORDER BY id ASC LIMIT ?",
             (limit,),
         ).fetchall()
-        return [{
-            "ts": r["ts"],
-            "balance": round(r["balance"] + (r["positions_value"] or 0), 6),
-            "cash": r["balance"],
-            "positions_value": round(r["positions_value"] or 0, 6),
-        } for r in rows]
+
+        # Find the first row with real positions_value data
+        first_mtm_id = None
+        for r in rows:
+            if r["positions_value"] and r["positions_value"] > 0:
+                first_mtm_id = r["id"]
+                break
+
+        # For rows before MTM data, reconstruct from predictions open/close timestamps
+        # Build a timeline of position opens and closes
+        preds = conn.execute(
+            "SELECT id, cost_basis, opened_at, closed_at FROM predictions ORDER BY id"
+        ).fetchall()
+
+        result = []
+        for r in rows:
+            if first_mtm_id and r["id"] >= first_mtm_id:
+                # Use recorded MTM snapshot
+                pv = r["positions_value"] or 0
+            else:
+                # Reconstruct: sum cost_basis of predictions open at this timestamp
+                ts = r["ts"]
+                pv = 0.0
+                for p in preds:
+                    if p["opened_at"] and p["opened_at"] <= ts:
+                        if not p["closed_at"] or p["closed_at"] > ts:
+                            pv += p["cost_basis"]
+
+            result.append({
+                "ts": r["ts"],
+                "balance": round(r["balance"] + pv, 6),
+                "cash": r["balance"],
+                "positions_value": round(pv, 6),
+            })
+        return result
     finally:
         conn.close()
 
