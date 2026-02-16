@@ -9,12 +9,17 @@ from vault.market_discovery import record_odds_snapshot
 log = logging.getLogger("vault.edge_calculator")
 
 
-def calculate_velocity(conn, market_id: str, vault_prob: float | None = None) -> dict | None:
+def calculate_velocity(conn, market_id: str, vault_prob: float | None = None,
+                       cfg: dict | None = None) -> dict | None:
     """Calculate odds velocity from snapshot history. Pure math on existing data.
 
     Returns dict with v_1h, v_6h, direction, sharp — or None if insufficient data.
     """
     from vault.market_discovery import get_odds_history
+
+    vel_cfg = (cfg or {}).get("velocity", {})
+    sharp_1h = vel_cfg.get("sharp_threshold_1h", 0.05)
+    sharp_6h = vel_cfg.get("sharp_threshold_6h", 0.10)
 
     history_1h = get_odds_history(conn, market_id, hours=1)
     history_6h = get_odds_history(conn, market_id, hours=6)
@@ -34,11 +39,11 @@ def calculate_velocity(conn, market_id: str, vault_prob: float | None = None) ->
     if len(history_6h) >= 2:
         v_6h = round(current_yes - history_6h[0]["yes_price"], 4)
 
-    # Sharp detection: 5pp in 1h or 10pp in 6h
+    # Sharp detection: configurable thresholds
     sharp = False
-    if v_1h is not None and abs(v_1h) >= 0.05:
+    if v_1h is not None and abs(v_1h) >= sharp_1h:
         sharp = True
-    if v_6h is not None and abs(v_6h) >= 0.10:
+    if v_6h is not None and abs(v_6h) >= sharp_6h:
         sharp = True
 
     # Direction relative to VAULT estimate
@@ -55,6 +60,32 @@ def calculate_velocity(conn, market_id: str, vault_prob: float | None = None) ->
                 direction = "away"
 
     return {"v_1h": v_1h, "v_6h": v_6h, "direction": direction, "sharp": sharp}
+
+
+def _log_smart_money_event(conn, *, cycle_id, market_id, question=None,
+                           vel=None, action_taken, vault_estimate=None,
+                           market_odds=None, side=None, amount_usd=None,
+                           prediction_id=None, counterfactual_size=None,
+                           counterfactual_side=None):
+    """Insert a row into smart_money_log. Never breaks the pipeline."""
+    try:
+        conn.execute(
+            "INSERT INTO smart_money_log "
+            "(cycle_id, market_id, question, v_1h, v_6h, direction, sharp, "
+            "action_taken, vault_estimate, market_odds, side, amount_usd, "
+            "prediction_id, counterfactual_size, counterfactual_side) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (cycle_id, market_id, question,
+             vel.get("v_1h") if vel else None,
+             vel.get("v_6h") if vel else None,
+             vel.get("direction") if vel else None,
+             1 if vel and vel.get("sharp") else 0,
+             action_taken, vault_estimate, market_odds, side, amount_usd,
+             prediction_id, counterfactual_size, counterfactual_side),
+        )
+        conn.commit()
+    except Exception as e:
+        log.warning(f"Failed to log smart money event for {market_id}: {e}")
 
 
 def calculate_edges(conn, cycle_id: int, estimates: list[dict],
@@ -203,28 +234,63 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
                 reasoning = f"Size ${recommended_size:.2f} below minimum"
 
         # ── Velocity analysis ──
-        vel = calculate_velocity(conn, mid, vault_prob)
+        vel_cfg = cfg.get("velocity", {})
+        vel = calculate_velocity(conn, mid, vault_prob, cfg=cfg)
         adj_confidence = confidence
         vel_reasoning = ""
+        veto_enabled = vel_cfg.get("veto_enabled", True)
+        boost_amount = vel_cfg.get("boost_amount", 0.15)
+        haircut_amount = vel_cfg.get("haircut_amount", 0.15)
 
         if vel and vel["sharp"]:
             if vel["direction"] == "away":
-                adj_confidence = max(0.1, confidence - 0.15)
+                adj_confidence = max(0.1, confidence - haircut_amount)
                 vel_reasoning = (
-                    f" Velocity CAUTION: {_fmt_velocity(vel)} moving AWAY from estimate "
+                    f" SMART MONEY VETO: {_fmt_velocity(vel)} moving AWAY from estimate "
                     f"(confidence {confidence:.0%} → {adj_confidence:.0%})"
                 )
+
+                if veto_enabled:
+                    # Store counterfactual before overriding
+                    cf_size = recommended_size
+                    cf_side = side
+
+                    if open_pred:
+                        # Flag open position for exit
+                        action = "exit"
+                        reasoning = f"Smart money exit signal: {_fmt_velocity(vel)} moving away"
+                        _log_smart_money_event(
+                            conn, cycle_id=cycle_id, market_id=mid,
+                            question=market.get("question", ""),
+                            vel=vel, action_taken="veto",
+                            vault_estimate=vault_prob, market_odds=market_yes,
+                            side=side, prediction_id=open_pred["id"],
+                            counterfactual_size=cf_size, counterfactual_side=cf_side,
+                        )
+                    else:
+                        # Hard block — override to hold
+                        action = "hold"
+                        reasoning = f"Smart money veto: sharp move away blocks bet"
+                        _log_smart_money_event(
+                            conn, cycle_id=cycle_id, market_id=mid,
+                            question=market.get("question", ""),
+                            vel=vel, action_taken="veto",
+                            vault_estimate=vault_prob, market_odds=market_yes,
+                            side=side,
+                            counterfactual_size=cf_size, counterfactual_side=cf_side,
+                        )
+
             elif vel["direction"] == "toward":
-                adj_confidence = min(1.0, confidence + 0.05)
+                adj_confidence = min(1.0, confidence + boost_amount)
                 vel_reasoning = (
-                    f" Velocity CONFIRM: {_fmt_velocity(vel)} moving toward estimate "
+                    f" SMART MONEY CONFIRMS: {_fmt_velocity(vel)} moving toward estimate "
                     f"(confidence {confidence:.0%} → {adj_confidence:.0%})"
                 )
             else:
                 vel_reasoning = f" Velocity: {_fmt_velocity(vel)} (sharp, neutral)"
 
             # Recalculate sizing with adjusted confidence if it changed
-            if adj_confidence != confidence:
+            if adj_confidence != confidence and not (veto_enabled and vel["direction"] == "away"):
                 adjusted_fraction = kelly_fraction * adj_confidence
                 adjusted_fraction = max(0, min(adjusted_fraction, max_kelly))
                 recommended_size = round(balance * adjusted_fraction, 2) if has_edge else 0
@@ -243,6 +309,16 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
                     elif action == "bet":
                         action = "hold"
                         reasoning = f"Velocity adjustment dropped below threshold"
+
+            # Log boost events
+            if vel["direction"] == "toward":
+                _log_smart_money_event(
+                    conn, cycle_id=cycle_id, market_id=mid,
+                    question=market.get("question", ""),
+                    vel=vel, action_taken="boost",
+                    vault_estimate=vault_prob, market_odds=market_yes,
+                    side=side, amount_usd=recommended_size,
+                )
 
             reasoning += vel_reasoning
 
@@ -294,7 +370,7 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
         if mid in estimated_ids:
             continue  # Already covered by estimate loop
 
-        vel = calculate_velocity(conn, mid)
+        vel = calculate_velocity(conn, mid, cfg=cfg)
         if vel and vel["sharp"]:
             results.append({
                 "market_id": mid,

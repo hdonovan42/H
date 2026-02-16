@@ -61,6 +61,21 @@ def build_decider_prompt(conn, pipeline_result, actionable: list[dict]) -> tuple
             if vel_line:
                 body += f"  {vel_line}\n"
 
+        elif item.get("source") == "momentum":
+            vel_line = _format_velocity_line(item)
+            body += f"""
+═══ MOMENTUM BET OPPORTUNITY ═══
+  "{item.get('question', item.get('market_id', '?'))[:80]}"
+  Haiku analysis: {item.get('vault_prob', 0):.0%} {item.get('side', 'YES')} (confidence: {item.get('confidence', 0):.1f})
+  Market odds:    {item.get('market_odds', 0):.0%} YES
+  Edge:           {item.get('edge', 0):+.0%} → BET {item.get('side', 'YES')}
+  Recommended:    ${item.get('recommended_size_usd', 0):.2f} (capped momentum bet)
+  Market ID:      {item.get('market_id', '?')}
+  Note: Lower conviction — momentum following, not Opus-estimated
+"""
+            if vel_line:
+                body += f"  {vel_line}\n"
+
     body += """
 Respond with a JSON array of actions:
 [{"action": "bet", "market_id": "ID", "side": "YES", "amount_usd": 5.00, "reasoning": "..."}]
@@ -389,6 +404,42 @@ SELL DISCIPLINE — only sell when the thesis is INVALIDATED:
     return prompt
 
 
+def build_momentum_prompt(question: str, v_1h: float | None, v_6h: float | None,
+                          market_odds: float) -> tuple[str, str]:
+    """Build prompt for Haiku momentum analysis of a sharp-moving unestimated market.
+
+    Returns (system_prompt, user_prompt) tuple.
+    """
+    system = (
+        "You are a prediction market analyst. A sharp price move has been detected on a market "
+        "that VAULT hasn't estimated yet. Analyze whether the move represents informed money "
+        "and whether we should follow with a small momentum bet. "
+        "Respond ONLY with valid JSON: "
+        '{"probability": 0.65, "confidence": 0.6, "side": "YES", "reasoning": "..."}'
+    )
+
+    vel_parts = []
+    if v_1h is not None:
+        vel_parts.append(f"{v_1h:+.0%} in the last 1 hour")
+    if v_6h is not None:
+        vel_parts.append(f"{v_6h:+.0%} in the last 6 hours")
+    vel_desc = " and ".join(vel_parts)
+
+    user = (
+        f"Market: \"{question}\"\n"
+        f"Current YES odds: {market_odds:.0%}\n"
+        f"Sharp move detected: {vel_desc}\n\n"
+        f"Does this sharp move make fundamental sense? Is it likely informed money (insiders, "
+        f"people with better information) or noise/manipulation? Should we follow with a small bet?\n\n"
+        f"Consider: What could drive this move? Is there a news catalyst? "
+        f"Does the direction align with public information?\n\n"
+        f"Respond JSON only: probability (your estimate of YES), confidence (0-1), "
+        f"side (YES/NO), reasoning (1-2 sentences)."
+    )
+
+    return system, user
+
+
 def _format_velocity_line(item: dict) -> str:
     """Format a velocity line for prompts. Returns empty string if no velocity data."""
     v_1h = item.get("v_1h")
@@ -403,7 +454,12 @@ def _format_velocity_line(item: dict) -> str:
         parts.append(f"{v_6h:+.0%}/6h")
 
     direction = item.get("velocity_direction", "neutral")
-    if direction == "toward":
+    sharp = item.get("velocity_sharp", False)
+    if sharp and direction == "away":
+        suffix = " SMART MONEY VETOED (bet blocked)"
+    elif sharp and direction == "toward":
+        suffix = " SMART MONEY CONFIRMS (boosted confidence)"
+    elif direction == "toward":
         suffix = " (market moving toward your estimate)"
     elif direction == "away":
         suffix = " (market moving AWAY — caution)"

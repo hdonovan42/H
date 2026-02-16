@@ -55,6 +55,19 @@ edge:
   market_duration_days: 30             # assumed avg market duration for risk-free comparison
   estimator_model: claude-haiku-4-5-20251001
 
+velocity:
+  sharp_threshold_1h: 0.05
+  sharp_threshold_6h: 0.10
+  veto_enabled: true
+  boost_amount: 0.15
+  haircut_amount: 0.15
+  momentum_enabled: true
+  momentum_model: claude-haiku-4-5-20251001
+  momentum_max_bet_usd: 2.00
+  momentum_min_confidence: 0.5
+  momentum_min_edge: 0.05
+  max_momentum_per_cycle: 3
+
 # Model pricing (USD per 1M tokens) — updated for Claude 4.5/4.6
 # These are used to calculate cost from token counts
 pricing:

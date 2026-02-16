@@ -466,6 +466,99 @@ def get_musk_markets():
         conn.close()
 
 
+# ── Smart Money ──────────────────────────────────────────────────
+
+@app.get("/api/v1/smart-money/log")
+def get_smart_money_log(limit: int = Query(50, ge=1, le=200)):
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM smart_money_log ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+@app.get("/api/v1/smart-money/summary")
+def get_smart_money_summary():
+    conn = _conn()
+    try:
+        # Counts by action
+        action_counts = conn.execute(
+            "SELECT action_taken, COUNT(*) as count FROM smart_money_log GROUP BY action_taken"
+        ).fetchall()
+        counts = {r["action_taken"]: r["count"] for r in action_counts}
+
+        # Veto effectiveness
+        veto_correct = conn.execute(
+            "SELECT COUNT(*) as c, SUM(counterfactual_pnl) as pnl "
+            "FROM smart_money_log WHERE outcome = 'veto_correct'"
+        ).fetchone()
+        veto_wrong = conn.execute(
+            "SELECT COUNT(*) as c, SUM(counterfactual_pnl) as pnl "
+            "FROM smart_money_log WHERE outcome = 'veto_wrong'"
+        ).fetchone()
+
+        # Momentum stats
+        momentum_wins = conn.execute(
+            "SELECT COUNT(*) as c, SUM(outcome_pnl) as pnl "
+            "FROM smart_money_log WHERE action_taken = 'momentum_bet' AND outcome = 'won'"
+        ).fetchone()
+        momentum_losses = conn.execute(
+            "SELECT COUNT(*) as c, SUM(outcome_pnl) as pnl "
+            "FROM smart_money_log WHERE action_taken = 'momentum_bet' AND outcome = 'lost'"
+        ).fetchone()
+
+        # Boost stats
+        boost_wins = conn.execute(
+            "SELECT COUNT(*) as c, SUM(outcome_pnl) as pnl "
+            "FROM smart_money_log WHERE action_taken = 'boost' AND outcome = 'won'"
+        ).fetchone()
+        boost_losses = conn.execute(
+            "SELECT COUNT(*) as c, SUM(outcome_pnl) as pnl "
+            "FROM smart_money_log WHERE action_taken = 'boost' AND outcome = 'lost'"
+        ).fetchone()
+
+        total_pending = conn.execute(
+            "SELECT COUNT(*) as c FROM smart_money_log WHERE outcome = 'pending'"
+        ).fetchone()["c"]
+
+        # Veto saved vs cost
+        veto_saved = abs(veto_correct["pnl"] or 0)  # losses we avoided
+        veto_cost = abs(veto_wrong["pnl"] or 0)  # gains we missed
+
+        return {
+            "counts": counts,
+            "total_events": sum(counts.values()) if counts else 0,
+            "pending": total_pending,
+            "veto": {
+                "total": counts.get("veto", 0),
+                "correct": veto_correct["c"],
+                "wrong": veto_wrong["c"],
+                "saved_usd": round(veto_saved, 2),
+                "cost_usd": round(veto_cost, 2),
+                "net_usd": round(veto_saved - veto_cost, 2),
+            },
+            "boost": {
+                "total": counts.get("boost", 0),
+                "wins": boost_wins["c"],
+                "losses": boost_losses["c"],
+                "pnl": round((boost_wins["pnl"] or 0) + (boost_losses["pnl"] or 0), 2),
+            },
+            "momentum": {
+                "total_bets": counts.get("momentum_bet", 0),
+                "total_skips": counts.get("momentum_skip", 0),
+                "wins": momentum_wins["c"],
+                "losses": momentum_losses["c"],
+                "pnl": round((momentum_wins["pnl"] or 0) + (momentum_losses["pnl"] or 0), 2),
+            },
+        }
+    finally:
+        conn.close()
+
+
 def run_api(host: str = "0.0.0.0", port: int = 3200):
     """Run the FastAPI server."""
     import uvicorn

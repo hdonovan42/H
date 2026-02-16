@@ -5,6 +5,72 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v10 — Smart Money Velocity
+**Deployed**: 2026-02-16 | **Schema**: v10
+
+### Problem
+VAULT detects sharp price moves on Polymarket (5pp/1h or 10pp/6h) but barely acts on them — a timid -15%/+5% confidence adjustment. Sharp moves represent **informed money** (insiders, people with better information). If true, VAULT should follow smart money, not fight it.
+
+### Changes
+
+**Velocity veto** — sharp move AWAY from estimate → hard block the bet
+- If not an open position: override `action = "hold"`, store counterfactual (what size/side WOULD have been)
+- If open position: flag for exit with "Smart money exit signal" reasoning
+- Logged as `veto` in `smart_money_log` table
+
+**Velocity boost** — sharp move TOWARD estimate → +15% confidence (was +5%)
+- Recalculate Kelly sizing with boosted confidence
+- Logged as `boost` in `smart_money_log` table
+
+**Momentum bets** — sharp move on unestimated market → Haiku analysis → small momentum bet
+- Haiku (~$0.001/call) analyzes whether the move makes fundamental sense
+- If confidence >= 50% AND edge >= 5%: create bet item capped at $2.00
+- Flows through existing decider path as `source="momentum"`
+- Logged as `momentum_bet` or `momentum_skip`
+
+**Smart money log** — track every velocity-influenced decision with counterfactual P&L
+- New `smart_money_log` table (schema v10) records every veto/boost/momentum decision
+- Outcome resolution backfills when predictions resolve: veto_correct/veto_wrong with counterfactual P&L
+- Hypothesis validation: after a few days, check if veto counterfactual P&L is net negative (= vetoes saved money)
+
+**Configurable velocity thresholds** (`config/default.yaml`)
+- `velocity` config section: sharp thresholds, veto enable, boost/haircut amounts, momentum params
+- `calculate_velocity()` now reads thresholds from config instead of hardcoded 0.05/0.10
+
+**Dashboard: Smart $ page**
+- Summary bar: total vetoes/boosts/momentum bets/skips
+- Hypothesis scorecard: "Vetoes saved $X" vs "Vetoes cost $X" — green if net positive
+- Recent signals table with color-coded action badges and outcomes
+- API endpoints: `GET /api/v1/smart-money/log` + `/summary`
+
+### Cost impact
+- Veto/boost logic: $0 (pure Python on existing data)
+- Momentum Haiku calls: ~$0.001 each, ~1-5/day → ~$0.005/day
+- Total additional: **~$0.005/day**
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/db.py` | Schema v10, `smart_money_log` table + migration |
+| `config/default.yaml` | New `velocity` config section |
+| `vault/edge_calculator.py` | Veto + boost logic, `_log_smart_money_event()`, configurable thresholds |
+| `vault/intelligence.py` | Pass cfg to `calculate_velocity()` |
+| `vault/prompts.py` | `build_momentum_prompt()`, updated `_format_velocity_line()`, momentum in decider |
+| `vault/agent.py` | Momentum pipeline, `_call_momentum_haiku()`, `_resolve_smart_money_entries()` |
+| `vault/api.py` | `GET /api/v1/smart-money/log` + `/summary` endpoints |
+| `dashboard/src/components/SmartMoneyPanel.jsx` | New dashboard page |
+| `dashboard/src/hooks/useVaultData.js` | Fetch smart money summary |
+| `dashboard/src/App.jsx` | Add nav + route for Smart $ page |
+
+### What to watch
+- First few days: are velocity alerts actually firing? Check `smart_money_log` table
+- Veto effectiveness: are vetoes saving money? Compare `veto_correct` vs `veto_wrong` counts
+- Momentum bets: are Haiku's snap analyses profitable? Track win rate + P&L
+- False positive rate: are there markets with sharp moves that are just noise?
+- Edge case: veto on open position → exit signal. Does the decider actually sell?
+
+---
+
 ## v9 — Loosen the Gates
 **Deployed**: 2026-02-15 | **Schema**: v9 | **First cycle**: 836 | **First bet**: cycle 845
 

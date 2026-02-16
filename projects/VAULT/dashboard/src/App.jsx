@@ -7,6 +7,7 @@ import CostBreakdown from './components/CostBreakdown';
 import BetsPanel from './components/BetsPanel';
 import EventTimeline from './components/EventTimeline';
 import PipelineView from './components/PipelineView';
+import SmartMoneyPanel from './components/SmartMoneyPanel';
 
 function useHash() {
   const [hash, setHash] = useState(window.location.hash || '#/');
@@ -108,6 +109,7 @@ export default function App() {
   const navItems = [
     { hash: '#/', label: 'Dashboard' },
     { hash: '#/pipeline', label: 'Pipeline' },
+    { hash: '#/smart-money', label: 'Smart $' },
     { hash: '#/log', label: 'Log' },
     { hash: '#/memory', label: 'Memory' },
   ];
@@ -116,6 +118,9 @@ export default function App() {
   switch (hash) {
     case '#/pipeline':
       page = <PipelineView calibration={calibration} />;
+      break;
+    case '#/smart-money':
+      page = <SmartMoneyPanel />;
       break;
     case '#/log':
       page = <LogPage cycles={cycles} costs={costs} events={events} />;

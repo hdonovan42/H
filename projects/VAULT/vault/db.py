@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from vault.config_loader import get_db_path
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -261,6 +261,31 @@ CREATE TABLE IF NOT EXISTS sentinel_alerts (
     event            TEXT,
     source           TEXT
 );
+
+CREATE TABLE IF NOT EXISTS smart_money_log (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts                  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    cycle_id            INTEGER NOT NULL,
+    market_id           TEXT NOT NULL,
+    question            TEXT,
+    v_1h                REAL,
+    v_6h                REAL,
+    direction           TEXT,
+    sharp               INTEGER NOT NULL DEFAULT 0,
+    action_taken        TEXT NOT NULL,
+    vault_estimate      REAL,
+    market_odds         REAL,
+    side                TEXT,
+    amount_usd          REAL,
+    prediction_id       INTEGER,
+    counterfactual_size REAL,
+    counterfactual_side TEXT,
+    outcome             TEXT DEFAULT 'pending',
+    outcome_pnl         REAL,
+    counterfactual_pnl  REAL,
+    resolved_at         TEXT,
+    FOREIGN KEY (cycle_id) REFERENCES cycles(id)
+);
 """
 
 
@@ -515,6 +540,42 @@ def _migrate(conn):
             "INSERT INTO meta (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             ("schema_version", "9"),
+        )
+        conn.commit()
+        version = 9
+
+    if version < 10:
+        # v10: add smart_money_log table
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS smart_money_log (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts                  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                cycle_id            INTEGER NOT NULL,
+                market_id           TEXT NOT NULL,
+                question            TEXT,
+                v_1h                REAL,
+                v_6h                REAL,
+                direction           TEXT,
+                sharp               INTEGER NOT NULL DEFAULT 0,
+                action_taken        TEXT NOT NULL,
+                vault_estimate      REAL,
+                market_odds         REAL,
+                side                TEXT,
+                amount_usd          REAL,
+                prediction_id       INTEGER,
+                counterfactual_size REAL,
+                counterfactual_side TEXT,
+                outcome             TEXT DEFAULT 'pending',
+                outcome_pnl         REAL,
+                counterfactual_pnl  REAL,
+                resolved_at         TEXT,
+                FOREIGN KEY (cycle_id) REFERENCES cycles(id)
+            );
+        """)
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "10"),
         )
         conn.commit()
 

@@ -183,6 +183,8 @@ def update_intelligence(conn, cycle_id: int, cfg: dict | None = None) -> tuple[s
     # Build markets block for prompt (questions only, NO odds — anti-anchoring)
     # Include velocity context where available (momentum info, not actual prices)
     from vault.edge_calculator import calculate_velocity
+    from vault.config_loader import load_config as _load_cfg
+    _vel_cfg = _load_cfg()
 
     markets_block = ""
     if markets:
@@ -190,7 +192,7 @@ def update_intelligence(conn, cycle_id: int, cfg: dict | None = None) -> tuple[s
         markets_block += "For each market, estimate the probability of YES based on your analysis.\n"
         markets_block += "You do NOT have access to market odds — form your own independent view.\n\n"
         for i, m in enumerate(markets):
-            vel = calculate_velocity(conn, m["id"])
+            vel = calculate_velocity(conn, m["id"], cfg=_vel_cfg)
             vel_note = ""
             if vel:
                 parts = []
