@@ -222,7 +222,7 @@ def get_cycles(limit: int = Query(50, ge=1, le=500)):
         rows = conn.execute(
             "SELECT id, ts_start, ts_end, action, asset, reasoning, "
             "total_cost, rounds_used, balance_after "
-            "FROM cycles WHERE reasoning NOT LIKE 'auto-hold:%' "
+            "FROM cycles WHERE reasoning NOT LIKE 'auto-hold:%' AND reasoning NOT LIKE 'bet blocked:%' "
             "ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()

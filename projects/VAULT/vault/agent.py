@@ -480,6 +480,11 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         v_1h = alert.get("v_1h")
         v_6h = alert.get("v_6h")
 
+        # Skip markets at extreme odds — would be blocked by opportunity cost gate anyway
+        if market_odds >= 0.995 or market_odds <= 0.005:
+            log.info(f"Momentum skip (extreme odds): {question[:50]} @ {market_odds:.2%}")
+            continue
+
         analysis = _call_momentum_haiku(conn, cycle_id, question, v_1h, v_6h, market_odds, cfg)
         if not analysis:
             _log_smart_money_event(

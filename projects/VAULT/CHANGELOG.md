@@ -5,6 +5,24 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v13.7 — Pre-filter Extreme Odds from Momentum Pipeline
+**Deployed**: 2026-02-16 | **Baseline**: $55.96 balance, 42.0d runway, +$36.03 trading P&L
+
+Markets above 99.5% (or below 0.5%) odds now skip the Haiku analysis call entirely. Previously these fired a Haiku call (~$0.0007 each) only to be rejected by the opportunity cost gate, producing noisy "bet blocked" dashboard entries. Also filters historical "bet blocked" messages from the cycles API alongside existing auto-hold filtering.
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/agent.py` | Pre-check `market_odds` before `_call_momentum_haiku` in velocity alert loop |
+| `vault/api.py` | Filter `bet blocked:%` from cycles query (same pattern as `auto-hold:%`) |
+
+### What to Watch
+- No more "bet blocked: would immediately exit" in VPS logs
+- Dashboard recent decisions should be cleaner
+- Legitimate momentum bets (< 99.5% odds) still fire normally
+
+---
+
 ## v13.6 — Fold Intel Bets into Legacy, Remove INTEL Card
 **Deployed**: 2026-02-16 | **Baseline**: $75.97 balance, 57.7d runway, +$36.03 trading P&L
 
