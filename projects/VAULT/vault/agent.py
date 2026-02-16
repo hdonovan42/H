@@ -454,10 +454,12 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
     vel_scale_40 = vel_cfg.get("momentum_vel_scale_40", 2.0)
     model = vel_cfg.get("momentum_model", "claude-haiku-4-5-20251001")
 
-    velocity_alerts = [
-        e for e in (pipeline_result.edges or [])
-        if e.get("action") == "velocity_alert" and e.get("velocity_sharp")
-    ]
+    velocity_alerts = sorted(
+        [e for e in (pipeline_result.edges or [])
+         if e.get("action") == "velocity_alert" and e.get("velocity_sharp")],
+        key=lambda e: abs(e.get("v_1h") or 0),
+        reverse=True,
+    )
 
     if not velocity_alerts:
         return []
@@ -484,22 +486,28 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
     total_api_cost = 0  # Track all Haiku calls including skipped signals
     for alert in velocity_alerts[:max_per_cycle]:
         question = alert.get("question", alert["market_id"])
-        market_odds = alert.get("market_odds", 0.5)
         v_1h = alert.get("v_1h")
         v_6h = alert.get("v_6h")
 
-        # 1. Extreme odds filter
-        if market_odds >= 0.995 or market_odds <= 0.005:
-            log.info(f"Momentum skip (extreme odds): {question[:50]} @ {market_odds:.2%}")
+        # Fetch LIVE odds (alert's market_odds may be stale from musk_markets table)
+        live_odds = get_current_odds(conn, alert["market_id"])
+        if not live_odds:
+            log.info(f"Momentum skip (no live odds): {question[:50]}")
             continue
+        market_odds = live_odds["yes_price"]
 
-        # 2. Mechanical direction: v_1h sign → side
+        # 1. Mechanical direction: v_1h sign → side
         if v_1h is None or v_1h == 0:
             log.info(f"Momentum skip (no v_1h): {question[:50]}")
             continue
         side = "NO" if v_1h < 0 else "YES"
         entry_price = market_odds if side == "YES" else (1 - market_odds)
         remaining = _remaining_return_pct(entry_price)
+
+        # 2. Extreme odds filter — check ENTRY side, not just YES side
+        if entry_price >= 0.995:
+            log.info(f"Momentum skip (extreme entry): {question[:50]} — {side} @ {entry_price:.2%}")
+            continue
 
         # 3. Velocity-scaled sizing
         abs_v = abs(v_1h)
@@ -570,9 +578,9 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
 
         # 5. Confidence gate
         if not follow or conf < follow_confidence:
+            skip_reason = f"follow={follow}" if not follow else f"conf {conf:.0%} < {follow_confidence:.0%}"
             log.info(
-                f"Momentum skip: {question[:50]} — follow={follow}, "
-                f"conf {conf:.0%} < {follow_confidence:.0%}"
+                f"Momentum skip: {question[:50]} — {skip_reason} — {reasoning[:80]}"
             )
             _log_smart_money_event(
                 conn, cycle_id=cycle_id, market_id=alert["market_id"],

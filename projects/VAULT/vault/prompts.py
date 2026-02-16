@@ -415,9 +415,9 @@ def build_momentum_prompt(question: str, v_1h: float | None, v_6h: float | None,
     Returns (system_prompt, user_prompt) tuple.
     """
     system = (
-        "You are a prediction market momentum validator. "
-        "A sharp price move has been detected and a bet direction has been determined mechanically. "
-        "Your job: decide whether to FOLLOW or SKIP this signal. "
+        "You are a momentum signal validator for a prediction market trading bot. "
+        "The default action is FOLLOW — sharp price moves on live events are usually right. "
+        "Only reject if there is a CLEAR reason not to follow. "
         "Respond ONLY with valid JSON: "
         '{"follow": true, "confidence": 0.8, "reasoning": "..."}'
     )
@@ -430,16 +430,16 @@ def build_momentum_prompt(question: str, v_1h: float | None, v_6h: float | None,
     vel_desc = ", ".join(vel_parts)
 
     user = (
-        f'A sharp price move detected on a prediction market.\n\n'
         f'Market: "{question}"\n'
         f'Current odds: {market_odds:.0%} YES / {1 - market_odds:.0%} NO\n'
         f'Velocity: {vel_desc}\n'
         f'Proposed bet: {side} at {entry_price:.0%} (remaining upside: {remaining:.0%})\n\n'
-        f'Should we follow this momentum? Consider:\n'
-        f'1. Is this move likely event-driven (live match, breaking news) or noise?\n'
-        f'2. At {entry_price:.0%} entry, is the remaining {remaining:.0%} upside worth the risk?\n'
-        f'3. Is the velocity magnitude ({abs(v_1h) if v_1h else 0:.0%}/1h) significant enough?\n\n'
-        f'JSON only: {{"follow": true/false, "confidence": 0.0-1.0, "reasoning": "..."}}'
+        f'The DEFAULT is follow=true. Only set follow=false if:\n'
+        f'- The market is clearly already settled (event over, result known)\n'
+        f'- The move is obviously manipulative (tiny market, no possible catalyst)\n'
+        f'- The entry price is so extreme there is negligible upside\n\n'
+        f'Live sports, esports, and breaking news moves should almost always be followed.\n\n'
+        f'JSON only: {{"follow": true/false, "confidence": 0.0-1.0, "reasoning": "one sentence"}}'
     )
 
     return system, user
