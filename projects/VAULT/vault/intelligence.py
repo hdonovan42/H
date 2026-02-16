@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 from vault.config_loader import load_config
 from vault.claude_client import call_claude
 from vault import ledger
+from vault.polymarket import get_current_odds
 
 INTELLIGENCE_REPO_PATH = "/home/hq/vault/intelligence"
 
@@ -264,6 +265,11 @@ def update_intelligence(conn, cycle_id: int, cfg: dict | None = None) -> tuple[s
     )
     system += estimation_rules
     system += (
+        "- TRACK RECORD: If a YOUR TRACK RECORD section is included below, use it to check your calibration. "
+        "If you see systematic overconfidence in a category, adjust down. If underconfident, adjust up. "
+        "Your estimates should improve over time as you see results.\n"
+    )
+    system += (
         "Exclude themes about: tweet counts, follower milestones, engagement metrics.\n"
         "Focus on: policy decisions, product launches, regulatory actions, executive moves, "
         "legal outcomes, scientific/engineering milestones.\n\n"
@@ -275,6 +281,10 @@ def update_intelligence(conn, cycle_id: int, cfg: dict | None = None) -> tuple[s
         f"NEW TWEETS SINCE LAST UPDATE ({len(tweets)} total):\n\n{tweet_block}"
         f"{markets_block}"
     )
+
+    track_record = _build_track_record(conn)
+    if track_record:
+        user_prompt += f"\n\n{track_record}"
 
     try:
         response = call_claude(
@@ -402,6 +412,186 @@ def _compact_number(n: int) -> str:
     elif n >= 1_000:
         return f"{n / 1_000:.1f}k"
     return str(n)
+
+
+def _build_track_record(conn) -> str:
+    """Build YOUR TRACK RECORD section for the Opus intelligence prompt.
+
+    Only includes pipeline-era bets (entry_confidence > 0) to avoid
+    polluting feedback with legacy tool-loop positions.
+    """
+    sections = []
+
+    # ── a) Open positions ────────────────────────────────────────────
+    open_pos = conn.execute(
+        "SELECT id, market_id, question, side, shares, entry_odds, cost_basis, "
+        "entry_edge, entry_confidence "
+        "FROM predictions "
+        "WHERE status = 'open' AND entry_confidence IS NOT NULL AND entry_confidence > 0 "
+        "ORDER BY id ASC"
+    ).fetchall()
+
+    if open_pos:
+        lines = ["OPEN POSITIONS:"]
+        for p in [dict(r) for r in open_pos]:
+            # Reconstruct vault estimate (always as P(YES))
+            edge = p["entry_edge"] or 0
+            if p["side"] == "YES":
+                vault_est = p["entry_odds"] + edge
+            else:
+                vault_est = 1 - p["entry_odds"] - edge
+            vault_est = max(0.0, min(1.0, vault_est))
+
+            # Current market odds + unrealised P&L
+            odds = get_current_odds(conn, p["market_id"])
+            if odds:
+                current_yes = odds["yes_price"]
+                current_price = current_yes if p["side"] == "YES" else (1 - current_yes)
+                unrealised = p["shares"] * current_price - p["cost_basis"]
+                market_str = f"market now: {current_yes:.0%}"
+                pnl_str = f"unrealised: ${unrealised:+.2f}"
+            else:
+                market_str = "market: unavailable"
+                pnl_str = "unrealised: N/A"
+
+            q = (p["question"] or "")[:60]
+            lines.append(
+                f"  [{p['id']}] {p['side']} \"{q}\" — "
+                f"your estimate: {vault_est:.0%} (conf {p['entry_confidence']:.2f}, "
+                f"edge {edge:+.0%}) — {market_str} — {pnl_str}"
+            )
+        sections.append("\n".join(lines))
+
+    # ── b) Resolved positions ────────────────────────────────────────
+    closed = conn.execute(
+        "SELECT id, market_id, question, side, entry_odds, entry_edge, "
+        "entry_confidence, resolution, pnl "
+        "FROM predictions "
+        "WHERE status = 'closed' AND entry_confidence IS NOT NULL AND entry_confidence > 0 "
+        "ORDER BY id ASC"
+    ).fetchall()
+    closed = [dict(r) for r in closed]
+
+    if closed:
+        lines = ["RESOLVED:"]
+        wins, losses, total_pnl = 0, 0, 0.0
+        for p in closed:
+            edge = p["entry_edge"] or 0
+            if p["side"] == "YES":
+                vault_est = p["entry_odds"] + edge
+            else:
+                vault_est = 1 - p["entry_odds"] - edge
+            vault_est = max(0.0, min(1.0, vault_est))
+
+            won = p["resolution"] == "won"
+            if won:
+                wins += 1
+            else:
+                losses += 1
+            pnl = p["pnl"] or 0
+            total_pnl += pnl
+
+            q = (p["question"] or "")[:60]
+            result = f"WON ${pnl:+.2f}" if won else f"LOST ${pnl:+.2f}"
+            lines.append(
+                f"  [{p['id']}] {p['side']} \"{q}\" — "
+                f"your estimate: {vault_est:.0%} (conf {p['entry_confidence']:.2f}) — {result}"
+            )
+        lines.append(f"  Record: {wins}W/{losses}L | P&L: ${total_pnl:+.2f}")
+        sections.append("\n".join(lines))
+
+    # ── c) Calibration summary (>= 3 resolved) ──────────────────────
+    if len(closed) >= 3:
+        bands = {
+            "0-40%": {"count": 0, "yes_actual": 0, "est_sum": 0.0},
+            "40-60%": {"count": 0, "yes_actual": 0, "est_sum": 0.0},
+            "60-100%": {"count": 0, "yes_actual": 0, "est_sum": 0.0},
+        }
+        for p in closed:
+            edge = p["entry_edge"] or 0
+            if p["side"] == "YES":
+                vault_est = p["entry_odds"] + edge
+            else:
+                vault_est = 1 - p["entry_odds"] - edge
+            vault_est = max(0.0, min(1.0, vault_est))
+
+            if vault_est < 0.4:
+                band = "0-40%"
+            elif vault_est < 0.6:
+                band = "40-60%"
+            else:
+                band = "60-100%"
+
+            bands[band]["count"] += 1
+            bands[band]["est_sum"] += vault_est
+            # Did the market resolve YES?
+            resolved_yes = (
+                (p["side"] == "YES" and p["resolution"] == "won")
+                or (p["side"] == "NO" and p["resolution"] == "lost")
+            )
+            if resolved_yes:
+                bands[band]["yes_actual"] += 1
+
+        cal_lines = ["CALIBRATION:"]
+        for band_name, b in bands.items():
+            if b["count"] == 0:
+                continue
+            avg_est = b["est_sum"] / b["count"]
+            actual_rate = b["yes_actual"] / b["count"]
+            hint = ""
+            if actual_rate > avg_est + 0.1:
+                hint = " — you may be underconfident here"
+            elif actual_rate < avg_est - 0.1:
+                hint = " — overconfident?"
+            cal_lines.append(
+                f"  Estimates {band_name}: {b['count']} markets, "
+                f"{b['yes_actual']} resolved YES "
+                f"({actual_rate:.0%} actual vs {avg_est:.0%} estimated{hint})"
+            )
+        if len(cal_lines) > 1:
+            sections.append("\n".join(cal_lines))
+
+    # ── d) Smart money summary ───────────────────────────────────────
+    sm_rows = conn.execute(
+        "SELECT action_taken, outcome, outcome_pnl FROM smart_money_log"
+    ).fetchall()
+
+    if sm_rows:
+        vetoes = {"total": 0, "correct": 0, "wrong": 0, "pending": 0}
+        boosts = 0
+        net_pnl = 0.0
+        for r in [dict(r) for r in sm_rows]:
+            action = (r["action_taken"] or "").lower()
+            outcome = (r["outcome"] or "pending").lower()
+            if "veto" in action:
+                vetoes["total"] += 1
+                if outcome in ("won", "correct"):
+                    vetoes["correct"] += 1
+                elif outcome in ("lost", "wrong"):
+                    vetoes["wrong"] += 1
+                else:
+                    vetoes["pending"] += 1
+            elif "boost" in action:
+                boosts += 1
+            net_pnl += r["outcome_pnl"] or 0
+
+        parts = []
+        if vetoes["total"]:
+            parts.append(
+                f"{vetoes['total']} vetoes ({vetoes['correct']} correct, "
+                f"{vetoes['wrong']} wrong, {vetoes['pending']} pending)"
+            )
+        if boosts:
+            parts.append(f"{boosts} boosts")
+        if net_pnl:
+            parts.append(f"net: ${net_pnl:+.2f}")
+        if parts:
+            sections.append(f"SMART MONEY SIGNALS: {', '.join(parts)}")
+
+    if not sections:
+        return ""
+
+    return "YOUR TRACK RECORD (pipeline bets only):\n\n" + "\n\n".join(sections)
 
 
 def store_opus_estimates(conn, estimates: list[dict], intelligence_id: int):

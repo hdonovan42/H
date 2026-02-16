@@ -5,6 +5,34 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v11 — Performance Mirror (Layer 1 Self-Recursion)
+**Deployed**: 2026-02-16
+
+### Problem
+Opus produces daily probability estimates without ever seeing its own track record. It can't learn from systematic biases (overconfidence on release dates, underconfidence on policy events). All the calibration data exists in the DB but nothing feeds it back into the decision-making process.
+
+### Changes
+
+**Track record injection** — new `_build_track_record(conn)` in `intelligence.py` appends a `YOUR TRACK RECORD` section to the daily Opus intelligence prompt:
+- **Open positions**: ID, side, question, vault estimate, confidence, entry edge, current market odds, unrealised P&L
+- **Resolved positions**: W/L, P&L per bet, aggregate record (shown when pipeline bets close)
+- **Calibration buckets**: 0-40% / 40-60% / 60-100% estimated probability vs actual YES rate, with over/underconfidence hints (shown after 3+ resolutions)
+- **Smart money summary**: veto/boost counts and outcomes from `smart_money_log`
+
+**Calibration guidance** — system prompt now instructs Opus to adjust estimates based on its track record patterns.
+
+**Pipeline-era only** — filters on `entry_confidence > 0`, excluding legacy tool-loop bets (IDs 1-91) that would pollute feedback.
+
+### Cost Impact
+~200-500 extra input tokens per daily Opus call = ~$0.005/day.
+
+### What to Watch
+- Next Opus call (00:00 UTC): verify `YOUR TRACK RECORD` section appears in logs with open positions
+- As positions resolve: RESOLVED and CALIBRATION sections should populate organically
+- Watch for Opus adjusting estimates in response to track record feedback
+
+---
+
 ## v10 — Smart Money Velocity
 **Deployed**: 2026-02-16 | **Schema**: v10
 
