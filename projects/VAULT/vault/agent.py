@@ -681,6 +681,47 @@ def _days_to_resolution(end_date: str | None, default_days: float = 30.0) -> flo
         return default_days
 
 
+def _exit_substandard_positions(conn):
+    """Exit positions that no longer meet current entry minimums.
+
+    Applies current confidence and edge thresholds retroactively to open positions.
+    Pipeline positions entered under looser rules get closed if they don't meet
+    today's standards. Only applies to pipeline positions (entry_confidence > 0).
+    """
+    cfg = load_config()
+    edge_cfg = cfg.get("edge", {})
+    min_confidence = edge_cfg.get("min_confidence", 0.4)
+    margin_of_safety = edge_cfg.get("margin_of_safety", 0.10)
+
+    from vault.polymarket import get_current_odds
+    open_preds = ledger.get_open_predictions(conn)
+    for pred in open_preds:
+        conf = pred.get("entry_confidence")
+        if not conf or conf <= 0:
+            continue  # legacy/momentum — not subject to intel gates
+
+        edge = abs(pred.get("entry_edge") or 0)
+        reason = None
+        if conf < min_confidence:
+            reason = f"confidence {conf:.2f} < {min_confidence:.2f}"
+        elif edge < margin_of_safety:
+            reason = f"edge {edge:.0%} < {margin_of_safety:.0%}"
+
+        if reason:
+            odds = get_current_odds(conn, pred["market_id"])
+            if not odds:
+                continue
+            our_price = odds["yes_price"] if pred["side"] == "YES" else odds["no_price"]
+            try:
+                pnl = ledger.record_prediction_sell(conn, pred["id"], our_price)
+                log.info(
+                    f"Substandard exit: [{pred['id']}] {pred['side']} "
+                    f"'{pred['question'][:40]}' — {reason} — P&L: ${pnl:+.2f}"
+                )
+            except Exception as e:
+                log.warning(f"Failed substandard exit {pred['id']}: {e}")
+
+
 def _exit_opportunity_cost(conn):
     """Exit positions where remaining return < risk-free return over the same period.
 
@@ -728,6 +769,9 @@ def run_cycle(conn) -> dict:
 
     # Resolve any settled predictions before the cycle starts
     resolve_predictions(conn)
+
+    # Exit pipeline positions that don't meet current entry minimums
+    _exit_substandard_positions(conn)
 
     # Exit positions where remaining return < risk-free return over same period
     _exit_opportunity_cost(conn)
