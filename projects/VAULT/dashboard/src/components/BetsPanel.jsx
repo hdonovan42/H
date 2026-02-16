@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 function formatCost(n) {
   if (n == null) return '$0.00';
@@ -66,15 +66,27 @@ function SourceSummary({ bySource }) {
 }
 
 export default function BetsPanel({ positions, predictions }) {
+  const [legacyOpen, setLegacyOpen] = useState(false);
+
   const openPos = positions?.open || [];
   const closedPos = positions?.closed || [];
   const openPreds = predictions?.open || [];
   const closedPreds = predictions?.closed || [];
   const bySource = predictions?.by_source;
 
-  const hasOpen = openPos.length > 0 || openPreds.length > 0;
-  const hasClosed = closedPos.length > 0 || closedPreds.length > 0;
-  const hasData = hasOpen || hasClosed;
+  // Split into legacy vs current
+  const currentOpenPreds = openPreds.filter((p) => p.source !== 'legacy');
+  const legacyOpenPreds = openPreds.filter((p) => p.source === 'legacy');
+  const currentClosedPreds = closedPreds.filter((p) => p.source !== 'legacy');
+  const legacyClosedPreds = closedPreds.filter((p) => p.source === 'legacy');
+  const legacyCount = legacyOpenPreds.length + legacyClosedPreds.length;
+  const legacyPnl = [...legacyOpenPreds, ...legacyClosedPreds].reduce(
+    (sum, p) => sum + (p.unrealized_pnl ?? p.pnl ?? 0), 0,
+  );
+
+  const hasOpen = openPos.length > 0 || currentOpenPreds.length > 0;
+  const hasClosed = closedPos.length > 0 || currentClosedPreds.length > 0;
+  const hasData = hasOpen || hasClosed || legacyCount > 0;
 
   return (
     <div className="card">
@@ -87,10 +99,10 @@ export default function BetsPanel({ positions, predictions }) {
       {hasOpen && (
         <>
           <div style={{ fontSize: '11px', color: 'var(--alive)', fontWeight: 600, marginBottom: '8px', letterSpacing: '1px' }}>
-            OPEN ({openPos.length + openPreds.length})
+            OPEN ({openPos.length + currentOpenPreds.length})
           </div>
 
-          {openPreds.map((p) => (
+          {currentOpenPreds.map((p) => (
             <div key={`pred-${p.id}`} className="position-item">
               <div className="position-header">
                 <span>
@@ -130,10 +142,10 @@ export default function BetsPanel({ positions, predictions }) {
       {hasClosed && (
         <>
           <div style={{ fontSize: '11px', color: 'var(--text-dim)', fontWeight: 600, marginTop: hasOpen ? '16px' : 0, marginBottom: '8px', letterSpacing: '1px' }}>
-            CLOSED ({closedPos.length + closedPreds.length})
+            CLOSED ({closedPos.length + currentClosedPreds.length})
           </div>
 
-          {closedPreds.map((p) => (
+          {currentClosedPreds.map((p) => (
             <div key={`pred-${p.id}`} className="position-item">
               <div className="position-header">
                 <span>
@@ -168,6 +180,67 @@ export default function BetsPanel({ positions, predictions }) {
             </div>
           ))}
         </>
+      )}
+
+      {legacyCount > 0 && (
+        <div style={{ marginTop: '16px', borderTop: '1px solid var(--border)' }}>
+          <div
+            onClick={() => setLegacyOpen(!legacyOpen)}
+            style={{
+              fontSize: '11px', color: '#666', fontWeight: 600, letterSpacing: '1px',
+              padding: '10px 0 4px', cursor: 'pointer', userSelect: 'none',
+            }}
+          >
+            {legacyOpen ? '\u25BC' : '\u25B6'} LEGACY ({legacyCount})
+            <span style={{ fontWeight: 400, marginLeft: '8px', color: legacyPnl >= 0 ? '#44ff88' : '#ff4444' }}>
+              {legacyPnl >= 0 ? '+' : ''}{formatCost(legacyPnl)}
+            </span>
+          </div>
+
+          {legacyOpen && (
+            <>
+              {legacyOpenPreds.map((p) => (
+                <div key={`pred-${p.id}`} className="position-item">
+                  <div className="position-header">
+                    <span>
+                      <SourceTag source="legacy" />
+                      <span className={`prediction-side ${p.side.toLowerCase()}`}>{p.side}</span>
+                      {' '}
+                      <span className="prediction-question">{p.question}</span>
+                    </span>
+                    <span className={p.unrealized_pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}>
+                      {p.unrealized_pnl >= 0 ? '+' : ''}{formatCost(p.unrealized_pnl)}
+                    </span>
+                  </div>
+                  <div className="position-detail">
+                    {p.shares?.toFixed(2)} shares | {formatPct(p.entry_odds)} &rarr; {formatPct(p.current_odds)} | cost {formatCost(p.cost_basis)} &rarr; mkt {formatCost(p.market_value)}
+                  </div>
+                </div>
+              ))}
+
+              {legacyClosedPreds.map((p) => (
+                <div key={`pred-${p.id}`} className="position-item">
+                  <div className="position-header">
+                    <span>
+                      <SourceTag source="legacy" />
+                      <span className={`prediction-side ${p.side.toLowerCase()}`}>{p.side}</span>
+                      {' '}
+                      <span className={`prediction-resolution ${p.resolution}`}>{p.resolution?.toUpperCase()}</span>
+                      {' '}
+                      <span className="prediction-question">{p.question}</span>
+                    </span>
+                    <span className={p.pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}>
+                      {p.pnl >= 0 ? '+' : ''}{formatCost(p.pnl)}
+                    </span>
+                  </div>
+                  <div className="position-detail">
+                    cost {formatCost(p.cost_basis)} &rarr; payout {formatCost(p.payout)} | {p.closed_at?.slice(0, 10)}
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
       )}
     </div>
   );
