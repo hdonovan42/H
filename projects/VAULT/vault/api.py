@@ -525,9 +525,86 @@ def get_smart_money_summary():
             "SELECT COUNT(*) as c FROM smart_money_log WHERE outcome = 'pending'"
         ).fetchone()["c"]
 
-        # Veto saved vs cost
+        # Veto saved vs cost (resolved)
         veto_saved = abs(veto_correct["pnl"] or 0)  # losses we avoided
         veto_cost = abs(veto_wrong["pnl"] or 0)  # gains we missed
+
+        # ── Mark-to-market for pending entries ───────────────────────
+        from vault.polymarket import get_current_odds
+
+        # Build map of open predictions by market_id for MTM lookups
+        open_preds = conn.execute(
+            "SELECT id, market_id, side, shares, cost_basis "
+            "FROM predictions WHERE status = 'open'"
+        ).fetchall()
+        # Multiple predictions can exist per market — aggregate per market+side
+        pred_by_market = {}
+        for p in open_preds:
+            p = dict(p)
+            key = p["market_id"]
+            if key not in pred_by_market:
+                pred_by_market[key] = {"shares": 0, "cost_basis": 0, "side": p["side"]}
+            pred_by_market[key]["shares"] += p["shares"]
+            pred_by_market[key]["cost_basis"] += p["cost_basis"]
+
+        # Get distinct pending markets that need MTM
+        pending_markets = conn.execute(
+            "SELECT DISTINCT market_id, action_taken, counterfactual_size, "
+            "counterfactual_side, market_odds "
+            "FROM smart_money_log "
+            "WHERE outcome = 'pending' AND action_taken IN ('momentum_bet', 'boost', 'veto')"
+        ).fetchall()
+
+        mtm_momentum = 0.0
+        mtm_boost = 0.0
+        mtm_veto_saved = 0.0
+        mtm_veto_cost = 0.0
+        # Track which market+action combos we've already MTM'd (avoid double-counting)
+        mtm_done = set()
+
+        for row in pending_markets:
+            row = dict(row)
+            mk = (row["market_id"], row["action_taken"])
+            if mk in mtm_done:
+                continue
+            mtm_done.add(mk)
+
+            odds = get_current_odds(conn, row["market_id"])
+            if not odds:
+                continue
+            current_yes = odds["yes_price"]
+
+            if row["action_taken"] in ("momentum_bet", "boost"):
+                pred = pred_by_market.get(row["market_id"])
+                if not pred:
+                    continue
+                current_price = current_yes if pred["side"] == "YES" else (1 - current_yes)
+                unrealised = pred["shares"] * current_price - pred["cost_basis"]
+                if row["action_taken"] == "momentum_bet":
+                    mtm_momentum += unrealised
+                else:
+                    mtm_boost += unrealised
+
+            elif row["action_taken"] == "veto":
+                cf_side = row["counterfactual_side"]
+                cf_size = row["counterfactual_size"] or 0
+                entry_odds = row["market_odds"]
+                if cf_side and cf_size > 0 and entry_odds:
+                    cf_entry_price = entry_odds if cf_side == "YES" else (1 - entry_odds)
+                    if cf_entry_price > 0:
+                        cf_shares = cf_size / cf_entry_price
+                        cf_current = current_yes if cf_side == "YES" else (1 - current_yes)
+                        cf_unrealised = cf_shares * cf_current - cf_size
+                        if cf_unrealised < 0:
+                            mtm_veto_saved += abs(cf_unrealised)
+                        else:
+                            mtm_veto_cost += cf_unrealised
+
+        # Combine resolved + unrealised
+        total_veto_saved = veto_saved + mtm_veto_saved
+        total_veto_cost = veto_cost + mtm_veto_cost
+        total_momentum = (momentum_wins["pnl"] or 0) + (momentum_losses["pnl"] or 0) + mtm_momentum
+        total_boost = (boost_wins["pnl"] or 0) + (boost_losses["pnl"] or 0) + mtm_boost
 
         return {
             "counts": counts,
@@ -537,22 +614,22 @@ def get_smart_money_summary():
                 "total": counts.get("veto", 0),
                 "correct": veto_correct["c"],
                 "wrong": veto_wrong["c"],
-                "saved_usd": round(veto_saved, 2),
-                "cost_usd": round(veto_cost, 2),
-                "net_usd": round(veto_saved - veto_cost, 2),
+                "saved_usd": round(total_veto_saved, 2),
+                "cost_usd": round(total_veto_cost, 2),
+                "net_usd": round(total_veto_saved - total_veto_cost, 2),
             },
             "boost": {
                 "total": counts.get("boost", 0),
                 "wins": boost_wins["c"],
                 "losses": boost_losses["c"],
-                "pnl": round((boost_wins["pnl"] or 0) + (boost_losses["pnl"] or 0), 2),
+                "pnl": round(total_boost, 2),
             },
             "momentum": {
                 "total_bets": counts.get("momentum_bet", 0),
                 "total_skips": counts.get("momentum_skip", 0),
                 "wins": momentum_wins["c"],
                 "losses": momentum_losses["c"],
-                "pnl": round((momentum_wins["pnl"] or 0) + (momentum_losses["pnl"] or 0), 2),
+                "pnl": round(total_momentum, 2),
             },
         }
     finally:
