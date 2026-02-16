@@ -429,7 +429,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
     if not velocity_alerts:
         return []
 
-    max_exposure_pct = vel_cfg.get("momentum_max_exposure_pct", 0.15)
+    max_exposure_pct = vel_cfg.get("momentum_max_exposure_pct", 0.50)
     balance = ledger.get_balance(conn)
 
     # Build current exposure per market for position-size awareness
