@@ -5,6 +5,22 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v13.4 — Collapse Closed Positions by Default
+**Deployed**: 2026-02-16 | **Baseline**: $76.00 balance, 58.6d runway, +$36.03 trading P&L
+
+Closed positions section now uses the same collapsible toggle as legacy — collapsed by default showing count and total PnL, click to expand.
+
+### Files modified
+| File | Change |
+|------|--------|
+| `dashboard/src/components/BetsPanel.jsx` | Closed section wrapped in collapsible toggle, matching legacy pattern |
+
+### What to Watch
+- Closed section should show `▶ CLOSED (N) +$X.XX` collapsed by default
+- Click expands to show individual closed positions
+
+---
+
 ## v13.3 — Dashboard "INTEL PAUSED" Indicator
 **Deployed**: 2026-02-16 | **Baseline**: $76.00 balance, 59d runway, +$36.03 trading P&L
 

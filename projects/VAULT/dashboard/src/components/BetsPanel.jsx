@@ -72,6 +72,7 @@ function SourceSummary({ bySource, intelDisabled }) {
 }
 
 export default function BetsPanel({ positions, predictions }) {
+  const [closedOpen, setClosedOpen] = useState(false);
   const [legacyOpen, setLegacyOpen] = useState(false);
 
   const openPos = positions?.open || [];
@@ -145,48 +146,67 @@ export default function BetsPanel({ positions, predictions }) {
         </>
       )}
 
-      {hasClosed && (
-        <>
-          <div style={{ fontSize: '11px', color: 'var(--text-dim)', fontWeight: 600, marginTop: hasOpen ? '16px' : 0, marginBottom: '8px', letterSpacing: '1px' }}>
-            CLOSED ({closedPos.length + currentClosedPreds.length})
+      {hasClosed && (() => {
+        const closedCount = closedPos.length + currentClosedPreds.length;
+        const closedPnl = [...currentClosedPreds, ...closedPos].reduce(
+          (sum, p) => sum + (p.pnl ?? 0), 0,
+        );
+        return (
+          <div style={{ marginTop: hasOpen ? '16px' : 0, borderTop: hasOpen ? '1px solid var(--border)' : 'none' }}>
+            <div
+              onClick={() => setClosedOpen(!closedOpen)}
+              style={{
+                fontSize: '11px', color: 'var(--text-dim)', fontWeight: 600, letterSpacing: '1px',
+                padding: hasOpen ? '10px 0 4px' : '0 0 4px', cursor: 'pointer', userSelect: 'none',
+              }}
+            >
+              {closedOpen ? '\u25BC' : '\u25B6'} CLOSED ({closedCount})
+              <span style={{ fontWeight: 400, marginLeft: '8px', color: closedPnl >= 0 ? '#44ff88' : '#ff4444' }}>
+                {closedPnl >= 0 ? '+' : ''}{formatCost(closedPnl)}
+              </span>
+            </div>
+
+            {closedOpen && (
+              <>
+                {currentClosedPreds.map((p) => (
+                  <div key={`pred-${p.id}`} className="position-item">
+                    <div className="position-header">
+                      <span>
+                        <SourceTag source={p.source} />
+                        <span className={`prediction-side ${p.side.toLowerCase()}`}>{p.side}</span>
+                        {' '}
+                        <span className={`prediction-resolution ${p.resolution}`}>{p.resolution?.toUpperCase()}</span>
+                        {' '}
+                        <span className="prediction-question">{p.question}</span>
+                      </span>
+                      <span className={p.pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}>
+                        {p.pnl >= 0 ? '+' : ''}{formatCost(p.pnl)}
+                      </span>
+                    </div>
+                    <div className="position-detail">
+                      cost {formatCost(p.cost_basis)} &rarr; payout {formatCost(p.payout)} | {p.closed_at?.slice(0, 10)}
+                    </div>
+                  </div>
+                ))}
+
+                {closedPos.map((p) => (
+                  <div key={`pos-${p.id}`} className="position-item">
+                    <div className="position-header">
+                      <span className="position-asset">{p.asset}</span>
+                      <span className={p.pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}>
+                        {p.pnl >= 0 ? '+' : ''}{formatCost(p.pnl)}
+                      </span>
+                    </div>
+                    <div className="position-detail">
+                      {p.quantity.toFixed(8)} units | {formatCost(p.cost_basis)} &rarr; {formatCost(p.close_price * p.quantity)} | {p.closed_at?.slice(0, 10)}
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
-
-          {currentClosedPreds.map((p) => (
-            <div key={`pred-${p.id}`} className="position-item">
-              <div className="position-header">
-                <span>
-                  <SourceTag source={p.source} />
-                  <span className={`prediction-side ${p.side.toLowerCase()}`}>{p.side}</span>
-                  {' '}
-                  <span className={`prediction-resolution ${p.resolution}`}>{p.resolution?.toUpperCase()}</span>
-                  {' '}
-                  <span className="prediction-question">{p.question}</span>
-                </span>
-                <span className={p.pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}>
-                  {p.pnl >= 0 ? '+' : ''}{formatCost(p.pnl)}
-                </span>
-              </div>
-              <div className="position-detail">
-                cost {formatCost(p.cost_basis)} &rarr; payout {formatCost(p.payout)} | {p.closed_at?.slice(0, 10)}
-              </div>
-            </div>
-          ))}
-
-          {closedPos.map((p) => (
-            <div key={`pos-${p.id}`} className="position-item">
-              <div className="position-header">
-                <span className="position-asset">{p.asset}</span>
-                <span className={p.pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}>
-                  {p.pnl >= 0 ? '+' : ''}{formatCost(p.pnl)}
-                </span>
-              </div>
-              <div className="position-detail">
-                {p.quantity.toFixed(8)} units | {formatCost(p.cost_basis)} &rarr; {formatCost(p.close_price * p.quantity)} | {p.closed_at?.slice(0, 10)}
-              </div>
-            </div>
-          ))}
-        </>
-      )}
+        );
+      })()}
 
       {legacyCount > 0 && (
         <div style={{ marginTop: '16px', borderTop: '1px solid var(--border)' }}>
