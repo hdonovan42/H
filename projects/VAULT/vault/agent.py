@@ -832,7 +832,7 @@ def run_cycle(conn) -> dict:
 
     # ── Auto-pilot: pipeline-driven decision ──
     if pipeline_result and pipeline_result.enabled:
-        actionable = _get_actionable(pipeline_result)
+        actionable = None  # Intel bets paused — momentum only
 
         # Momentum analysis: sharp moves on unestimated markets
         vel_cfg = cfg.get("velocity", {})

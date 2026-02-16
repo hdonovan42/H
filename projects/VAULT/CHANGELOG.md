@@ -5,6 +5,38 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v13.2 — Disable Intel Bets, Momentum Only
+**Deployed**: 2026-02-16 | **Baseline**: $59.60 balance, 47.7d runway, +$35.66 trading P&L
+
+### Thesis
+Momentum bets are the alpha — intel (Opus-estimated) bets haven't earned their ~$0.20/day cost. Pause intel entirely to cut burn rate and let momentum run unencumbered.
+
+### Changes
+- **Skip `_get_actionable()` intel items** — `actionable = None` so no `bet`/`exit` edges reach the decider
+- **Skip daily Opus call** — `update_intelligence()` no longer fires, saving ~$0.20/day
+- **Skip emergency Opus re-estimation** — major events logged but no Opus triggered
+- **Remove early return on empty estimates** — pipeline continues to edge calculation so velocity alerts still fire
+
+### What is NOT touched
+Momentum path is completely untouched: `_analyze_momentum_opportunities()`, `_call_momentum_haiku()`, `_run_decider()`, velocity config, `calculate_edges()`, `discover_markets()`, tweet collection, sentinel, all exit logic.
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/agent.py` | `actionable = None` instead of `_get_actionable()` |
+| `vault/pipeline.py` | Skip `update_intelligence()`, skip emergency Opus, remove early return |
+
+### Reversibility
+Revert these 4 changes to re-enable intel. `opus_estimates` table and intelligence docs are preserved.
+
+### What to Watch
+- Burn rate should drop ~$0.20/day (no daily Opus calls)
+- Momentum bets should still fire normally on velocity alerts
+- No `action: "bet"` intel items should reach the decider
+- Existing open positions still monitored by sentinel
+
+---
+
 ## v13.1 — Hard Price Ceiling + Decider Entry Gate
 **Deployed**: 2026-02-16 | **Baseline**: $59.62 balance, 48.3d runway, +$35.66 trading P&L
 

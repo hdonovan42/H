@@ -64,11 +64,7 @@ def run_pipeline(conn, cycle_id: int) -> PipelineResult:
 
         # ── Phase 1b: Daily intelligence update if due ────────────
         # Now also produces Opus probability estimates
-        if should_update_intelligence(conn, cfg):
-            log.info("Pipeline Phase 1b: daily intelligence update + estimation (Opus)")
-            update_intelligence(conn, cycle_id, cfg)
-        else:
-            log.info("Pipeline Phase 1b: intelligence document up to date")
+        log.info("Pipeline Phase 1b: intelligence updates paused (intel disabled)")
 
         # ── Phase 1c: Load master intelligence + themes ───────────
         intel = get_latest_intelligence(conn)
@@ -86,15 +82,10 @@ def run_pipeline(conn, cycle_id: int) -> PipelineResult:
         log.info("Pipeline Phase 2: sentinel check")
         result.sentinel_results = run_sentinel(conn, cycle_id, cfg)
 
-        # If sentinel detected a major event, trigger emergency Opus update
+        # Emergency Opus re-estimation paused (intel disabled)
         if result.sentinel_results.get("major_event"):
             event = result.sentinel_results["major_event"]
-            log.info(f"Pipeline Phase 2: MAJOR EVENT detected — {event['event']}")
-            log.info("Pipeline Phase 2: triggering emergency Opus update + re-estimation")
-            doc, themes, estimates = update_intelligence(conn, cycle_id, cfg)
-            if doc:
-                result.digest = doc
-                result.themes = themes
+            log.info(f"Pipeline Phase 2: MAJOR EVENT detected — {event['event']} (intel paused, skipping Opus)")
 
         # ── Phase 2b: Load latest Opus estimates from DB ──────────
         log.info("Pipeline Phase 2b: loading Opus estimates")
@@ -102,15 +93,7 @@ def run_pipeline(conn, cycle_id: int) -> PipelineResult:
         log.info(f"Pipeline Phase 2b: {len(result.estimates)} Opus estimates loaded")
 
         if not result.estimates:
-            from vault import ledger as _ledger
-            open_preds = _ledger.get_open_predictions(conn)
-            if not open_preds:
-                log.warning("Pipeline: no Opus estimates and no open positions — waiting for next Opus run")
-                result.duration_ms = int((time.monotonic() - start) * 1000)
-                _record_run(conn, cycle_id, result)
-                return result
-            else:
-                log.info("No Opus estimates but have open positions — edge calc will handle exits via sentinel")
+            log.info("Pipeline Phase 2b: no Opus estimates (intel paused) — continuing for velocity detection")
 
         # ── Phase 3: Discover markets ─────────────────────────────
         log.info(f"Pipeline Phase 3: discovering markets ({len(result.themes)} themes)")
