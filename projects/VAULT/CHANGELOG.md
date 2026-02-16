@@ -5,6 +5,38 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v15 — Volatility-Normalized Velocity (Z-Score)
+**Deployed**: 2026-02-16 | **Baseline**: $41.00 balance, 28.2d runway, +$22.20 trading P&L
+
+Normalizes velocity against 24h volatility baseline via z-score: `z_1h = v_1h / stddev_1h`. Tennis matches flip-flopping ±10%/hr now produce z~1 (noise suppressed), while a political market spiking +10% on a flat baseline produces z~4 (signal amplified). Falls back to raw velocity for markets with < 30 snapshots.
+
+**Why**: Raw `v_1h` treats all 10% moves as equal. Sports markets are inherently volatile — their moves are expected. Political/event markets are flat for days then spike — those spikes are significant. Z-score separates the two.
+
+### How it works
+- **Z-score computation**: `stddev_1h = stdev(24h per-cycle deltas) * sqrt(snaps_per_hour)`, then `z_1h = v_1h / stddev_1h`
+- **Sharp detection**: z >= 2.0 triggers sharp (replaces raw 5%/10% thresholds when z available)
+- **Sizing**: z >= 3.0 → 1.5x, z >= 4.0 → 2.0x (replaces raw 20%/40% thresholds when z available)
+- **Sort priority**: momentum candidates sorted by |z_1h|, falling back to |v_1h| for new markets
+- **Fallback**: Markets with < 30 snapshots in 24h use raw velocity — new markets aren't penalized
+- **stddev floor**: 0.001 prevents infinite z on perfectly flat markets
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/edge_calculator.py` | `calculate_velocity()`: 24h stddev, z_1h, z-score-first sharp detection; `_fmt_velocity()`: append `z=X.X`; velocity alert/edge dicts: pass through z_1h |
+| `vault/agent.py` | `_analyze_momentum_opportunities()`: z-score sort, sizing, item dict, logging; `_execute_momentum_bets()`: z-score sort; `_call_momentum_haiku()`: pass z_1h |
+| `vault/prompts.py` | `build_momentum_prompt()`: accept + display z_1h in Haiku context |
+| `config/default.yaml` | `z_sharp_threshold: 2.0`, `z_min_snapshots: 30`, `z_sizing_low: 3.0`, `z_sizing_high: 4.0` |
+
+### What to Watch
+- `_fmt_velocity` output in logs should include `z=X.X` for markets with 30+ snapshots
+- Live sports (tennis, CS:GO): should show **low z-scores** (~1-2) despite big raw moves
+- Political/event markets with sudden spikes: should show **high z-scores** (3+)
+- Markets with < 30 snapshots: should use raw velocity, no z in logs
+- A z=1.5 move should NOT trigger sharp even if raw |v_1h| = 20%
+
+---
+
 ## v14.1 — Position-Aware Momentum (Add/Hold, Not Repeat Entry)
 **Deployed**: 2026-02-16 | **Baseline**: $41.00 balance, 28.2d runway, +$22.20 trading P&L
 
