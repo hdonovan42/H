@@ -267,8 +267,8 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
                             side=side, prediction_id=open_pred["id"],
                             counterfactual_size=cf_size, counterfactual_side=cf_side,
                         )
-                    else:
-                        # Hard block — override to hold
+                    elif cf_size > 0:
+                        # Hard block — only log when there's an actual bet to veto
                         action = "hold"
                         reasoning = f"Smart money veto: sharp move away blocks bet"
                         _log_smart_money_event(
