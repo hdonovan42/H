@@ -591,7 +591,7 @@ def _parse_momentum_response(text: str) -> dict | None:
 
 
 def _exit_maxed_positions(conn):
-    """Sell any position where our side is >= 95% — no more upside, free the capital."""
+    """Sell any position where our side is >= 99% — essentially resolved, free the capital."""
     from vault.polymarket import get_current_odds
     open_preds = ledger.get_open_predictions(conn)
     for pred in open_preds:
@@ -599,7 +599,7 @@ def _exit_maxed_positions(conn):
         if not odds:
             continue
         our_price = odds["yes_price"] if pred["side"] == "YES" else odds["no_price"]
-        if our_price >= 0.95:
+        if our_price >= 0.99:
             try:
                 pnl = ledger.record_prediction_sell(conn, pred["id"], our_price)
                 log.info(
