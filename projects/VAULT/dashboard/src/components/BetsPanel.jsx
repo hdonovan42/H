@@ -11,13 +11,12 @@ function formatPct(n) {
 }
 
 const SOURCE_STYLES = {
-  pipeline: { label: 'INTEL', color: '#f5a623', bg: '#f5a62318', border: '#f5a62340' },
   momentum: { label: 'MOMENTUM', color: '#4488ff', bg: '#4488ff18', border: '#4488ff40' },
   legacy: { label: 'LEGACY', color: '#666', bg: '#66666618', border: '#66666640' },
 };
 
 function SourceTag({ source }) {
-  const s = SOURCE_STYLES[source] || SOURCE_STYLES.pipeline;
+  const s = SOURCE_STYLES[source] || SOURCE_STYLES.legacy;
   return (
     <span style={{
       fontSize: '9px', fontWeight: 700, letterSpacing: '0.5px',
@@ -29,7 +28,7 @@ function SourceTag({ source }) {
   );
 }
 
-function SourceSummary({ bySource, intelDisabled }) {
+function SourceSummary({ bySource }) {
   if (!bySource || Object.keys(bySource).length === 0) return null;
   const sources = Object.entries(bySource);
   return (
@@ -40,18 +39,15 @@ function SourceSummary({ bySource, intelDisabled }) {
       borderBottom: '1px solid var(--border)',
     }}>
       {sources.map(([key, s]) => {
-        const style = SOURCE_STYLES[key] || SOURCE_STYLES.pipeline;
+        const style = SOURCE_STYLES[key] || SOURCE_STYLES.legacy;
         const total = s.unrealized + s.realized;
-        const paused = key === 'pipeline' && intelDisabled;
         return (
           <div key={key} style={{
             padding: '8px 10px', borderRadius: '6px',
             background: style.bg, border: `1px solid ${style.border}`,
-            opacity: paused ? 0.5 : 1,
           }}>
             <div style={{ fontSize: '10px', fontWeight: 700, color: style.color, letterSpacing: '0.5px', marginBottom: '4px' }}>
               {style.label}
-              {paused && <span style={{ marginLeft: '6px', fontSize: '9px', color: '#ff6b6b', fontWeight: 700 }}>PAUSED</span>}
             </div>
             <div style={{ fontSize: '16px', fontWeight: 600, color: total >= 0 ? '#44ff88' : '#ff4444' }}>
               {total >= 0 ? '+' : ''}{formatCost(total)}
@@ -99,7 +95,7 @@ export default function BetsPanel({ positions, predictions }) {
     <div className="card">
       <div className="card-title">Positions</div>
 
-      <SourceSummary bySource={bySource} intelDisabled={predictions?.intel_disabled} />
+      <SourceSummary bySource={bySource} />
 
       {!hasData && <div className="empty">No bets yet</div>}
 

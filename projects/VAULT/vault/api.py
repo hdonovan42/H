@@ -17,9 +17,7 @@ log = logging.getLogger("vault.api")
 
 
 def _pred_source(p: dict) -> str:
-    """Classify a prediction's source: pipeline (Opus intel), momentum, or legacy."""
-    if p.get("entry_confidence") is not None or p.get("entry_edge") is not None:
-        return "pipeline"
+    """Classify a prediction's source: momentum or legacy (intel bets folded into legacy)."""
     reason = (p.get("entry_reasoning") or "").lower()
     if "sharp move" in reason or "momentum" in reason:
         return "momentum"
@@ -327,7 +325,7 @@ def get_predictions():
             for k in ("cost", "value", "unrealized", "realized", "total_cost"):
                 by_source[s][k] = round(by_source[s][k], 2)
 
-        return {"open": open_preds, "closed": closed_preds, "by_source": by_source, "intel_disabled": True}
+        return {"open": open_preds, "closed": closed_preds, "by_source": by_source}
     finally:
         conn.close()
 

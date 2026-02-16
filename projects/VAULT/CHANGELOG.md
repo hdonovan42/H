@@ -5,6 +5,19 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v13.6 — Fold Intel Bets into Legacy, Remove INTEL Card
+**Deployed**: 2026-02-16 | **Baseline**: $75.97 balance, 57.7d runway, +$36.03 trading P&L
+
+Intel (pipeline) predictions reclassified as legacy. INTEL source summary card removed from dashboard. Only MOMENTUM and LEGACY remain.
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/api.py` | `_pred_source()` no longer returns `pipeline`; `intel_disabled` flag removed |
+| `dashboard/src/components/BetsPanel.jsx` | INTEL style removed from `SOURCE_STYLES`, `intelDisabled` prop removed |
+
+---
+
 ## v13.5 — Disable Tweets, Sentinel & Intelligence (Momentum-Only Mode)
 **Deployed**: 2026-02-16 | **Baseline**: $75.98 balance, 58.1d runway, +$36.03 trading P&L
 
