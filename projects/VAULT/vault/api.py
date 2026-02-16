@@ -16,6 +16,16 @@ from vault.market_data import get_price
 log = logging.getLogger("vault.api")
 
 
+def _pred_source(p: dict) -> str:
+    """Classify a prediction's source: pipeline (Opus intel), momentum, or legacy."""
+    if p.get("entry_confidence"):
+        return "pipeline"
+    reason = (p.get("entry_reasoning") or "").lower()
+    if "sharp move" in reason or "momentum" in reason:
+        return "momentum"
+    return "legacy"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("VAULT API starting")
@@ -255,8 +265,9 @@ def get_predictions():
         from vault.polymarket import get_current_odds
 
         open_preds = ledger.get_open_predictions(conn)
-        # Enrich with current odds
+        # Enrich with current odds + source tag
         for p in open_preds:
+            p["source"] = _pred_source(p)
             odds = get_current_odds(conn, p["market_id"])
             if odds:
                 current = odds["yes_price"] if p["side"] == "YES" else odds["no_price"]
@@ -269,7 +280,34 @@ def get_predictions():
                 p["unrealized_pnl"] = 0.0
 
         closed_preds = ledger.get_closed_predictions(conn)
-        return {"open": open_preds, "closed": closed_preds}
+        for p in closed_preds:
+            p["source"] = _pred_source(p)
+
+        # Source-level performance breakdown
+        by_source = {}
+        for p in open_preds:
+            s = p["source"]
+            if s not in by_source:
+                by_source[s] = {"cost": 0, "value": 0, "unrealized": 0, "realized": 0, "open": 0, "won": 0, "lost": 0}
+            by_source[s]["cost"] += p["cost_basis"]
+            by_source[s]["value"] += p["market_value"]
+            by_source[s]["unrealized"] += p["unrealized_pnl"]
+            by_source[s]["open"] += 1
+        for p in closed_preds:
+            s = p["source"]
+            if s not in by_source:
+                by_source[s] = {"cost": 0, "value": 0, "unrealized": 0, "realized": 0, "open": 0, "won": 0, "lost": 0}
+            by_source[s]["realized"] += (p.get("pnl") or 0)
+            if p.get("resolution") == "won":
+                by_source[s]["won"] += 1
+            elif p.get("resolution") in ("lost", "sold"):
+                by_source[s]["lost"] += 1
+        # Round everything
+        for s in by_source:
+            for k in ("cost", "value", "unrealized", "realized"):
+                by_source[s][k] = round(by_source[s][k], 2)
+
+        return {"open": open_preds, "closed": closed_preds, "by_source": by_source}
     finally:
         conn.close()
 
