@@ -430,7 +430,6 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         return []
 
     max_exposure_pct = vel_cfg.get("momentum_max_exposure_pct", 0.15)
-    price_ceiling = vel_cfg.get("momentum_price_ceiling", 0.90)
     balance = ledger.get_balance(conn)
 
     # Build current exposure per market for position-size awareness
@@ -474,19 +473,6 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
                 f"Momentum skip: {question[:50]} — conf {conf:.0%} < {min_confidence:.0%} "
                 f"or edge {abs(edge):.0%} < {min_edge:.0%}"
             )
-            _log_smart_money_event(
-                conn, cycle_id=cycle_id, market_id=alert["market_id"],
-                question=question,
-                vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
-                action_taken="momentum_skip",
-                vault_estimate=prob, market_odds=market_odds, side=side,
-            )
-            continue
-
-        # Price ceiling — no alpha left once our side is priced above ceiling
-        our_price = (1 - market_odds) if side == "NO" else market_odds
-        if our_price >= price_ceiling:
-            log.info(f"Momentum skip: {question[:50]} — our side at {our_price:.0%} >= {price_ceiling:.0%} ceiling")
             _log_smart_money_event(
                 conn, cycle_id=cycle_id, market_id=alert["market_id"],
                 question=question,
