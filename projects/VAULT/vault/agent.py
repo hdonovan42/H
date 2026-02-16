@@ -544,7 +544,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
 
         # Cap bet size (also respect remaining room under exposure cap)
         remaining_room = max_exposure_usd - current_exposure
-        base_bet = min(max_bet, balance * 0.05)
+        base_bet = min(max_bet, balance * 0.10)
         bet_size = min(base_bet * pyramid_mult, remaining_room)
         bet_size = round(bet_size, 2)
 

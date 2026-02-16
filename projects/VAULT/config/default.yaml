@@ -63,7 +63,7 @@ velocity:
   haircut_amount: 0.15
   momentum_enabled: true
   momentum_model: claude-haiku-4-5-20251001
-  momentum_max_bet_usd: 2.00
+  momentum_max_bet_usd: 4.00
   momentum_min_confidence: 0.5
   momentum_min_edge: 0.05
   max_momentum_per_cycle: 3
