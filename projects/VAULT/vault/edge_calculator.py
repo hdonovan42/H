@@ -52,9 +52,8 @@ def calculate_velocity(conn, market_id: str, vault_prob: float | None = None,
     if len(history_6h) >= 2:
         v_6h = round(current_yes - history_6h[0]["yes_price"], 4)
 
-    # Z-score: normalize v_1h against 24h volatility baseline
+    # Z-score: normalize v_1h against 24h volatility baseline (sizing amplifier, not entry gate)
     z_min_snapshots = vel_cfg.get("z_min_snapshots", 30)
-    z_sharp = vel_cfg.get("z_sharp_threshold", 2.0)
     z_1h = None
 
     if v_1h is not None:
@@ -71,17 +70,13 @@ def calculate_velocity(conn, market_id: str, vault_prob: float | None = None,
                 if stddev_1h > 0.001:  # floor to avoid div-by-zero on flat markets
                     z_1h = round(v_1h / stddev_1h, 2)
 
-    # Sharp detection: z-score-first, raw-velocity fallback
+    # Sharp detection: always raw velocity (entry gate — don't let z-score raise the bar)
+    # z_1h is purely a sizing/conviction amplifier, not a filter
     sharp = False
-    if z_1h is not None:
-        if abs(z_1h) >= z_sharp:
-            sharp = True
-    else:
-        # Fallback for new markets with insufficient history
-        if v_1h is not None and abs(v_1h) >= sharp_1h:
-            sharp = True
-        if v_6h is not None and abs(v_6h) >= sharp_6h:
-            sharp = True
+    if v_1h is not None and abs(v_1h) >= sharp_1h:
+        sharp = True
+    if v_6h is not None and abs(v_6h) >= sharp_6h:
+        sharp = True
 
     # Direction relative to VAULT estimate
     direction = "neutral"

@@ -517,26 +517,30 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             log.info(f"Momentum skip (extreme entry): {question[:50]} — {side} @ {entry_price:.2%}")
             continue
 
-        # 3. Velocity-scaled sizing (z-score-first, raw-velocity fallback)
+        # 3. Velocity-scaled sizing: raw velocity sets base, z-score amplifies
         z_1h = alert.get("z_1h")
         z_sizing_high = vel_cfg.get("z_sizing_high", 4.0)
         z_sizing_low = vel_cfg.get("z_sizing_low", 3.0)
+        z_boost_low = vel_cfg.get("z_boost_low", 1.5)    # multiplier at z >= z_sizing_low
+        z_boost_high = vel_cfg.get("z_boost_high", 2.5)   # multiplier at z >= z_sizing_high
         abs_v = abs(v_1h)
+
+        # Base multiplier from raw velocity (unchanged — all markets get this)
+        if abs_v >= 0.40:
+            vel_mult = vel_scale_40
+        elif abs_v >= 0.20:
+            vel_mult = vel_scale_20
+        else:
+            vel_mult = 1.0
+
+        # Z-score amplifier on top: high-conviction signals get bigger positions
         if z_1h is not None:
             abs_z = abs(z_1h)
             if abs_z >= z_sizing_high:
-                vel_mult = vel_scale_40
+                vel_mult *= z_boost_high
             elif abs_z >= z_sizing_low:
-                vel_mult = vel_scale_20
-            else:
-                vel_mult = 1.0
-        else:
-            if abs_v >= 0.40:
-                vel_mult = vel_scale_40
-            elif abs_v >= 0.20:
-                vel_mult = vel_scale_20
-            else:
-                vel_mult = 1.0
+                vel_mult *= z_boost_low
+
         raw_bet = min(base_bet * vel_mult, max_bet, balance * 0.10)
 
         # Pyramiding: scale bet size based on unrealised ROI of existing exposure

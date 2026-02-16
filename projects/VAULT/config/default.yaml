@@ -65,17 +65,18 @@ velocity:
   momentum_model: claude-haiku-4-5-20251001
   momentum_follow_confidence: 0.6   # Haiku must be this confident to follow
   momentum_base_bet_usd: 2.00       # base bet size
-  momentum_max_bet_usd: 4.00        # hard cap
+  momentum_max_bet_usd: 6.00        # hard cap (raised for z-boosted high-conviction bets)
   momentum_vel_scale_20: 1.5        # 1.5x at |v_1h| >= 20%
   momentum_vel_scale_40: 2.0        # 2x at |v_1h| >= 40%
   momentum_add_min_roi: 0.0          # only add if existing position ROI > this (strictly profitable)
   max_momentum_per_cycle: 3
   momentum_max_exposure_pct: 0.50
   momentum_min_volume: 10000     # skip markets below $10k volume (thin/manipulable)
-  z_sharp_threshold: 2.0        # z >= 2.0 = sharp (replaces raw 5%/10% when z available)
   z_min_snapshots: 30            # need 30+ snapshots in 24h for reliable z-score
-  z_sizing_low: 3.0              # 1.5x sizing at z >= 3
-  z_sizing_high: 4.0             # 2.0x sizing at z >= 4
+  z_sizing_low: 3.0              # z >= 3: apply z_boost_low multiplier on top of raw sizing
+  z_sizing_high: 4.0             # z >= 4: apply z_boost_high multiplier on top of raw sizing
+  z_boost_low: 1.5               # 1.5x amplifier at z >= 3 (stacks with raw velocity sizing)
+  z_boost_high: 2.5              # 2.5x amplifier at z >= 4 (e.g. base 2.0 * 2.5 = 5.0x → $6 cap)
   opportunity_cost_annual: 0.10  # 10% annual — exit when remaining return < risk-free over same period
   opportunity_cost_default_days: 30  # fallback when market has no end_date
 
