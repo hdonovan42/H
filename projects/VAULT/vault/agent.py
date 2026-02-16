@@ -590,6 +590,26 @@ def _parse_momentum_response(text: str) -> dict | None:
     return None
 
 
+def _exit_maxed_positions(conn):
+    """Sell any position where our side is >= 95% — no more upside, free the capital."""
+    from vault.polymarket import get_current_odds
+    open_preds = ledger.get_open_predictions(conn)
+    for pred in open_preds:
+        odds = get_current_odds(conn, pred["market_id"])
+        if not odds:
+            continue
+        our_price = odds["yes_price"] if pred["side"] == "YES" else odds["no_price"]
+        if our_price >= 0.95:
+            try:
+                pnl = ledger.record_prediction_sell(conn, pred["id"], our_price)
+                log.info(
+                    f"Capital efficiency exit: [{pred['id']}] {pred['side']} "
+                    f"'{pred['question'][:40]}' @ {our_price:.0%} — P&L: ${pnl:+.2f}"
+                )
+            except Exception as e:
+                log.warning(f"Failed to exit maxed position {pred['id']}: {e}")
+
+
 def run_cycle(conn) -> dict:
     """Run one agent decision cycle. Returns summary dict.
 
@@ -601,6 +621,9 @@ def run_cycle(conn) -> dict:
 
     # Resolve any settled predictions before the cycle starts
     resolve_predictions(conn)
+
+    # Exit positions at >= 95% of max value — no upside left, free the capital
+    _exit_maxed_positions(conn)
 
     # Start cycle
     cur = conn.execute(
