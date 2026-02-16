@@ -429,16 +429,20 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
     if not velocity_alerts:
         return []
 
-    # Skip markets where we already have an open position (prevents runaway stacking)
-    open_market_ids = {
-        r["market_id"] for r in ledger.get_open_predictions(conn)
-    }
+    max_exposure_pct = vel_cfg.get("momentum_max_exposure_pct", 0.15)
+    price_ceiling = vel_cfg.get("momentum_price_ceiling", 0.90)
+    balance = ledger.get_balance(conn)
+
+    # Build current exposure per market for position-size awareness
+    open_preds = ledger.get_open_predictions(conn)
+    exposure_by_market = {}
+    for p in open_preds:
+        exposure_by_market[p["market_id"]] = (
+            exposure_by_market.get(p["market_id"], 0) + p["cost_basis"]
+        )
 
     items = []
     for alert in velocity_alerts[:max_per_cycle]:
-        if alert["market_id"] in open_market_ids:
-            log.info(f"Momentum skip: already have open position on {alert.get('question', alert['market_id'])[:50]}")
-            continue
         question = alert.get("question", alert["market_id"])
         market_odds = alert.get("market_odds", 0.5)
         v_1h = alert.get("v_1h")
@@ -479,8 +483,39 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             )
             continue
 
-        # Cap bet size
-        bet_size = min(max_bet, ledger.get_balance(conn) * 0.05)
+        # Price ceiling — no alpha left once our side is priced above ceiling
+        our_price = (1 - market_odds) if side == "NO" else market_odds
+        if our_price >= price_ceiling:
+            log.info(f"Momentum skip: {question[:50]} — our side at {our_price:.0%} >= {price_ceiling:.0%} ceiling")
+            _log_smart_money_event(
+                conn, cycle_id=cycle_id, market_id=alert["market_id"],
+                question=question,
+                vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
+                action_taken="momentum_skip",
+                vault_estimate=prob, market_odds=market_odds, side=side,
+            )
+            continue
+
+        # Exposure cap — don't over-concentrate on one market
+        current_exposure = exposure_by_market.get(alert["market_id"], 0)
+        max_exposure_usd = balance * max_exposure_pct
+        if current_exposure >= max_exposure_usd:
+            log.info(
+                f"Momentum skip: {question[:50]} — exposure ${current_exposure:.2f} "
+                f">= {max_exposure_pct:.0%} cap (${max_exposure_usd:.2f})"
+            )
+            _log_smart_money_event(
+                conn, cycle_id=cycle_id, market_id=alert["market_id"],
+                question=question,
+                vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
+                action_taken="momentum_skip",
+                vault_estimate=prob, market_odds=market_odds, side=side,
+            )
+            continue
+
+        # Cap bet size (also respect remaining room under exposure cap)
+        remaining_room = max_exposure_usd - current_exposure
+        bet_size = min(max_bet, balance * 0.05, remaining_room)
         bet_size = round(bet_size, 2)
 
         item = {
