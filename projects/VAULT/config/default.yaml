@@ -68,6 +68,7 @@ velocity:
   momentum_max_bet_usd: 4.00        # hard cap
   momentum_vel_scale_20: 1.5        # 1.5x at |v_1h| >= 20%
   momentum_vel_scale_40: 2.0        # 2x at |v_1h| >= 40%
+  momentum_add_min_roi: 0.0          # only add if existing position ROI > this (strictly profitable)
   max_momentum_per_cycle: 3
   momentum_max_exposure_pct: 0.50
   momentum_min_volume: 10000     # skip markets below $10k volume (thin/manipulable)

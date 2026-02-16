@@ -5,6 +5,35 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v14.1 — Position-Aware Momentum (Add/Hold, Not Repeat Entry)
+**Deployed**: 2026-02-16 | **Baseline**: $41.00 balance, 28.2d runway, +$22.20 trading P&L
+
+Treats each market as a single position. First entry gets full Haiku validation; subsequent cycles with an existing same-side position only add if profitable, with no Haiku call ($0 API). Fixes the bug where 4 identical $3 bets were placed on Rio Open across 4 consecutive cycles.
+
+**Why**: Each cycle treated every velocity alert as a fresh entry — Haiku validated again, base sizing applied again, no memory of previous bets. The pyramiding multiplier existed but was ineffective at breakeven ROI (1.0x = full bet again).
+
+### How it works
+- **New entry** (no same-side position): full Haiku call, base sizing — unchanged
+- **Add to profitable position** (ROI > 0%): skip Haiku, synthetic conf=0.8, pyramid sizing — $0 API
+- **Add to flat/losing position** (ROI <= 0%): **skip entirely** — the core fix
+- **Opposite-side position**: treated as new entry (different lookup key)
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/agent.py` | `_analyze_momentum_opportunities()`: position lookup `(market_id, side)`, add/new branch before Haiku call |
+| `vault/agent.py` | `_resolve_smart_money_entries()`: `momentum_add` resolved alongside `momentum_bet` |
+| `config/default.yaml` | `momentum_add_min_roi: 0.0` under `velocity:` |
+
+### What to Watch
+- Existing position + flat/losing: `Momentum skip (add, not profitable): ... ROI +0.0%`
+- Existing position + profitable: `Momentum add candidate: ... (no Haiku call)`
+- Fresh market: normal `momentum_validation` Haiku call
+- Smart money log: `momentum_add` vs `momentum_bet` distinguishes entry types
+- Cycle cost should be $0 when all signals are adds blocked by ROI gate
+
+---
+
 ## v14 — Pure Velocity-Following Momentum System
 **Deployed**: 2026-02-16 | **Baseline**: $55.23 balance, 39.2d runway, +$39.80 trading P&L
 

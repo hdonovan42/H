@@ -51,7 +51,7 @@ def _resolve_smart_money_entries(conn, pred: dict, winner: str, actual_pnl: floa
             action = row["action_taken"]
             now_ts = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
 
-            if action == "momentum_bet":
+            if action in ("momentum_bet", "momentum_add"):
                 # Actual bet was placed — record real P&L
                 outcome = "won" if pred["side"] == winner else "lost"
                 conn.execute(
@@ -482,6 +482,14 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         else:
             value_by_market[mid] = value_by_market.get(mid, 0) + p["cost_basis"]
 
+    # Build position lookup: (market_id, side) → existing predictions
+    open_pred_by_market_side = {}
+    for p in open_preds:
+        key = (p["market_id"], p["side"])
+        open_pred_by_market_side.setdefault(key, []).append(p)
+
+    add_min_roi = vel_cfg.get("momentum_add_min_roi", 0.0)
+
     items = []
     total_api_cost = 0  # Track all Haiku calls including skipped signals
     for alert in velocity_alerts[:max_per_cycle]:
@@ -556,27 +564,58 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
                 f"{pyramid_mult:.0f}x size (${bet_size:.2f})"
             )
 
-        # 4. Haiku validation: "follow this signal?"
-        analysis = _call_momentum_haiku(
-            conn, cycle_id, question, v_1h, v_6h, market_odds,
-            side, entry_price, remaining, model, cfg,
-        )
-        if not analysis:
-            _log_smart_money_event(
-                conn, cycle_id=cycle_id, market_id=alert["market_id"],
-                question=question,
-                vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
-                action_taken="momentum_skip",
-                market_odds=market_odds, side=side,
+        # 4. Position-aware validation: add vs new entry
+        is_add = (alert["market_id"], side) in open_pred_by_market_side
+
+        if is_add:
+            # Existing same-side position — gate on profitability, skip Haiku
+            if unrealised_roi <= add_min_roi:
+                log.info(
+                    f"Momentum skip (add, not profitable): {question[:50]} — "
+                    f"ROI {unrealised_roi:+.1%} <= {add_min_roi:.0%}"
+                )
+                _log_smart_money_event(
+                    conn, cycle_id=cycle_id, market_id=alert["market_id"],
+                    question=question,
+                    vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
+                    action_taken="momentum_skip",
+                    market_odds=market_odds, side=side,
+                )
+                continue
+
+            # Profitable position — synthetic validation, $0 API cost
+            follow = True
+            conf = 0.8
+            reasoning = (
+                f"Add to profitable {side} position (ROI {unrealised_roi:+.1%}, "
+                f"v_1h={v_1h:+.0%})"
             )
-            continue
+            log.info(
+                f"Momentum add candidate: {question[:50]} — {side} ${bet_size:.2f} "
+                f"(ROI {unrealised_roi:+.1%}, no Haiku call)"
+            )
+        else:
+            # New entry — full Haiku validation
+            analysis = _call_momentum_haiku(
+                conn, cycle_id, question, v_1h, v_6h, market_odds,
+                side, entry_price, remaining, model, cfg,
+            )
+            if not analysis:
+                _log_smart_money_event(
+                    conn, cycle_id=cycle_id, market_id=alert["market_id"],
+                    question=question,
+                    vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
+                    action_taken="momentum_skip",
+                    market_odds=market_odds, side=side,
+                )
+                continue
 
-        total_api_cost += analysis.get("api_cost", 0)
-        follow = analysis["follow"]
-        conf = analysis["confidence"]
-        reasoning = analysis["reasoning"]
+            total_api_cost += analysis.get("api_cost", 0)
+            follow = analysis["follow"]
+            conf = analysis["confidence"]
+            reasoning = analysis["reasoning"]
 
-        # 5. Confidence gate
+        # 5. Confidence gate (applies to both adds and new entries)
         if not follow or conf < follow_confidence:
             skip_reason = f"follow={follow}" if not follow else f"conf {conf:.0%} < {follow_confidence:.0%}"
             log.info(
@@ -614,6 +653,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             )
             continue
 
+        action_tag = "momentum_add" if is_add else "momentum_bet"
         item = {
             "market_id": alert["market_id"],
             "question": question,
@@ -624,11 +664,11 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             "v_6h": v_6h,
             "abs_v_1h": abs_v,
             "follow_confidence": round(conf, 4),
-            "reasoning": f"Momentum follow: {reasoning}",
+            "reasoning": f"Momentum {'add' if is_add else 'follow'}: {reasoning}",
             "recommended_size_usd": bet_size,
             "velocity_sharp": True,
             "source": "momentum",
-            "api_cost": analysis.get("api_cost", 0),
+            "api_cost": 0 if is_add else analysis.get("api_cost", 0),
         }
         items.append(item)
 
@@ -636,11 +676,11 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             conn, cycle_id=cycle_id, market_id=alert["market_id"],
             question=question,
             vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
-            action_taken="momentum_bet",
+            action_taken=action_tag,
             market_odds=market_odds, side=side, amount_usd=bet_size,
         )
         log.info(
-            f"Momentum bet candidate: {question[:50]} — {side} ${bet_size:.2f} "
+            f"Momentum {action_tag} candidate: {question[:50]} — {side} ${bet_size:.2f} "
             f"(v={v_1h:+.0%}/1h, conf={conf:.0%})"
         )
 
