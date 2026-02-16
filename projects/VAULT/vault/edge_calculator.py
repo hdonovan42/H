@@ -1,12 +1,25 @@
 """Edge detection + position sizing — pure Python, no Claude calls."""
 
 import logging
+from datetime import datetime, timezone
 from vault.config_loader import load_config
 from vault import ledger
 from vault.polymarket import get_current_odds
 from vault.market_discovery import record_odds_snapshot
 
 log = logging.getLogger("vault.edge_calculator")
+
+
+def _market_days(end_date: str | None, default: float = 30.0) -> float:
+    """Days until market resolves from its end_date. Fallback to default."""
+    if not end_date:
+        return default
+    try:
+        end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+        days = (end_dt - datetime.now(timezone.utc)).total_seconds() / 86400
+        return max(days, 0.04)  # ~1h floor
+    except (ValueError, TypeError):
+        return default
 
 
 def calculate_velocity(conn, market_id: str, vault_prob: float | None = None,
@@ -109,7 +122,7 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
     max_kelly = edge_cfg.get("max_kelly_fraction", 0.25)
     risk_free_rate = edge_cfg.get("risk_free_daily_rate", 0.0001)
     min_confidence = edge_cfg.get("min_confidence", 0.3)
-    market_duration_days = edge_cfg.get("market_duration_days", 30)  # assumed avg market duration
+    default_duration_days = edge_cfg.get("market_duration_days", 30)  # fallback when no end_date
 
     balance = ledger.get_balance(conn)
     market_odds_map = {m["id"]: m for m in markets}
@@ -141,11 +154,15 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
         if mid not in market_odds_map:
             odds = get_current_odds(conn, mid)
             if odds:
+                end_row = conn.execute(
+                    "SELECT end_date FROM musk_markets WHERE market_id = ?", (mid,)
+                ).fetchone()
                 market_odds_map[mid] = {
                     "id": mid,
                     "question": est.get("question", ""),
                     "yes_price": odds["yes_price"],
                     "no_price": odds["no_price"],
+                    "end_date": end_row["end_date"] if end_row else None,
                 }
                 record_odds_snapshot(conn, mid,
                                      odds["yes_price"], odds["no_price"], cycle_id)
@@ -195,7 +212,8 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
         recommended_size = round(balance * adjusted_fraction, 2) if has_edge else 0
 
         # Expected profit must beat risk-free return on the same capital
-        risk_free_return = recommended_size * risk_free_rate * market_duration_days
+        duration_days = _market_days(market.get("end_date"), default_duration_days)
+        risk_free_return = recommended_size * risk_free_rate * duration_days
         expected_profit = recommended_size * abs_edge * confidence
         beats_risk_free = expected_profit > risk_free_return
 
@@ -295,7 +313,7 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
                 adjusted_fraction = max(0, min(adjusted_fraction, max_kelly))
                 recommended_size = round(balance * adjusted_fraction, 2) if has_edge else 0
                 expected_profit = recommended_size * abs_edge * adj_confidence
-                beats_risk_free = expected_profit > (recommended_size * risk_free_rate * market_duration_days)
+                beats_risk_free = expected_profit > (recommended_size * risk_free_rate * duration_days)
 
                 # Recheck action with adjusted values
                 if not open_pred:
