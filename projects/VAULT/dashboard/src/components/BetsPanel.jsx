@@ -29,7 +29,7 @@ function SourceTag({ source }) {
   );
 }
 
-function SourceSummary({ bySource }) {
+function SourceSummary({ bySource, intelDisabled }) {
   if (!bySource || Object.keys(bySource).length === 0) return null;
   const sources = Object.entries(bySource);
   return (
@@ -42,13 +42,16 @@ function SourceSummary({ bySource }) {
       {sources.map(([key, s]) => {
         const style = SOURCE_STYLES[key] || SOURCE_STYLES.pipeline;
         const total = s.unrealized + s.realized;
+        const paused = key === 'pipeline' && intelDisabled;
         return (
           <div key={key} style={{
             padding: '8px 10px', borderRadius: '6px',
             background: style.bg, border: `1px solid ${style.border}`,
+            opacity: paused ? 0.5 : 1,
           }}>
             <div style={{ fontSize: '10px', fontWeight: 700, color: style.color, letterSpacing: '0.5px', marginBottom: '4px' }}>
               {style.label}
+              {paused && <span style={{ marginLeft: '6px', fontSize: '9px', color: '#ff6b6b', fontWeight: 700 }}>PAUSED</span>}
             </div>
             <div style={{ fontSize: '16px', fontWeight: 600, color: total >= 0 ? '#44ff88' : '#ff4444' }}>
               {total >= 0 ? '+' : ''}{formatCost(total)}
@@ -95,7 +98,7 @@ export default function BetsPanel({ positions, predictions }) {
     <div className="card">
       <div className="card-title">Positions</div>
 
-      <SourceSummary bySource={bySource} />
+      <SourceSummary bySource={bySource} intelDisabled={predictions?.intel_disabled} />
 
       {!hasData && <div className="empty">No bets yet</div>}
 

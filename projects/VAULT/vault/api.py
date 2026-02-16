@@ -327,7 +327,7 @@ def get_predictions():
             for k in ("cost", "value", "unrealized", "realized", "total_cost"):
                 by_source[s][k] = round(by_source[s][k], 2)
 
-        return {"open": open_preds, "closed": closed_preds, "by_source": by_source}
+        return {"open": open_preds, "closed": closed_preds, "by_source": by_source, "intel_disabled": True}
     finally:
         conn.close()
 

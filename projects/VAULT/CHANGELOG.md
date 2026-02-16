@@ -5,6 +5,27 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v13.3 — Dashboard "INTEL PAUSED" Indicator
+**Deployed**: 2026-02-16 | **Baseline**: $76.00 balance, 59d runway, +$36.03 trading P&L
+
+Intel bets were disabled in v13.2 but the dashboard didn't reflect this. Added a visible PAUSED state on the INTEL source summary card so it's immediately obvious intel is off.
+
+### Changes
+- API returns `intel_disabled: true` in predictions response
+- INTEL card renders at 50% opacity with red "PAUSED" label
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/api.py:330` | Add `intel_disabled: True` to predictions response |
+| `dashboard/src/components/BetsPanel.jsx` | `SourceSummary` shows PAUSED indicator on intel card |
+
+### What to Watch
+- INTEL card on vault.hjd.ai should show dimmed with "PAUSED" label
+- When intel is re-enabled, remove the `intel_disabled` flag from the API response
+
+---
+
 ## v13.2 — Disable Intel Bets, Momentum Only
 **Deployed**: 2026-02-16 | **Baseline**: $59.60 balance, 47.7d runway, +$35.66 trading P&L
 
