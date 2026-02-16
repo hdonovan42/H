@@ -298,9 +298,10 @@ def get_predictions():
             if s not in by_source:
                 by_source[s] = {"cost": 0, "value": 0, "unrealized": 0, "realized": 0, "open": 0, "won": 0, "lost": 0}
             by_source[s]["realized"] += (p.get("pnl") or 0)
-            if p.get("resolution") == "won":
+            pnl = p.get("pnl") or 0
+            if p.get("resolution") == "won" or (p.get("resolution") == "sold" and pnl > 0):
                 by_source[s]["won"] += 1
-            elif p.get("resolution") in ("lost", "sold"):
+            elif p.get("resolution") == "lost" or (p.get("resolution") == "sold" and pnl < 0):
                 by_source[s]["lost"] += 1
         # Round everything
         for s in by_source:
