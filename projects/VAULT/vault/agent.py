@@ -694,6 +694,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             vel={"v_1h": v_1h, "v_6h": v_6h, "z_1h": z_1h, "direction": "neutral", "sharp": True},
             action_taken=action_tag,
             market_odds=market_odds, side=side, amount_usd=bet_size,
+            confidence=conf,
         )
         z_part = f", z={z_1h:.1f}" if z_1h is not None else ""
         log.info(

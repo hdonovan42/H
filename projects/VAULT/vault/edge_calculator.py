@@ -98,22 +98,24 @@ def _log_smart_money_event(conn, *, cycle_id, market_id, question=None,
                            vel=None, action_taken, vault_estimate=None,
                            market_odds=None, side=None, amount_usd=None,
                            prediction_id=None, counterfactual_size=None,
-                           counterfactual_side=None):
+                           counterfactual_side=None, confidence=None):
     """Insert a row into smart_money_log. Never breaks the pipeline."""
     try:
         conn.execute(
             "INSERT INTO smart_money_log "
             "(cycle_id, market_id, question, v_1h, v_6h, direction, sharp, "
             "action_taken, vault_estimate, market_odds, side, amount_usd, "
-            "prediction_id, counterfactual_size, counterfactual_side) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "prediction_id, counterfactual_size, counterfactual_side, "
+            "z_1h, confidence) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (cycle_id, market_id, question,
              vel.get("v_1h") if vel else None,
              vel.get("v_6h") if vel else None,
              vel.get("direction") if vel else None,
              1 if vel and vel.get("sharp") else 0,
              action_taken, vault_estimate, market_odds, side, amount_usd,
-             prediction_id, counterfactual_size, counterfactual_side),
+             prediction_id, counterfactual_size, counterfactual_side,
+             vel.get("z_1h") if vel else None, confidence),
         )
         conn.commit()
     except Exception as e:
@@ -303,6 +305,7 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
                             vault_estimate=vault_prob, market_odds=market_yes,
                             side=side, prediction_id=open_pred["id"],
                             counterfactual_size=cf_size, counterfactual_side=cf_side,
+                            confidence=adj_confidence,
                         )
                     elif cf_size > 0:
                         # Hard block — only log when there's an actual bet to veto
@@ -315,6 +318,7 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
                             vault_estimate=vault_prob, market_odds=market_yes,
                             side=side,
                             counterfactual_size=cf_size, counterfactual_side=cf_side,
+                            confidence=adj_confidence,
                         )
 
             elif vel["direction"] == "toward":
@@ -355,6 +359,7 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
                     vel=vel, action_taken="boost",
                     vault_estimate=vault_prob, market_odds=market_yes,
                     side=side, amount_usd=recommended_size,
+                    confidence=adj_confidence,
                 )
 
             reasoning += vel_reasoning

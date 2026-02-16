@@ -284,6 +284,8 @@ CREATE TABLE IF NOT EXISTS smart_money_log (
     outcome_pnl         REAL,
     counterfactual_pnl  REAL,
     resolved_at         TEXT,
+    z_1h                REAL,
+    confidence          REAL,
     FOREIGN KEY (cycle_id) REFERENCES cycles(id)
 );
 """
@@ -576,6 +578,17 @@ def _migrate(conn):
             "INSERT INTO meta (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             ("schema_version", "10"),
+        )
+        conn.commit()
+
+    if version < 11:
+        # v11: add z_1h and confidence to smart_money_log for z-score outcome tracking
+        conn.execute("ALTER TABLE smart_money_log ADD COLUMN z_1h REAL")
+        conn.execute("ALTER TABLE smart_money_log ADD COLUMN confidence REAL")
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "11"),
         )
         conn.commit()
 
