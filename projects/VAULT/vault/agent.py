@@ -429,8 +429,16 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
     if not velocity_alerts:
         return []
 
+    # Skip markets where we already have an open position (prevents runaway stacking)
+    open_market_ids = {
+        r["market_id"] for r in ledger.get_open_predictions(conn)
+    }
+
     items = []
     for alert in velocity_alerts[:max_per_cycle]:
+        if alert["market_id"] in open_market_ids:
+            log.info(f"Momentum skip: already have open position on {alert.get('question', alert['market_id'])[:50]}")
+            continue
         question = alert.get("question", alert["market_id"])
         market_odds = alert.get("market_odds", 0.5)
         v_1h = alert.get("v_1h")
