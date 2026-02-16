@@ -30,6 +30,7 @@ VAULT was sitting on $55 in cash with only 1 position open. Every discovered mar
 **Fix estimated markets missing from edge calculations** (`edge_calculator.py`)
 - Opus estimated 7 markets but keyword discovery only found 4. The other 3 (including Starship) were silently skipped — no odds to calculate edge against.
 - Edge calculator now fetches live odds for any estimated market not found by discovery.
+- Also records odds snapshots for these markets, so velocity calculations and mark-to-market stay current. Previously, positions in undiscovered markets had stale snapshots (Netflix was 2 days old).
 - Immediately triggered the Starship FT12 bet — the market that was supposed to pass both gates all along.
 
 **Filter auto-hold from dashboard** (`api.py`, `CycleLog.jsx`)
