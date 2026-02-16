@@ -18,7 +18,7 @@ log = logging.getLogger("vault.api")
 
 def _pred_source(p: dict) -> str:
     """Classify a prediction's source: pipeline (Opus intel), momentum, or legacy."""
-    if p.get("entry_confidence"):
+    if p.get("entry_confidence") is not None or p.get("entry_edge") is not None:
         return "pipeline"
     reason = (p.get("entry_reasoning") or "").lower()
     if "sharp move" in reason or "momentum" in reason:
