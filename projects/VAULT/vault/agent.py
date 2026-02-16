@@ -217,6 +217,32 @@ def _run_decider(conn, cycle_id, pipeline_result, actionable, context, cfg) -> d
                 executed = True
                 break
 
+            # Opportunity cost gate — don't enter if we'd immediately exit
+            from vault.polymarket import get_current_odds
+            opp_odds = get_current_odds(conn, market_id)
+            if opp_odds:
+                opp_price = opp_odds["yes_price"] if side == "YES" else opp_odds["no_price"]
+                opp_cfg = cfg.get("velocity", {})
+                opp_remaining = _remaining_return_pct(opp_price)
+                opp_end = conn.execute(
+                    "SELECT end_date FROM musk_markets WHERE market_id = ?",
+                    (market_id,),
+                ).fetchone()
+                opp_days = _days_to_resolution(
+                    opp_end[0] if opp_end else None,
+                    opp_cfg.get("opportunity_cost_default_days", 30),
+                )
+                opp_risk_free = opp_cfg.get("opportunity_cost_annual", 0.10) * (opp_days / 365)
+                if opp_price >= 0.995 or opp_remaining <= opp_risk_free:
+                    log.info(
+                        f"Decider bet blocked (would immediately exit): {side} on {market_id} "
+                        f"@ {opp_price:.2%} — remaining {opp_remaining:.2%} vs risk-free {opp_risk_free:.2%}"
+                    )
+                    result["action"] = "hold"
+                    result["reasoning"] = f"bet blocked: would immediately exit @ {opp_price:.2%}"
+                    executed = True
+                    break
+
             bet_actuator = get_actuator("bet")
             exec_result = bet_actuator.execute(conn, {
                 "market_id": market_id,
@@ -500,7 +526,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         default_days = vel_cfg.get("opportunity_cost_default_days", 30)
         days = _days_to_resolution(end_date[0] if end_date else None, default_days)
         risk_free = annual_rate * (days / 365)
-        if remaining <= risk_free:
+        if our_entry_price >= 0.995 or remaining <= risk_free:
             log.info(
                 f"Momentum skip (opportunity cost): {question[:40]} — "
                 f"remaining {remaining:.2%} < risk-free {risk_free:.2%} ({days:.0f}d)"
@@ -745,7 +771,7 @@ def _exit_opportunity_cost(conn):
         days = _days_to_resolution(pred.get("end_date"), default_days)
         risk_free = annual_rate * (days / 365)
 
-        if remaining <= risk_free:
+        if our_price >= 0.995 or remaining <= risk_free:
             try:
                 pnl = ledger.record_prediction_sell(conn, pred["id"], our_price)
                 log.info(

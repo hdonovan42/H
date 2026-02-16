@@ -2,7 +2,7 @@
 name: dcp
 description: Deploy, Commit & Push — deploys the current project to VPS, commits all changes, and pushes to remote.
 argument-hint: [project-name]
-allowed-tools: Bash, Read, Glob, Grep
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 ---
 
 # Deploy, Commit & Push
@@ -37,7 +37,25 @@ After deploy, verify the service is healthy:
 - **VAULT**: `ssh hq@89.167.4.126 'curl -s localhost:3200/api/v1/status'` — check `alive: true`
 - **AXIOM_v2**: `ssh hq@89.167.4.126 'export PATH=$PATH:/home/hq/.nvm/versions/node/v22.22.0/bin && pm2 show axiom2-api'` — check status online
 
-### 3. Commit
+### 3. Update changelog
+
+Check if the project has a `CHANGELOG.md` (e.g. `projects/VAULT/CHANGELOG.md`). If it exists and there are uncommitted changes beyond the changelog itself:
+
+1. Read the existing changelog to determine the current version number and entry format
+2. Determine the next version (increment the minor number, e.g. v13 → v14, or v13.1 → v13.2). Use your judgement:
+   - **Major bump** (v13 → v14): structural/architectural changes, new features, new pipeline stages
+   - **Minor bump** (v13 → v13.1): config tweaks, parameter changes, small fixes
+3. Prepend a new entry after the `---` separator below the header, matching the existing style. Include:
+   - Version + short title
+   - `**Deployed**: {today's date}` + baseline stats from the health check (balance, runway, etc.)
+   - Brief description of what changed and why
+   - Files modified table
+   - "What to watch" bullets
+4. Keep the entry proportional to the change — a two-line config tweak gets a short entry, not a dissertation
+
+If no changelog exists for the project, skip this step.
+
+### 4. Commit
 
 Check `git status` for uncommitted changes. If there are changes:
 - Stage all modified/new files relevant to the project (use specific file paths, not `git add .`)
@@ -46,13 +64,13 @@ Check `git status` for uncommitted changes. If there are changes:
 
 If the working tree is already clean, skip this step.
 
-### 4. Push
+### 5. Push
 
 ```bash
 git push
 ```
 
-### 5. Report
+### 6. Report
 
 Print a summary:
 - Deploy status (success/fail)

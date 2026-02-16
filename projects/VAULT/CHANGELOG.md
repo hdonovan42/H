@@ -5,6 +5,29 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v13.1 — Hard Price Ceiling + Decider Entry Gate
+**Deployed**: 2026-02-16 | **Baseline**: $59.62 balance, 48.3d runway, +$35.66 trading P&L
+
+### Problem
+8 CS:GO positions at 99.95% weren't exiting — the opportunity cost formula is rate-based, and when `days → 0` the risk-free rate shrinks to near-zero, making even dust-level returns (0.05%) look worthwhile. Separately, momentum was entering positions that the exit sweep would immediately sell on the next cycle (buy $4 → exit next cycle → repeat).
+
+### Changes
+- **Hard price ceiling**: positions at ≥99.5% exit immediately regardless of rate comparison (`our_price >= 0.995` short-circuits in `_exit_opportunity_cost`)
+- **Same ceiling on entry**: momentum analysis gate also blocks entries at ≥99.5%
+- **Decider execution gate** (new): right before `bet_actuator.execute()`, fetches *live* odds and runs the full opportunity cost check. Blocks any bet that would immediately trigger an exit. This is the single chokepoint — no bet can bypass it.
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/agent.py` | `_exit_opportunity_cost()` +ceiling, momentum entry gate +ceiling, new decider-level opportunity cost gate before bet execution |
+
+### What to Watch
+- CS:GO positions exited immediately on deploy (+$23 freed capital)
+- Netflix and Starship positions unaffected (both well below 99.5%)
+- No more enter-then-exit churn on near-resolved markets
+
+---
+
 ## v13 — Universal Market Scanning + Opportunity Cost Exits
 **Deployed**: 2026-02-16 | **Baseline**: $41.61 balance, 40.5d runway, +$25.78 trading P&L
 
