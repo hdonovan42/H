@@ -56,9 +56,9 @@ def discover_markets(conn, cycle_id: int, themes: list[dict] | None = None,
         re.IGNORECASE,
     )
 
-    # Fetch in bulk — 3 pages of 100, sorted by volume
+    # Fetch in bulk — 5 pages of 100, sorted by volume
     all_raw = []
-    for offset in [0, 100, 200]:
+    for offset in [0, 100, 200, 300, 400]:
         try:
             resp = httpx.get(
                 f"{GAMMA_BASE}/markets",
@@ -81,9 +81,12 @@ def discover_markets(conn, cycle_id: int, themes: list[dict] | None = None,
             log.warning(f"Failed to fetch markets (offset {offset}): {e}")
             break
 
-    # Filter locally by keyword match in question text
-    markets = []
+    # Parse all markets, track everything for velocity, keyword-filter for intel
+    intel_markets = []
+    tracked_count = 0
     seen_ids = set()
+    min_volume = cfg.get("velocity", {}).get("momentum_min_volume", 10000)
+
     for raw in all_raw:
         parsed = _parse_market(raw)
         if not parsed:
@@ -91,34 +94,38 @@ def discover_markets(conn, cycle_id: int, themes: list[dict] | None = None,
         mid = parsed["id"]
         if mid in seen_ids:
             continue
-
-        question = parsed.get("question", "")
-        if not keyword_pattern.search(question):
-            continue
+        seen_ids.add(mid)
 
         # Skip extreme odds (resolved in all but name)
         yes = parsed["yes_price"]
         if yes < 0.05 or yes > 0.95:
             continue
 
-        seen_ids.add(mid)
-        _save_cache(conn, mid, parsed, yes)
-        markets.append(parsed)
+        # Keyword match for intel pipeline
+        question = parsed.get("question", "")
+        is_intel = bool(keyword_pattern.search(question))
 
-    # Store/update in musk_markets table and record odds snapshots
-    for m in markets:
-        _upsert_market(conn, m)
-        record_odds_snapshot(conn, m["id"], m.get("yes_price", 0.5),
-                             m.get("no_price", 0.5), cycle_id)
+        # Track for velocity: keyword matches ALWAYS, others need min volume
+        volume = parsed.get("volume", 0) or 0
+        if is_intel or volume >= min_volume:
+            _upsert_market(conn, parsed)
+            record_odds_snapshot(conn, mid, yes,
+                                 parsed.get("no_price", 0.5), cycle_id)
+            tracked_count += 1
 
-    if markets:
+        if is_intel:
+            _save_cache(conn, mid, parsed, yes)
+            intel_markets.append(parsed)
+
+    if tracked_count:
         conn.commit()
 
     log.info(
-        f"Market discovery: {len(markets)} found from {len(all_raw)} scanned "
-        f"({len(keywords)} keywords from {len(themes)} themes, cycle {cycle_id})"
+        f"Market discovery: {tracked_count} tracked for velocity, "
+        f"{len(intel_markets)} intel-matched from {len(all_raw)} scanned "
+        f"({len(keywords)} keywords, cycle {cycle_id})"
     )
-    return markets
+    return intel_markets
 
 
 def _upsert_market(conn, market: dict):

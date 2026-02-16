@@ -4,6 +4,7 @@ import logging
 from vault.actuators.base import BaseActuator
 from vault import ledger
 from vault.polymarket import fetch_market
+from vault.config_loader import load_config
 
 log = logging.getLogger("vault.actuator.bet")
 
@@ -66,6 +67,20 @@ class BetActuator(BaseActuator):
         odds = market["yes_price"] if side == "YES" else market["no_price"]
         if odds <= 0 or odds >= 1:
             return {"success": False, "error": f"Invalid odds: {odds}"}
+
+        # Opportunity cost gate — don't buy if remaining return < risk-free
+        from vault.agent import _remaining_return_pct, _days_to_resolution
+        cfg = load_config()
+        vel_cfg = cfg.get("velocity", {})
+        remaining = _remaining_return_pct(odds)
+        days = _days_to_resolution(market.get("end_date"),
+                                    vel_cfg.get("opportunity_cost_default_days", 30))
+        risk_free = vel_cfg.get("opportunity_cost_annual", 0.10) * (days / 365)
+        if remaining <= risk_free:
+            return {
+                "success": False,
+                "error": f"Opportunity cost: remaining {remaining:.2%} < risk-free {risk_free:.2%} ({days:.0f}d)",
+            }
 
         # Look up edge data from pipeline if available
         entry_edge = None

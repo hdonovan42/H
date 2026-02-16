@@ -489,6 +489,31 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             )
             continue
 
+        # Opportunity cost gate — don't enter if remaining return < risk-free
+        our_entry_price = market_odds if side == "YES" else (1 - market_odds)
+        remaining = _remaining_return_pct(our_entry_price)
+        end_date = conn.execute(
+            "SELECT end_date FROM musk_markets WHERE market_id = ?",
+            (alert["market_id"],),
+        ).fetchone()
+        annual_rate = vel_cfg.get("opportunity_cost_annual", 0.10)
+        default_days = vel_cfg.get("opportunity_cost_default_days", 30)
+        days = _days_to_resolution(end_date[0] if end_date else None, default_days)
+        risk_free = annual_rate * (days / 365)
+        if remaining <= risk_free:
+            log.info(
+                f"Momentum skip (opportunity cost): {question[:40]} — "
+                f"remaining {remaining:.2%} < risk-free {risk_free:.2%} ({days:.0f}d)"
+            )
+            _log_smart_money_event(
+                conn, cycle_id=cycle_id, market_id=alert["market_id"],
+                question=question,
+                vel={"v_1h": v_1h, "v_6h": v_6h, "direction": "neutral", "sharp": True},
+                action_taken="momentum_skip",
+                vault_estimate=prob, market_odds=market_odds, side=side,
+            )
+            continue
+
         # Exposure cap — don't over-concentrate on one market
         current_exposure = exposure_by_market.get(alert["market_id"], 0)
         max_exposure_usd = balance * max_exposure_pct
@@ -636,24 +661,60 @@ def _parse_momentum_response(text: str) -> dict | None:
     return None
 
 
-def _exit_maxed_positions(conn):
-    """Sell any position where our side is >= 99% — essentially resolved, free the capital."""
+def _remaining_return_pct(our_price: float) -> float:
+    """Max possible return if position resolves in our favour."""
+    if our_price >= 1.0:
+        return 0.0
+    return (1.0 - our_price) / our_price
+
+
+def _days_to_resolution(end_date: str | None, default_days: float = 30.0) -> float:
+    """Days until market resolves. Falls back to default if no end_date."""
+    if not end_date:
+        return default_days
+    from datetime import datetime, timezone
+    try:
+        end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+        days = (end_dt - datetime.now(timezone.utc)).total_seconds() / 86400
+        return max(days, 0.04)  # ~1 hour floor — market could resolve any moment
+    except (ValueError, TypeError):
+        return default_days
+
+
+def _exit_opportunity_cost(conn):
+    """Exit positions where remaining return < risk-free return over the same period.
+
+    At 10% annual opportunity cost:
+      - 99.5% position resolving in 30d: 0.5% remaining vs 0.82% risk-free → EXIT
+      - 95% position resolving in 7d: 5.3% remaining vs 0.19% risk-free → HOLD
+      - 99% position resolving in 1d: 1.0% remaining vs 0.03% risk-free → HOLD
+    """
     from vault.polymarket import get_current_odds
+    cfg = load_config()
+    annual_rate = cfg.get("velocity", {}).get("opportunity_cost_annual", 0.10)
+    default_days = cfg.get("velocity", {}).get("opportunity_cost_default_days", 30)
+
     open_preds = ledger.get_open_predictions(conn)
     for pred in open_preds:
         odds = get_current_odds(conn, pred["market_id"])
         if not odds:
             continue
         our_price = odds["yes_price"] if pred["side"] == "YES" else odds["no_price"]
-        if our_price >= 0.99:
+        remaining = _remaining_return_pct(our_price)
+        days = _days_to_resolution(pred.get("end_date"), default_days)
+        risk_free = annual_rate * (days / 365)
+
+        if remaining <= risk_free:
             try:
                 pnl = ledger.record_prediction_sell(conn, pred["id"], our_price)
                 log.info(
-                    f"Capital efficiency exit: [{pred['id']}] {pred['side']} "
-                    f"'{pred['question'][:40]}' @ {our_price:.0%} — P&L: ${pnl:+.2f}"
+                    f"Opportunity cost exit: [{pred['id']}] {pred['side']} "
+                    f"'{pred['question'][:40]}' @ {our_price:.2%} — "
+                    f"remaining {remaining:.2%} < risk-free {risk_free:.2%} "
+                    f"({days:.0f}d) — P&L: ${pnl:+.2f}"
                 )
             except Exception as e:
-                log.warning(f"Failed to exit maxed position {pred['id']}: {e}")
+                log.warning(f"Failed opportunity cost exit {pred['id']}: {e}")
 
 
 def run_cycle(conn) -> dict:
@@ -668,8 +729,8 @@ def run_cycle(conn) -> dict:
     # Resolve any settled predictions before the cycle starts
     resolve_predictions(conn)
 
-    # Exit positions at >= 95% of max value — no upside left, free the capital
-    _exit_maxed_positions(conn)
+    # Exit positions where remaining return < risk-free return over same period
+    _exit_opportunity_cost(conn)
 
     # Start cycle
     cur = conn.execute(

@@ -5,6 +5,61 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v13 — Universal Market Scanning + Opportunity Cost Exits
+**Deployed**: 2026-02-16 | **Baseline**: $41.61 balance, 40.5d runway, +$25.78 trading P&L
+
+### Thesis
+Momentum signals exist across all of Polymarket, not just the Elon ecosystem. The cricket bet — VAULT's most profitable momentum trade — was found by accident (a "Tesla Megapack Australia" keyword matched "T20 World Cup: Australia vs Sri Lanka"). Opening up to all markets + replacing the hard 99% exit with an economics-based opportunity cost model.
+
+### Changes
+
+**Broadened market scanning** — velocity detection now covers ALL Polymarket markets, not just keyword-matched ones:
+- Fetches top 500 active markets by volume (was 300)
+- ALL markets above $10k volume are tracked for velocity (upserted into `musk_markets`, odds snapshots recorded)
+- Keyword filter only gates what Opus sees for intelligence analysis — velocity scanning is unrestricted
+- ~55 markets tracked per cycle (was ~11). Covers geopolitics, sports, elections, crypto, entertainment, science
+- New markets discovered: US/Iran strikes ($9.4M), Academy Awards ($1M), Venezuela politics ($1M), NBA games, tennis, Colombia elections, Japan unemployment, etc.
+
+**Opportunity cost exit** — replaced hard ≥99% threshold with principled economic model:
+- Formula: exit when `remaining_return ≤ risk_free_return` over the same period
+- `remaining_return = (1 - our_price) / our_price` — max gain if we win
+- `risk_free_return = 10% annual × (days_to_resolution / 365)`
+- Time-aware: holds a 99% position resolving tomorrow (1% over 1d = 365% annualised), exits a 95% position expiring in a year (5.3% < 10% risk-free)
+- Config: `opportunity_cost_annual: 0.10`, `opportunity_cost_default_days: 30`
+
+**Opportunity cost entry gate** — same logic blocks wasteful entries:
+- Applied in bet actuator using LIVE odds (not stale cached data)
+- Also applied in momentum analysis using cached odds (belt + suspenders)
+- Prevents the churn loop: buy at 99.95% → sell next cycle → rebuy → repeat
+
+### The Cricket Churn (the bug this fixes)
+After the original cricket momentum bets (profitable, +$4.19), the market sat at YES=0.05%. Every cycle: momentum detected velocity → Haiku said "bet NO" → bet actuator bought NO at 99.95% → capital efficiency exit sold at ≥99% → repeat. 14 churned positions with $0 profit, burning Haiku API costs. Root cause: stale `musk_markets` cache showed 24% YES (market had been filtered from discovery), but bet actuator fetched live 0.05% YES.
+
+### Decision table (10% annual opportunity cost)
+| Our price | Remaining | Days | Risk-free | Decision |
+|-----------|-----------|------|-----------|----------|
+| 99.95% | 0.05% | 7d | 0.19% | **EXIT** |
+| 99% | 1.01% | 7d | 0.19% | HOLD |
+| 99% | 1.01% | 60d | 1.64% | **EXIT** |
+| 95% | 5.26% | 30d | 0.82% | HOLD |
+| 76% | 31.6% | 7d | 0.19% | HOLD |
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/market_discovery.py` | Track all markets for velocity, keyword-filter only for intel return |
+| `vault/agent.py` | `_exit_opportunity_cost()` replaces `_exit_maxed_positions()`, opportunity cost entry gate in momentum, `_remaining_return_pct()` + `_days_to_resolution()` helpers |
+| `vault/actuators/bet.py` | Opportunity cost gate using live odds — final defence against wasteful entries |
+| `config/default.yaml` | `opportunity_cost_annual`, `opportunity_cost_default_days`, `momentum_min_volume`, `momentum_max_exposure_pct` |
+
+### What to Watch
+- Velocity alerts on new market categories (sports, geopolitics, elections)
+- Opportunity cost exits on existing positions as they approach resolution
+- No more churn on near-resolved markets
+- Snapshot table growth (~55 rows/cycle = ~79k/day) — may need periodic cleanup
+
+---
+
 ## v12 — Momentum-First Architecture
 **Deployed**: 2026-02-16 | **Baseline**: $41.72 balance, 19.1d runway, +$25.78 trading P&L
 
