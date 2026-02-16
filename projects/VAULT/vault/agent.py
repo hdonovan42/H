@@ -850,13 +850,23 @@ def run_cycle(conn) -> dict:
     )
     conn.commit()
 
-    # Record objectives snapshot
+    # Record objectives snapshot with MTM positions value
     burn_rate = ledger.get_burn_rate(conn)
     runway = ledger.get_runway(conn)
     total_pnl = ledger.get_total_pnl(conn)
+    from vault.polymarket import get_current_odds
+    positions_value = 0.0
+    for pred in ledger.get_open_predictions(conn):
+        odds = get_current_odds(conn, pred["market_id"])
+        if odds:
+            cp = odds["yes_price"] if pred["side"] == "YES" else odds["no_price"]
+            positions_value += pred["shares"] * cp
+        else:
+            positions_value += pred["cost_basis"]
+    positions_value = round(positions_value, 6)
     conn.execute(
-        "INSERT INTO objectives (balance, burn_rate, runway_days, total_pnl) VALUES (?, ?, ?, ?)",
-        (balance_after, burn_rate, runway, total_pnl),
+        "INSERT INTO objectives (balance, burn_rate, runway_days, total_pnl, positions_value) VALUES (?, ?, ?, ?, ?)",
+        (balance_after, burn_rate, runway, total_pnl, positions_value),
     )
     conn.commit()
 
