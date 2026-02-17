@@ -929,7 +929,7 @@ def _exit_stale_momentum(conn):
     for pred in open_preds:
         # Only momentum positions
         reasoning = pred.get("entry_reasoning") or ""
-        if not reasoning.startswith("Momentum"):
+        if not (reasoning.startswith("Momentum") or reasoning.startswith("Sharp move")):
             continue
 
         # Hold duration
