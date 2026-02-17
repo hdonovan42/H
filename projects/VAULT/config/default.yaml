@@ -79,11 +79,15 @@ velocity:
   z_confidence_haircut: 0.10     # -10% confidence for low-z moves (skipped for profitable adds)
   opportunity_cost_annual: 0.10  # 10% annual — exit when remaining return < risk-free over same period
   opportunity_cost_default_days: 30  # fallback when market has no end_date
-  stale_min_hours: 1.0            # don't judge momentum until held >= 1h
+  stale_min_hours_profitable: 2.0   # let winning momentum positions breathe
+  stale_min_hours_losing: 1.0      # cut losers fast
   stale_max_hours: 4.0            # force exit stale positions after 4h even at a loss
   stale_velocity_threshold: 0.02  # v_1h < 2% = "momentum stalled"
   momentum_max_positions_per_market: 5  # hard cap on positions per market (all sides)
   momentum_min_velocity_1h: 0.10   # minimum |v_1h| for momentum entry (new + adds)
+  trailing_stop_drop: 0.15           # exit when ROI drops 15pp below peak
+  trailing_stop_min_peak: 0.15       # only fire if peak ROI was >= 15%
+  trailing_stop_min_pnl: 0.25        # must still have > $0.25 unrealised profit
 
 # Model pricing (USD per 1M tokens) — updated for Claude 4.5/4.6
 # These are used to calculate cost from token counts

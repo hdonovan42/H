@@ -592,6 +592,16 @@ def _migrate(conn):
         )
         conn.commit()
 
+    if version < 12:
+        # v12: add peak_roi to predictions for trailing stop high-water mark
+        conn.execute("ALTER TABLE predictions ADD COLUMN peak_roi REAL DEFAULT 0")
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "12"),
+        )
+        conn.commit()
+
 
 def init_db(db_path: Path | None = None) -> sqlite3.Connection:
     """Create tables and seed meta if needed."""

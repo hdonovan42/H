@@ -960,7 +960,8 @@ def _exit_stale_momentum(conn):
 
     cfg = load_config()
     vel_cfg = cfg.get("velocity", {})
-    stale_min_hours = vel_cfg.get("stale_min_hours", 1.0)
+    stale_min_hours_profitable = vel_cfg.get("stale_min_hours_profitable", 2.0)
+    stale_min_hours_losing = vel_cfg.get("stale_min_hours_losing", 1.0)
     stale_max_hours = vel_cfg.get("stale_max_hours", 4.0)
     stale_vel_threshold = vel_cfg.get("stale_velocity_threshold", 0.02)
 
@@ -977,9 +978,6 @@ def _exit_stale_momentum(conn):
         opened = datetime.fromisoformat(pred["opened_at"].replace("Z", "+00:00"))
         hours_held = (datetime.now(timezone.utc) - opened).total_seconds() / 3600
 
-        if hours_held < stale_min_hours:
-            continue  # too early
-
         # Current odds + P&L
         odds = get_current_odds(conn, pred["market_id"])
         if not odds:
@@ -988,6 +986,11 @@ def _exit_stale_momentum(conn):
         current_value = pred["shares"] * our_price
         unrealised_pnl = current_value - pred["cost_basis"]
         profitable = unrealised_pnl > 0
+
+        # Split floor: let winners breathe (2h), cut losers fast (1h)
+        min_hours = stale_min_hours_profitable if profitable else stale_min_hours_losing
+        if hours_held < min_hours:
+            continue
 
         # Current velocity
         vel = calculate_velocity(conn, pred["market_id"], cfg=cfg)
@@ -1026,6 +1029,56 @@ def _exit_stale_momentum(conn):
                 )
             except Exception as e:
                 log.warning(f"Failed stale momentum exit {pred['id']}: {e}")
+
+
+def _exit_trailing_stop(conn):
+    """Exit momentum positions where ROI has dropped significantly from peak."""
+    from vault.polymarket import get_current_odds
+
+    cfg = load_config()
+    vel_cfg = cfg.get("velocity", {})
+    trail_drop = vel_cfg.get("trailing_stop_drop", 0.15)
+    trail_min_peak = vel_cfg.get("trailing_stop_min_peak", 0.15)
+    trail_min_pnl = vel_cfg.get("trailing_stop_min_pnl", 0.25)
+
+    open_preds = ledger.get_open_predictions(conn)
+    for pred in open_preds:
+        reasoning = pred.get("entry_reasoning") or ""
+        if not (reasoning.startswith("Momentum") or reasoning.startswith("Sharp move")):
+            continue
+
+        odds = get_current_odds(conn, pred["market_id"])
+        if not odds:
+            continue
+        our_price = odds["yes_price"] if pred["side"] == "YES" else odds["no_price"]
+        current_value = pred["shares"] * our_price
+        unrealised_pnl = current_value - pred["cost_basis"]
+        current_roi = unrealised_pnl / pred["cost_basis"] if pred["cost_basis"] > 0 else 0
+
+        # Update peak_roi high-water mark
+        peak_roi = pred.get("peak_roi") or 0
+        if current_roi > peak_roi:
+            peak_roi = current_roi
+            conn.execute(
+                "UPDATE predictions SET peak_roi = ? WHERE id = ?",
+                (round(peak_roi, 4), pred["id"])
+            )
+            conn.commit()
+
+        # Check trailing stop conditions
+        if (peak_roi >= trail_min_peak
+                and (peak_roi - current_roi) >= trail_drop
+                and current_roi > 0
+                and unrealised_pnl > trail_min_pnl):
+            try:
+                pnl = ledger.record_prediction_sell(conn, pred["id"], our_price)
+                log.info(
+                    f"Trailing stop exit: [{pred['id']}] {pred['side']} "
+                    f"'{pred['question'][:40]}' — peak ROI {peak_roi:+.0%}, "
+                    f"current {current_roi:+.0%}, PnL: ${pnl:+.2f}"
+                )
+            except Exception as e:
+                log.warning(f"Failed trailing stop exit {pred['id']}: {e}")
 
 
 def _exit_opportunity_cost(conn):
@@ -1081,6 +1134,9 @@ def run_cycle(conn) -> dict:
 
     # Exit positions where remaining return < risk-free return over same period
     _exit_opportunity_cost(conn)
+
+    # Exit momentum positions where ROI has dropped from peak
+    _exit_trailing_stop(conn)
 
     # Exit momentum positions where momentum has stalled
     _exit_stale_momentum(conn)
