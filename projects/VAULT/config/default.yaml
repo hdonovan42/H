@@ -79,6 +79,9 @@ velocity:
   z_confidence_haircut: 0.10     # -10% confidence for low-z moves (skipped for profitable adds)
   opportunity_cost_annual: 0.10  # 10% annual — exit when remaining return < risk-free over same period
   opportunity_cost_default_days: 30  # fallback when market has no end_date
+  stale_min_hours: 1.0            # don't judge momentum until held >= 1h
+  stale_max_hours: 4.0            # force exit stale positions after 4h even at a loss
+  stale_velocity_threshold: 0.02  # v_1h < 2% = "momentum stalled"
 
 # Model pricing (USD per 1M tokens) — updated for Claude 4.5/4.6
 # These are used to calculate cost from token counts

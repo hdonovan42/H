@@ -912,6 +912,83 @@ def _exit_substandard_positions(conn):
                 log.warning(f"Failed substandard exit {pred['id']}: {e}")
 
 
+def _exit_stale_momentum(conn):
+    """Exit momentum positions where momentum has stalled and we're in profit,
+    or where momentum has died and we've held too long."""
+    from datetime import datetime, timezone
+    from vault.polymarket import get_current_odds
+    from vault.edge_calculator import calculate_velocity
+
+    cfg = load_config()
+    vel_cfg = cfg.get("velocity", {})
+    stale_min_hours = vel_cfg.get("stale_min_hours", 1.0)
+    stale_max_hours = vel_cfg.get("stale_max_hours", 4.0)
+    stale_vel_threshold = vel_cfg.get("stale_velocity_threshold", 0.02)
+
+    open_preds = ledger.get_open_predictions(conn)
+    for pred in open_preds:
+        # Only momentum positions
+        reasoning = pred.get("entry_reasoning") or ""
+        if not reasoning.startswith("Momentum"):
+            continue
+
+        # Hold duration
+        if not pred.get("opened_at"):
+            continue
+        opened = datetime.fromisoformat(pred["opened_at"].replace("Z", "+00:00"))
+        hours_held = (datetime.now(timezone.utc) - opened).total_seconds() / 3600
+
+        if hours_held < stale_min_hours:
+            continue  # too early
+
+        # Current odds + P&L
+        odds = get_current_odds(conn, pred["market_id"])
+        if not odds:
+            continue
+        our_price = odds["yes_price"] if pred["side"] == "YES" else odds["no_price"]
+        current_value = pred["shares"] * our_price
+        unrealised_pnl = current_value - pred["cost_basis"]
+        profitable = unrealised_pnl > 0
+
+        # Current velocity
+        vel = calculate_velocity(conn, pred["market_id"], cfg=cfg)
+
+        # Is momentum still alive in our direction?
+        momentum_alive = False
+        if vel and vel.get("v_1h") is not None:
+            v = vel["v_1h"]
+            if pred["side"] == "YES" and v > stale_vel_threshold:
+                momentum_alive = True
+            elif pred["side"] == "NO" and v < -stale_vel_threshold:
+                momentum_alive = True
+
+        if momentum_alive:
+            continue  # momentum still running, hold
+
+        # Momentum stalled — should we exit?
+        should_exit = False
+        reason = ""
+
+        if profitable:
+            should_exit = True
+            reason = (f"Stale momentum profit-take: held {hours_held:.1f}h, "
+                      f"PnL ${unrealised_pnl:+.2f}, momentum stalled")
+        elif hours_held >= stale_max_hours:
+            should_exit = True
+            reason = (f"Stale momentum timeout: held {hours_held:.1f}h > {stale_max_hours}h, "
+                      f"PnL ${unrealised_pnl:+.2f}, momentum gone")
+
+        if should_exit:
+            try:
+                pnl = ledger.record_prediction_sell(conn, pred["id"], our_price)
+                log.info(
+                    f"Stale momentum exit: [{pred['id']}] {pred['side']} "
+                    f"'{pred['question'][:40]}' @ {our_price:.2%} — {reason} — PnL: ${pnl:+.2f}"
+                )
+            except Exception as e:
+                log.warning(f"Failed stale momentum exit {pred['id']}: {e}")
+
+
 def _exit_opportunity_cost(conn):
     """Exit positions where remaining return < risk-free return over the same period.
 
@@ -965,6 +1042,9 @@ def run_cycle(conn) -> dict:
 
     # Exit positions where remaining return < risk-free return over same period
     _exit_opportunity_cost(conn)
+
+    # Exit momentum positions where momentum has stalled
+    _exit_stale_momentum(conn)
 
     # Start cycle
     cur = conn.execute(

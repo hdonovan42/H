@@ -5,6 +5,38 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v15.3 — Stale Momentum Exit
+**Deployed**: 2026-02-17 | **Baseline**: $71.46 balance, 52.8d runway, +$45.78 trading P&L
+
+Adds mechanical exit logic for momentum positions where momentum has stalled. Previously, momentum bets had no exit except opportunity-cost (price near 100%) or market resolution — a bet entered at 68% that stalls at 70% would sit indefinitely. Now every cycle rechecks velocity on open momentum positions and takes profit or cuts losses.
+
+**Why**: Overnight data shows 25W/0L but all wins relied on price running to ~95%+ for opportunity-cost to kick in. If momentum dies mid-way and we're sitting on profit, we should take it. If momentum dies and we've held 4h+ at a loss, cut it.
+
+### Decision matrix
+| Condition | Action |
+|-----------|--------|
+| Held > 1h + profitable + velocity stalled | SELL (profit-take) |
+| Held > 4h + velocity stalled | SELL (timeout cut) |
+| Velocity alive (v_1h > 2% in our direction) | HOLD |
+| Held < 1h | HOLD (too early) |
+
+"Velocity stalled" = `v_1h` is None/zero, reversed, or `abs(v_1h) < 2%`.
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/agent.py` | New `_exit_stale_momentum(conn)` function; called in `run_cycle()` after opportunity-cost exit |
+| `config/default.yaml` | `stale_min_hours: 1.0`, `stale_max_hours: 4.0`, `stale_velocity_threshold: 0.02` |
+
+### What to Watch
+- `Stale momentum exit:` messages in logs when momentum dies on an open position
+- Profitable momentum positions held > 1h with dead velocity should exit
+- Positions with active momentum (v_1h > 2% in our direction) should NOT exit
+- Non-momentum positions (intel pipeline) should be completely unaffected
+- $0 API cost — pure mechanical, no Haiku call
+
+---
+
 ## v15 — Volatility-Normalized Velocity (Z-Score)
 **Deployed**: 2026-02-16 | **Baseline**: $41.00 balance, 28.2d runway, +$22.20 trading P&L
 
