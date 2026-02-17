@@ -448,8 +448,8 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
     vel_cfg = cfg.get("velocity", {})
     max_per_cycle = vel_cfg.get("max_momentum_per_cycle", 3)
     follow_confidence = vel_cfg.get("momentum_follow_confidence", 0.6)
-    base_bet = vel_cfg.get("momentum_base_bet_usd", 2.00)
-    max_bet = vel_cfg.get("momentum_max_bet_usd", 4.00)
+    base_bet_pct = vel_cfg.get("momentum_base_bet_pct", 0.025)
+    max_bet_pct = vel_cfg.get("momentum_max_bet_pct", 0.10)
     vel_scale_20 = vel_cfg.get("momentum_vel_scale_20", 1.5)
     vel_scale_40 = vel_cfg.get("momentum_vel_scale_40", 2.0)
     model = vel_cfg.get("momentum_model", "claude-haiku-4-5-20251001")
@@ -490,6 +490,8 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
 
     add_min_roi = vel_cfg.get("momentum_add_min_roi", 0.0)
     total_value = balance + sum(value_by_market.values())
+    base_bet = round(total_value * base_bet_pct, 2)
+    max_bet = round(total_value * max_bet_pct, 2)
 
     # Per-market position count (all sides combined)
     positions_per_market = {}
@@ -1039,7 +1041,7 @@ def _exit_trailing_stop(conn):
     vel_cfg = cfg.get("velocity", {})
     trail_drop = vel_cfg.get("trailing_stop_drop", 0.15)
     trail_min_peak = vel_cfg.get("trailing_stop_min_peak", 0.15)
-    trail_min_pnl = vel_cfg.get("trailing_stop_min_pnl", 0.25)
+    trail_min_pnl_pct = vel_cfg.get("trailing_stop_min_pnl_pct", 0.05)
 
     open_preds = ledger.get_open_predictions(conn)
     for pred in open_preds:
@@ -1069,7 +1071,7 @@ def _exit_trailing_stop(conn):
         if (peak_roi >= trail_min_peak
                 and (peak_roi - current_roi) >= trail_drop
                 and current_roi > 0
-                and unrealised_pnl > trail_min_pnl):
+                and unrealised_pnl > (pred["cost_basis"] * trail_min_pnl_pct)):
             try:
                 pnl = ledger.record_prediction_sell(conn, pred["id"], our_price)
                 log.info(

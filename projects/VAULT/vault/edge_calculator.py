@@ -146,6 +146,7 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
     default_duration_days = edge_cfg.get("market_duration_days", 30)  # fallback when no end_date
 
     balance = ledger.get_balance(conn)
+    min_bet_size = round(balance * 0.01, 2)  # 1% of balance — was hardcoded $0.50
     market_odds_map = {m["id"]: m for m in markets}
 
     # Build sentinel alert lookup by prediction_id
@@ -252,7 +253,7 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
                 open_pred, vault_prob, confidence, market_yes, market_no,
                 risk_free_rate, margin_of_safety, sentinel_alert=sentinel_alert
             )
-        elif has_edge and recommended_size >= 0.50 and beats_risk_free:
+        elif has_edge and recommended_size >= min_bet_size and beats_risk_free:
             action = "bet"
             reasoning = (
                 f"{abs_edge:.0%} edge ({side}), confidence {confidence:.0%}, "
@@ -270,7 +271,7 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
                     f"Expected profit ${expected_profit:.2f} < risk-free ${risk_free_return:.2f}"
                 )
             else:
-                reasoning = f"Size ${recommended_size:.2f} below minimum"
+                reasoning = f"Size ${recommended_size:.2f} below minimum ${min_bet_size:.2f}"
 
         # ── Velocity analysis ──
         vel_cfg = cfg.get("velocity", {})
@@ -340,7 +341,7 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
 
                 # Recheck action with adjusted values
                 if not open_pred:
-                    if has_edge and recommended_size >= 0.50 and beats_risk_free:
+                    if has_edge and recommended_size >= min_bet_size and beats_risk_free:
                         action = "bet"
                         reasoning = (
                             f"{abs_edge:.0%} edge ({side}), confidence {adj_confidence:.0%}, "
@@ -481,7 +482,7 @@ def _analyze_open_position(pred: dict, vault_prob: float, confidence: float,
     d) Sentinel detected thesis break (breaking news, HIGHEST PRIORITY)
     a) Estimate flipped against position (vault < 45% for your side, confidence >= 50%)
     b) Estimate dropped to < 50% of entry estimate (thesis substantially weakened)
-    c) Remaining EV < risk-free return AND < $0.50 absolute
+    c) Remaining EV < risk-free return AND < 1% of cost basis
 
     Returns (action, reasoning) tuple.
     """
@@ -544,12 +545,13 @@ def _analyze_open_position(pred: dict, vault_prob: float, confidence: float,
                 f"{entry_estimate:.0%} for {side}, P&L: ${unrealized_pnl:+.2f}.{thesis_str}"
             )
 
-    # Exit condition (c): Remaining EV below risk-free AND below $0.50 absolute
+    # Exit condition (c): Remaining EV below risk-free AND below 1% of cost basis
     risk_free_threshold = cost_basis * risk_free_rate * 30
-    if remaining_ev < risk_free_threshold and remaining_ev < 0.50:
+    min_remaining_ev = cost_basis * 0.01
+    if remaining_ev < risk_free_threshold and remaining_ev < min_remaining_ev:
         return "exit", (
             f"Remaining EV ${remaining_ev:.2f} < risk-free ${risk_free_threshold:.2f} "
-            f"and < $0.50, P&L: ${unrealized_pnl:+.2f}.{thesis_str}"
+            f"and < 1% of cost basis (${min_remaining_ev:.2f}), P&L: ${unrealized_pnl:+.2f}.{thesis_str}"
         )
 
     # Otherwise hold — market converging toward our estimate is a WIN

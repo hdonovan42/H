@@ -49,7 +49,8 @@ def check_trade_allowed(conn, amount_usd: float, asset: str) -> tuple[bool, str]
 def check_cycle_cost(conn, cycle_id: int) -> bool:
     """Check if cycle has exceeded max cost. Returns True if over budget."""
     cfg = load_config()
-    max_cost = cfg["agent"]["max_cycle_cost"]
+    balance = ledger.get_balance(conn)
+    max_cost = balance * cfg["agent"].get("max_cycle_cost_pct", 0.006)
 
     row = conn.execute(
         "SELECT COALESCE(SUM(cost_usd), 0) as total FROM api_calls WHERE cycle_id = ?",
