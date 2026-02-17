@@ -489,6 +489,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         open_pred_by_market_side.setdefault(key, []).append(p)
 
     add_min_roi = vel_cfg.get("momentum_add_min_roi", 0.0)
+    total_value = balance + sum(value_by_market.values())
 
     # Per-market position count (all sides combined)
     positions_per_market = {}
@@ -553,7 +554,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             vel_mult = vel_scale_20
         else:
             vel_mult = 1.0
-        raw_bet = min(base_bet * vel_mult, max_bet, balance * 0.10)
+        raw_bet = min(base_bet * vel_mult, max_bet, total_value * 0.15)
 
         # Pyramiding: scale bet size based on unrealised ROI of existing exposure
         current_exposure = exposure_by_market.get(alert["market_id"], 0)
@@ -569,7 +570,6 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             pyramid_mult = 1.0
 
         # Cap bet size (respect remaining room under exposure cap)
-        total_value = balance + sum(value_by_market.values())
         max_exposure_usd = total_value * max_exposure_pct
         remaining_room = max_exposure_usd - current_exposure
         bet_size = min(raw_bet * pyramid_mult, remaining_room, max_bet)
