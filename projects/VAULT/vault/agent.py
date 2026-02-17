@@ -533,9 +533,20 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             log.info(f"Momentum skip (extreme entry): {question[:50]} — {side} @ {entry_price:.2%}")
             continue
 
+        # 2b. Minimum entry odds — sub-50% momentum entries have 0% win rate historically
+        if entry_price < 0.50:
+            log.info(f"Momentum skip (low entry odds): {question[:50]} — {side} @ {entry_price:.2%}")
+            continue
+
         # 3. Velocity-scaled sizing (pure raw velocity)
         z_1h = alert.get("z_1h")
         abs_v = abs(v_1h)
+
+        # 3a. Minimum velocity filter (5-10% band has 56% WR vs 100% for 10-20%)
+        momentum_min_velocity = vel_cfg.get("momentum_min_velocity_1h", 0.10)
+        if abs_v < momentum_min_velocity:
+            log.info(f"Momentum skip (weak velocity): {question[:50]} — |v_1h| {abs_v:.1%} < {momentum_min_velocity:.0%}")
+            continue
         if abs_v >= 0.40:
             vel_mult = vel_scale_40
         elif abs_v >= 0.20:
@@ -548,10 +559,12 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         current_exposure = exposure_by_market.get(alert["market_id"], 0)
         current_value = value_by_market.get(alert["market_id"], 0)
         unrealised_roi = (current_value - current_exposure) / current_exposure if current_exposure > 0 else 0
-        if unrealised_roi >= 0.25:
+        if unrealised_roi >= 0.30:
             pyramid_mult = 3.0
-        elif unrealised_roi >= 0.10:
+        elif unrealised_roi >= 0.15:
             pyramid_mult = 2.0
+        elif unrealised_roi >= 0.05:
+            pyramid_mult = 1.5
         else:
             pyramid_mult = 1.0
 

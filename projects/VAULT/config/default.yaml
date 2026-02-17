@@ -65,7 +65,7 @@ velocity:
   momentum_model: claude-haiku-4-5-20251001
   momentum_follow_confidence: 0.6   # Haiku must be this confident to follow
   momentum_base_bet_usd: 2.00       # base bet size
-  momentum_max_bet_usd: 4.00        # hard cap
+  momentum_max_bet_usd: 6.00        # hard cap
   momentum_vel_scale_20: 1.5        # 1.5x at |v_1h| >= 20%
   momentum_vel_scale_40: 2.0        # 2x at |v_1h| >= 40%
   momentum_add_min_roi: 0.0          # only add if existing position ROI > this (strictly profitable)
@@ -83,6 +83,7 @@ velocity:
   stale_max_hours: 4.0            # force exit stale positions after 4h even at a loss
   stale_velocity_threshold: 0.02  # v_1h < 2% = "momentum stalled"
   momentum_max_positions_per_market: 5  # hard cap on positions per market (all sides)
+  momentum_min_velocity_1h: 0.10   # minimum |v_1h| for momentum entry (new + adds)
 
 # Model pricing (USD per 1M tokens) — updated for Claude 4.5/4.6
 # These are used to calculate cost from token counts
