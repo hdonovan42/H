@@ -490,12 +490,28 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
 
     add_min_roi = vel_cfg.get("momentum_add_min_roi", 0.0)
 
+    # Per-market position count (all sides combined)
+    positions_per_market = {}
+    for p in open_preds:
+        mid = p["market_id"]
+        positions_per_market[mid] = positions_per_market.get(mid, 0) + 1
+    max_positions_per_market = vel_cfg.get("momentum_max_positions_per_market", 5)
+
     items = []
     total_api_cost = 0  # Track all Haiku calls including skipped signals
     for alert in velocity_alerts[:max_per_cycle]:
         question = alert.get("question", alert["market_id"])
         v_1h = alert.get("v_1h")
         v_6h = alert.get("v_6h")
+
+        # Market-type filter: skip O/U, draw, spread (noisy in-game momentum)
+        _NOISY_PATTERNS = ["over/under", "o/u ", " o/u", "total points", "total goals",
+                           "total maps", "spread", "end in a draw", "draw or",
+                           "by at least", "margin"]
+        q_lower = question.lower()
+        if any(pat in q_lower for pat in _NOISY_PATTERNS):
+            log.info(f"Momentum skip (noisy market type): {question[:50]}")
+            continue
 
         # Fetch LIVE odds (alert's market_odds may be stale from musk_markets table)
         live_odds = get_current_odds(conn, alert["market_id"])
@@ -540,7 +556,8 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             pyramid_mult = 1.0
 
         # Cap bet size (respect remaining room under exposure cap)
-        max_exposure_usd = balance * max_exposure_pct
+        total_value = balance + sum(value_by_market.values())
+        max_exposure_usd = total_value * max_exposure_pct
         remaining_room = max_exposure_usd - current_exposure
         bet_size = min(raw_bet * pyramid_mult, remaining_room, max_bet)
         bet_size = round(max(bet_size, 0), 2)
@@ -556,6 +573,15 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
                 vel={"v_1h": v_1h, "v_6h": v_6h, "z_1h": z_1h, "direction": "neutral", "sharp": True},
                 action_taken="momentum_skip",
                 market_odds=market_odds, side=side,
+            )
+            continue
+
+        # Per-market position count cap
+        market_pos_count = positions_per_market.get(alert["market_id"], 0)
+        if market_pos_count >= max_positions_per_market:
+            log.info(
+                f"Momentum skip: {question[:50]} — {market_pos_count} positions "
+                f">= {max_positions_per_market} cap"
             )
             continue
 
