@@ -70,6 +70,15 @@ function SourceSummary({ bySource }) {
 export default function BetsPanel({ positions, predictions }) {
   const [closedOpen, setClosedOpen] = useState(false);
   const [legacyOpen, setLegacyOpen] = useState(false);
+  const [expandedMarkets, setExpandedMarkets] = useState(new Set());
+
+  function toggleMarket(key) {
+    setExpandedMarkets(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
 
   const openPos = positions?.open || [];
   const closedPos = positions?.closed || [];
@@ -87,6 +96,33 @@ export default function BetsPanel({ positions, predictions }) {
     (sum, p) => sum + (p.unrealized_pnl ?? p.pnl ?? 0), 0,
   );
 
+  // Group open predictions by market
+  const marketGroups = {};
+  for (const p of currentOpenPreds) {
+    const key = p.question;
+    if (!marketGroups[key]) {
+      marketGroups[key] = {
+        question: p.question,
+        side: p.side,
+        source: p.source,
+        current_odds: p.current_odds,
+        end_date: p.end_date,
+        positions: [],
+        totalShares: 0,
+        totalCost: 0,
+        totalValue: 0,
+        totalPnl: 0,
+      };
+    }
+    const g = marketGroups[key];
+    g.positions.push(p);
+    g.totalShares += p.shares || 0;
+    g.totalCost += p.cost_basis || 0;
+    g.totalValue += p.market_value || 0;
+    g.totalPnl += p.unrealized_pnl || 0;
+  }
+  const markets = Object.values(marketGroups);
+
   const hasOpen = openPos.length > 0 || currentOpenPreds.length > 0;
   const hasClosed = closedPos.length > 0 || currentClosedPreds.length > 0;
   const hasData = hasOpen || hasClosed || legacyCount > 0;
@@ -102,28 +138,54 @@ export default function BetsPanel({ positions, predictions }) {
       {hasOpen && (
         <>
           <div style={{ fontSize: '11px', color: 'var(--alive)', fontWeight: 600, marginBottom: '8px', letterSpacing: '1px' }}>
-            OPEN ({openPos.length + currentOpenPreds.length})
+            OPEN ({markets.length} market{markets.length !== 1 ? 's' : ''}, {currentOpenPreds.length} position{currentOpenPreds.length !== 1 ? 's' : ''})
           </div>
 
-          {currentOpenPreds.map((p) => (
-            <div key={`pred-${p.id}`} className="position-item">
-              <div className="position-header">
-                <span>
-                  <SourceTag source={p.source} />
-                  <span className={`prediction-side ${p.side.toLowerCase()}`}>{p.side}</span>
-                  {' '}
-                  <span className="prediction-question">{p.question}</span>
-                </span>
-                <span className={p.unrealized_pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}>
-                  {p.unrealized_pnl >= 0 ? '+' : ''}{formatCost(p.unrealized_pnl)}
-                </span>
-              </div>
-              <div className="position-detail">
-                {p.shares?.toFixed(2)} shares | {formatPct(p.entry_odds)} &rarr; {formatPct(p.current_odds)} | cost {formatCost(p.cost_basis)} &rarr; mkt {formatCost(p.market_value)}
-                {p.end_date && ` | exp ${p.end_date.slice(0, 10)}`}
-              </div>
-            </div>
-          ))}
+          {markets.map((g) => {
+            const q = g.question;
+            const expanded = expandedMarkets.has(q);
+            return (
+              <React.Fragment key={q}>
+                <div className="position-item" style={{ cursor: 'pointer' }} onClick={() => toggleMarket(q)}>
+                  <div className="position-header">
+                    <span>
+                      <span style={{ marginRight: '6px', fontSize: '10px', color: 'var(--text-dim)' }}>
+                        {expanded ? '\u25BC' : '\u25B6'}
+                      </span>
+                      <SourceTag source={g.source} />
+                      <span className={`prediction-side ${g.side.toLowerCase()}`}>{g.side}</span>
+                      {' '}
+                      <span className="prediction-question">{g.question}</span>
+                    </span>
+                    <span className={g.totalPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}>
+                      {g.totalPnl >= 0 ? '+' : ''}{formatCost(g.totalPnl)}
+                    </span>
+                  </div>
+                  <div className="position-detail">
+                    {g.positions.length} position{g.positions.length !== 1 ? 's' : ''} | {g.totalShares.toFixed(2)} shares
+                    | cost {formatCost(g.totalCost)} &rarr; mkt {formatCost(g.totalValue)}
+                    {g.end_date && ` | exp ${g.end_date.slice(0, 10)}`}
+                  </div>
+                </div>
+                {expanded && g.positions.map((p) => (
+                  <div key={`pred-${p.id}`} className="position-item"
+                       style={{ paddingLeft: '24px', borderBottom: '1px solid var(--border)', opacity: 0.85 }}>
+                    <div className="position-header">
+                      <span style={{ fontSize: '11px' }}>
+                        #{p.id} | {p.shares?.toFixed(2)} shares
+                        | {formatPct(p.entry_odds)} &rarr; {formatPct(p.current_odds)}
+                        | cost {formatCost(p.cost_basis)} &rarr; mkt {formatCost(p.market_value)}
+                      </span>
+                      <span className={p.unrealized_pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}
+                            style={{ fontSize: '11px' }}>
+                        {p.unrealized_pnl >= 0 ? '+' : ''}{formatCost(p.unrealized_pnl)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </React.Fragment>
+            );
+          })}
 
           {openPos.map((p) => (
             <div key={`pos-${p.id}`} className="position-item">
