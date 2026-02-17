@@ -5,6 +5,67 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16 — Agent Team Review: Defensive + Offensive Overhaul
+**Deployed**: 2026-02-17 | **Schema**: v12 | **Baseline**: $80.62 balance, 59.3d runway, +$45.25 trading P&L
+
+Three-agent review team (profit maximisation, capital efficiency, win rate optimisation) analysed 174 closed trades and debated priorities. Key finding: **sports momentum at 0.50–0.70 entry odds is the edge** (91% WR, 45.8% ROI). All major losses came from non-sports markets or sub-50% entry odds. Implemented across three priority tiers:
+
+### P0 — Defensive Guardrails (v16.0)
+
+**Exposure cap fix**: `_analyze_momentum_opportunities()` was computing `max_exposure_usd = balance * 0.50` using cash balance only. Each bet shrinks cash, so the cap erodes as positions accumulate. MrBeast got 14 positions ($26.28 = 31% of total value) in 26 minutes. Fix: cap now uses `(balance + positions_value) * 0.50` — total portfolio value.
+
+**O/U / draw / spread filter**: Markets with inherently noisy in-game momentum (over/under, draw, spread, totals) are now blocked from momentum entry. The Girona O/U disaster (-$17.94 from 5 bets) was the single biggest loss event — 30% of all losses. Simple question-text pattern matching, placed before API calls.
+
+**Per-market position cap**: Hard limit of 5 positions per market (all sides combined), configurable via `momentum_max_positions_per_market`. Defence in depth against accumulation regardless of exposure percentage.
+
+### P1 — Offensive Tuning (v16.1)
+
+**Max bet $4 → $6**: The 3x pyramid tier (3x × $2 = $6) was capped back to $4 — effectively neutering pyramiding. Raising to $6 lets the full pyramid function. The 50% exposure cap is the real guardrail.
+
+**Pyramid thresholds lowered**: New 4-tier system: 5%→1.5x, 15%→2x, 30%→3x (was 10%→2x, 25%→3x). Adds a 1.5x tier so scaling engages earlier when the signal is confirming but there's still runway.
+
+**50% minimum entry odds**: Sub-50% momentum entries had 0% WR historically. The 0.50–0.70 bucket is 91% WR and 45.8% ROI — that's where the alpha lives.
+
+**10% minimum velocity**: The 5–10% v_1h band had 56% WR vs 100% for 10–20%. Raises the floor from `sharp_threshold_1h: 0.05` (alert detection, unchanged) to `momentum_min_velocity_1h: 0.10` for actual entry.
+
+### P2 — Exit Refinements (v16.2, v16.3)
+
+**Split stale exit**: Profitable positions get 2h before the stale check fires (let winners breathe through halftime/set breaks). Unprofitable positions keep the 1h floor (cut losers fast). Replaces the single `stale_min_hours: 1.0` with `stale_min_hours_profitable: 2.0` / `stale_min_hours_losing: 1.0`.
+
+**High-water-mark trailing stop**: New `_exit_trailing_stop()` function + `peak_roi` column (schema v12). Tracks each position's peak unrealised ROI. Exits when ROI drops 15pp below peak while still profitable (PnL > $0.25, peak was >= 15%). Runs before stale exit in the chain. Protects against the 2–6h reversal pattern that was net -$9.16 historically.
+
+**Min add ROI 0% → 2%**: `momentum_add_min_roi` raised from 0.0 to 0.02. Filters noise-level "profitable" adds (+$0.001) without a cooldown timer — the P0 position cap and exposure cap already prevent accumulation.
+
+### Data from the review
+
+| Metric | Value |
+|--------|-------|
+| Sports momentum WR | **90%** (45W/5L) |
+| Non-sports WR | **41%** (25W/36L) |
+| Best entry odds | 0.50–0.70: 91% WR, 45.8% ROI |
+| Best velocity band | v_1h 10–20%: **100% WR** (22W/0L) |
+| Biggest loss event | Girona O/U: -$17.94 (5 bets, 1 market) |
+| Flat trade rate | 34.5% (60/174 at $0 PnL) |
+| Win/loss ratio | 1.02x ($1.51 avg win / $1.47 avg loss) |
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/agent.py` | Exposure cap fix, O/U filter, position cap, min entry odds, min velocity, pyramid thresholds, split stale exit, trailing stop function, exit chain wiring |
+| `vault/db.py` | Schema v12: `peak_roi REAL DEFAULT 0` on predictions |
+| `config/default.yaml` | `momentum_max_bet_usd: 6.00`, `momentum_add_min_roi: 0.02`, `momentum_max_positions_per_market: 5`, `momentum_min_velocity_1h: 0.10`, `stale_min_hours_profitable: 2.0`, `stale_min_hours_losing: 1.0`, `trailing_stop_drop/min_peak/min_pnl` |
+
+### What to Watch
+- Accumulation: MrBeast (14 positions) and Somalia (8 positions) were created before P0 deployed — stale exit will clean them up
+- Position cap: "Momentum skip: ... N positions >= 5 cap" log messages
+- O/U filter: "Momentum skip (noisy market type)" log messages
+- Entry filters: "Momentum skip (low entry odds)" and "Momentum skip (weak velocity)" messages
+- Trailing stop: "Trailing stop exit: ... peak ROI +X%, current +Y%" messages
+- Split stale: profitable positions should hold longer (up to 2h) before stale exit fires
+- Pyramid: "Momentum pyramid: ... ROI +5% → 2x" should fire more frequently than before
+
+---
+
 ## v15.3 — Stale Momentum Exit
 **Deployed**: 2026-02-17 | **Baseline**: $71.46 balance, 52.8d runway, +$45.78 trading P&L
 
