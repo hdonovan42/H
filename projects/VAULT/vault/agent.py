@@ -500,6 +500,19 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         positions_per_market[mid] = positions_per_market.get(mid, 0) + 1
     max_positions_per_market = vel_cfg.get("momentum_max_positions_per_market", 5)
 
+    def _is_sports_market(question: str) -> bool:
+        q = question.lower()
+        if " vs " in q or " vs. " in q:
+            return True
+        _SPORTS_KEYWORDS = [
+            "open:", "grand prix", "grand slam", "world cup",
+            "nba", "nfl", "mlb", "nhl", "premier league", "la liga",
+            "serie a", "bundesliga", "champions league", "europa league",
+            "atp", "wta", "ufc", "bellator", "pga", "lpga",
+            "counter-strike", "dota", "valorant", "league of legends",
+        ]
+        return any(kw in q for kw in _SPORTS_KEYWORDS)
+
     items = []
     total_api_cost = 0  # Track all Haiku calls including skipped signals
     for alert in velocity_alerts[:max_per_cycle]:
@@ -545,10 +558,15 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         z_1h = alert.get("z_1h")
         abs_v = abs(v_1h)
 
-        # 3a. Minimum velocity filter (5-10% band has 56% WR vs 100% for 10-20%)
-        momentum_min_velocity = vel_cfg.get("momentum_min_velocity_1h", 0.10)
+        # 3a. Minimum velocity filter — sports get lower floor (5%) vs default (10%)
+        is_sports = _is_sports_market(question)
+        momentum_min_velocity = vel_cfg.get(
+            "momentum_min_velocity_1h_sports" if is_sports else "momentum_min_velocity_1h",
+            0.05 if is_sports else 0.10,
+        )
         if abs_v < momentum_min_velocity:
-            log.info(f"Momentum skip (weak velocity): {question[:50]} — |v_1h| {abs_v:.1%} < {momentum_min_velocity:.0%}")
+            mtype = "sports" if is_sports else "non-sports"
+            log.info(f"Momentum skip (weak velocity, {mtype}): {question[:50]} — |v_1h| {abs_v:.1%} < {momentum_min_velocity:.0%}")
             continue
         if abs_v >= 0.40:
             vel_mult = vel_scale_40

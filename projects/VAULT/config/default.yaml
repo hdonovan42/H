@@ -85,6 +85,7 @@ velocity:
   stale_velocity_threshold: 0.02  # v_1h < 2% = "momentum stalled"
   momentum_max_positions_per_market: 5  # hard cap on positions per market (all sides)
   momentum_min_velocity_1h: 0.10   # minimum |v_1h| for momentum entry (new + adds)
+  momentum_min_velocity_1h_sports: 0.05  # lower floor for sports/esports (filtered by O/U/draw already)
   trailing_stop_drop: 0.15           # exit when ROI drops 15pp below peak
   trailing_stop_min_peak: 0.15       # only fire if peak ROI was >= 15%
   trailing_stop_min_pnl_pct: 0.05    # 5% of cost basis (e.g. $0.10 on $2 bet)
