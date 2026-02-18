@@ -364,9 +364,23 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             0.05 if is_sports else 0.10,
         )
         if abs_v < momentum_min_velocity:
-            mtype = "sports" if is_sports else "non-sports"
-            log.info(f"Momentum skip (weak velocity, {mtype}): {question[:50]} — |v_1h| {abs_v:.1%} < {momentum_min_velocity:.0%}")
-            continue
+            # Z-score gate: allow lower velocity if move is statistically significant
+            z_override_min_vel = vel_cfg.get("z_override_min_velocity", 0.07)
+            z_override_threshold = vel_cfg.get("z_override_threshold", 4.0)
+            z_gate_passes = (
+                not is_sports
+                and z_1h is not None
+                and abs(z_1h) >= z_override_threshold
+                and abs_v >= z_override_min_vel
+            )
+            if not z_gate_passes:
+                mtype = "sports" if is_sports else "non-sports"
+                log.info(f"Momentum skip (weak velocity, {mtype}): {question[:50]} — |v_1h| {abs_v:.1%} < {momentum_min_velocity:.0%}")
+                continue
+            log.info(
+                f"Momentum z-gate override: {question[:50]} — "
+                f"|v_1h| {abs_v:.1%} < {momentum_min_velocity:.0%} but z={z_1h:.1f} >= {z_override_threshold}"
+            )
         if abs_v >= 0.40:
             vel_mult = vel_scale_40
         elif abs_v >= 0.20:

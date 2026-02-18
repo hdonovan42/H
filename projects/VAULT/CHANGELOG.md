@@ -5,6 +5,25 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.8 — Z-Score Gate for Non-Sports Velocity Threshold
+
+**Deployed**: 2026-02-18 | **Baseline**: $73.88 balance, 479.7d runway, +$34.87 trading P&L
+
+The 10% non-sports velocity floor was blocking valid signals like DeepSeek V4 (sustained -9.5%/1h, z=-6.7, YES 40%→24%). A $2 NO bet at 65% would now be worth $2.34 (+17% ROI). Rather than blanket-lowering the threshold (non-sports WR is 40%), added a conditional z-score gate: velocity 7%+ is allowed through if z-score >= 4.0 (statistically significant moves only).
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/agent.py` | Z-gate override in velocity filter — allows 7%+ velocity when z >= 4.0 (non-sports only) |
+| `config/default.yaml` | `z_override_min_velocity: 0.07`, `z_override_threshold: 4.0` |
+
+### What to Watch
+- Z-gate activations: `grep "z-gate override" logs`
+- Sports markets unaffected (gate is `not is_sports` gated)
+- Win rate of z-gate bets vs regular momentum bets
+
+---
+
 ## v16.7 — Enriched Market Intelligence for Momentum Validator
 
 **Deployed**: 2026-02-18 | **Schema**: v13 | **Baseline**: $73.88 balance, 441.3d runway, +$34.87 trading P&L
