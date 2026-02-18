@@ -171,9 +171,11 @@ def _run_decider(conn, cycle_id, pipeline_result, actionable, context, cfg) -> d
 
     system_prompt, user_prompt = build_decider_prompt(conn, pipeline_result, actionable)
 
+    decider_model = cfg.get("agent", {}).get("decider_model", "claude-sonnet-4-6-20250514")
     response = call_claude(
         conn=conn,
         ledger_mod=ledger,
+        model=decider_model,
         system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}],
         cycle_id=cycle_id,

@@ -10,6 +10,7 @@ daemon:
 
 agent:
   default_model: claude-haiku-4-5-20251001
+  decider_model: claude-sonnet-4-6-20250514    # smarter reasoning for bet/sell decisions
   max_rounds_per_cycle: 4       # research + search + bet + write_memory
   max_cycle_cost_pct: 0.006     # 0.6% of balance per cycle (~$0.50 at $84)
 
@@ -96,6 +97,9 @@ pricing:
   claude-opus-4-6:
     input: 15.00
     output: 75.00
+  claude-sonnet-4-6-20250514:
+    input: 3.00
+    output: 15.00
   claude-sonnet-4-5-20250929:
     input: 3.00
     output: 15.00
