@@ -131,15 +131,25 @@ def discover_markets(conn, cycle_id: int, themes: list[dict] | None = None,
 def _upsert_market(conn, market: dict):
     """Insert or update a market in the musk_markets table."""
     conn.execute(
-        "INSERT INTO musk_markets (market_id, question, slug, yes_price, no_price, volume, end_date) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "INSERT INTO musk_markets "
+        "(market_id, question, slug, yes_price, no_price, volume, end_date, "
+        "description, volume_24h, liquidity, spread, competitive, game_start_time, event_title) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(market_id) DO UPDATE SET "
         "yes_price=excluded.yes_price, no_price=excluded.no_price, "
         "volume=excluded.volume, end_date=excluded.end_date, "
+        "description=excluded.description, volume_24h=excluded.volume_24h, "
+        "liquidity=excluded.liquidity, spread=excluded.spread, "
+        "competitive=excluded.competitive, game_start_time=excluded.game_start_time, "
+        "event_title=excluded.event_title, "
         "last_seen=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
         (market["id"], market.get("question", ""), market.get("slug"),
          market.get("yes_price", 0.5), market.get("no_price", 0.5),
-         market.get("volume", 0), market.get("end_date")),
+         market.get("volume", 0), market.get("end_date"),
+         market.get("description", ""), market.get("volume_24h", 0),
+         market.get("liquidity", 0), market.get("spread", 0),
+         market.get("competitive", 0), market.get("game_start_time"),
+         market.get("event_title", "")),
     )
 
 

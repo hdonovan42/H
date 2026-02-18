@@ -205,6 +205,12 @@ def _parse_market(raw: dict) -> dict | None:
             yes_price = float(outcome_prices[0])
             no_price = float(outcome_prices[1])
 
+    # Extract parent event title if available
+    events = raw.get("events")
+    event_title = ""
+    if events and isinstance(events, list) and len(events) > 0:
+        event_title = events[0].get("title", "")
+
     return {
         "id": str(market_id),
         "condition_id": raw.get("conditionId"),
@@ -216,4 +222,17 @@ def _parse_market(raw: dict) -> dict | None:
         "end_date": raw.get("endDate"),
         "closed": raw.get("closed", False),
         "clob_token_ids": raw.get("clobTokenIds"),
+        # Enriched fields from Gamma API
+        "volume_24h": float(raw.get("volume24hr", 0) or 0),
+        "liquidity": float(raw.get("liquidityClob", 0) or 0),
+        "spread": float(raw.get("spread", 0) or 0),
+        "best_bid": float(raw.get("bestBid", 0) or 0),
+        "best_ask": float(raw.get("bestAsk", 0) or 0),
+        "competitive": float(raw.get("competitive", 0) or 0),
+        "description": raw.get("description", ""),
+        "start_date": raw.get("startDate"),
+        "game_start_time": raw.get("gameStartTime"),
+        "group_item_title": raw.get("groupItemTitle"),
+        "accepting_orders": raw.get("acceptingOrders", True),
+        "event_title": event_title,
     }

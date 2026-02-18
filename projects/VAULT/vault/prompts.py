@@ -117,7 +117,8 @@ PREDICTION MARKETS (your primary trading venue):
 
 def build_momentum_prompt(question: str, v_1h: float | None, v_6h: float | None,
                           market_odds: float, side: str, entry_price: float,
-                          remaining: float, z_1h: float | None = None) -> tuple[str, str]:
+                          remaining: float, z_1h: float | None = None,
+                          market_context: dict | None = None) -> tuple[str, str]:
     """Build prompt for Haiku momentum validation — follow/no-follow on a sharp move.
 
     Direction and sizing are determined mechanically before this call.
@@ -147,6 +148,31 @@ def build_momentum_prompt(question: str, v_1h: float | None, v_6h: float | None,
         f'Current odds: {market_odds:.0%} YES / {1 - market_odds:.0%} NO\n'
         f'Velocity: {vel_desc}\n'
         f'Proposed bet: {side} at {entry_price:.0%} (remaining upside: {remaining:.0%})\n\n'
+    )
+
+    # Add market context if available
+    if market_context:
+        ctx_parts = []
+        desc = market_context.get("description", "")
+        if desc:
+            ctx_parts.append(f"Resolution: {desc[:200]}")
+        event_title = market_context.get("event_title", "")
+        if event_title:
+            ctx_parts.append(f"Event: {event_title}")
+        game_start = market_context.get("game_start_time", "")
+        if game_start:
+            ctx_parts.append(f"Game starts: {game_start}")
+        vol24 = market_context.get("volume_24h", 0) or 0
+        liq = market_context.get("liquidity", 0) or 0
+        if vol24 or liq:
+            ctx_parts.append(f"24h volume: ${vol24:,.0f}, Liquidity: ${liq:,.0f}")
+        spread = market_context.get("spread", 0) or 0
+        if spread:
+            ctx_parts.append(f"Spread: {spread:.0%}")
+        if ctx_parts:
+            user += "Market context:\n" + "\n".join(f"- {p}" for p in ctx_parts) + "\n\n"
+
+    user += (
         f'The DEFAULT is follow=true. Only set follow=false if:\n'
         f'- The market is clearly already settled (event over, result known)\n'
         f'- The move is obviously manipulative (tiny market, no possible catalyst)\n'

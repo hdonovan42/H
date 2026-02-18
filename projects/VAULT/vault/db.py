@@ -602,6 +602,22 @@ def _migrate(conn):
         )
         conn.commit()
 
+    if version < 13:
+        # v13: enriched market data from Gamma API for momentum intelligence
+        conn.execute("ALTER TABLE musk_markets ADD COLUMN description TEXT")
+        conn.execute("ALTER TABLE musk_markets ADD COLUMN volume_24h REAL")
+        conn.execute("ALTER TABLE musk_markets ADD COLUMN liquidity REAL")
+        conn.execute("ALTER TABLE musk_markets ADD COLUMN spread REAL")
+        conn.execute("ALTER TABLE musk_markets ADD COLUMN competitive REAL")
+        conn.execute("ALTER TABLE musk_markets ADD COLUMN game_start_time TEXT")
+        conn.execute("ALTER TABLE musk_markets ADD COLUMN event_title TEXT")
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "13"),
+        )
+        conn.commit()
+
 
 def init_db(db_path: Path | None = None) -> sqlite3.Connection:
     """Create tables and seed meta if needed."""

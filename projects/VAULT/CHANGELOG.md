@@ -5,6 +5,35 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.7 — Enriched Market Intelligence for Momentum Validator
+
+**Deployed**: 2026-02-18 | **Schema**: v13 | **Baseline**: $73.88 balance, 441.3d runway, +$34.87 trading P&L
+
+### Enriched market data (schema v13)
+Momentum validator was deciding follow/no-follow with only price numbers and velocity — no context about *what* the market actually is. Now pulling 7 new fields from the Gamma API: `description`, `volume_24h`, `liquidity`, `spread`, `competitive`, `game_start_time`, `event_title`. Stored in `musk_markets` and passed through to the Haiku prompt.
+
+### Pre-filter: spread + liquidity gates
+Markets with wide spread (>10%) or low liquidity (<$50) produce false velocity signals from unreliable prices. These are now filtered out *before* any API call, saving Haiku costs on junk signals.
+
+### Richer Haiku prompt
+Momentum validation prompt now includes resolution criteria, event title, game start time, 24h volume, liquidity, and spread. Haiku can now distinguish "NBA game starting in 5 minutes" from "obscure market with $30 liquidity."
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/db.py` | Schema v13 migration — 7 new columns on `musk_markets` |
+| `vault/polymarket.py` | Parse enriched fields from Gamma API response |
+| `vault/market_discovery.py` | Upsert new fields into `musk_markets` |
+| `vault/agent.py` | Spread/liquidity pre-filters, pass market_context to Haiku |
+| `vault/prompts.py` | `build_momentum_prompt()` accepts and renders market context |
+
+### What to Watch
+- Spread/liquidity skips: `grep "wide spread\|low liquidity" logs`
+- Haiku prompts now longer (~50 more tokens) — monitor momentum_validation avg cost
+- Schema migration runs on first cycle after deploy
+
+---
+
 ## v16.6 — Sports Velocity Floor + Dead Code Cleanup
 
 **Deployed**: 2026-02-18 | **Baseline**: $73.88 balance, 394.6d runway, +$34.87 trading P&L

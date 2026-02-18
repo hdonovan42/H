@@ -336,6 +336,23 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             log.info(f"Momentum skip (low entry odds): {question[:50]} — {side} @ {entry_price:.2%}")
             continue
 
+        # 2c. Fetch market context (used for spread/liquidity filter + Haiku prompt)
+        mkt_row = conn.execute(
+            "SELECT end_date, description, volume_24h, liquidity, spread, competitive, "
+            "game_start_time, event_title FROM musk_markets WHERE market_id = ?",
+            (alert["market_id"],),
+        ).fetchone()
+
+        # 2d. Skip illiquid/wide-spread markets (unreliable prices, false velocity)
+        mkt_spread = mkt_row["spread"] if mkt_row and mkt_row["spread"] else 0
+        mkt_liquidity = mkt_row["liquidity"] if mkt_row and mkt_row["liquidity"] else 0
+        if mkt_spread > 0.10:
+            log.info(f"Momentum skip (wide spread {mkt_spread:.0%}): {question[:50]}")
+            continue
+        if mkt_liquidity > 0 and mkt_liquidity < 50:
+            log.info(f"Momentum skip (low liquidity ${mkt_liquidity:.0f}): {question[:50]}")
+            continue
+
         # 3. Velocity-scaled sizing (pure raw velocity)
         z_1h = alert.get("z_1h")
         abs_v = abs(v_1h)
@@ -437,11 +454,12 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
                 f"(ROI {unrealised_roi:+.1%}, no Haiku call)"
             )
         else:
-            # New entry — full Haiku validation
+            # New entry — full Haiku validation with market context
+            market_context = dict(mkt_row) if mkt_row else {}
             analysis = _call_momentum_haiku(
                 conn, cycle_id, question, v_1h, v_6h, market_odds,
                 side, entry_price, remaining, model, cfg,
-                z_1h=z_1h,
+                z_1h=z_1h, market_context=market_context,
             )
             if not analysis:
                 _log_smart_money_event(
@@ -487,13 +505,9 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             continue
 
         # 6. Opportunity cost gate — don't enter if remaining return < risk-free
-        end_date = conn.execute(
-            "SELECT end_date FROM musk_markets WHERE market_id = ?",
-            (alert["market_id"],),
-        ).fetchone()
         annual_rate = vel_cfg.get("opportunity_cost_annual", 0.10)
         default_days = vel_cfg.get("opportunity_cost_default_days", 30)
-        days = _days_to_resolution(end_date[0] if end_date else None, default_days)
+        days = _days_to_resolution(mkt_row["end_date"] if mkt_row else None, default_days)
         risk_free = annual_rate * (days / 365)
         if entry_price >= 0.995 or remaining <= risk_free:
             log.info(
@@ -548,11 +562,11 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
 
 def _call_momentum_haiku(conn, cycle_id, question, v_1h, v_6h, market_odds,
                          side, entry_price, remaining, model, cfg,
-                         z_1h=None):
+                         z_1h=None, market_context=None):
     """Call Haiku for momentum follow/no-follow validation. Returns parsed dict or None."""
     system, user = build_momentum_prompt(
         question, v_1h, v_6h, market_odds, side, entry_price, remaining,
-        z_1h=z_1h,
+        z_1h=z_1h, market_context=market_context,
     )
 
     try:
