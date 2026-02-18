@@ -5,6 +5,41 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.6 — Sports Velocity Floor + Dead Code Cleanup
+
+**Deployed**: 2026-02-18 | **Baseline**: $73.88 balance, 394.6d runway, +$34.87 trading P&L
+
+### Sports-specific velocity threshold
+Sports momentum has 65% WR (79 bets) vs 40% for non-sports (43 bets). The blanket 10% minimum velocity floor was blocking profitable sports signals in the 5-9% band. Added `_is_sports_market()` detector (matches "vs"/"vs." + league/tournament keywords) and `momentum_min_velocity_1h_sports: 0.05` config. Non-sports keeps 10%.
+
+### Dead code cleanup (751 lines removed)
+Three-agent review team (auditor, defender, optimiser) traced every module and function. Removed:
+- `musk_markets.py`, `actuators/buy.py`, `sell.py`, `research.py` (4 files deleted)
+- `_run_decider()`, `_get_actionable()`, `_parse_decider_json()` from agent.py
+- `build_decider_prompt()`, `build_edge_prompt()` from prompts.py
+- Dead pipeline.py imports (`collect_x_data`, `run_sentinel`, intelligence functions)
+- Config keys: `focus`, `x_keywords`, `max_x_calls_per_cycle`
+
+Defender verified all kept modules have live API endpoints (dashboard depends on them). `_run_tool_loop()` kept as pipeline crash fallback. `polymarket_keywords` kept as live fallback for market discovery.
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/agent.py` | Add `_is_sports_market()`, sports velocity floor, remove decider + actionable + parser |
+| `vault/prompts.py` | Remove `build_decider_prompt()` + `build_edge_prompt()` (~290 lines) |
+| `vault/pipeline.py` | Remove dead imports |
+| `vault/actuators/__init__.py` | Remove conditional crypto loader |
+| `config/default.yaml` | Add `momentum_min_velocity_1h_sports`, remove dead keys |
+| `vault/musk_markets.py` | Deleted |
+| `vault/actuators/buy.py`, `sell.py`, `research.py` | Deleted |
+
+### What to Watch
+- Sports markets at 5-9% velocity passing through: `grep "weak velocity, sports" logs`
+- Non-sports still blocked below 10%: `grep "weak velocity, non-sports" logs`
+- No import errors after file deletions
+
+---
+
 ## v16 — Agent Team Review: Defensive + Offensive Overhaul
 **Deployed**: 2026-02-17 | **Schema**: v12 | **Baseline**: $80.62 balance, 59.3d runway, +$45.25 trading P&L
 
