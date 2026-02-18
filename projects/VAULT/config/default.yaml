@@ -10,7 +10,6 @@ daemon:
 
 agent:
   default_model: claude-haiku-4-5-20251001
-  decider_model: claude-sonnet-4-6-20250514    # smarter reasoning for bet/sell decisions
   max_rounds_per_cycle: 4       # research + search + bet + write_memory
   max_cycle_cost_pct: 0.006     # 0.6% of balance per cycle (~$0.50 at $84)
 
@@ -25,13 +24,10 @@ polymarket:
 
 pipeline:
   enabled: true
-  focus: "musk_ecosystem"
 
 musk_ecosystem:
-  x_keywords: ["Tesla", "SpaceX", "Elon Musk", "xAI", "Neuralink", "Starship"]
   x_accounts: ["elonmusk", "SawyerMerritt", "farzyness", "TeslaLarry", "jamesdouma"]
   polymarket_keywords: ["Tesla", "SpaceX", "Elon", "Musk", "xAI", "Neuralink", "Starship"]
-  max_x_calls_per_cycle: 7
   x_posts_per_call: 10
 
 digest:

@@ -5,14 +5,8 @@ import logging
 import time
 from dataclasses import dataclass, field
 from vault.config_loader import load_config
-from vault.x_feed import collect_x_data
 from vault.market_discovery import discover_markets
 from vault.edge_calculator import calculate_edges
-from vault.sentinel import run_sentinel
-from vault.intelligence import (
-    should_update_intelligence, update_intelligence,
-    get_latest_intelligence, get_latest_opus_estimates,
-)
 
 log = logging.getLogger("vault.pipeline")
 
