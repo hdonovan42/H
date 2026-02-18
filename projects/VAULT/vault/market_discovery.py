@@ -166,7 +166,7 @@ def get_odds_history(conn, market_id: str, hours: int = 24) -> list[dict]:
     """Get odds movement history for a market over the last N hours."""
     rows = conn.execute(
         "SELECT yes_price, no_price, ts FROM odds_snapshots "
-        "WHERE market_id = ? AND ts > datetime('now', ? || ' hours') "
+        "WHERE market_id = ? AND ts > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ? || ' hours') "
         "ORDER BY ts ASC",
         (market_id, f"-{hours}"),
     ).fetchall()

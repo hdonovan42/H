@@ -22,6 +22,15 @@ def _market_days(end_date: str | None, default: float = 30.0) -> float:
         return default
 
 
+def _snap_span_minutes(snaps: list[dict]) -> float:
+    """Minutes between first and last snapshot. Returns 0 if < 2 snapshots."""
+    if len(snaps) < 2:
+        return 0
+    first = datetime.fromisoformat(snaps[0]["ts"].replace("Z", "+00:00"))
+    last = datetime.fromisoformat(snaps[-1]["ts"].replace("Z", "+00:00"))
+    return (last - first).total_seconds() / 60
+
+
 def calculate_velocity(conn, market_id: str, vault_prob: float | None = None,
                        cfg: dict | None = None) -> dict | None:
     """Calculate odds velocity from snapshot history. Pure math on existing data.
@@ -44,13 +53,23 @@ def calculate_velocity(conn, market_id: str, vault_prob: float | None = None,
     all_snaps = history_6h or history_1h
     current_yes = all_snaps[-1]["yes_price"]
 
+    # Minimum span: snapshots must cover enough of the window to be meaningful.
+    # Without this, a snapshot gap followed by a burst of fresh snapshots produces
+    # phantom velocity (comparing across a gap as if it were a 1h move).
+    min_span_1h = vel_cfg.get("min_span_minutes_1h", 30)   # 30 of 60 min
+    min_span_6h = vel_cfg.get("min_span_minutes_6h", 180)  # 3h of 6h
+
     v_1h = None
     if len(history_1h) >= 2:
-        v_1h = round(current_yes - history_1h[0]["yes_price"], 4)
+        span = _snap_span_minutes(history_1h)
+        if span >= min_span_1h:
+            v_1h = round(current_yes - history_1h[0]["yes_price"], 4)
 
     v_6h = None
     if len(history_6h) >= 2:
-        v_6h = round(current_yes - history_6h[0]["yes_price"], 4)
+        span = _snap_span_minutes(history_6h)
+        if span >= min_span_6h:
+            v_6h = round(current_yes - history_6h[0]["yes_price"], 4)
 
     # Z-score: normalize v_1h against 24h volatility baseline (sizing amplifier, not entry gate)
     z_min_snapshots = vel_cfg.get("z_min_snapshots", 30)

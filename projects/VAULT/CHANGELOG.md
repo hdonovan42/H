@@ -5,6 +5,29 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.9 — Fix Broken Velocity Window (All Velocities Were Wrong)
+
+**Deployed**: 2026-02-18 | **Baseline**: $72.02 balance, 504.7d runway, +$34.87 trading P&L
+
+**Critical bug**: `get_odds_history()` used `datetime('now', '-1 hours')` which produces `2026-02-18 19:43:21` (space-separated), but `odds_snapshots.ts` stores ISO 8601 format `2026-02-18T19:43:21.000Z`. SQLite string comparison: `T` (ASCII 84) > ` ` (ASCII 32), so **every snapshot appeared newer than the cutoff**. The "1 hour" window was actually returning ALL snapshots — effectively all-time data. Every velocity signal since day 1 was comparing current price against the first-ever recorded price, not the price 1 hour ago.
+
+**Fix**: Changed query to use `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ...)` to match stored format. Also added minimum span checks in `calculate_velocity()` as belt-and-suspenders defense.
+
+**Impact**: After fix, velocity alerts dropped from 22/cycle to 3-4/cycle. Many "sharp moves" were phantom signals from stale all-time comparisons. DeepSeek V4 (the trigger for this investigation) is no longer alerting because the actual 1h price change is ~0%, not -12%.
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/market_discovery.py` | `get_odds_history()`: fix `datetime()` → `strftime()` format match |
+| `vault/edge_calculator.py` | `calculate_velocity()`: add `_snap_span_minutes()` minimum span check |
+
+### What to Watch
+- Velocity alert count per cycle should be much lower (real signals only)
+- Existing open position (DeepSeek NO $1.85) was entered on a phantom signal — monitor for exit
+- All historical win/loss rates were achieved with broken velocity — actual future performance may differ
+
+---
+
 ## v16.8 — Z-Score Gate + Post-Filter Candidate Cap
 
 **Deployed**: 2026-02-18 | **Baseline**: $73.88 balance, 538.1d runway, +$34.87 trading P&L
