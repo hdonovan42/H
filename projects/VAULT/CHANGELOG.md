@@ -5,21 +5,25 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
-## v16.8 — Z-Score Gate for Non-Sports Velocity Threshold
+## v16.8 — Z-Score Gate + Post-Filter Candidate Cap
 
-**Deployed**: 2026-02-18 | **Baseline**: $73.88 balance, 479.7d runway, +$34.87 trading P&L
+**Deployed**: 2026-02-18 | **Baseline**: $73.88 balance, 538.1d runway, +$34.87 trading P&L
 
-The 10% non-sports velocity floor was blocking valid signals like DeepSeek V4 (sustained -9.5%/1h, z=-6.7, YES 40%→24%). A $2 NO bet at 65% would now be worth $2.34 (+17% ROI). Rather than blanket-lowering the threshold (non-sports WR is 40%), added a conditional z-score gate: velocity 7%+ is allowed through if z-score >= 4.0 (statistically significant moves only).
+Two fixes to unblock valid non-sports momentum signals:
+
+**Z-score gate**: The 10% non-sports velocity floor was blocking DeepSeek V4 (sustained -9.5%/1h, z=-6.7, YES 40%→24%). Rather than blanket-lowering the threshold, added a conditional override: velocity 7%+ is allowed through if z-score >= 4.0 (statistically significant moves only). Sports markets unaffected.
+
+**Post-filter candidate cap**: `max_momentum_per_cycle: 3` was applied *before* cheap filters (entry odds, extreme, noisy market), so 3 doomed markets consumed all slots. DeepSeek (ranked 4th by z-score) never reached the velocity filter. Moved the cap downstream — now limits *accepted candidates* after all filters, not raw alerts evaluated. First cycle after deploy: z-gate fired on DeepSeek, Haiku validated at 90% confidence, BET NO $1.85 @ 78%.
 
 ### Files modified
 | File | Change |
 |------|--------|
-| `vault/agent.py` | Z-gate override in velocity filter — allows 7%+ velocity when z >= 4.0 (non-sports only) |
+| `vault/agent.py` | Z-gate override in velocity filter; move `max_per_cycle` cap after filters |
 | `config/default.yaml` | `z_override_min_velocity: 0.07`, `z_override_threshold: 4.0` |
 
 ### What to Watch
 - Z-gate activations: `grep "z-gate override" logs`
-- Sports markets unaffected (gate is `not is_sports` gated)
+- More markets now evaluated per cycle — watch Haiku API cost (was $0.0017 on first cycle)
 - Win rate of z-gate bets vs regular momentum bets
 
 ---

@@ -297,7 +297,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
 
     items = []
     total_api_cost = 0  # Track all Haiku calls including skipped signals
-    for alert in velocity_alerts[:max_per_cycle]:
+    for alert in velocity_alerts:
         question = alert.get("question", alert["market_id"])
         v_1h = alert.get("v_1h")
         v_6h = alert.get("v_6h")
@@ -565,11 +565,16 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             market_odds=market_odds, side=side, amount_usd=bet_size,
             confidence=conf,
         )
+
         z_part = f", z={z_1h:.1f}" if z_1h is not None else ""
         log.info(
             f"Momentum {action_tag} candidate: {question[:50]} — {side} ${bet_size:.2f} "
             f"(v={v_1h:+.0%}/1h{z_part}, conf={conf:.0%})"
         )
+
+        # Cap accepted candidates per cycle (applied after filters, not before)
+        if len(items) >= max_per_cycle:
+            break
 
     return items, total_api_cost
 
