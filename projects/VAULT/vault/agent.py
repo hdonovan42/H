@@ -437,6 +437,15 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
                 f"{pyramid_mult:.0f}x size (${bet_size:.2f})"
             )
 
+        # 3b. Opposite-side guard — never bet against an existing position
+        opposite_side = "NO" if side == "YES" else "YES"
+        if (alert["market_id"], opposite_side) in open_pred_by_market_side:
+            log.info(
+                f"Momentum skip (opposite side): {question[:50]} — "
+                f"want {side} but have {opposite_side} position"
+            )
+            continue
+
         # 4. Position-aware validation: add vs new entry
         is_add = (alert["market_id"], side) in open_pred_by_market_side
 
@@ -786,6 +795,60 @@ def _exit_substandard_positions(conn):
                 log.warning(f"Failed substandard exit {pred['id']}: {e}")
 
 
+def _exit_momentum_reversal(conn):
+    """Exit momentum positions where velocity has flipped against our side.
+
+    The thesis for a momentum bet is: velocity is moving sharply in our direction.
+    If velocity reverses (moves against us at meaningful speed), the thesis is
+    broken — exit immediately. No hold timer, no minimum loss threshold.
+    """
+    from vault.polymarket import get_current_odds
+    from vault.edge_calculator import calculate_velocity
+
+    cfg = load_config()
+    vel_cfg = cfg.get("velocity", {})
+    # Reversal threshold: velocity against us must exceed this to trigger exit.
+    # Lower than entry threshold (5% vs 10%) — we want to cut fast.
+    reversal_threshold = vel_cfg.get("momentum_reversal_threshold", 0.05)
+
+    open_preds = ledger.get_open_predictions(conn)
+    for pred in open_preds:
+        reasoning = pred.get("entry_reasoning") or ""
+        if not (reasoning.startswith("Momentum") or reasoning.startswith("Sharp move")):
+            continue
+
+        vel = calculate_velocity(conn, pred["market_id"], cfg=cfg)
+        if not vel or vel.get("v_1h") is None:
+            continue
+
+        v = vel["v_1h"]
+        reversed_against = False
+        if pred["side"] == "YES" and v < -reversal_threshold:
+            reversed_against = True
+        elif pred["side"] == "NO" and v > reversal_threshold:
+            reversed_against = True
+
+        if not reversed_against:
+            continue
+
+        odds = get_current_odds(conn, pred["market_id"])
+        if not odds:
+            continue
+        our_price = odds["yes_price"] if pred["side"] == "YES" else odds["no_price"]
+        current_value = pred["shares"] * our_price
+        unrealised_pnl = current_value - pred["cost_basis"]
+
+        try:
+            pnl = ledger.record_prediction_sell(conn, pred["id"], our_price)
+            log.info(
+                f"Momentum reversal exit: [{pred['id']}] {pred['side']} "
+                f"'{pred['question'][:40]}' @ {our_price:.2%} — "
+                f"v_1h={v:+.1%} reversed against {pred['side']} — PnL: ${pnl:+.2f}"
+            )
+        except Exception as e:
+            log.warning(f"Failed momentum reversal exit {pred['id']}: {e}")
+
+
 def _exit_stale_momentum(conn):
     """Exit momentum positions where momentum has stalled and we're in profit,
     or where momentum has died and we've held too long."""
@@ -969,6 +1032,9 @@ def run_cycle(conn) -> dict:
 
     # Exit positions where remaining return < risk-free return over same period
     _exit_opportunity_cost(conn)
+
+    # Exit momentum positions where velocity has flipped against us (fastest check)
+    _exit_momentum_reversal(conn)
 
     # Exit momentum positions where ROI has dropped from peak
     _exit_trailing_stop(conn)

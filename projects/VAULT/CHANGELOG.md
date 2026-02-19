@@ -5,6 +5,31 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.12 — Momentum Reversal Exit + Opposite-Side Guard
+
+**Deployed**: 2026-02-19 | **Baseline**: $74.54 balance, 1081d runway, +$35.60 trading P&L
+
+Live-tested on Dota 2: OG vs Team Liquid. VAULT bought YES @ 0.82 on +15% velocity, game reversed, YES crashed to 0.45 then 0.02. Two bugs exposed:
+
+**1. No reversal exit**: When velocity flipped against a momentum position, nothing cut the loss. The YES position rode from 0.82 to 0.02 (-$1.80). New `_exit_momentum_reversal()` fires immediately when v_1h flips against our side at >5% — no hold timer, no minimum loss. In the Dota 2 case, would have sold at ~0.45 (-$0.84 instead of -$1.80).
+
+**2. No opposite-side guard**: The system bet NO @ 0.56 while still holding the YES position — betting both sides simultaneously. Added a guard before new entries: if an open position exists on the opposite side of the same market, skip. With the reversal exit, the correct flow is: sell the losing side → same cycle re-enters the new direction.
+
+Dota 2 final P&L: +$0.69 across 5 positions ($24.97 deployed). With both fixes from the start: estimated +$1.79 on same capital.
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/agent.py` | `_exit_momentum_reversal()` — velocity-reversal stop-loss, runs every cycle |
+| `vault/agent.py` | Opposite-side guard before new momentum entries |
+
+### What to Watch
+- Reversal exits in logs: `Momentum reversal exit: [id] SIDE ... v_1h=X% reversed`
+- Opposite-side skips: `Momentum skip (opposite side)`
+- The reversal threshold (5%) is configurable via `momentum_reversal_threshold` — if too sensitive, raise it
+
+---
+
 ## v16.11 — Fix Two Filters Blocking Legitimate Bets
 
 **Deployed**: 2026-02-19 | **Baseline**: $73.86 balance, 1231d runway, +$34.91 trading P&L
