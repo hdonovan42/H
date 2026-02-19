@@ -1,6 +1,6 @@
 """System prompt builder — survival-framed context for VAULT agent."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from vault.config_loader import load_config
 from vault import ledger
 from vault.memory import format_memories_for_prompt
@@ -147,8 +147,11 @@ def build_momentum_prompt(question: str, v_1h: float | None, v_6h: float | None,
         f'Market: "{question}"\n'
         f'Current odds: {market_odds:.0%} YES / {1 - market_odds:.0%} NO\n'
         f'Velocity: {vel_desc}\n'
-        f'Proposed bet: {side} at {entry_price:.0%} (remaining upside: {remaining:.0%})\n\n'
+        f'Proposed bet: {side} at {entry_price:.0%} (remaining upside: {remaining:.0%})\n'
     )
+
+    now_utc = datetime.now(timezone.utc)
+    user += f'Current time: {now_utc.strftime("%Y-%m-%d %H:%M UTC")}\n\n'
 
     # Add market context if available
     if market_context:
@@ -161,7 +164,18 @@ def build_momentum_prompt(question: str, v_1h: float | None, v_6h: float | None,
             ctx_parts.append(f"Event: {event_title}")
         game_start = market_context.get("game_start_time", "")
         if game_start:
-            ctx_parts.append(f"Game starts: {game_start}")
+            try:
+                gs = datetime.fromisoformat(str(game_start))
+                diff_h = (now_utc - gs).total_seconds() / 3600
+                if -1 <= diff_h <= 6:
+                    status = f"LIVE — started {diff_h:.1f}h ago"
+                elif diff_h < -1:
+                    status = f"starts in {-diff_h:.0f}h"
+                else:
+                    status = f"started {diff_h:.0f}h ago (likely finished)"
+                ctx_parts.append(f"Game: {status}")
+            except (ValueError, TypeError):
+                ctx_parts.append(f"Game starts: {game_start}")
         vol24 = market_context.get("volume_24h", 0) or 0
         liq = market_context.get("liquidity", 0) or 0
         if vol24 or liq:

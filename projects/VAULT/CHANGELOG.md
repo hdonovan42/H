@@ -5,6 +5,26 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.10 — Add Current Datetime to Haiku Momentum Prompt
+
+**Deployed**: 2026-02-19 | **Baseline**: $73.87 balance, 1348d runway, +$34.91 trading P&L
+
+Haiku rejected a live LCK esports match 30 times because it didn't know the current date. The game started at 08:00 UTC, velocity alerts fired at 09:24-09:58 UTC (match was live, DN Freecs dominating), but Haiku called Feb 19, 2026 "4+ years in the future" and rejected for "no catalyst." The prompt says "live esports moves should almost always be followed" — it just couldn't tell the game was live.
+
+**Fix**: Pass `Current time: YYYY-MM-DD HH:MM UTC` into every momentum prompt. Compute game status from `game_start_time`: "LIVE — started 1.5h ago" / "starts in 5h" / "started 8h ago (likely finished)".
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/prompts.py` | Add current datetime + computed game status to `build_momentum_prompt()` |
+
+### What to Watch
+- Next live sports/esports market with velocity: Haiku should reference correct time context
+- Watch for "LIVE" in Haiku reasoning via logs
+- Confirm non-sports markets (no `game_start_time`) unaffected
+
+---
+
 ## v16.9 — Fix Broken Velocity Window (All Velocities Were Wrong)
 
 **Deployed**: 2026-02-18 | **Baseline**: $72.02 balance, 504.7d runway, +$34.87 trading P&L
