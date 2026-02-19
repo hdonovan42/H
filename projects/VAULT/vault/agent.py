@@ -331,9 +331,9 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             log.info(f"Momentum skip (extreme entry): {question[:50]} — {side} @ {entry_price:.2%}")
             continue
 
-        # 2b. Minimum entry odds — sub-50% momentum entries have 0% win rate historically
-        if entry_price < 0.50:
-            log.info(f"Momentum skip (low entry odds): {question[:50]} — {side} @ {entry_price:.2%}")
+        # 2b. Minimum entry odds — very low entries are noise (sub-10% means 90%+ odds against)
+        if entry_price < 0.10:
+            log.info(f"Momentum skip (extreme low entry): {question[:50]} — {side} @ {entry_price:.2%}")
             continue
 
         # 2c. Fetch market context (used for spread/liquidity filter + Haiku prompt)

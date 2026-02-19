@@ -53,11 +53,12 @@ def calculate_velocity(conn, market_id: str, vault_prob: float | None = None,
     all_snaps = history_6h or history_1h
     current_yes = all_snaps[-1]["yes_price"]
 
-    # Minimum span: snapshots must cover enough of the window to be meaningful.
-    # Without this, a snapshot gap followed by a burst of fresh snapshots produces
-    # phantom velocity (comparing across a gap as if it were a 1h move).
-    min_span_1h = vel_cfg.get("min_span_minutes_1h", 30)   # 30 of 60 min
-    min_span_6h = vel_cfg.get("min_span_minutes_6h", 180)  # 3h of 6h
+    # Minimum span: need enough data to distinguish signal from noise.
+    # Low threshold (5min) since the datetime format fix (v16.9) already ensures
+    # snapshots are genuinely from the requested window. Live sports events can
+    # swing 30%+ in under 5 minutes — a high span floor blocks those entirely.
+    min_span_1h = vel_cfg.get("min_span_minutes_1h", 5)    # 5 min floor
+    min_span_6h = vel_cfg.get("min_span_minutes_6h", 60)   # 1h of 6h
 
     v_1h = None
     if len(history_1h) >= 2:

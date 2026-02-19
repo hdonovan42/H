@@ -5,6 +5,29 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.11 — Fix Two Filters Blocking Legitimate Bets
+
+**Deployed**: 2026-02-19 | **Baseline**: $73.86 balance, 1231d runway, +$34.91 trading P&L
+
+Two filters were incorrectly blocking legitimate momentum signals:
+
+**1. Span check too aggressive (30min → 5min)**: The Mirra Andreeva tennis match surged 46%→82% in 2 minutes during a live match — $52k liquidity, 1% spread, perfect candidate. But the 30-min span check blocked it because we'd only been tracking the market for 5 minutes. The span check was added as defense against the datetime bug (v16.9), which is now fixed. Reduced from 30min to 5min for 1h velocity, 180min to 60min for 6h.
+
+**2. Entry odds floor removed (50% → 10%)**: The `<50%` entry filter was blocking markets like S&P Opens (YES 29%, +9.5% velocity, 71% remaining upside) and Tesla $420 (YES 39%, +6% velocity). Historical data showed the <50% bucket was actually *profitable* (+$6.46 on 93 bets), while 50-60% was the worst bucket (-$8.66). The comment claimed "0% win rate" but data showed 27%. Lowered to 10% (only block truly extreme long-shots). Haiku now decides on borderline entries.
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/edge_calculator.py` | `min_span_minutes_1h`: 30 → 5, `min_span_minutes_6h`: 180 → 60 |
+| `vault/agent.py` | Entry odds floor: 50% → 10% |
+
+### What to Watch
+- More velocity alerts should now reach the velocity/Haiku filters (previously hidden by span/entry blocks)
+- Live sports markets with fast swings should now produce v_1h values within 5 minutes of discovery
+- Monitor sub-50% entry bets: if win rate is terrible, may need a softer floor (e.g. 30%)
+
+---
+
 ## v16.10 — Add Current Datetime to Haiku Momentum Prompt
 
 **Deployed**: 2026-02-19 | **Baseline**: $73.87 balance, 1348d runway, +$34.91 trading P&L
