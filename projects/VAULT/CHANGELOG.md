@@ -5,6 +5,32 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.13 — Tighten Haiku Momentum Prompt
+
+**Deployed**: 2026-02-19 | **Baseline**: $74.40 balance, 1045d runway, +$35.60 trading P&L
+
+Haiku was rejecting strong momentum signals (ETH dip z=-6.0, BTC dip z=-5.8) by doing its own fundamental analysis — citing "resolution certainty", "contracting time window", and "tiny liquidity" ($14k-$24k is fine for Polymarket). It was ignoring the "default is follow" instruction.
+
+**Fix**: Rewrote both system and user prompts to be much more forceful:
+- System: "You MUST follow. Only reject if liquidity < $1,000 (manipulation). Do NOT analyse fundamentals."
+- User: Removed "settled market" rejection reason (Python handles that). Added explicit end_date with days remaining. Added "Do NOT reject for: time to expiry, market structure, your opinion on the outcome."
+- Also added raw Haiku response logging for future debugging.
+
+Tested: Both ETH and BTC markets returned follow=true with the new prompt.
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/prompts.py` | Rewrote system + user prompt to prevent Haiku from overriding momentum signals |
+| `vault/agent.py` | Added raw Haiku response logging |
+
+### What to Watch
+- Haiku should now approve most signals that pass the cheap Python filters
+- If bet frequency jumps too high, the Python filters (velocity, z-score, spread, liquidity) are the correct place to gate — not Haiku
+- Monitor for any false follows where Haiku should have blocked (manipulation on thin markets)
+
+---
+
 ## v16.12 — Momentum Reversal Exit + Opposite-Side Guard
 
 **Deployed**: 2026-02-19 | **Baseline**: $74.54 balance, 1081d runway, +$35.60 trading P&L

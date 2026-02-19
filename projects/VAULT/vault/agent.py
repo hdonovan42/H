@@ -610,6 +610,7 @@ def _call_momentum_haiku(conn, cycle_id, question, v_1h, v_6h, market_odds,
         )
         text = " ".join(b["text"] for b in response["content"] if b["type"] == "text")
         cost = response.get("cost", 0)
+        log.info(f"Haiku momentum raw: {question[:40]} — {text[:200]}")
         result = _parse_momentum_response(text)
         if result:
             result["api_cost"] = cost

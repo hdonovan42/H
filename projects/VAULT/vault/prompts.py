@@ -127,9 +127,10 @@ def build_momentum_prompt(question: str, v_1h: float | None, v_6h: float | None,
     Returns (system_prompt, user_prompt) tuple.
     """
     system = (
-        "You are a momentum signal validator for a prediction market trading bot. "
-        "The default action is FOLLOW — sharp price moves on live events are usually right. "
-        "Only reject if there is a CLEAR reason not to follow. "
+        "You are a momentum signal validator. Your job is to FOLLOW momentum signals. "
+        "You must respond follow=true unless the signal is clearly fake (e.g. bot manipulation on "
+        "a market with <$1000 liquidity). Real price movements on real markets should ALWAYS be followed. "
+        "Do NOT analyse fundamentals, time to expiry, or market structure — that is not your job. "
         "Respond ONLY with valid JSON: "
         '{"follow": true, "confidence": 0.8, "reasoning": "..."}'
     )
@@ -176,6 +177,14 @@ def build_momentum_prompt(question: str, v_1h: float | None, v_6h: float | None,
                 ctx_parts.append(f"Game: {status}")
             except (ValueError, TypeError):
                 ctx_parts.append(f"Game starts: {game_start}")
+        end_date = market_context.get("end_date", "")
+        if end_date:
+            try:
+                ed = datetime.fromisoformat(str(end_date).replace("Z", "+00:00"))
+                days_left = (ed - now_utc).total_seconds() / 86400
+                ctx_parts.append(f"Market closes: {end_date} ({days_left:.1f} days from now)")
+            except (ValueError, TypeError):
+                ctx_parts.append(f"Market closes: {end_date}")
         vol24 = market_context.get("volume_24h", 0) or 0
         liq = market_context.get("liquidity", 0) or 0
         if vol24 or liq:
@@ -187,11 +196,10 @@ def build_momentum_prompt(question: str, v_1h: float | None, v_6h: float | None,
             user += "Market context:\n" + "\n".join(f"- {p}" for p in ctx_parts) + "\n\n"
 
     user += (
-        f'The DEFAULT is follow=true. Only set follow=false if:\n'
-        f'- The market is clearly already settled (event over, result known)\n'
-        f'- The move is obviously manipulative (tiny market, no possible catalyst)\n'
-        f'- The entry price is so extreme there is negligible upside\n\n'
-        f'Live sports, esports, and breaking news moves should almost always be followed.\n\n'
+        f'This market is LIVE with active volume. It has NOT resolved.\n'
+        f'You MUST set follow=true unless liquidity is under $1,000 (manipulation risk).\n'
+        f'Do NOT reject for: time to expiry, market structure, your opinion on the outcome, '
+        f'or any fundamental analysis. Those are not your job.\n\n'
         f'JSON only: {{"follow": true/false, "confidence": 0.0-1.0, "reasoning": "one sentence"}}'
     )
 
