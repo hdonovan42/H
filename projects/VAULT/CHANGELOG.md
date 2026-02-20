@@ -5,6 +5,45 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.18 — Oscillation Dampener (Mode B)
+
+**Deployed**: 2026-02-20 | **Baseline**: $62.80 balance, 429d runway
+
+VAULT lost $13.75 on TSLA $410 (8 trades in 3h) because the momentum system pyramided into a binary oscillating around the strike. This adds a "Mode B" dampener: markets with 6+ directional reversals (8pp swing threshold) in a 2h window get restricted to 1 position with no pyramiding. A net-move override (>15%) exempts markets genuinely trending through noise.
+
+### Oscillation metrics in `calculate_velocity()`
+- Counts directional reversals in a configurable window (default 2h, 8pp min swing)
+- Returns `reversals_2h` and `net_move_2h` alongside existing velocity data
+- Propagated through velocity alert builder to momentum analysis
+
+### Dampener in `_analyze_momentum_opportunities()`
+- `is_oscillating` flag: `reversals_2h >= 6 AND |net_move_2h| < 15%`
+- If oscillating: `pyramid_mult` forced to 1.0, `effective_max_positions` capped to 1
+- `[OSCILLATION DAMPENED]` tag prepended to reasoning for visibility in logs/dashboard
+- Separate log line: `Oscillation dampener: ... — N reversals, net ±X%`
+
+### Config params (in `velocity:` section)
+- `oscillation_lookback_hours: 2.0` — reversal counting window
+- `oscillation_min_swing: 0.08` — 8pp minimum to count as a reversal
+- `oscillation_max_reversals: 6` — trigger threshold
+- `oscillation_net_move_override: 0.15` — exempt if |net move| > 15%
+
+### What to watch
+- `Oscillation dampener:` log lines — confirm fires on appropriate markets
+- `[OSCILLATION DAMPENED]` in cycle reasoning — verify limited to 1 position
+- Non-oscillating markets should still pyramid normally (`Momentum pyramid:` lines)
+- Backtest script at `scripts/backtest_oscillation.py` for historical validation
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `vault/edge_calculator.py` | Oscillation metrics in `calculate_velocity()` (+18 lines), fields in velocity alert builder (+2 lines) |
+| `vault/agent.py` | Oscillation flag, pyramid override, position cap override, reasoning annotation (+23 lines) |
+| `config/default.yaml` | 4 oscillation config params |
+| `scripts/backtest_oscillation.py` | New backtest verification script |
+
+---
+
 ## v16.17 — Volume Guard + Keyword Cleanup
 
 **Deployed**: 2026-02-20 | **Baseline**: $71.30 balance, $98.16 total value, 456d runway
