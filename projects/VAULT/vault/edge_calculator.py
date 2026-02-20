@@ -98,6 +98,29 @@ def calculate_velocity(conn, market_id: str, vault_prob: float | None = None,
             if stddev_1h > 0.001:  # floor to avoid div-by-zero on flat markets
                 z_1h = round(v_1h / stddev_1h, 2)
 
+    # Oscillation detection: count directional reversals in recent window
+    osc_lookback = vel_cfg.get("oscillation_lookback_hours", 2.0)
+    osc_min_swing = vel_cfg.get("oscillation_min_swing", 0.08)
+    osc_cutoff = now - timedelta(hours=osc_lookback)
+    osc_history = [s for s in history_24h if _parse_snapshot_ts(s["ts"]) >= osc_cutoff]
+
+    reversals_2h = 0
+    net_move_2h = 0.0
+    if len(osc_history) >= 3:
+        prices = [s["yes_price"] for s in osc_history]
+        net_move_2h = round(prices[-1] - prices[0], 4)
+        direction_osc = None
+        last_extreme = prices[0]
+        for p in prices[1:]:
+            move = p - last_extreme
+            if abs(move) < osc_min_swing:
+                continue
+            new_dir = "up" if move > 0 else "down"
+            if direction_osc is not None and new_dir != direction_osc:
+                reversals_2h += 1
+            direction_osc = new_dir
+            last_extreme = p
+
     # Sharp detection: always raw velocity (entry gate — don't let z-score raise the bar)
     sharp = False
     if v_1h is not None and abs(v_1h) >= sharp_1h:
@@ -117,7 +140,8 @@ def calculate_velocity(conn, market_id: str, vault_prob: float | None = None,
             elif gap_after > gap_before:
                 direction = "away"
 
-    return {"v_1h": v_1h, "v_6h": v_6h, "z_1h": z_1h, "direction": direction, "sharp": sharp}
+    return {"v_1h": v_1h, "v_6h": v_6h, "z_1h": z_1h, "direction": direction, "sharp": sharp,
+            "reversals_2h": reversals_2h, "net_move_2h": net_move_2h}
 
 
 def _log_smart_money_event(conn, *, cycle_id, market_id, question=None,
@@ -460,6 +484,8 @@ def calculate_edges(conn, cycle_id: int, estimates: list[dict],
                 "v_1h": vel["v_1h"],
                 "v_6h": vel["v_6h"],
                 "z_1h": vel["z_1h"],
+                "reversals_2h": vel.get("reversals_2h", 0),
+                "net_move_2h": vel.get("net_move_2h", 0.0),
                 "velocity_direction": vel["direction"],
                 "velocity_sharp": True,
             })

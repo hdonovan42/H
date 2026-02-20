@@ -85,6 +85,11 @@ velocity:
   momentum_min_velocity_1h_sports: 0.05  # lower floor for sports/esports (filtered by O/U/draw already)
   momentum_flip_window_hours: 4.0      # look-back for detecting both-side trades
   momentum_flip_cooldown_hours: 1.0    # block re-entry for 1h after multi-flip detected
+  # Oscillation detector (Mode B dampener)
+  oscillation_lookback_hours: 2.0         # window for counting reversals
+  oscillation_min_swing: 0.08             # 8pp minimum to count as a reversal
+  oscillation_max_reversals: 6            # >= this triggers dampener
+  oscillation_net_move_override: 0.15     # allow if |net move| > 15% (trending through noise)
   z_override_min_velocity: 0.07    # z-gate floor: must still have 7%+ velocity
   z_override_threshold: 4.0        # z-score must be >= 4.0 to override velocity floor
   trailing_stop_drop: 0.15           # exit when ROI drops 15pp below peak

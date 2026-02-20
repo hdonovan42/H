@@ -430,6 +430,21 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
                 f"Momentum z-gate override: {question[:50]} — "
                 f"|v_1h| {abs_v:.1%} < {momentum_min_velocity:.0%} but z={z_1h:.1f} >= {z_override_threshold}"
             )
+        # Oscillation dampener: detect noisy mean-reverting markets
+        osc_max_rev = vel_cfg.get("oscillation_max_reversals", 6)
+        osc_net_override = vel_cfg.get("oscillation_net_move_override", 0.15)
+        reversals_2h = alert.get("reversals_2h", 0)
+        net_move_2h = alert.get("net_move_2h", 0.0)
+        is_oscillating = (reversals_2h >= osc_max_rev
+                          and abs(net_move_2h) < osc_net_override)
+
+        if is_oscillating:
+            log.info(
+                f"Oscillation dampener: {question[:50]} — "
+                f"{reversals_2h} reversals, net {net_move_2h:+.0%} "
+                f"(capped to 1 position, no pyramid)"
+            )
+
         if abs_v >= 0.40:
             vel_mult = vel_scale_40
         elif abs_v >= 0.20:
@@ -442,7 +457,9 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         current_exposure = exposure_by_market.get(alert["market_id"], 0)
         current_value = value_by_market.get(alert["market_id"], 0)
         unrealised_roi = (current_value - current_exposure) / current_exposure if current_exposure > 0 else 0
-        if unrealised_roi >= 0.30:
+        if is_oscillating:
+            pyramid_mult = 1.0
+        elif unrealised_roi >= 0.30:
             pyramid_mult = 3.0
         elif unrealised_roi >= 0.15:
             pyramid_mult = 2.0
@@ -471,12 +488,13 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             )
             continue
 
-        # Per-market position count cap
+        # Per-market position count cap (oscillation dampener overrides to 1)
+        effective_max_positions = 1 if is_oscillating else max_positions_per_market
         market_pos_count = positions_per_market.get(alert["market_id"], 0)
-        if market_pos_count >= max_positions_per_market:
+        if market_pos_count >= effective_max_positions:
             log.info(
                 f"Momentum skip: {question[:50]} — {market_pos_count} positions "
-                f">= {max_positions_per_market} cap"
+                f">= {effective_max_positions} cap"
             )
             continue
 
@@ -667,7 +685,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             "z_1h": z_1h,
             "abs_v_1h": abs_v,
             "follow_confidence": round(conf, 4),
-            "reasoning": f"Momentum {'add' if is_add else 'follow'}: {reasoning}",
+            "reasoning": f"{'[OSCILLATION DAMPENED] ' if is_oscillating else ''}Momentum {'add' if is_add else 'follow'}: {reasoning}",
             "recommended_size_usd": bet_size,
             "velocity_sharp": True,
             "source": "momentum",
