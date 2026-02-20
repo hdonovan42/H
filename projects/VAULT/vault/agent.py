@@ -380,16 +380,21 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             log.info(f"Momentum skip (extreme low entry): {question[:50]} — {side} @ {entry_price:.2%}")
             continue
 
-        # 2c. Fetch market context (used for spread/liquidity filter + Haiku prompt)
+        # 2c. Fetch market context (used for spread/liquidity/volume filter + Haiku prompt)
         mkt_row = conn.execute(
-            "SELECT end_date, description, volume_24h, liquidity, spread, competitive, "
+            "SELECT end_date, description, volume, volume_24h, liquidity, spread, competitive, "
             "game_start_time, event_title FROM musk_markets WHERE market_id = ?",
             (alert["market_id"],),
         ).fetchone()
 
-        # 2d. Skip illiquid/wide-spread markets (unreliable prices, false velocity)
+        # 2d. Skip illiquid/wide-spread/low-volume markets (unreliable prices, false velocity)
         mkt_spread = mkt_row["spread"] if mkt_row and mkt_row["spread"] else 0
         mkt_liquidity = mkt_row["liquidity"] if mkt_row and mkt_row["liquidity"] else 0
+        mkt_volume = mkt_row["volume"] if mkt_row and mkt_row["volume"] else 0
+        min_volume = vel_cfg.get("momentum_min_volume", 10000)
+        if mkt_volume < min_volume:
+            log.info(f"Momentum skip (low volume ${mkt_volume:,.0f} < ${min_volume:,.0f}): {question[:50]}")
+            continue
         if mkt_spread > 0.10:
             log.info(f"Momentum skip (wide spread {mkt_spread:.0%}): {question[:50]}")
             continue

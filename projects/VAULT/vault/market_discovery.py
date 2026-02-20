@@ -1,13 +1,12 @@
-"""Theme-based market discovery — replaces hardcoded keyword matching.
+"""Market discovery — bulk-fetch Polymarket markets and track for velocity.
 
-Fetches Polymarket markets in bulk, filters by theme-derived keywords
-instead of static keyword lists.
+Fetches top markets by volume, filters by minimum volume threshold,
+records odds snapshots for momentum/velocity calculations.
 """
 
 import logging
-import re
 from vault.config_loader import load_config
-from vault.polymarket import _parse_market, _save_cache
+from vault.polymarket import _parse_market
 from vault.http_utils import http_get_with_retry
 
 log = logging.getLogger("vault.market_discovery")
@@ -17,44 +16,15 @@ GAMMA_BASE = "https://gamma-api.polymarket.com"
 
 def discover_markets(conn, cycle_id: int, themes: list[dict] | None = None,
                      cfg: dict | None = None) -> list[dict]:
-    """Fetch active Polymarket markets in bulk and filter by theme keywords.
+    """Fetch active Polymarket markets in bulk and track those above min volume.
 
-    Same bulk-fetch mechanism as the old musk_markets module, but filters
-    against theme-derived keywords instead of a hardcoded list.
-    Falls back to config keywords when no themes are provided.
-    Stores/updates in musk_markets table and records odds snapshots.
+    All markets meeting the volume threshold get odds snapshots recorded
+    for velocity/momentum calculations. Returns list of tracked markets.
     """
     if cfg is None:
         cfg = load_config()
 
-    # Build keyword list from themes, or fall back to config keywords
-    all_keywords = []
-    if themes:
-        for theme in themes:
-            all_keywords.extend(theme.get("keywords", []))
-
-    # Deduplicate while preserving order
-    seen = set()
-    keywords = []
-    for kw in all_keywords:
-        kw_lower = kw.lower()
-        if kw_lower not in seen:
-            seen.add(kw_lower)
-            keywords.append(kw)
-
-    if not keywords:
-        # Fallback to config keywords when no themes provided
-        musk_cfg = cfg.get("musk_ecosystem", {})
-        keywords = musk_cfg.get(
-            "polymarket_keywords", ["Tesla", "SpaceX", "Elon", "Musk"]
-        )
-        log.info(f"No theme keywords — falling back to config keywords: {keywords}")
-
-    # Build word-boundary regex to avoid partial matches
-    keyword_pattern = re.compile(
-        r'\b(' + '|'.join(re.escape(kw) for kw in keywords) + r')\b',
-        re.IGNORECASE,
-    )
+    min_volume = cfg.get("velocity", {}).get("momentum_min_volume", 10000)
 
     # Fetch in bulk — 5 pages of 100, sorted by volume
     all_raw = []
@@ -79,11 +49,8 @@ def discover_markets(conn, cycle_id: int, themes: list[dict] | None = None,
             log.warning(f"Failed to fetch markets (offset {offset}): {e}")
             break
 
-    # Parse all markets, track everything for velocity, keyword-filter for intel
-    intel_markets = []
-    tracked_count = 0
+    tracked = []
     seen_ids = set()
-    min_volume = cfg.get("velocity", {}).get("momentum_min_volume", 10000)
 
     for raw in all_raw:
         parsed = _parse_market(raw)
@@ -99,31 +66,24 @@ def discover_markets(conn, cycle_id: int, themes: list[dict] | None = None,
         if yes < 0.05 or yes > 0.95:
             continue
 
-        # Keyword match for intel pipeline
-        question = parsed.get("question", "")
-        is_intel = bool(keyword_pattern.search(question))
-
-        # Track for velocity: keyword matches ALWAYS, others need min volume
+        # Volume gate — same threshold used at entry stage in agent.py
         volume = parsed.get("volume", 0) or 0
-        if is_intel or volume >= min_volume:
-            _upsert_market(conn, parsed)
-            record_odds_snapshot(conn, mid, yes,
-                                 parsed.get("no_price", 0.5), cycle_id)
-            tracked_count += 1
+        if volume < min_volume:
+            continue
 
-        if is_intel:
-            _save_cache(conn, mid, parsed, yes)
-            intel_markets.append(parsed)
+        _upsert_market(conn, parsed)
+        record_odds_snapshot(conn, mid, yes,
+                             parsed.get("no_price", 0.5), cycle_id)
+        tracked.append(parsed)
 
-    if tracked_count:
+    if tracked:
         conn.commit()
 
     log.info(
-        f"Market discovery: {tracked_count} tracked for velocity, "
-        f"{len(intel_markets)} intel-matched from {len(all_raw)} scanned "
-        f"({len(keywords)} keywords, cycle {cycle_id})"
+        f"Market discovery: {len(tracked)} tracked for velocity "
+        f"(>=${min_volume:,.0f} vol) from {len(all_raw)} scanned (cycle {cycle_id})"
     )
-    return intel_markets
+    return tracked
 
 
 def _upsert_market(conn, market: dict):

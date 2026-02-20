@@ -5,6 +5,36 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.17 — Volume Guard + Keyword Cleanup
+
+**Deployed**: 2026-02-20 | **Baseline**: $71.30 balance, $98.16 total value, 456d runway
+
+48-hour trading analysis revealed markets with <$5K 24h volume lost -$12.34 net. Root cause: the `momentum_min_volume` ($10K) config was only enforced at the market tracking stage, not the betting stage. Keyword-matched markets (Tesla, Musk, etc.) bypassed the volume check entirely via a legacy `is_intel` flag from the disabled intel pipeline.
+
+### Volume guard at entry stage
+- Added `volume` to the mkt_row SQL query in `_analyze_momentum_opportunities()`
+- New check: skip markets where total volume < `momentum_min_volume` (default $10K)
+- Would have blocked all 8 bets on the TSLA $410 market ($96 volume, -$13.75 loss)
+
+### Removed legacy keyword/intel system
+- The keyword matching (Tesla, SpaceX, Elon, Musk, etc.) was dead weight since v13.5 (momentum-only mode)
+- `is_intel` bypass let keyword-matched markets skip the volume check at tracking time
+- `_save_cache`, keyword regex, theme building, and `intel_markets` return list all removed
+- All markets now held to the same `momentum_min_volume` threshold at both tracking and entry
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `vault/agent.py` | Added `volume` to mkt_row query; volume guard at entry stage |
+| `vault/market_discovery.py` | Removed keyword/theme/intel system; uniform volume gate; removed `re` and `_save_cache` imports |
+
+### What to Watch
+- Verify no reduction in esports/tennis tracking (these have $96K-$997K volume, well above $10K threshold)
+- Monitor log for `Momentum skip (low volume ...)` entries to confirm guard is firing
+- Tracked market count may drop slightly (garbage markets no longer tracked)
+
+---
+
 ## v16.15 — P1 Reliability Sweep: 8 Fixes
 
 **Deployed**: 2026-02-20 | **Baseline**: $74.40 balance
