@@ -83,6 +83,8 @@ velocity:
   momentum_max_positions_per_market: 5  # hard cap on positions per market (all sides)
   momentum_min_velocity_1h: 0.10   # minimum |v_1h| for momentum entry (new + adds)
   momentum_min_velocity_1h_sports: 0.05  # lower floor for sports/esports (filtered by O/U/draw already)
+  momentum_flip_window_hours: 4.0      # look-back for detecting both-side trades
+  momentum_flip_cooldown_hours: 1.0    # block re-entry for 1h after multi-flip detected
   z_override_min_velocity: 0.07    # z-gate floor: must still have 7%+ velocity
   z_override_threshold: 4.0        # z-score must be >= 4.0 to override velocity floor
   trailing_stop_drop: 0.15           # exit when ROI drops 15pp below peak

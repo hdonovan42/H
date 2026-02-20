@@ -493,6 +493,54 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         # 4. Position-aware validation: add vs new entry
         is_add = (alert["market_id"], side) in open_pred_by_market_side
 
+        # Multi-flip guard: allow one side-change per market, block the second.
+        # First flip (e.g. NO→YES) is a legitimate reversal — allow it.
+        # Second flip (YES→NO→YES) means we're oscillating — block until cooldown.
+        # Only applies to NEW entries, not pyramid adds to open positions.
+        if not is_add:
+            from datetime import datetime, timezone, timedelta
+            flip_window = vel_cfg.get("momentum_flip_window_hours", 4.0)
+            flip_cooldown = vel_cfg.get("momentum_flip_cooldown_hours", 1.0)
+            now_utc = datetime.now(timezone.utc)
+            window_start = (now_utc - timedelta(hours=flip_window)).strftime(
+                "%Y-%m-%dT%H:%M:%S"
+            )
+
+            recent_closed = conn.execute(
+                "SELECT DISTINCT side FROM predictions "
+                "WHERE market_id = ? AND closed_at IS NOT NULL AND closed_at > ?",
+                (alert["market_id"], window_start),
+            ).fetchall()
+            distinct_closed_sides = set(r["side"] for r in recent_closed)
+
+            if len(distinct_closed_sides) >= 2:
+                most_recent = conn.execute(
+                    "SELECT closed_at FROM predictions "
+                    "WHERE market_id = ? AND closed_at IS NOT NULL "
+                    "ORDER BY closed_at DESC LIMIT 1",
+                    (alert["market_id"],),
+                ).fetchone()
+                if most_recent and most_recent["closed_at"]:
+                    closed_ts = datetime.fromisoformat(
+                        most_recent["closed_at"].replace("Z", "+00:00")
+                    )
+                    hours_since = (now_utc - closed_ts).total_seconds() / 3600
+                    if hours_since < flip_cooldown:
+                        log.info(
+                            f"Momentum skip (multi-flip guard): {question[:50]} — "
+                            f"traded both sides within {flip_window:.0f}h, "
+                            f"last close {hours_since:.1f}h ago"
+                        )
+                        _log_smart_money_event(
+                            conn, cycle_id=cycle_id, market_id=alert["market_id"],
+                            question=question,
+                            vel={"v_1h": v_1h, "v_6h": v_6h, "z_1h": z_1h,
+                                 "direction": "neutral", "sharp": True},
+                            action_taken="momentum_skip",
+                            market_odds=market_odds, side=side,
+                        )
+                        continue
+
         if is_add:
             # Existing same-side position — gate on profitability, skip Haiku
             if unrealised_roi <= add_min_roi:
