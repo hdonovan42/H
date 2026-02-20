@@ -5,6 +5,67 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.15 — P1 Reliability Sweep: 8 Fixes
+
+**Deployed**: 2026-02-20 | **Baseline**: $74.40 balance
+
+Follow-up to v16.14 (P0 bugs). Addresses all 8 P1 items from the automated code review swarm — reliability issues, performance bottlenecks, and cost waste that degrade 24/7 operation.
+
+### P1-7: Division by zero guard
+- `_remaining_return_pct(0)` triggered `ZeroDivisionError` in `bet.py` opportunity cost gate and `_exit_opportunity_cost()`. At zero price, infinite upside is mathematically correct.
+- **Fix**: Added `if our_price <= 0: return float('inf')` guard.
+
+### P1-8: Odds-None crash fix
+- Ternary precedence bug in `research_markets.py:92` and `prompts.py:65`: `odds["yes_price"] if side == "YES" else odds["no_price"] if odds else fallback` — the `if odds` guard only covered the NO branch. YES-side with `odds=None` crashed with `TypeError`.
+- **Fix**: Replaced with explicit `if odds:` / `else:` blocks in both locations.
+
+### P1-1: Database indexes (migration v14)
+- 600+ unindexed scans per cycle on `odds_snapshots(market_id, ts)` for velocity calculations. Additional unindexed queries on `predictions(status)`, `api_calls(cycle_id, ts)`, `smart_money_log(market_id, outcome)`.
+- **Fix**: Added 5 `CREATE INDEX IF NOT EXISTS` statements in migration v14. One-time build at startup (~5-30s on large DBs).
+
+### P1-2: Snapshot pruning
+- `odds_snapshots` table grows unbounded (~200 inserts/cycle). After weeks of operation, velocity queries degrade.
+- **Fix**: New `prune_old_snapshots()` keeps all data < 48h, then 1 snapshot/market/hour for older data. Runs every 50 cycles. Config: `snapshot_prune_keep_hours`, `snapshot_prune_interval_cycles`.
+
+### P1-6: HTTP retry logic
+- All 6 `httpx.get()` calls to Polymarket Gamma API had zero retry — any transient timeout or 5xx killed the cycle.
+- **Fix**: New `vault/http_utils.py` with `http_get_with_retry()`: exponential backoff (1s/2s/4s), retries on timeout, connect error, 429, 5xx. No retry on 4xx (except 429). Replaced all 5 calls in `polymarket.py` and 1 in `market_discovery.py`.
+
+### P1-4: Single velocity fetch
+- `calculate_velocity()` made 3 separate DB queries (1h, 6h, 24h windows) per market. With 200+ tracked markets, that's ~600 queries/cycle.
+- **Fix**: Single `get_odds_history(hours=24)` call, partitioned into 1h/6h windows in Python. Added `_parse_snapshot_ts()` helper. Identical behavior, ~400 fewer queries/cycle.
+
+### P1-3: Shared odds cache
+- 5 exit functions each called `get_open_predictions()` + `get_current_odds()` per position — up to 10x redundant API/cache hits.
+- **Fix**: Build `odds_cache` dict once before exit functions, pass `(open_preds, odds_cache)` to all 5. End-of-cycle MTM reuses cache with fallback for new positions. Stale cache is safe — existing `try/except` around `record_prediction_sell()` handles positions sold by earlier exit functions.
+
+### P1-5: Smart Haiku routing
+- Every momentum signal called Haiku ($0.002-0.004/call) even for clear signals (high liquidity, far from expiry, unambiguous category). ~95% of calls returned follow=true with 0.8 confidence.
+- **Fix**: New `_should_route_to_haiku()` function auto-follows clear signals at confidence 0.75/$0 cost. Routes to Haiku only when risk triggers fire: near-resolution (<2h), mid-liquidity ($1K-$5K), or category-ambiguous (non-sports with "vs"). Rewrote Haiku prompt to give real decision authority instead of forced follow. Config: `smart_haiku_routing`, `haiku_route_near_resolution_hours`, `haiku_route_min_liquidity`, `haiku_route_max_liquidity`, `haiku_route_ambiguous_category`.
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `vault/agent.py` | P1-7: div-by-zero guard; P1-2: prune call; P1-3: shared odds cache + exit function signatures; P1-5: smart routing + `_is_sports_market()` extraction |
+| `vault/db.py` | P1-1: migration v14 with 5 indexes |
+| `vault/edge_calculator.py` | P1-4: single 24h query + Python partitioning |
+| `vault/polymarket.py` | P1-6: replaced 4 `httpx.get()` with retry wrapper |
+| `vault/market_discovery.py` | P1-2: `prune_old_snapshots()`; P1-6: replaced 1 `httpx.get()` |
+| `vault/http_utils.py` | P1-6: new module — `http_get_with_retry()` |
+| `vault/prompts.py` | P1-8: odds-None fix; P1-5: Haiku prompt rewrite |
+| `vault/actuators/research_markets.py` | P1-8: odds-None fix |
+| `config/default.yaml` | P1-2: prune config; P1-5: smart routing config |
+
+### What to Watch
+- **Indexes**: Verify `schema_version = 14` and indexes exist after restart (`PRAGMA index_list(odds_snapshots)`)
+- **Cycle time**: Expect 30-50% reduction from P1-1 + P1-4 + P1-3
+- **Haiku costs**: Count `momentum_validation` API calls — should drop ~95%. Look for `Momentum auto-follow:` log lines
+- **Retries**: Watch for `retry 1/3` WARNING log lines on transient Polymarket outages
+- **Pruning**: After 50 cycles, `SELECT COUNT(*) FROM odds_snapshots` should stabilize
+- **Crash guards**: No more `ZeroDivisionError` or `TypeError: NoneType` in logs
+
+---
+
 ## v16.14 — P0 Bug Sweep: 6 Critical Fixes
 
 **Deployed**: 2026-02-20 | **Baseline**: $74.40 balance
