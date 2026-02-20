@@ -62,7 +62,10 @@ OPEN PREDICTIONS:
     if predictions:
         for p in predictions:
             odds = get_current_odds(conn, p["market_id"])
-            current = odds["yes_price"] if p["side"] == "YES" else odds["no_price"] if odds else p["entry_odds"]
+            if odds:
+                current = odds["yes_price"] if p["side"] == "YES" else odds["no_price"]
+            else:
+                current = p["entry_odds"]
             mkt_value = round(p["shares"] * current, 2)
             prompt += (
                 f"  [{p['id']}] {p['side']} '{p['question'][:60]}' | "
@@ -127,12 +130,12 @@ def build_momentum_prompt(question: str, v_1h: float | None, v_6h: float | None,
     Returns (system_prompt, user_prompt) tuple.
     """
     system = (
-        "You are a momentum signal validator. Your job is to FOLLOW momentum signals. "
-        "You must respond follow=true unless the signal is clearly fake (e.g. bot manipulation on "
-        "a market with <$1000 liquidity). Real price movements on real markets should ALWAYS be followed. "
-        "Do NOT analyse fundamentals, time to expiry, or market structure — that is not your job. "
+        "You are a momentum signal validator with full authority to reject signals. "
+        "Assess whether this momentum is real. Consider manipulation risk, near-resolution "
+        "volatility, and signal quality. You have full authority to reject — this signal was "
+        "routed to you because it triggered a risk flag (near expiry, mid-liquidity, or ambiguous category). "
         "Respond ONLY with valid JSON: "
-        '{"follow": true, "confidence": 0.8, "reasoning": "..."}'
+        '{"follow": true/false, "confidence": 0.0-1.0, "reasoning": "one sentence"}'
     )
 
     vel_parts = []
@@ -196,10 +199,11 @@ def build_momentum_prompt(question: str, v_1h: float | None, v_6h: float | None,
             user += "Market context:\n" + "\n".join(f"- {p}" for p in ctx_parts) + "\n\n"
 
     user += (
-        f'This market is LIVE with active volume. It has NOT resolved.\n'
-        f'You MUST set follow=true unless liquidity is under $1,000 (manipulation risk).\n'
-        f'Do NOT reject for: time to expiry, market structure, your opinion on the outcome, '
-        f'or any fundamental analysis. Those are not your job.\n\n'
+        f'This signal was flagged for review. Assess carefully:\n'
+        f'- Is the price movement organic or potentially manipulated?\n'
+        f'- Is near-resolution volatility creating noise?\n'
+        f'- Is the signal quality sufficient to justify a bet?\n'
+        f'Set follow=false if the risk outweighs the signal.\n\n'
         f'JSON only: {{"follow": true/false, "confidence": 0.0-1.0, "reasoning": "one sentence"}}'
     )
 

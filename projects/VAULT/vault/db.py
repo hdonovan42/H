@@ -1,10 +1,13 @@
 """SQLite schema and connection factory."""
 
+import logging
 import sqlite3
 from pathlib import Path
 from vault.config_loader import get_db_path
 
-SCHEMA_VERSION = 13
+log = logging.getLogger("vault.db")
+
+SCHEMA_VERSION = 14
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -626,6 +629,27 @@ def _migrate(conn):
             "INSERT INTO meta (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             ("schema_version", "13"),
+        )
+        conn.commit()
+
+    if version < 14:
+        # v14: performance indexes for hot query paths
+        indexes = [
+            ("idx_odds_snapshots_market_ts", "odds_snapshots(market_id, ts)"),
+            ("idx_predictions_status", "predictions(status)"),
+            ("idx_api_calls_cycle_id", "api_calls(cycle_id)"),
+            ("idx_api_calls_ts", "api_calls(ts)"),
+            ("idx_smart_money_log_market_outcome", "smart_money_log(market_id, outcome)"),
+        ]
+        for idx_name, idx_def in indexes:
+            try:
+                conn.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {idx_def}")
+            except sqlite3.OperationalError as e:
+                log.warning(f"Failed to create index {idx_name}: {e}")
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "14"),
         )
         conn.commit()
 

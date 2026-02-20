@@ -1,13 +1,18 @@
 """Edge detection + position sizing — pure Python, no Claude calls."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from vault.config_loader import load_config
 from vault import ledger
 from vault.polymarket import get_current_odds
 from vault.market_discovery import record_odds_snapshot
 
 log = logging.getLogger("vault.edge_calculator")
+
+
+def _parse_snapshot_ts(ts_str: str) -> datetime:
+    """Parse a snapshot timestamp string to datetime. Cached-friendly helper."""
+    return datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
 
 
 def _market_days(end_date: str | None, default: float = 30.0) -> float:
@@ -36,6 +41,7 @@ def calculate_velocity(conn, market_id: str, vault_prob: float | None = None,
     """Calculate odds velocity from snapshot history. Pure math on existing data.
 
     Returns dict with v_1h, v_6h, direction, sharp — or None if insufficient data.
+    Single 24h query, partitioned in Python to eliminate redundant DB calls.
     """
     from vault.market_discovery import get_odds_history
 
@@ -43,20 +49,25 @@ def calculate_velocity(conn, market_id: str, vault_prob: float | None = None,
     sharp_1h = vel_cfg.get("sharp_threshold_1h", 0.05)
     sharp_6h = vel_cfg.get("sharp_threshold_6h", 0.10)
 
-    history_1h = get_odds_history(conn, market_id, hours=1)
-    history_6h = get_odds_history(conn, market_id, hours=6)
+    # Single DB query for 24h — partition into 1h/6h windows in Python
+    history_24h = get_odds_history(conn, market_id, hours=24)
+    if not history_24h:
+        return None
+
+    now = datetime.now(timezone.utc)
+    cutoff_1h = now - timedelta(hours=1)
+    cutoff_6h = now - timedelta(hours=6)
+
+    history_1h = [s for s in history_24h if _parse_snapshot_ts(s["ts"]) >= cutoff_1h]
+    history_6h = [s for s in history_24h if _parse_snapshot_ts(s["ts"]) >= cutoff_6h]
 
     if not history_1h and not history_6h:
         return None
 
-    # Current odds = most recent snapshot from either window
-    all_snaps = history_6h or history_1h
-    current_yes = all_snaps[-1]["yes_price"]
+    # Current odds = most recent snapshot
+    current_yes = history_24h[-1]["yes_price"]
 
     # Minimum span: need enough data to distinguish signal from noise.
-    # Low threshold (5min) since the datetime format fix (v16.9) already ensures
-    # snapshots are genuinely from the requested window. Live sports events can
-    # swing 30%+ in under 5 minutes — a high span floor blocks those entirely.
     min_span_1h = vel_cfg.get("min_span_minutes_1h", 5)    # 5 min floor
     min_span_6h = vel_cfg.get("min_span_minutes_6h", 60)   # 1h of 6h
 
@@ -76,22 +87,18 @@ def calculate_velocity(conn, market_id: str, vault_prob: float | None = None,
     z_min_snapshots = vel_cfg.get("z_min_snapshots", 30)
     z_1h = None
 
-    if v_1h is not None:
-        from vault.market_discovery import get_odds_history as _get_24h
-        history_24h = _get_24h(conn, market_id, hours=24)
-        if len(history_24h) >= z_min_snapshots:
-            deltas = [history_24h[i + 1]["yes_price"] - history_24h[i]["yes_price"]
-                      for i in range(len(history_24h) - 1)]
-            if len(deltas) >= 2:
-                from statistics import stdev
-                stddev_delta = stdev(deltas)
-                snaps_per_hour = len(history_24h) / 24
-                stddev_1h = stddev_delta * (snaps_per_hour ** 0.5)
-                if stddev_1h > 0.001:  # floor to avoid div-by-zero on flat markets
-                    z_1h = round(v_1h / stddev_1h, 2)
+    if v_1h is not None and len(history_24h) >= z_min_snapshots:
+        deltas = [history_24h[i + 1]["yes_price"] - history_24h[i]["yes_price"]
+                  for i in range(len(history_24h) - 1)]
+        if len(deltas) >= 2:
+            from statistics import stdev
+            stddev_delta = stdev(deltas)
+            snaps_per_hour = len(history_24h) / 24
+            stddev_1h = stddev_delta * (snaps_per_hour ** 0.5)
+            if stddev_1h > 0.001:  # floor to avoid div-by-zero on flat markets
+                z_1h = round(v_1h / stddev_1h, 2)
 
     # Sharp detection: always raw velocity (entry gate — don't let z-score raise the bar)
-    # z_1h is purely a sizing/conviction amplifier, not a filter
     sharp = False
     if v_1h is not None and abs(v_1h) >= sharp_1h:
         sharp = True
@@ -103,7 +110,6 @@ def calculate_velocity(conn, market_id: str, vault_prob: float | None = None,
     if vault_prob is not None:
         move = v_1h if v_1h is not None else v_6h
         if move is not None and abs(move) > 0.005:
-            # "toward" = odds moving closer to vault_prob
             gap_before = abs(vault_prob - (current_yes - move))
             gap_after = abs(vault_prob - current_yes)
             if gap_after < gap_before:

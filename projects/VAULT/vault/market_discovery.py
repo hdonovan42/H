@@ -6,9 +6,9 @@ instead of static keyword lists.
 
 import logging
 import re
-import httpx
 from vault.config_loader import load_config
 from vault.polymarket import _parse_market, _save_cache
+from vault.http_utils import http_get_with_retry
 
 log = logging.getLogger("vault.market_discovery")
 
@@ -60,7 +60,7 @@ def discover_markets(conn, cycle_id: int, themes: list[dict] | None = None,
     all_raw = []
     for offset in [0, 100, 200, 300, 400]:
         try:
-            resp = httpx.get(
+            resp = http_get_with_retry(
                 f"{GAMMA_BASE}/markets",
                 params={
                     "active": "true",
@@ -70,9 +70,7 @@ def discover_markets(conn, cycle_id: int, themes: list[dict] | None = None,
                     "order": "volume",
                     "ascending": "false",
                 },
-                timeout=10,
             )
-            resp.raise_for_status()
             batch = resp.json()
             all_raw.extend(batch)
             if len(batch) < 100:
@@ -171,6 +169,31 @@ def get_odds_history(conn, market_id: str, hours: int = 24) -> list[dict]:
         (market_id, f"-{hours}"),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def prune_old_snapshots(conn, keep_hours: int = 48):
+    """Prune old odds snapshots to control table growth.
+
+    Data < keep_hours old: keep everything (velocity needs 24h max, 2x safety margin).
+    Data >= keep_hours old: keep 1 snapshot per market per hour-bucket, delete the rest.
+    """
+    try:
+        deleted = conn.execute(
+            "DELETE FROM odds_snapshots WHERE id NOT IN ("
+            "  SELECT id FROM odds_snapshots "
+            "  WHERE ts > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ? || ' hours')"
+            "  UNION ALL"
+            "  SELECT MIN(id) FROM odds_snapshots "
+            "  WHERE ts <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ? || ' hours') "
+            "  GROUP BY market_id, strftime('%Y-%m-%dT%H', ts)"
+            ")",
+            (f"-{keep_hours}", f"-{keep_hours}"),
+        ).rowcount
+        if deleted:
+            conn.commit()
+            log.info(f"Pruned {deleted} old odds snapshots (kept 1/hour beyond {keep_hours}h)")
+    except Exception as e:
+        log.warning(f"Failed to prune snapshots: {e}")
 
 
 def get_tracked_markets(conn) -> list[dict]:

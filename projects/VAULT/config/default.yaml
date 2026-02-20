@@ -88,6 +88,14 @@ velocity:
   trailing_stop_drop: 0.15           # exit when ROI drops 15pp below peak
   trailing_stop_min_peak: 0.15       # only fire if peak ROI was >= 15%
   trailing_stop_min_pnl_pct: 0.05    # 5% of cost basis (e.g. $0.10 on $2 bet)
+  smart_haiku_routing: true            # skip Haiku for clear signals, route only flagged ones
+  haiku_route_near_resolution_hours: 2.0  # route to Haiku if < 2h to expiry
+  haiku_route_min_liquidity: 1000.0       # route if liquidity in $1K-$5K gray zone
+  haiku_route_max_liquidity: 5000.0
+  haiku_route_ambiguous_category: true    # route non-sports markets with " vs " in question
+
+snapshot_prune_keep_hours: 48         # keep all snapshots within this window
+snapshot_prune_interval_cycles: 50    # prune every N cycles
 
 # Model pricing (USD per 1M tokens) — updated for Claude 4.5/4.6
 # These are used to calculate cost from token counts

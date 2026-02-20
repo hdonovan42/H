@@ -221,6 +221,63 @@ def _run_tool_loop(conn, cycle_id, system_prompt, context, cfg) -> dict:
     return result
 
 
+def _is_sports_market(question: str) -> bool:
+    """Check if a market question looks like a sports/esports event."""
+    q = question.lower()
+    if " vs " in q or " vs. " in q:
+        return True
+    _SPORTS_KEYWORDS = [
+        "open:", "grand prix", "grand slam", "world cup",
+        "nba", "nfl", "mlb", "nhl", "premier league", "la liga",
+        "serie a", "bundesliga", "champions league", "europa league",
+        "atp", "wta", "ufc", "bellator", "pga", "lpga",
+        "counter-strike", "dota", "valorant", "league of legends",
+    ]
+    return any(kw in q for kw in _SPORTS_KEYWORDS)
+
+
+def _should_route_to_haiku(question: str, mkt_row, vel_cfg: dict) -> bool:
+    """Decide whether a momentum signal needs Haiku validation or can auto-follow.
+
+    Returns True if the signal should be routed to Haiku for validation.
+    Returns False if the signal is clear enough for auto-follow (confidence=0.75, $0 API cost).
+
+    Routes to Haiku when ANY risk trigger fires:
+    1. Near-resolution: end_date < 2 hours away (exit noise risk)
+    2. Mid-liquidity: $1K-$5K (manipulation gray zone)
+    3. Category-ambiguous: non-sports market with " vs " in question
+    """
+    if not vel_cfg.get("smart_haiku_routing", False):
+        return True  # routing disabled — always call Haiku (old behavior)
+
+    # Trigger 1: near-resolution
+    near_hours = vel_cfg.get("haiku_route_near_resolution_hours", 2.0)
+    if mkt_row and mkt_row["end_date"]:
+        from datetime import datetime, timezone
+        try:
+            end_dt = datetime.fromisoformat(str(mkt_row["end_date"]).replace("Z", "+00:00"))
+            hours_left = (end_dt - datetime.now(timezone.utc)).total_seconds() / 3600
+            if hours_left < near_hours:
+                return True
+        except (ValueError, TypeError):
+            pass
+
+    # Trigger 2: mid-liquidity (manipulation gray zone)
+    min_liq = vel_cfg.get("haiku_route_min_liquidity", 1000.0)
+    max_liq = vel_cfg.get("haiku_route_max_liquidity", 5000.0)
+    if mkt_row:
+        liq = mkt_row["liquidity"] if mkt_row["liquidity"] else 0
+        if min_liq <= liq <= max_liq:
+            return True
+
+    # Trigger 3: category-ambiguous (non-sports with " vs " — could be political debate, etc.)
+    if vel_cfg.get("haiku_route_ambiguous_category", True):
+        if not _is_sports_market(question) and " vs " in question.lower():
+            return True
+
+    return False  # clear signal — auto-follow
+
+
 def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: dict) -> list[dict]:
     """Analyze velocity alerts for pure velocity-following momentum bets.
 
@@ -281,19 +338,6 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         mid = p["market_id"]
         positions_per_market[mid] = positions_per_market.get(mid, 0) + 1
     max_positions_per_market = vel_cfg.get("momentum_max_positions_per_market", 5)
-
-    def _is_sports_market(question: str) -> bool:
-        q = question.lower()
-        if " vs " in q or " vs. " in q:
-            return True
-        _SPORTS_KEYWORDS = [
-            "open:", "grand prix", "grand slam", "world cup",
-            "nba", "nfl", "mlb", "nhl", "premier league", "la liga",
-            "serie a", "bundesliga", "champions league", "europa league",
-            "atp", "wta", "ufc", "bellator", "pga", "lpga",
-            "counter-strike", "dota", "valorant", "league of legends",
-        ]
-        return any(kw in q for kw in _SPORTS_KEYWORDS)
 
     items = []
     total_api_cost = 0  # Track all Haiku calls including skipped signals
@@ -477,27 +521,39 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
                 f"(ROI {unrealised_roi:+.1%}, no Haiku call)"
             )
         else:
-            # New entry — full Haiku validation with market context
-            market_context = dict(mkt_row) if mkt_row else {}
-            analysis = _call_momentum_haiku(
-                conn, cycle_id, question, v_1h, v_6h, market_odds,
-                side, entry_price, remaining, model, cfg,
-                z_1h=z_1h, market_context=market_context,
-            )
-            if not analysis:
-                _log_smart_money_event(
-                    conn, cycle_id=cycle_id, market_id=alert["market_id"],
-                    question=question,
-                    vel={"v_1h": v_1h, "v_6h": v_6h, "z_1h": z_1h, "direction": "neutral", "sharp": True},
-                    action_taken="momentum_skip",
-                    market_odds=market_odds, side=side,
+            # New entry — smart routing: only call Haiku when risk triggers fire
+            item_api_cost = 0
+            if _should_route_to_haiku(question, mkt_row, vel_cfg):
+                market_context = dict(mkt_row) if mkt_row else {}
+                analysis = _call_momentum_haiku(
+                    conn, cycle_id, question, v_1h, v_6h, market_odds,
+                    side, entry_price, remaining, model, cfg,
+                    z_1h=z_1h, market_context=market_context,
                 )
-                continue
+                if not analysis:
+                    _log_smart_money_event(
+                        conn, cycle_id=cycle_id, market_id=alert["market_id"],
+                        question=question,
+                        vel={"v_1h": v_1h, "v_6h": v_6h, "z_1h": z_1h, "direction": "neutral", "sharp": True},
+                        action_taken="momentum_skip",
+                        market_odds=market_odds, side=side,
+                    )
+                    continue
 
-            total_api_cost += analysis.get("api_cost", 0)
-            follow = analysis["follow"]
-            conf = analysis["confidence"]
-            reasoning = analysis["reasoning"]
+                item_api_cost = analysis.get("api_cost", 0)
+                total_api_cost += item_api_cost
+                follow = analysis["follow"]
+                conf = analysis["confidence"]
+                reasoning = analysis["reasoning"]
+            else:
+                # Auto-follow: clear signal, $0 API cost
+                follow = True
+                conf = 0.75
+                reasoning = (
+                    f"Momentum auto-follow: {side} v_1h={v_1h:+.0%} "
+                    f"(clear signal, no risk triggers)"
+                )
+                log.info(f"Momentum auto-follow: {question[:50]} — {side} ${bet_size:.2f}")
 
         # 4b. Z-score confidence adjustment (high z = boost, low z = haircut)
         #     Profitable adds are exempt from haircut — don't neuter winners
@@ -562,7 +618,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             "recommended_size_usd": bet_size,
             "velocity_sharp": True,
             "source": "momentum",
-            "api_cost": 0 if is_add else analysis.get("api_cost", 0),
+            "api_cost": 0 if is_add else item_api_cost,
         }
         items.append(item)
 
@@ -737,6 +793,8 @@ def _execute_momentum_bets(conn, cycle_id: int, momentum_items: list[dict],
 
 def _remaining_return_pct(our_price: float) -> float:
     """Max possible return if position resolves in our favour."""
+    if our_price <= 0:
+        return float('inf')
     if our_price >= 1.0:
         return 0.0
     return (1.0 - our_price) / our_price
@@ -755,7 +813,7 @@ def _days_to_resolution(end_date: str | None, default_days: float = 30.0) -> flo
         return default_days
 
 
-def _exit_substandard_positions(conn):
+def _exit_substandard_positions(conn, open_preds, odds_cache):
     """Exit positions that no longer meet current entry minimums.
 
     Applies current confidence and edge thresholds retroactively to open positions.
@@ -767,8 +825,6 @@ def _exit_substandard_positions(conn):
     min_confidence = edge_cfg.get("min_confidence", 0.4)
     margin_of_safety = edge_cfg.get("margin_of_safety", 0.10)
 
-    from vault.polymarket import get_current_odds
-    open_preds = ledger.get_open_predictions(conn)
     for pred in open_preds:
         conf = pred.get("entry_confidence")
         if not conf or conf <= 0:
@@ -782,7 +838,7 @@ def _exit_substandard_positions(conn):
             reason = f"edge {edge:.0%} < {margin_of_safety:.0%}"
 
         if reason:
-            odds = get_current_odds(conn, pred["market_id"])
+            odds = odds_cache.get(pred["market_id"])
             if not odds:
                 continue
             our_price = odds["yes_price"] if pred["side"] == "YES" else odds["no_price"]
@@ -796,23 +852,19 @@ def _exit_substandard_positions(conn):
                 log.warning(f"Failed substandard exit {pred['id']}: {e}")
 
 
-def _exit_momentum_reversal(conn):
+def _exit_momentum_reversal(conn, open_preds, odds_cache):
     """Exit momentum positions where velocity has flipped against our side.
 
     The thesis for a momentum bet is: velocity is moving sharply in our direction.
     If velocity reverses (moves against us at meaningful speed), the thesis is
     broken — exit immediately. No hold timer, no minimum loss threshold.
     """
-    from vault.polymarket import get_current_odds
     from vault.edge_calculator import calculate_velocity
 
     cfg = load_config()
     vel_cfg = cfg.get("velocity", {})
-    # Reversal threshold: velocity against us must exceed this to trigger exit.
-    # Lower than entry threshold (5% vs 10%) — we want to cut fast.
     reversal_threshold = vel_cfg.get("momentum_reversal_threshold", 0.05)
 
-    open_preds = ledger.get_open_predictions(conn)
     for pred in open_preds:
         reasoning = pred.get("entry_reasoning") or ""
         if not (reasoning.startswith("Momentum") or reasoning.startswith("Sharp move")):
@@ -832,12 +884,10 @@ def _exit_momentum_reversal(conn):
         if not reversed_against:
             continue
 
-        odds = get_current_odds(conn, pred["market_id"])
+        odds = odds_cache.get(pred["market_id"])
         if not odds:
             continue
         our_price = odds["yes_price"] if pred["side"] == "YES" else odds["no_price"]
-        current_value = pred["shares"] * our_price
-        unrealised_pnl = current_value - pred["cost_basis"]
 
         try:
             pnl = ledger.record_prediction_sell(conn, pred["id"], our_price)
@@ -850,11 +900,10 @@ def _exit_momentum_reversal(conn):
             log.warning(f"Failed momentum reversal exit {pred['id']}: {e}")
 
 
-def _exit_stale_momentum(conn):
+def _exit_stale_momentum(conn, open_preds, odds_cache):
     """Exit momentum positions where momentum has stalled and we're in profit,
     or where momentum has died and we've held too long."""
     from datetime import datetime, timezone
-    from vault.polymarket import get_current_odds
     from vault.edge_calculator import calculate_velocity
 
     cfg = load_config()
@@ -864,7 +913,6 @@ def _exit_stale_momentum(conn):
     stale_max_hours = vel_cfg.get("stale_max_hours", 4.0)
     stale_vel_threshold = vel_cfg.get("stale_velocity_threshold", 0.02)
 
-    open_preds = ledger.get_open_predictions(conn)
     for pred in open_preds:
         # Only momentum positions
         reasoning = pred.get("entry_reasoning") or ""
@@ -878,7 +926,7 @@ def _exit_stale_momentum(conn):
         hours_held = (datetime.now(timezone.utc) - opened).total_seconds() / 3600
 
         # Current odds + P&L
-        odds = get_current_odds(conn, pred["market_id"])
+        odds = odds_cache.get(pred["market_id"])
         if not odds:
             continue
         our_price = odds["yes_price"] if pred["side"] == "YES" else odds["no_price"]
@@ -930,23 +978,20 @@ def _exit_stale_momentum(conn):
                 log.warning(f"Failed stale momentum exit {pred['id']}: {e}")
 
 
-def _exit_trailing_stop(conn):
+def _exit_trailing_stop(conn, open_preds, odds_cache):
     """Exit momentum positions where ROI has dropped significantly from peak."""
-    from vault.polymarket import get_current_odds
-
     cfg = load_config()
     vel_cfg = cfg.get("velocity", {})
     trail_drop = vel_cfg.get("trailing_stop_drop", 0.15)
     trail_min_peak = vel_cfg.get("trailing_stop_min_peak", 0.15)
     trail_min_pnl_pct = vel_cfg.get("trailing_stop_min_pnl_pct", 0.05)
 
-    open_preds = ledger.get_open_predictions(conn)
     for pred in open_preds:
         reasoning = pred.get("entry_reasoning") or ""
         if not (reasoning.startswith("Momentum") or reasoning.startswith("Sharp move")):
             continue
 
-        odds = get_current_odds(conn, pred["market_id"])
+        odds = odds_cache.get(pred["market_id"])
         if not odds:
             continue
         our_price = odds["yes_price"] if pred["side"] == "YES" else odds["no_price"]
@@ -980,7 +1025,7 @@ def _exit_trailing_stop(conn):
                 log.warning(f"Failed trailing stop exit {pred['id']}: {e}")
 
 
-def _exit_opportunity_cost(conn):
+def _exit_opportunity_cost(conn, open_preds, odds_cache):
     """Exit positions where remaining return < risk-free return over the same period.
 
     At 10% annual opportunity cost:
@@ -988,14 +1033,12 @@ def _exit_opportunity_cost(conn):
       - 95% position resolving in 7d: 5.3% remaining vs 0.19% risk-free → HOLD
       - 99% position resolving in 1d: 1.0% remaining vs 0.03% risk-free → HOLD
     """
-    from vault.polymarket import get_current_odds
     cfg = load_config()
     annual_rate = cfg.get("velocity", {}).get("opportunity_cost_annual", 0.10)
     default_days = cfg.get("velocity", {}).get("opportunity_cost_default_days", 30)
 
-    open_preds = ledger.get_open_predictions(conn)
     for pred in open_preds:
-        odds = get_current_odds(conn, pred["market_id"])
+        odds = odds_cache.get(pred["market_id"])
         if not odds:
             continue
         our_price = odds["yes_price"] if pred["side"] == "YES" else odds["no_price"]
@@ -1028,20 +1071,39 @@ def run_cycle(conn) -> dict:
     # Resolve any settled predictions before the cycle starts
     resolve_predictions(conn)
 
+    # Periodic snapshot pruning to control table growth
+    prune_interval = cfg.get("snapshot_prune_interval_cycles", 50)
+    cycle_count = conn.execute("SELECT COUNT(*) as c FROM cycles").fetchone()["c"]
+    if cycle_count % prune_interval == 0:
+        from vault.market_discovery import prune_old_snapshots
+        keep_hours = cfg.get("snapshot_prune_keep_hours", 48)
+        prune_old_snapshots(conn, keep_hours=keep_hours)
+
+    # Build shared odds cache for exit functions (avoids redundant API/DB calls)
+    from vault.polymarket import get_current_odds
+    open_preds = ledger.get_open_predictions(conn)
+    odds_cache = {}
+    for pred in open_preds:
+        mid = pred["market_id"]
+        if mid not in odds_cache:
+            odds = get_current_odds(conn, mid)
+            if odds:
+                odds_cache[mid] = odds
+
     # Exit pipeline positions that don't meet current entry minimums
-    _exit_substandard_positions(conn)
+    _exit_substandard_positions(conn, open_preds, odds_cache)
 
     # Exit positions where remaining return < risk-free return over same period
-    _exit_opportunity_cost(conn)
+    _exit_opportunity_cost(conn, open_preds, odds_cache)
 
     # Exit momentum positions where velocity has flipped against us (fastest check)
-    _exit_momentum_reversal(conn)
+    _exit_momentum_reversal(conn, open_preds, odds_cache)
 
     # Exit momentum positions where ROI has dropped from peak
-    _exit_trailing_stop(conn)
+    _exit_trailing_stop(conn, open_preds, odds_cache)
 
     # Exit momentum positions where momentum has stalled
-    _exit_stale_momentum(conn)
+    _exit_stale_momentum(conn, open_preds, odds_cache)
 
     # Start cycle
     cur = conn.execute(
@@ -1117,10 +1179,9 @@ def run_cycle(conn) -> dict:
     burn_rate = ledger.get_burn_rate(conn)
     runway = ledger.get_runway(conn)
     total_pnl = ledger.get_total_pnl(conn)
-    from vault.polymarket import get_current_odds
     positions_value = 0.0
     for pred in ledger.get_open_predictions(conn):
-        odds = get_current_odds(conn, pred["market_id"])
+        odds = odds_cache.get(pred["market_id"]) or get_current_odds(conn, pred["market_id"])
         if odds:
             cp = odds["yes_price"] if pred["side"] == "YES" else odds["no_price"]
             positions_value += pred["shares"] * cp

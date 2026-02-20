@@ -3,8 +3,8 @@
 import json
 import logging
 from datetime import datetime, timezone, timedelta
-import httpx
 from vault.config_loader import load_config
+from vault.http_utils import http_get_with_retry
 
 log = logging.getLogger("vault.polymarket")
 
@@ -52,8 +52,7 @@ def fetch_market(conn, market_id: str) -> dict | None:
         return cached
 
     try:
-        resp = httpx.get(f"{GAMMA_BASE}/markets/{market_id}", timeout=10)
-        resp.raise_for_status()
+        resp = http_get_with_retry(f"{GAMMA_BASE}/markets/{market_id}")
         market = resp.json()
         parsed = _parse_market(market)
         if parsed:
@@ -72,7 +71,7 @@ def fetch_trending(conn, limit: int = 5) -> list[dict]:
     try:
         # Fetch more than needed so we have enough after filtering extremes
         fetch_count = max(n * 4, 20)
-        resp = httpx.get(
+        resp = http_get_with_retry(
             f"{GAMMA_BASE}/markets",
             params={
                 "active": "true",
@@ -81,9 +80,7 @@ def fetch_trending(conn, limit: int = 5) -> list[dict]:
                 "ascending": "false",
                 "limit": fetch_count,
             },
-            timeout=10,
         )
-        resp.raise_for_status()
         markets = resp.json()
 
         results = []
@@ -110,7 +107,7 @@ def fetch_trending(conn, limit: int = 5) -> list[dict]:
 def search_markets(conn, query: str, limit: int = 10) -> list[dict]:
     """Search markets by query string."""
     try:
-        resp = httpx.get(
+        resp = http_get_with_retry(
             f"{GAMMA_BASE}/markets",
             params={
                 "active": "true",
@@ -118,9 +115,7 @@ def search_markets(conn, query: str, limit: int = 10) -> list[dict]:
                 "limit": limit,
                 "slug_keyword": query,
             },
-            timeout=10,
         )
-        resp.raise_for_status()
         markets = resp.json()
 
         results = []
@@ -140,8 +135,7 @@ def check_resolution(conn, market_id: str) -> dict | None:
     Returns: {"resolved": True, "winner": "YES"|"NO"} or None
     """
     try:
-        resp = httpx.get(f"{GAMMA_BASE}/markets/{market_id}", timeout=10)
-        resp.raise_for_status()
+        resp = http_get_with_retry(f"{GAMMA_BASE}/markets/{market_id}")
         market = resp.json()
 
         closed = market.get("closed", False)

@@ -89,7 +89,10 @@ class ResearchMarketsActuator(BaseActuator):
             enriched = []
             for p in predictions:
                 odds = get_current_odds(conn, p["market_id"])
-                current = odds["yes_price"] if p["side"] == "YES" else odds["no_price"] if odds else p["entry_odds"]
+                if odds:
+                    current = odds["yes_price"] if p["side"] == "YES" else odds["no_price"]
+                else:
+                    current = p["entry_odds"]
                 market_value = round(p["shares"] * current, 6)
                 enriched.append({
                     "prediction_id": p["id"],
