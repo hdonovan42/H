@@ -64,12 +64,36 @@ def check_cycle_cost(conn, cycle_id: int) -> bool:
 
 
 def resurrect(conn, seed_amount: float | None = None):
-    """Resurrect VAULT — reset balance, clear state, start fresh."""
+    """Resurrect VAULT — reset balance, close phantom positions, start fresh."""
     cfg = load_config()
     if seed_amount is None:
         seed_amount = cfg["seed_balance"]
 
     set_meta(conn, "alive", "true")
+
+    # Close all open predictions/positions from previous life to prevent phantom P&L
+    open_count = conn.execute(
+        "SELECT COUNT(*) as c FROM predictions WHERE status = 'open'"
+    ).fetchone()["c"]
+    if open_count > 0:
+        conn.execute(
+            "UPDATE predictions SET status = 'closed', resolution = 'abandoned', "
+            "payout = 0, pnl = -cost_basis, "
+            "closed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') "
+            "WHERE status = 'open'"
+        )
+        log.info(f"Closed {open_count} phantom predictions from previous life")
+
+    open_pos_count = conn.execute(
+        "SELECT COUNT(*) as c FROM positions WHERE status = 'open'"
+    ).fetchone()["c"]
+    if open_pos_count > 0:
+        conn.execute(
+            "UPDATE positions SET status = 'closed', pnl = -cost_basis, "
+            "closed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') "
+            "WHERE status = 'open'"
+        )
+        log.info(f"Closed {open_pos_count} phantom positions from previous life")
 
     # Seed new balance
     conn.execute(

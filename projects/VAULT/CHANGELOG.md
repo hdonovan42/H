@@ -5,6 +5,53 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.14 — P0 Bug Sweep: 6 Critical Fixes
+
+**Deployed**: 2026-02-20 | **Baseline**: $74.40 balance
+
+Automated code review swarm (bug-hunter, commit-reviewer, optimizer, moderator) found 22 bugs, 23 optimizations, and 12 commit-history issues across the codebase. This commit addresses all 6 P0-severity bugs — issues causing financial loss, data corruption, or crash risk.
+
+### P0-1: Trailing stop completely broken — `peak_roi` missing from query
+- `get_open_predictions()` didn't SELECT `peak_roi`, so `pred.get("peak_roi")` always returned None → defaulted to 0. The trailing stop high-water mark never persisted across cycles. Trailing stops were effectively disabled since v16.
+- **Fix**: Added `peak_roi` to the SELECT column list.
+
+### P0-2: NO-side vault probability inverted in track record
+- `_build_track_record()` computed `vault_est = 1 - entry_odds - edge` for NO-side bets. Correct formula is `+ edge`. This fed corrupted calibration data to Opus, potentially degrading all future probability estimates.
+- **Fix**: Changed `- edge` to `+ edge` in 3 locations (open positions, resolved, calibration).
+
+### P0-3: Resurrect leaves phantom open positions
+- After death/resurrect, old open predictions persisted and interacted with the fresh balance — phantom positions could trigger sells, resolve, or credit/debit the new balance.
+- **Fix**: Close all open predictions (`resolution='abandoned'`) and positions before seeding new balance.
+
+### P0-4: Daemon race condition — separate DB connections
+- The cycle thread created a new `init_db()` connection while the main loop used a different one for `is_alive()`/`check_death()`. SQLite WAL mode meant stale reads — death events could be missed, cycles could double-fire.
+- **Fix**: Share single connection with `check_same_thread=False`. Safe because the ThreadPoolExecutor has `max_workers=1` — no concurrent writes.
+
+### P0-5: Non-atomic ledger balance updates
+- Every ledger operation did read-modify-write: `balance = get_balance(); new = balance - cost; INSERT`. With separate connections (P0-4) or concurrent API requests, two operations could read the same starting balance and produce incorrect `balance_after` values.
+- **Fix**: Replaced all 6 ledger write functions with atomic SQL subqueries: `(SELECT balance_after FROM ledger ORDER BY id DESC LIMIT 1) +/- ?`.
+
+### P0-6: Migration v11-v13 crash on existing columns
+- Migrations v11, v12, v13 ran bare `ALTER TABLE ADD COLUMN` without try/except guards. On fresh DB init (where SCHEMA_SQL already creates the columns), the migration would crash. Earlier migrations (v4, v6, v9) correctly used try/except.
+- **Fix**: Wrapped all v11-v13 ALTER TABLEs in try/except. Also fixed `SCHEMA_VERSION = 10` → `13`.
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/ledger.py` | P0-1: add `peak_roi` to SELECT; P0-5: atomic balance in all 6 write functions |
+| `vault/intelligence.py` | P0-2: fix NO-side vault_est formula (3 locations) |
+| `vault/guardrails.py` | P0-3: close phantom positions/predictions on resurrect |
+| `vault/daemon.py` | P0-4: share connection instead of creating separate `init_db()` in thread |
+| `vault/db.py` | P0-4: `check_same_thread=False`; P0-6: try/except on v11-v13 migrations; fix SCHEMA_VERSION |
+
+### What to Watch
+- Trailing stops should now fire: `grep "Trailing stop exit" logs` — first trigger expected when a profitable momentum position drops 15pp from peak
+- Next Opus intelligence update: verify NO-side track record entries show corrected vault estimates
+- Ledger balance integrity: `SELECT balance_after FROM ledger ORDER BY id DESC LIMIT 5` should show monotonically consistent values
+- Fresh DB init: should not crash on migration (testable with `rm vault.db && vault start`)
+
+---
+
 ## v16.13 — Tighten Haiku Momentum Prompt
 
 **Deployed**: 2026-02-19 | **Baseline**: $74.40 balance, 1045d runway, +$35.60 trading P&L

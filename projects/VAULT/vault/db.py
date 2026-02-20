@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from vault.config_loader import get_db_path
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 13
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -292,10 +292,14 @@ CREATE TABLE IF NOT EXISTS smart_money_log (
 
 
 def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
-    """Get a SQLite connection with WAL mode and row factory."""
+    """Get a SQLite connection with WAL mode and row factory.
+
+    Uses check_same_thread=False so the connection can be shared with the
+    daemon's ThreadPoolExecutor (single worker — no concurrent writes).
+    """
     if db_path is None:
         db_path = get_db_path()
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -583,8 +587,11 @@ def _migrate(conn):
 
     if version < 11:
         # v11: add z_1h and confidence to smart_money_log for z-score outcome tracking
-        conn.execute("ALTER TABLE smart_money_log ADD COLUMN z_1h REAL")
-        conn.execute("ALTER TABLE smart_money_log ADD COLUMN confidence REAL")
+        for col, coltype in [("z_1h", "REAL"), ("confidence", "REAL")]:
+            try:
+                conn.execute(f"ALTER TABLE smart_money_log ADD COLUMN {col} {coltype}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
         conn.execute(
             "INSERT INTO meta (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -594,7 +601,10 @@ def _migrate(conn):
 
     if version < 12:
         # v12: add peak_roi to predictions for trailing stop high-water mark
-        conn.execute("ALTER TABLE predictions ADD COLUMN peak_roi REAL DEFAULT 0")
+        try:
+            conn.execute("ALTER TABLE predictions ADD COLUMN peak_roi REAL DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass  # column already exists
         conn.execute(
             "INSERT INTO meta (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -604,13 +614,14 @@ def _migrate(conn):
 
     if version < 13:
         # v13: enriched market data from Gamma API for momentum intelligence
-        conn.execute("ALTER TABLE musk_markets ADD COLUMN description TEXT")
-        conn.execute("ALTER TABLE musk_markets ADD COLUMN volume_24h REAL")
-        conn.execute("ALTER TABLE musk_markets ADD COLUMN liquidity REAL")
-        conn.execute("ALTER TABLE musk_markets ADD COLUMN spread REAL")
-        conn.execute("ALTER TABLE musk_markets ADD COLUMN competitive REAL")
-        conn.execute("ALTER TABLE musk_markets ADD COLUMN game_start_time TEXT")
-        conn.execute("ALTER TABLE musk_markets ADD COLUMN event_title TEXT")
+        for col, coltype in [("description", "TEXT"), ("volume_24h", "REAL"),
+                             ("liquidity", "REAL"), ("spread", "REAL"),
+                             ("competitive", "REAL"), ("game_start_time", "TEXT"),
+                             ("event_title", "TEXT")]:
+            try:
+                conn.execute(f"ALTER TABLE musk_markets ADD COLUMN {col} {coltype}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
         conn.execute(
             "INSERT INTO meta (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",

@@ -35,25 +35,21 @@ def seed_balance(conn, amount: float | None = None):
 
 def deduct_api_cost(conn, cost: float, description: str = "") -> float:
     """Deduct API cost from balance. Returns new balance."""
-    balance = get_balance(conn)
-    new_balance = round(balance - cost, 6)
-
     conn.execute(
         "INSERT INTO ledger (entry_type, amount, description, balance_after) "
-        "VALUES (?, ?, ?, ?)",
-        ("api_cost", -cost, description, new_balance),
+        "VALUES (?, ?, ?, "
+        "ROUND((SELECT balance_after FROM ledger ORDER BY id DESC LIMIT 1) - ?, 6))",
+        ("api_cost", -cost, description, cost),
     )
     conn.commit()
 
+    new_balance = get_balance(conn)
     log.debug(f"API cost: -${cost:.4f} | Balance: ${new_balance:.2f}")
     return new_balance
 
 
 def record_trade_buy(conn, asset: str, quantity: float, price: float, total_usd: float, cycle_id: int | None = None) -> int:
     """Record a buy trade. Deducts from balance. Returns position_id."""
-    balance = get_balance(conn)
-    new_balance = round(balance - total_usd, 6)
-
     # Create position
     cur = conn.execute(
         "INSERT INTO positions (asset, quantity, cost_basis, status) VALUES (?, ?, ?, 'open')",
@@ -68,14 +64,16 @@ def record_trade_buy(conn, asset: str, quantity: float, price: float, total_usd:
         (cycle_id, "buy", asset, quantity, price, total_usd, position_id),
     )
 
-    # Ledger entry
+    # Ledger entry — atomic balance via SQL subquery
     conn.execute(
         "INSERT INTO ledger (entry_type, amount, description, reference_id, balance_after) "
-        "VALUES (?, ?, ?, ?, ?)",
-        ("trade_buy", -total_usd, f"BUY {quantity:.8f} {asset} @ ${price:,.2f}", position_id, new_balance),
+        "VALUES (?, ?, ?, ?, "
+        "ROUND((SELECT balance_after FROM ledger ORDER BY id DESC LIMIT 1) - ?, 6))",
+        ("trade_buy", -total_usd, f"BUY {quantity:.8f} {asset} @ ${price:,.2f}", position_id, total_usd),
     )
     conn.commit()
 
+    new_balance = get_balance(conn)
     log.info(f"BUY {quantity:.8f} {asset} @ ${price:,.2f} = ${total_usd:.2f} | Balance: ${new_balance:.2f}")
     return position_id
 
@@ -95,9 +93,6 @@ def record_trade_sell(conn, position_id: int, price: float, cycle_id: int | None
     total_usd = round(quantity * price, 6)
     pnl = round(total_usd - cost_basis, 6)
 
-    balance = get_balance(conn)
-    new_balance = round(balance + total_usd, 6)
-
     # Close position
     conn.execute(
         "UPDATE positions SET closed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), "
@@ -112,14 +107,16 @@ def record_trade_sell(conn, position_id: int, price: float, cycle_id: int | None
         (cycle_id, "sell", asset, quantity, price, total_usd, position_id),
     )
 
-    # Ledger entry
+    # Ledger entry — atomic balance via SQL subquery
     conn.execute(
         "INSERT INTO ledger (entry_type, amount, description, reference_id, balance_after) "
-        "VALUES (?, ?, ?, ?, ?)",
-        ("trade_sell", total_usd, f"SELL {quantity:.8f} {asset} @ ${price:,.2f} (P&L: ${pnl:+.2f})", position_id, new_balance),
+        "VALUES (?, ?, ?, ?, "
+        "ROUND((SELECT balance_after FROM ledger ORDER BY id DESC LIMIT 1) + ?, 6))",
+        ("trade_sell", total_usd, f"SELL {quantity:.8f} {asset} @ ${price:,.2f} (P&L: ${pnl:+.2f})", position_id, total_usd),
     )
     conn.commit()
 
+    new_balance = get_balance(conn)
     log.info(f"SELL {quantity:.8f} {asset} @ ${price:,.2f} = ${total_usd:.2f} | P&L: ${pnl:+.2f} | Balance: ${new_balance:.2f}")
     return pnl
 
@@ -134,9 +131,6 @@ def record_prediction_buy(conn, market_id: str, condition_id: str | None,
                           entry_confidence: float | None = None,
                           entry_reasoning: str | None = None) -> int:
     """Place a prediction bet. Deducts from balance. Returns prediction_id."""
-    balance = get_balance(conn)
-    new_balance = round(balance - amount_usd, 6)
-
     # shares = amount / odds (e.g. $5 at 0.60 odds = 8.33 shares, paying out $8.33 if won)
     shares = round(amount_usd / odds, 6)
 
@@ -149,15 +143,18 @@ def record_prediction_buy(conn, market_id: str, condition_id: str | None,
     )
     prediction_id = cur.lastrowid
 
+    # Ledger entry — atomic balance via SQL subquery
     conn.execute(
         "INSERT INTO ledger (entry_type, amount, description, reference_id, balance_after) "
-        "VALUES (?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, "
+        "ROUND((SELECT balance_after FROM ledger ORDER BY id DESC LIMIT 1) - ?, 6))",
         ("prediction_buy", -amount_usd,
          f"BET {side} '{question[:60]}' @ {odds:.0%} (${amount_usd:.2f})",
-         prediction_id, new_balance),
+         prediction_id, amount_usd),
     )
     conn.commit()
 
+    new_balance = get_balance(conn)
     log.info(f"BET {side} '{question[:40]}' @ {odds:.0%} | ${amount_usd:.2f} for {shares:.2f} shares | Balance: ${new_balance:.2f}")
     return prediction_id
 
@@ -177,21 +174,20 @@ def record_prediction_resolve(conn, prediction_id: int, winner: str) -> float:
     pnl = round(payout - pred["cost_basis"], 6)
     resolution = "won" if won else "lost"
 
-    balance = get_balance(conn)
-    new_balance = round(balance + payout, 6)
-
     conn.execute(
         "UPDATE predictions SET closed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), "
         "resolution = ?, payout = ?, pnl = ?, status = 'closed' WHERE id = ?",
         (resolution, payout, pnl, prediction_id),
     )
 
+    # Ledger entry — atomic balance via SQL subquery
     conn.execute(
         "INSERT INTO ledger (entry_type, amount, description, reference_id, balance_after) "
-        "VALUES (?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, "
+        "ROUND((SELECT balance_after FROM ledger ORDER BY id DESC LIMIT 1) + ?, 6))",
         ("prediction_resolve", payout,
          f"RESOLVED {resolution.upper()} '{pred['question'][:50]}' (P&L: ${pnl:+.2f})",
-         prediction_id, new_balance),
+         prediction_id, payout),
     )
     conn.commit()
 
@@ -214,21 +210,20 @@ def record_prediction_sell(conn, prediction_id: int, current_odds: float,
     sell_value = round(pred["shares"] * current_odds, 6)
     pnl = round(sell_value - pred["cost_basis"], 6)
 
-    balance = get_balance(conn)
-    new_balance = round(balance + sell_value, 6)
-
     conn.execute(
         "UPDATE predictions SET closed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), "
         "resolution = 'sold', payout = ?, pnl = ?, status = 'closed' WHERE id = ?",
         (sell_value, pnl, prediction_id),
     )
 
+    # Ledger entry — atomic balance via SQL subquery
     conn.execute(
         "INSERT INTO ledger (entry_type, amount, description, reference_id, balance_after) "
-        "VALUES (?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, "
+        "ROUND((SELECT balance_after FROM ledger ORDER BY id DESC LIMIT 1) + ?, 6))",
         ("prediction_sell", sell_value,
          f"SELL prediction '{pred['question'][:50]}' @ {current_odds:.0%} (P&L: ${pnl:+.2f})",
-         prediction_id, new_balance),
+         prediction_id, sell_value),
     )
     conn.commit()
 
@@ -240,7 +235,8 @@ def get_open_predictions(conn) -> list[dict]:
     """Get all open predictions."""
     rows = conn.execute(
         "SELECT id, market_id, question, slug, side, shares, entry_odds, "
-        "cost_basis, end_date, opened_at, entry_edge, entry_confidence, entry_reasoning "
+        "cost_basis, end_date, opened_at, entry_edge, entry_confidence, entry_reasoning, "
+        "peak_roi "
         "FROM predictions WHERE status = 'open'"
     ).fetchall()
     return [dict(r) for r in rows]

@@ -125,18 +125,10 @@ def run_daemon(resurrect: bool = False):
                     time.sleep(1)
                 continue
 
-            # Run cycle with timeout (new connection for thread safety)
+            # Run cycle with timeout (shared connection with check_same_thread=False)
             try:
-                def _run_cycle_threadsafe():
-                    from vault.db import init_db
-                    thread_conn = init_db()
-                    try:
-                        return run_cycle(thread_conn)
-                    finally:
-                        thread_conn.close()
-
                 with ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(_run_cycle_threadsafe)
+                    future = executor.submit(run_cycle, conn)
                     result = future.result(timeout=300)
                 if result.get("action") == "death":
                     log.critical("Agent died during cycle.")

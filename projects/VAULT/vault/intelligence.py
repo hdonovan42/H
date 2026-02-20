@@ -439,7 +439,7 @@ def _build_track_record(conn) -> str:
             if p["side"] == "YES":
                 vault_est = p["entry_odds"] + edge
             else:
-                vault_est = 1 - p["entry_odds"] - edge
+                vault_est = 1 - p["entry_odds"] + edge
             vault_est = max(0.0, min(1.0, vault_est))
 
             # Current market odds + unrealised P&L
@@ -480,7 +480,7 @@ def _build_track_record(conn) -> str:
             if p["side"] == "YES":
                 vault_est = p["entry_odds"] + edge
             else:
-                vault_est = 1 - p["entry_odds"] - edge
+                vault_est = 1 - p["entry_odds"] + edge
             vault_est = max(0.0, min(1.0, vault_est))
 
             won = p["resolution"] == "won"
@@ -512,7 +512,7 @@ def _build_track_record(conn) -> str:
             if p["side"] == "YES":
                 vault_est = p["entry_odds"] + edge
             else:
-                vault_est = 1 - p["entry_odds"] - edge
+                vault_est = 1 - p["entry_odds"] + edge
             vault_est = max(0.0, min(1.0, vault_est))
 
             if vault_est < 0.4:
