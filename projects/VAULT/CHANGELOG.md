@@ -5,6 +5,32 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.20 — Split Stale Exit Timers
+
+**Deployed**: 2026-02-21 | **Baseline**: $59.90 balance, $63.61 total value, 381d runway
+
+Three-agent audit (Opportunity Hunter, Loss Preventer, Mediator) on momentum-only trades (264 trades, #96-360, excluding legacy) revealed duration is the strongest predictor of profit/loss. Trades held <1h lost -$27.46 (163 trades). Trades held 1-6h made +$39.38 (77 trades). The stale exit timers were symmetric — now they're asymmetric to match the data.
+
+### Config changes
+- `stale_min_hours_profitable`: 2.0 → **3.0** — let winners breathe into the 1-6h sweet spot
+- `stale_min_hours_losing`: 1.0 → **0.5** — cut losers before they compound into the <1h loss bucket
+
+### What to watch
+- Losing positions should exit faster — look for stale exits at 30-60min on losers
+- Winning positions should hold longer — stale profit-takes should appear at 3h+ instead of 2h+
+- Overall PnL per trade should shift positive as losers are cut and winners are held
+- Monitor that the 0.5h floor isn't too aggressive — if good positions are being cut at 30min due to temporary momentum stalls, consider raising to 0.75h
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `config/default.yaml` | 2 config param updates |
+
+### Also created
+- `ROADMAP.md` — living development roadmap with 8 remaining audit recommendations (4 high priority, 4 medium priority, 4 deferred)
+
+---
+
 ## v16.19 — Burned-Market Guard
 
 **Deployed**: 2026-02-21 | **Baseline**: $59.90 balance, $63.61 total value, 381d runway
