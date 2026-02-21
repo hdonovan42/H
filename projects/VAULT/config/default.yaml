@@ -90,8 +90,6 @@ velocity:
   oscillation_min_swing: 0.08             # 8pp minimum to count as a reversal
   oscillation_max_reversals: 6            # >= this triggers dampener
   oscillation_net_move_override: 0.15     # allow if |net move| > 15% (trending through noise)
-  # Theme concentration cap — limit distinct markets per correlated event
-  theme_max_markets: 3              # max distinct markets per event_title
   # Burned-market guard — cap exposure on markets with realised losses
   burned_market_lookback_hours: 4.0       # window to sum realised P&L
   burned_market_loss_threshold: -2.00     # net P&L <= this triggers guard

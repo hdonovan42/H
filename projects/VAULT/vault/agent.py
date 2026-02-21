@@ -339,17 +339,6 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         positions_per_market[mid] = positions_per_market.get(mid, 0) + 1
     max_positions_per_market = vel_cfg.get("momentum_max_positions_per_market", 5)
 
-    # Theme concentration cap: count distinct markets per event_title
-    theme_max_markets = vel_cfg.get("theme_max_markets", 3)
-    theme_markets = {}  # event_title → set of market_ids with open positions
-    for p in open_preds:
-        evt = conn.execute(
-            "SELECT event_title FROM musk_markets WHERE market_id = ?",
-            (p["market_id"],)
-        ).fetchone()
-        if evt and evt["event_title"]:
-            theme_markets.setdefault(evt["event_title"], set()).add(p["market_id"])
-
     items = []
     total_api_cost = 0  # Track all Haiku calls including skipped signals
     for alert in velocity_alerts:
@@ -406,16 +395,8 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         if mkt_volume < min_volume:
             log.info(f"Momentum skip (low volume ${mkt_volume:,.0f} < ${min_volume:,.0f}): {question[:50]}")
             continue
-        # Theme concentration cap: skip if we already have N distinct markets in this theme
+        # Extract event_title for theme tracking in logs
         event_title = mkt_row["event_title"] if mkt_row and mkt_row["event_title"] else ""
-        if event_title:
-            theme_market_ids = theme_markets.get(event_title, set())
-            if alert["market_id"] not in theme_market_ids and len(theme_market_ids) >= theme_max_markets:
-                log.info(
-                    "Momentum skip (theme cap): %s — %d/%d markets in '%s'"
-                    % (question[:50], len(theme_market_ids), theme_max_markets, event_title[:40])
-                )
-                continue
 
         if mkt_spread > 0.10:
             log.info(f"Momentum skip (wide spread {mkt_spread:.0%}): {question[:50]}")
@@ -737,10 +718,6 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         }
         items.append(item)
 
-        # Track this market in theme map for subsequent alerts in same cycle
-        if event_title:
-            theme_markets.setdefault(event_title, set()).add(alert["market_id"])
-
         _log_smart_money_event(
             conn, cycle_id=cycle_id, market_id=alert["market_id"],
             question=question,
@@ -751,9 +728,10 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         )
 
         z_part = f", z={z_1h:.1f}" if z_1h is not None else ""
+        theme_part = f", theme='{event_title[:40]}'" if event_title else ""
         log.info(
             f"Momentum {action_tag} candidate: {question[:50]} — {side} ${bet_size:.2f} "
-            f"(v={v_1h:+.0%}/1h{z_part}, conf={conf:.0%})"
+            f"(v={v_1h:+.0%}/1h{z_part}, conf={conf:.0%}{theme_part})"
         )
 
         # Cap accepted candidates per cycle (applied after filters, not before)
