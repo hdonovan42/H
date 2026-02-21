@@ -5,29 +5,34 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
-## v16.20 — Split Stale Exit Timers
+## v16.20 — Volume Guard Adjustment + Stale Timer Split + Theme Tracking
 
-**Deployed**: 2026-02-21 | **Baseline**: $59.90 balance, $63.61 total value, 381d runway
+**Deployed**: 2026-02-21 | **Baseline**: $63.65 balance, 403d runway
 
-Three-agent audit (Opportunity Hunter, Loss Preventer, Mediator) on momentum-only trades (264 trades, #96-360, excluding legacy) revealed duration is the strongest predictor of profit/loss. Trades held <1h lost -$27.46 (163 trades). Trades held 1-6h made +$39.38 (77 trades). The stale exit timers were symmetric — now they're asymmetric to match the data.
+Safeguard analysis across 264 closed momentum bets. Three changes:
 
-### Config changes
-- `stale_min_hours_profitable`: 2.0 → **3.0** — let winners breathe into the 1-6h sweet spot
-- `stale_min_hours_losing`: 1.0 → **0.5** — cut losers before they compound into the <1h loss bucket
+1. **Volume guard $10K → $5K**: The $10K floor was net-negative (-$1.58), blocking a +$22.52 TSLA winner at $9,907 volume. $5K still catches genuinely thin markets ($96, $936 volume).
 
-### What to watch
-- Losing positions should exit faster — look for stale exits at 30-60min on losers
-- Winning positions should hold longer — stale profit-takes should appear at 3h+ instead of 2h+
-- Overall PnL per trade should shift positive as losers are cut and winners are held
-- Monitor that the 0.5h floor isn't too aggressive — if good positions are being cut at 30min due to temporary momentum stalls, consider raising to 0.75h
+2. **Stale exit timer split**: Duration is the strongest predictor of profit/loss. Trades <1h lost -$27.46, trades 1-6h made +$39.38. Timers are now asymmetric.
+   - `stale_min_hours_profitable`: 2.0 → **3.0**
+   - `stale_min_hours_losing`: 1.0 → **0.5**
+
+3. **Theme tracking in logs**: `event_title` from Polymarket's events API now logged with momentum candidates for theme performance analysis. No blocking — keyword removal already fixed the correlated-bet problem.
 
 ### Files modified
 | File | Changes |
 |------|---------|
-| `config/default.yaml` | 2 config param updates |
+| `config/default.yaml` | `momentum_min_volume` 10000→5000, stale timer split |
+| `vault/agent.py` | event_title in momentum log lines |
 
 ### Also created
-- `ROADMAP.md` — living development roadmap with 8 remaining audit recommendations (4 high priority, 4 medium priority, 4 deferred)
+- `ROADMAP.md` — living development roadmap with audit recommendations
+
+### What to watch
+- `Momentum skip (low volume $X < $5,000):` — new threshold
+- Markets in $5K-$10K range should now be eligible
+- `theme='...'` in momentum candidate log lines — track theme P&L
+- Stale exits at 30min on losers, 3h+ on winners
 
 ---
 
