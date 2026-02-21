@@ -90,6 +90,9 @@ velocity:
   oscillation_min_swing: 0.08             # 8pp minimum to count as a reversal
   oscillation_max_reversals: 6            # >= this triggers dampener
   oscillation_net_move_override: 0.15     # allow if |net move| > 15% (trending through noise)
+  # Burned-market guard — cap exposure on markets with realised losses
+  burned_market_lookback_hours: 4.0       # window to sum realised P&L
+  burned_market_loss_threshold: -2.00     # net P&L <= this triggers guard
   z_override_min_velocity: 0.07    # z-gate floor: must still have 7%+ velocity
   z_override_threshold: 4.0        # z-score must be >= 4.0 to override velocity floor
   trailing_stop_drop: 0.15           # exit when ROI drops 15pp below peak

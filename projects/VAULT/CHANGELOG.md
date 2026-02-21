@@ -5,6 +5,46 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.19 — Burned-Market Guard
+
+**Deployed**: 2026-02-21 | **Baseline**: $59.90 balance, $63.61 total value, 381d runway
+
+Feb 20's three biggest losses (-$22.99 Coleman Wong, -$13.75 TSLA $410, -$12.28 FURIA) share the same failure: the system loses money on a market, then piles more in via pyramiding and side-flipping. The oscillation dampener (v16.18) can't catch these — they only show 3-4 reversals, well below the 6-reversal trigger.
+
+**The fix is simpler: realised losses on a market predict future losses.** If we've net-lost >$2 on a market in the last 4 hours, cap to 1 position with no pyramiding. Backtested at -$2.00 threshold: saves $51.45, loses only $5.88 (1 false positive), net benefit +$45.58.
+
+### Burned-market computation in `_analyze_momentum_opportunities()`
+- Queries `predictions` for `SUM(pnl)` where `market_id` matches and `closed_at` within lookback window
+- `is_burned` flag: `net_pnl <= -$2.00` (configurable threshold + window)
+- Composes with `is_oscillating` via OR — either guard can fire independently
+
+### Dampener effects (same as oscillation dampener)
+- `pyramid_mult` forced to 1.0 when burned
+- `effective_max_positions` capped to 1 when burned
+- `[BURNED MARKET]` tag prepended to reasoning
+
+### Schema v15
+- `idx_predictions_market_closed` compound index on `predictions(market_id, closed_at)` — benefits both burned-market query and existing multi-flip guard queries
+
+### Config params (in `velocity:` section)
+- `burned_market_lookback_hours: 4.0` — window to sum realised P&L
+- `burned_market_loss_threshold: -2.00` — net P&L <= this triggers guard
+
+### What to watch
+- `Burned-market guard:` log lines — confirm fires on markets with recent losses
+- `[BURNED MARKET]` in cycle reasoning — verify limited to 1 position
+- Clean markets should still pyramid normally (`Momentum pyramid:` lines)
+- False positives: winning markets getting capped (should be rare at -$2.00)
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `vault/agent.py` | Burned-market guard computation + logging (~20 lines), compose into 3 existing override sites |
+| `config/default.yaml` | 2 config params |
+| `vault/db.py` | Schema v15, compound index migration |
+
+---
+
 ## v16.18 — Oscillation Dampener (Mode B)
 
 **Deployed**: 2026-02-20 | **Baseline**: $62.80 balance, 429d runway

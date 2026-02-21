@@ -7,7 +7,7 @@ from vault.config_loader import get_db_path
 
 log = logging.getLogger("vault.db")
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -650,6 +650,22 @@ def _migrate(conn):
             "INSERT INTO meta (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             ("schema_version", "14"),
+        )
+        conn.commit()
+
+    if version < 15:
+        # v15: compound index for burned-market guard + multi-flip guard queries
+        try:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_predictions_market_closed "
+                "ON predictions(market_id, closed_at)"
+            )
+        except sqlite3.OperationalError as e:
+            log.warning(f"Failed to create index idx_predictions_market_closed: {e}")
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "15"),
         )
         conn.commit()
 

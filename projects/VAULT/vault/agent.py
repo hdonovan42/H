@@ -445,6 +445,28 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
                 f"(capped to 1 position, no pyramid)"
             )
 
+        # Burned-market guard: restrict markets where we've already lost money
+        from datetime import datetime, timezone, timedelta
+        burned_lookback = vel_cfg.get("burned_market_lookback_hours", 4.0)
+        burned_threshold = vel_cfg.get("burned_market_loss_threshold", -2.00)
+        burned_cutoff = (datetime.now(timezone.utc) - timedelta(hours=burned_lookback)).strftime(
+            "%Y-%m-%dT%H:%M:%S"
+        )
+        burned_row = conn.execute(
+            "SELECT COALESCE(SUM(pnl), 0) as net_pnl FROM predictions "
+            "WHERE market_id = ? AND closed_at IS NOT NULL AND closed_at > ?",
+            (alert["market_id"], burned_cutoff),
+        ).fetchone()
+        burned_pnl = burned_row["net_pnl"] if burned_row else 0
+        is_burned = burned_pnl <= burned_threshold
+
+        if is_burned:
+            log.info(
+                f"Burned-market guard: {question[:50]} — "
+                f"net realised ${burned_pnl:+.2f} in {burned_lookback:.0f}h "
+                f"(capped to 1 position, no pyramid)"
+            )
+
         if abs_v >= 0.40:
             vel_mult = vel_scale_40
         elif abs_v >= 0.20:
@@ -457,7 +479,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         current_exposure = exposure_by_market.get(alert["market_id"], 0)
         current_value = value_by_market.get(alert["market_id"], 0)
         unrealised_roi = (current_value - current_exposure) / current_exposure if current_exposure > 0 else 0
-        if is_oscillating:
+        if is_oscillating or is_burned:
             pyramid_mult = 1.0
         elif unrealised_roi >= 0.30:
             pyramid_mult = 3.0
@@ -489,7 +511,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             continue
 
         # Per-market position count cap (oscillation dampener overrides to 1)
-        effective_max_positions = 1 if is_oscillating else max_positions_per_market
+        effective_max_positions = 1 if (is_oscillating or is_burned) else max_positions_per_market
         market_pos_count = positions_per_market.get(alert["market_id"], 0)
         if market_pos_count >= effective_max_positions:
             log.info(
@@ -685,7 +707,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             "z_1h": z_1h,
             "abs_v_1h": abs_v,
             "follow_confidence": round(conf, 4),
-            "reasoning": f"{'[OSCILLATION DAMPENED] ' if is_oscillating else ''}Momentum {'add' if is_add else 'follow'}: {reasoning}",
+            "reasoning": f"{'[OSCILLATION DAMPENED] ' if is_oscillating else '[BURNED MARKET] ' if is_burned else ''}Momentum {'add' if is_add else 'follow'}: {reasoning}",
             "recommended_size_usd": bet_size,
             "velocity_sharp": True,
             "source": "momentum",
