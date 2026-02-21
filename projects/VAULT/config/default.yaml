@@ -68,7 +68,7 @@ velocity:
   momentum_add_min_roi: 0.02         # only add if existing position ROI > 2% (filters noise)
   max_momentum_per_cycle: 3
   momentum_max_exposure_pct: 0.50
-  momentum_min_volume: 10000     # skip markets below $10k volume (thin/manipulable)
+  momentum_min_volume: 5000      # skip markets below $5k volume (thin/manipulable)
   z_min_snapshots: 30            # need 30+ snapshots in 24h for reliable z-score
   z_sizing_low: 3.0              # z < 3: haircut confidence (noisy move)
   z_sizing_high: 4.0             # z >= 4: boost confidence (significant move)
@@ -76,8 +76,8 @@ velocity:
   z_confidence_haircut: 0.10     # -10% confidence for low-z moves (skipped for profitable adds)
   opportunity_cost_annual: 0.10  # 10% annual — exit when remaining return < risk-free over same period
   opportunity_cost_default_days: 30  # fallback when market has no end_date
-  stale_min_hours_profitable: 2.0   # let winning momentum positions breathe
-  stale_min_hours_losing: 1.0      # cut losers fast
+  stale_min_hours_profitable: 3.0   # let winning momentum positions breathe (was 2.0 — 1-2h is the profit sweet spot)
+  stale_min_hours_losing: 0.5      # cut losers fast (was 1.0 — <1h trades lose -$27.46 on 163 trades)
   stale_max_hours: 4.0            # force exit stale positions after 4h even at a loss
   stale_velocity_threshold: 0.02  # v_1h < 2% = "momentum stalled"
   momentum_max_positions_per_market: 5  # hard cap on positions per market (all sides)
@@ -90,6 +90,8 @@ velocity:
   oscillation_min_swing: 0.08             # 8pp minimum to count as a reversal
   oscillation_max_reversals: 6            # >= this triggers dampener
   oscillation_net_move_override: 0.15     # allow if |net move| > 15% (trending through noise)
+  # Theme concentration cap — limit distinct markets per correlated event
+  theme_max_markets: 3              # max distinct markets per event_title
   # Burned-market guard — cap exposure on markets with realised losses
   burned_market_lookback_hours: 4.0       # window to sum realised P&L
   burned_market_loss_threshold: -2.00     # net P&L <= this triggers guard
