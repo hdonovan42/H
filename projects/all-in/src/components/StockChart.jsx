@@ -63,6 +63,8 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
     if (!container) return;
 
     const handleWheel = (e) => {
+      // Only zoom when chart is focused (clicked)
+      if (document.activeElement !== container) return;
       e.preventDefault();
       e.stopPropagation();
       setVisibleDays(prev => {
