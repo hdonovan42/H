@@ -541,6 +541,31 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         # 4. Position-aware validation: add vs new entry
         is_add = (alert["market_id"], side) in open_pred_by_market_side
 
+        # Side-switch velocity floor: if we've previously closed the opposite side,
+        # require higher velocity to re-enter on this side (filters weak flips).
+        if not is_add:
+            from datetime import datetime, timezone, timedelta
+            switch_window = vel_cfg.get("momentum_flip_window_hours", 4.0)
+            switch_min_vel = vel_cfg.get("side_switch_min_velocity_1h", 0.15)
+            now_utc = datetime.now(timezone.utc)
+            switch_start = (now_utc - timedelta(hours=switch_window)).strftime(
+                "%Y-%m-%dT%H:%M:%S"
+            )
+            opposite_side = "NO" if side == "YES" else "YES"
+            had_opposite = conn.execute(
+                "SELECT 1 FROM predictions "
+                "WHERE market_id = ? AND side = ? AND closed_at IS NOT NULL AND closed_at > ? "
+                "LIMIT 1",
+                (alert["market_id"], opposite_side, switch_start),
+            ).fetchone()
+            if had_opposite and abs(v_1h) < switch_min_vel:
+                log.info(
+                    f"Momentum skip (side-switch velocity floor): {question[:50]} — "
+                    f"want {side} but closed {opposite_side} recently, "
+                    f"|v_1h|={abs(v_1h):.0%} < {switch_min_vel:.0%} required"
+                )
+                continue
+
         # Multi-flip guard: allow one side-change per market, block the second.
         # First flip (e.g. NO→YES) is a legitimate reversal — allow it.
         # Second flip (YES→NO→YES) means we're oscillating — block until cooldown.

@@ -85,6 +85,7 @@ velocity:
   momentum_min_velocity_1h_sports: 0.05  # lower floor for sports/esports (filtered by O/U/draw already)
   momentum_flip_window_hours: 4.0      # look-back for detecting both-side trades
   momentum_flip_cooldown_hours: 1.0    # block re-entry for 1h after multi-flip detected
+  side_switch_min_velocity_1h: 0.15    # 15% — side-switches need stronger signal than normal entries
   # Oscillation detector (Mode B dampener)
   oscillation_lookback_hours: 2.0         # window for counting reversals
   oscillation_min_swing: 0.08             # 8pp minimum to count as a reversal

@@ -5,6 +5,44 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.22 — Side-Switch Velocity Floor
+
+**Deployed**: 2026-02-22 | **Baseline**: $57.59 balance, $74.02 total value, 68d runway
+
+Side-switching (closing one side, entering the opposite) is a reliable money destroyer: 23 markets with both-side trades lost -$59.98 net vs +$78.27 for single-side markets. But a blanket ban would have blocked profitable reversals like TSLA Up/Down (+$22.52) and Rio Open Lajovic (+$8.24).
+
+Backtested velocity thresholds for side-switch trades across all 363 momentum trades:
+
+| Threshold | Blocked | Saved | Notes |
+|-----------|---------|-------|-------|
+| 10% (was) | 9 | +$5 | Too loose |
+| **15%** | **30** | **+$15.45** | **Sweet spot — keeps all TSLA/Rio/Dota winners** |
+| 20% | 56 | +$8.82 | Blocks 4 of 5 TSLA switches |
+| 25% | 75 | +$30.49 | Blocks almost all profitable switches too |
+
+15% filters the weak flips (Goldman +6%, ChatGPT -9%, Valorant +10%, MOUZ NXT -6%) that all lost, while preserving genuine reversals that entered at 16%+ velocity.
+
+### Side-switch velocity floor in `_analyze_momentum_opportunities()`
+- New guard between `is_add` check and multi-flip guard
+- If not a pyramid add AND closed opposite-side position within `momentum_flip_window_hours`, require `|v_1h| >= side_switch_min_velocity_1h` (default 15%)
+- Log line: `Momentum skip (side-switch velocity floor): ... |v_1h|=X% < 15% required`
+
+### Config
+- `side_switch_min_velocity_1h: 0.15` in `velocity:` section
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `vault/agent.py` | Side-switch velocity floor guard (~15 lines) |
+| `config/default.yaml` | 1 new config param |
+
+### What to watch
+- `Momentum skip (side-switch velocity floor):` log lines — confirm weak flips blocked
+- Side-switches at 15%+ should still go through (genuine reversals)
+- Compare side-switch PnL over next 48h vs historical -$60 baseline
+
+---
+
 ## v16.21 — Hard 4h Position Cap
 
 **Deployed**: 2026-02-22 | **Baseline**: $62.64 balance, $77.71 total value, 74.6d runway
