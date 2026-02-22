@@ -1048,21 +1048,21 @@ def _exit_stale_momentum(conn, open_preds, odds_cache):
             elif pred["side"] == "NO" and v < -stale_vel_threshold:
                 momentum_alive = True
 
-        if momentum_alive:
-            continue  # momentum still running, hold
+        if momentum_alive and hours_held < stale_max_hours:
+            continue  # momentum still running and under hard cap, hold
 
-        # Momentum stalled — should we exit?
+        # Momentum stalled or hard time cap reached — should we exit?
         should_exit = False
         reason = ""
 
-        if profitable:
+        if hours_held >= stale_max_hours:
+            should_exit = True
+            reason = (f"Hard time cap: held {hours_held:.1f}h >= {stale_max_hours}h, "
+                      f"PnL ${unrealised_pnl:+.2f} — no position held past {stale_max_hours}h")
+        elif profitable:
             should_exit = True
             reason = (f"Stale momentum profit-take: held {hours_held:.1f}h, "
                       f"PnL ${unrealised_pnl:+.2f}, momentum stalled")
-        elif hours_held >= stale_max_hours:
-            should_exit = True
-            reason = (f"Stale momentum timeout: held {hours_held:.1f}h > {stale_max_hours}h, "
-                      f"PnL ${unrealised_pnl:+.2f}, momentum gone")
 
         if should_exit:
             try:
