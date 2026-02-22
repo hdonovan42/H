@@ -5,6 +5,42 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.21 — Hard 4h Position Cap
+
+**Deployed**: 2026-02-22 | **Baseline**: $62.64 balance, $77.71 total value, 74.6d runway
+
+Previously `stale_max_hours` only killed positions where momentum had stalled. Positions with active momentum could be held indefinitely (MrBeast: 8h, Paradex: 11h, Goldman Sachs: 19h). Data across 363 momentum trades shows no position has ever become more profitable after 2 hours — the 4h+ bucket is pure loss:
+
+| Duration | Trades | PnL | Avg/trade |
+|----------|--------|-----|-----------|
+| 0-30m | 112 | -$28.05 | -$0.25 |
+| 30m-1h | 106 | +$6.58 | +$0.06 |
+| **1-1.5h** | **35** | **+$27.26** | **+$0.78** |
+| **1.5-2h** | **31** | **+$21.50** | **+$0.69** |
+| 2-3h | 24 | +$2.62 | +$0.11 |
+| 3-4h | 17 | +$2.93 | +$0.17 |
+| 4-6h | 14 | -$6.15 | -$0.44 |
+| 6h+ | 24 | -$8.38 | -$0.35 |
+
+`stale_max_hours` is now a hard ceiling — sell at 4h regardless of momentum status.
+
+### Code change in `_exit_stale_momentum()`
+- `momentum_alive` check now gated by `and hours_held < stale_max_hours`
+- Hard cap case checked first in exit decision, overrides all other logic
+- Log line: `Hard time cap: held Xh >= 4.0h` distinguishes from stale exits
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `vault/agent.py` | 2-line change in `_exit_stale_momentum()` — hard cap logic |
+
+### What to watch
+- `Hard time cap:` log lines — confirm positions are being killed at 4h
+- No more 6h+ or 8h+ holdouts in the predictions table
+- Watch for false positives: profitable positions killed at 4h that were still trending (unlikely based on data)
+
+---
+
 ## v16.20 — Volume Guard Adjustment + Stale Timer Split + Theme Tracking
 
 **Deployed**: 2026-02-21 | **Baseline**: $63.65 balance, 403d runway
