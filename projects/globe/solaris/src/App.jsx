@@ -194,24 +194,12 @@ function Footer() {
 
 export default function App() {
   const [currentView, setCurrentView] = useState('globe');
-  const [isStarted, setIsStarted] = useState(false);
   const [isRendering, setIsRendering] = useState(true);
 
   useEffect(() => {
-    if (isStarted) {
-      const timer = setTimeout(() => setIsRendering(false), 400);
-      return () => clearTimeout(timer);
-    }
-  }, [isStarted]);
-
-  if (!isStarted) {
-    return (
-      <>
-        <style>{shellStyles}</style>
-        <HeroSection onStart={() => setIsStarted(true)} />
-      </>
-    );
-  }
+    const timer = setTimeout(() => setIsRendering(false), 400);
+    return () => clearTimeout(timer);
+  }, []);
 
   return (
     <>
