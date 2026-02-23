@@ -34,15 +34,30 @@ jobs:
           npm install --ignore-scripts react react-dom dayjs vite @vitejs/plugin-react
           npm run build
 
-      # Replace all-in source with built output
+      # Build solaris globe app
+      - name: Build solaris
+        working-directory: projects/globe/solaris
+        run: |
+          npm install --ignore-scripts react react-dom three vite @vitejs/plugin-react
+          npm run build
+
+      # Replace source dirs with built output
       - name: Prepare site
         run: |
-          # Remove source files, keep dist
+          # all-in
           cd projects/all-in
           mv dist ../all-in-dist
           cd ..
           rm -rf all-in
           mv all-in-dist all-in
+
+          # solaris
+          cd globe/solaris
+          mv dist ../../solaris-dist
+          cd ../..
+          rm -rf globe
+          mkdir -p globe
+          mv solaris-dist globe/solaris
 
       - uses: actions/upload-pages-artifact@v3
         with:
