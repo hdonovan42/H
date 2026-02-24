@@ -87,7 +87,7 @@ class BetActuator(BaseActuator):
         entry_confidence = None
         entry_reasoning_text = None
         pipeline_edges = context.get("pipeline_edges", [])
-        for pe in pipeline_edges:
+        for pe in reversed(pipeline_edges):
             if pe.get("market_id") == market_id:
                 entry_edge = pe.get("edge")
                 entry_confidence = pe.get("confidence")

@@ -80,6 +80,7 @@ velocity:
   stale_min_hours_losing: 0.5      # cut losers fast (was 1.0 — <1h trades lose -$27.46 on 163 trades)
   stale_max_hours: 4.0            # force exit stale positions after 4h even at a loss
   stale_velocity_threshold: 0.02  # v_1h < 2% = "momentum stalled"
+  momentum_unrealised_loss_floor: -0.05  # block entry when existing positions down 5%+
   momentum_max_positions_per_market: 5  # hard cap on positions per market (all sides)
   momentum_min_velocity_1h: 0.10   # minimum |v_1h| for momentum entry (new + adds)
   momentum_min_velocity_1h_sports: 0.05  # lower floor for sports/esports (filtered by O/U/draw already)

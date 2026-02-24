@@ -523,6 +523,24 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             )
             continue
 
+        # Unrealised loss floor: block entry when open positions on this market are underwater
+        unrealised_loss_floor = vel_cfg.get("momentum_unrealised_loss_floor", -0.05)
+        if current_exposure > 0 and unrealised_roi < unrealised_loss_floor:
+            log.info(
+                f"Momentum skip (unrealised loss floor): {question[:50]} — "
+                f"ROI {unrealised_roi:+.1%} < {unrealised_loss_floor:.0%} floor, "
+                f"exposure ${current_exposure:.2f}"
+            )
+            _log_smart_money_event(
+                conn, cycle_id=cycle_id, market_id=alert["market_id"],
+                question=question,
+                vel={"v_1h": v_1h, "v_6h": v_6h, "z_1h": z_1h,
+                     "direction": "neutral", "sharp": True},
+                action_taken="momentum_skip",
+                market_odds=market_odds, side=side,
+            )
+            continue
+
         if pyramid_mult > 1:
             log.info(
                 f"Momentum pyramid: {question[:40]} — ROI {unrealised_roi:+.0%} → "

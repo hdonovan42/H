@@ -5,6 +5,33 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.23 — Unrealised Loss Floor + Entry Reasoning Fix
+
+**Deployed**: 2026-02-24
+
+Post-mortem: Galorys vs ODDIK CS:GO match (Feb 23-24) lost -$7.14 across 5 YES positions despite all safeguards. The burned-market guard only fires on *realised* losses — positions were still open when new entries were added, so the system pyramided into a losing market during brief price bounces.
+
+### Changes
+
+1. **Unrealised loss floor guard** (`vault/agent.py`): Block any new momentum entry on a market where existing open positions are collectively underwater by more than 5% (configurable via `momentum_unrealised_loss_floor`). Inserted after the position count cap check. Would have blocked trade #535 which entered at -6.3% unrealised ROI.
+
+2. **Entry reasoning bug fix** (`vault/actuators/bet.py`): `pipeline_edges` contains two entries per market — first from edge_calculator ("Sharp move detected:"), last from momentum executor ("Momentum add:" / "Momentum auto-follow:"). The forward loop always matched the first (wrong) entry. Fixed by iterating `reversed(pipeline_edges)` so the most-recent reasoning wins.
+
+3. **Config** (`config/default.yaml`): Added `momentum_unrealised_loss_floor: -0.05`.
+
+### What to watch
+- False positives: legitimate entries blocked on normal 1-3% dips during active matches
+- `entry_reasoning` in new trades should now show "Momentum add:" / "Momentum auto-follow:" instead of "Sharp move detected:"
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `vault/agent.py` | ~15 lines: unrealised loss floor guard after position cap check |
+| `vault/actuators/bet.py` | 1 line: `reversed(pipeline_edges)` for correct reasoning lookup |
+| `config/default.yaml` | 1 param: `momentum_unrealised_loss_floor: -0.05` |
+
+---
+
 ## v16.22.1 — British Spelling Fix
 
 **Deployed**: 2026-02-24 | **Baseline**: $52.00 balance, $78.90 total value, 143d runway
