@@ -363,8 +363,8 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
           x: 50 + (i / (visibleData.length - 1 || 1)) * 720
         });
       });
-      // Cap labels to the nominal month count, dropping earliest first
-      const maxLabels = Math.floor(visibleDays / 30);
+      // Cap labels: max 12 (1Y/late-Dec YTD), scales down for shorter ranges
+      const maxLabels = Math.min(12, Math.ceil(visibleDays / 30));
       if (allLabels.length > maxLabels) {
         allLabels = allLabels.slice(allLabels.length - maxLabels);
       }
