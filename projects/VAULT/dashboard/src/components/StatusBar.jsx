@@ -40,7 +40,7 @@ export default function StatusBar({ status }) {
         <div className={`stat-value ${total_pnl >= 0 ? 'green' : 'red'}`}>
           {total_pnl >= 0 ? '+' : ''}{formatCost(total_pnl)}
         </div>
-        <div className="stat-sub">realized</div>
+        <div className="stat-sub">realised</div>
       </div>
 
       <div className="stat">

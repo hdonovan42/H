@@ -5,6 +5,19 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.22.1 — British Spelling Fix
+
+**Deployed**: 2026-02-24 | **Baseline**: $52.00 balance, $78.90 total value, 143d runway
+
+Dashboard label "realized" → "realised" (British spelling).
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `dashboard/src/components/StatusBar.jsx` | "realized" → "realised" |
+
+---
+
 ## v16.22 — Side-Switch Velocity Floor
 
 **Deployed**: 2026-02-22 | **Baseline**: $57.59 balance, $74.02 total value, 68d runway
