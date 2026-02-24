@@ -363,6 +363,10 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
           x: 50 + (i / (visibleData.length - 1 || 1)) * 720
         });
       });
+      // Cap at 6 labels, dropping earliest months first
+      if (allLabels.length > 6) {
+        allLabels = allLabels.slice(allLabels.length - 6);
+      }
     } else {
       // Multi-year: show years
       const seen = new Set();
