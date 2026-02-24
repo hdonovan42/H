@@ -60,9 +60,11 @@ export default function StatusBar({ status }) {
       </div>
 
       <div className="stat">
-        <div className="stat-label">API Costs</div>
-        <div className="stat-value red">{formatCost(total_api_costs)}</div>
-        <div className="stat-sub">total spent</div>
+        <div className="stat-label">ARR</div>
+        <div className={`stat-value ${alive_days > 0 ? ((total_value - 50) / 50 / alive_days * 365 >= 0 ? 'green' : 'red') : ''}`}>
+          {alive_days > 0 ? `${(total_value - 50) / 50 / alive_days * 365 * 100 >= 0 ? '+' : ''}${Math.round((total_value - 50) / 50 / alive_days * 365 * 100)}%` : 'N/A'}
+        </div>
+        <div className="stat-sub">annualised return</div>
       </div>
 
       <div className="stat">

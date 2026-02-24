@@ -5,6 +5,21 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.23.1 — Dashboard: ARR + British Spelling
+
+**Deployed**: 2026-02-24 | **Baseline**: $52.73 balance, $78.00 total value, 144.8d runway
+
+Dashboard changes:
+- Replaced "API Costs" stat box with **ARR** (annualised rate of return as %). Calculated as `(total_value - seed) / seed / days_alive * 365 * 100`.
+- "realized" → "realised" (British spelling).
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `dashboard/src/components/StatusBar.jsx` | ARR box replaces API Costs; British spelling |
+
+---
+
 ## v16.23 — Unrealised Loss Floor + Entry Reasoning Fix
 
 **Deployed**: 2026-02-24
