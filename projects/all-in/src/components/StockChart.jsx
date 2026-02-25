@@ -128,6 +128,14 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
     return [];
   }, [chartData, intradayData, weeklyData, monthlyData, visibleDays, sliceByTradingDays]);
 
+  // Early market: data spans < 2 hours, scale to 2-hour window instead of full day
+  const earlyMarket = useMemo(() => {
+    if (visibleDays > 1 || !visibleData || visibleData.length < 2) return false;
+    const first = dayjs(visibleData[0].date).tz(EST);
+    const last = dayjs(visibleData[visibleData.length - 1].date).tz(EST);
+    return last.diff(first, 'minute') / 60 < 2;
+  }, [visibleDays, visibleData]);
+
   // Calculate chart paths and candles from visible data
   const { minPrice, maxPrice, priceRange, linePath, areaPath, candles } = useMemo(() => {
     if (!visibleData?.length) return { minPrice: 0, maxPrice: 100, priceRange: 100, linePath: '', areaPath: '', candles: [] };
@@ -139,8 +147,28 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
     );
     if (validData.length < 2) return { minPrice: 0, maxPrice: 100, priceRange: 100, linePath: '', areaPath: '', candles: [] };
 
-    const min = Math.min(...validData.map(d => d.low)) * 0.999;
-    const max = Math.max(...validData.map(d => d.high)) * 1.001;
+    let min = Math.min(...validData.map(d => d.low));
+    let max = Math.max(...validData.map(d => d.high));
+    // Include previous close in 1D range so the reference line is always visible
+    if (visibleDays <= 1 && previousClose) {
+      min = Math.min(min, previousClose);
+      max = Math.max(max, previousClose);
+    }
+    // Expand range to fit nice Y-axis labels
+    const rawRange = (max - min) || 1;
+    const rawStep = rawRange / 3;
+    const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    const norm = rawStep / mag;
+    let labelStep;
+    if (norm <= 1.5) labelStep = 1 * mag;
+    else if (norm <= 3.5) labelStep = 2 * mag;
+    else if (norm <= 7.5) labelStep = 5 * mag;
+    else labelStep = 10 * mag;
+    if (labelStep >= 2 && labelStep % 2 !== 0) labelStep = Math.round(labelStep / 2) * 2;
+    const center = (min + max) / 2;
+    const rc = Math.round(center / labelStep) * labelStep;
+    min = Math.min(min, rc - 1.5 * labelStep) - rawRange * 0.01;
+    max = Math.max(max, rc + 1.5 * labelStep) + rawRange * 0.01;
     const range = (max - min) || 1;
     const calcY = (price) => 260 - ((price - min) / range) * 240;
 
@@ -149,7 +177,9 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
       if (visibleDays <= 1) {
         const estTime = dayjs(d.date).tz(EST);
         const timeInHours = Math.max(9.5, Math.min(16, estTime.hour() + estTime.minute() / 60));
-        return 50 + ((timeInHours - 9.5) / 6.5) * 720;
+        // Early market: scale to 2-hour window (9:30–11:30) instead of full day
+        const span = earlyMarket ? 2 : 6.5;
+        return 50 + ((timeInHours - 9.5) / span) * 720;
       }
       // For longer periods, use index-based positioning
       return 50 + (i / (validData.length - 1 || 1)) * 720;
@@ -183,7 +213,7 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
     });
 
     return { minPrice: min, maxPrice: max, priceRange: range, linePath: line, areaPath: area, candles: candleData };
-  }, [visibleData, visibleDays]);
+  }, [visibleData, visibleDays, earlyMarket, previousClose]);
 
   // Determine chart color based on price movement
   let isChartPositive = true;
@@ -209,7 +239,8 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
 
     if (visibleDays <= 1) {
       // Intraday: find nearest point by time
-      const mouseTimeHours = 9.5 + ((mouseX - 50) / 720) * 6.5;
+      const span = earlyMarket ? 2 : 6.5;
+      const mouseTimeHours = 9.5 + ((mouseX - 50) / 720) * span;
       let nearestIndex = 0, nearestDiff = Infinity;
 
       visibleData.forEach((d, i) => {
@@ -224,7 +255,7 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
       if (!point) return;
       const estTime = dayjs(point.date).tz(EST);
       const timeInHours = Math.max(9.5, Math.min(16, estTime.hour() + estTime.minute() / 60));
-      dataX = 50 + ((timeInHours - 9.5) / 6.5) * 720;
+      dataX = 50 + ((timeInHours - 9.5) / span) * 720;
     } else {
       // Longer periods: find by position
       const ratio = (mouseX - 50) / 720;
@@ -240,7 +271,7 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
         setHoverData({ dataX, y: yPos, data: point });
       }
     }
-  }, [visibleData, visibleDays, minPrice, priceRange]);
+  }, [visibleData, visibleDays, earlyMarket, minPrice, priceRange]);
 
   // Mouse down handler for drag selection
   const handleMouseDown = useCallback((e) => {
@@ -253,7 +284,8 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
     let index, dataX;
 
     if (visibleDays <= 1) {
-      const mouseTimeHours = 9.5 + ((mouseX - 50) / 720) * 6.5;
+      const span = earlyMarket ? 2 : 6.5;
+      const mouseTimeHours = 9.5 + ((mouseX - 50) / 720) * span;
       let nearestIndex = 0, nearestDiff = Infinity;
       visibleData.forEach((d, i) => {
         const estTime = dayjs(d.date).tz(EST);
@@ -266,7 +298,7 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
       if (!point) return;
       const estTime = dayjs(point.date).tz(EST);
       const timeInHours = Math.max(9.5, Math.min(16, estTime.hour() + estTime.minute() / 60));
-      dataX = 50 + ((timeInHours - 9.5) / 6.5) * 720;
+      dataX = 50 + ((timeInHours - 9.5) / span) * 720;
     } else {
       const ratio = (mouseX - 50) / 720;
       const dataLength = visibleData.length - 1 || 1;
@@ -281,24 +313,33 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
         setDragStart({ dataX, y: yPos, data: point });
       }
     }
-  }, [visibleData, visibleDays, minPrice, priceRange]);
+  }, [visibleData, visibleDays, earlyMarket, minPrice, priceRange]);
 
   // Mouse up handler to clear drag selection
   const handleMouseUp = useCallback(() => {
     setDragStart(null);
   }, []);
 
-  // Y-axis labels
+  // Y-axis labels — exactly 4 round-number labels with even jumps
   const getYAxisLabels = () => {
-    if (!minPrice || !maxPrice || !isFinite(minPrice) || !isFinite(maxPrice)) return [];
-    const min = Math.floor(minPrice / 20) * 20;
-    const max = Math.ceil(maxPrice / 20) * 20;
-    const step = Math.ceil((max - min) / 5 / 20) * 20 || 20;
-    const steps = [];
-    for (let p = max; p >= min && steps.length < 6; p -= step) steps.push(p);
-    return steps.map(p => ({
-      label: `$${p}`,
-      top: ((20 + ((max - p) / ((max - min) || 1)) * 240) / 300) * 100
+    if (!minPrice || !maxPrice || !isFinite(minPrice) || !isFinite(maxPrice) || !priceRange) return [];
+    // Nice round even step so 4 labels span roughly the price range
+    const rawStep = priceRange / 3;
+    const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    const norm = rawStep / mag;
+    let step;
+    if (norm <= 1.5) step = 1 * mag;
+    else if (norm <= 3.5) step = 2 * mag;
+    else if (norm <= 7.5) step = 5 * mag;
+    else step = 10 * mag;
+    if (step >= 2 && step % 2 !== 0) step = Math.round(step / 2) * 2;
+    // Centre 4 labels around the data midpoint
+    const center = (minPrice + maxPrice) / 2;
+    const rc = Math.round(center / step) * step;
+    const labels = [rc - 1.5 * step, rc - 0.5 * step, rc + 0.5 * step, rc + 1.5 * step];
+    return labels.map(p => ({
+      label: `$${Number.isInteger(p) ? p : p.toFixed(2)}`,
+      top: ((260 - ((p - minPrice) / priceRange) * 240) / 300) * 100
     }));
   };
 
@@ -309,7 +350,15 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
 
     let allLabels = [];
 
-    if (visibleDays <= 1) {
+    if (visibleDays <= 1 && earlyMarket) {
+      // Early market: show half-hour labels across the 2-hour window (9:30–11:30)
+      const labels = ['9:30','10:00','10:30','11:00','11:30'];
+      allLabels = labels.map(label => {
+        const [h, m] = label.split(':').map(Number);
+        const timeInHours = h + m / 60;
+        return { label, x: 50 + ((timeInHours - 9.5) / 2) * 720 };
+      });
+    } else if (visibleDays <= 1) {
       // Intraday: show hours from 9:30 to 16:00
       allLabels = ['10:00','11:00','12:00','13:00','14:00','15:00','16:00'].map((label, idx, arr) => {
         const hour = parseInt(label.split(':')[0]);

@@ -206,10 +206,10 @@ export default function StockTracker() {
     }
   }, [chartCache]);
 
-  // Intraday data fetcher for 1D view (5-min intervals)
+  // Intraday data fetcher for 1D view (1-min intervals)
   const fetchIntradayData = useCallback(async (symbol) => {
     try {
-      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=5m`);
+      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=1m`);
       const barsData = await barsRes.json();
 
       if (barsData?.chart?.result?.[0]) {

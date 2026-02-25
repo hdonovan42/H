@@ -74,7 +74,7 @@ export const fetchSharesOutstanding = async (symbol) => {
 };
 
 export const fetchYahooQuote = async (symbol) => {
-  const response = await fetchWithTimeout(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=5m&includePrePost=true`);
+  const response = await fetchWithTimeout(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=1m&includePrePost=true`);
   const data = await response.json();
 
   if (!data?.chart?.result?.[0]) return null;
