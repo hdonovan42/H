@@ -167,6 +167,14 @@ function generateXLSX(rows, sheetName, outputPath) {
   XLSX.writeFile(wb, outputPath);
 }
 
+function isQuarterComplete(quarter, year) {
+  const qNum = parseInt(quarter[1]);
+  const endMonth = qNum * 3; // month after quarter ends (1-indexed)
+  // First day of the next quarter
+  const quarterEnd = new Date(Date.UTC(year, endMonth, 1));
+  return Date.now() >= quarterEnd.getTime();
+}
+
 // --- Main ---
 async function main() {
   // Parse args
@@ -181,6 +189,12 @@ async function main() {
   }
 
   const { quarter, year } = quarterInfo;
+
+  // Only export complete quarters
+  if (!isQuarterComplete(quarter, year)) {
+    console.log(`${quarter}'${String(year).slice(-2)} has not ended yet, skipping.`);
+    process.exit(0);
+  }
   const filename = formatFilename(quarter, year);
   const sheetName = `TSLA ${quarter}'${String(year).slice(-2)}`;
 
