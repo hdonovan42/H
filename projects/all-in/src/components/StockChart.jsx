@@ -137,15 +137,15 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
   }, [visibleDays, visibleData]);
 
   // Calculate chart paths and candles from visible data
-  const { minPrice, maxPrice, priceRange, linePath, areaPath, candles } = useMemo(() => {
-    if (!visibleData?.length) return { minPrice: 0, maxPrice: 100, priceRange: 100, linePath: '', areaPath: '', candles: [] };
+  const { minPrice, maxPrice, priceRange, yLabels, linePath, areaPath, candles } = useMemo(() => {
+    if (!visibleData?.length) return { minPrice: 0, maxPrice: 100, priceRange: 100, yLabels: [], linePath: '', areaPath: '', candles: [] };
 
     // Filter out any data points with null/undefined values
     const validData = visibleData.filter(d =>
       d.low != null && d.high != null && d.close != null && d.open != null &&
       isFinite(d.low) && isFinite(d.high) && isFinite(d.close) && isFinite(d.open)
     );
-    if (validData.length < 2) return { minPrice: 0, maxPrice: 100, priceRange: 100, linePath: '', areaPath: '', candles: [] };
+    if (validData.length < 2) return { minPrice: 0, maxPrice: 100, priceRange: 100, yLabels: [], linePath: '', areaPath: '', candles: [] };
 
     let min = Math.min(...validData.map(d => d.low));
     let max = Math.max(...validData.map(d => d.high));
@@ -154,21 +154,18 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
       min = Math.min(min, previousClose);
       max = Math.max(max, previousClose);
     }
-    // Expand range to fit nice Y-axis labels
+    // 4 Y-axis labels: round bottom near min, round top near max, 2 evenly spaced between
     const rawRange = (max - min) || 1;
-    const rawStep = rawRange / 3;
-    const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
-    const norm = rawStep / mag;
-    let labelStep;
-    if (norm <= 1.5) labelStep = 1 * mag;
-    else if (norm <= 3.5) labelStep = 2 * mag;
-    else if (norm <= 7.5) labelStep = 5 * mag;
-    else labelStep = 10 * mag;
-    if (labelStep >= 2 && labelStep % 2 !== 0) labelStep = Math.round(labelStep / 2) * 2;
-    const center = (min + max) / 2;
-    const rc = Math.round(center / labelStep) * labelStep;
-    min = Math.min(min, rc - 1.5 * labelStep) - rawRange * 0.01;
-    max = Math.max(max, rc + 1.5 * labelStep) + rawRange * 0.01;
+    const roundTo = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000].find(s => s >= rawRange / 30) || 1;
+    const bottom = Math.ceil(min / roundTo) * roundTo;
+    const top = Math.floor(max / roundTo) * roundTo;
+    const gap = (top - bottom) / 3;
+    const mid1 = bottom + Math.round(gap / roundTo) * roundTo;
+    const mid2 = bottom + Math.round(gap * 2 / roundTo) * roundTo;
+    const labelValues = [bottom, mid1, mid2, top];
+    // Expand chart range to fit labels with small padding
+    min = Math.min(min, bottom) - rawRange * 0.01;
+    max = Math.max(max, top) + rawRange * 0.01;
     const range = (max - min) || 1;
     const calcY = (price) => 260 - ((price - min) / range) * 240;
 
@@ -212,7 +209,13 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
       };
     });
 
-    return { minPrice: min, maxPrice: max, priceRange: range, linePath: line, areaPath: area, candles: candleData };
+    // Compute label positions using final chart range
+    const computedLabels = labelValues.map(p => ({
+      label: `$${Number.isInteger(p) ? p : p.toFixed(2)}`,
+      top: ((260 - ((p - min) / range) * 240) / 300) * 100
+    }));
+
+    return { minPrice: min, maxPrice: max, priceRange: range, yLabels: computedLabels, linePath: line, areaPath: area, candles: candleData };
   }, [visibleData, visibleDays, earlyMarket, previousClose]);
 
   // Determine chart color based on price movement
@@ -320,28 +323,7 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
     setDragStart(null);
   }, []);
 
-  // Y-axis labels — exactly 4 round-number labels with even jumps
-  const getYAxisLabels = () => {
-    if (!minPrice || !maxPrice || !isFinite(minPrice) || !isFinite(maxPrice) || !priceRange) return [];
-    // Nice round even step so 4 labels span roughly the price range
-    const rawStep = priceRange / 3;
-    const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
-    const norm = rawStep / mag;
-    let step;
-    if (norm <= 1.5) step = 1 * mag;
-    else if (norm <= 3.5) step = 2 * mag;
-    else if (norm <= 7.5) step = 5 * mag;
-    else step = 10 * mag;
-    if (step >= 2 && step % 2 !== 0) step = Math.round(step / 2) * 2;
-    // Centre 4 labels around the data midpoint
-    const center = (minPrice + maxPrice) / 2;
-    const rc = Math.round(center / step) * step;
-    const labels = [rc - 1.5 * step, rc - 0.5 * step, rc + 0.5 * step, rc + 1.5 * step];
-    return labels.map(p => ({
-      label: `$${Number.isInteger(p) ? p : p.toFixed(2)}`,
-      top: ((260 - ((p - minPrice) / priceRange) * 240) / 300) * 100
-    }));
-  };
+  // Y-axis labels are pre-computed in the chart memo above
 
   // Dynamic X-axis labels based on visible range
   const getXAxisLabels = () => {
@@ -439,7 +421,7 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
     }
   };
 
-  const yLabels = getYAxisLabels();
+  // yLabels computed in chart memo above
   const xLabels = getXAxisLabels();
 
   // Determine which timeframe button is "active" (closest match)
