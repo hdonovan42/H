@@ -16,9 +16,10 @@ export default function CycleLog({ cycles }) {
   }
 
   return (
-    <div className="card">
+    <div className="card cycle-log-card">
       <div className="card-title">Recent Decisions</div>
-      <ul className="cycle-list">
+      <div className="cycle-list-wrapper">
+        <ul className="cycle-list">
         {cycles.map((c) => (
           <li key={c.id} className="cycle-item">
             <span className={`action-badge ${c.action || 'wait'}`}>
@@ -38,6 +39,7 @@ export default function CycleLog({ cycles }) {
           </li>
         ))}
       </ul>
+      </div>
     </div>
   );
 }

@@ -227,9 +227,25 @@ html, body {
 
 /* ── Cycle Log ───────────────────────────────────────────────── */
 
+.cycle-log-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.cycle-list-wrapper {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
 .cycle-list {
   list-style: none;
-  max-height: 400px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   overflow-y: auto;
 }
 
