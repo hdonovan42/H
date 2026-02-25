@@ -14,7 +14,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
-    "puppeteer": "^24.37.5",
+    "cheerio": "^1.0.0",
     "resend": "^4.0.0",
     "stripe": "^17.0.0"
   }
