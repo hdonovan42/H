@@ -1,0 +1,11 @@
+export const APP_NAME = 'AutoSnipe'
+export const APP_VERSION = '1.0.0'
+export const ACCENT_COLOR = '#FF6B00'
+export const FREE_TIER_SEARCHES = 1
+export const PRO_TIER_SEARCHES = 10
+export const POLL_INTERVAL_HOURS = 3
+export const MAX_AGENT_ITERATIONS = 8
+export const DISPLAY_WIDTH = 1024
+export const DISPLAY_HEIGHT = 768
+export const CONTAINER_NAME = 'autosnipe-browser'
+export const DISPLAY_NUM = 1

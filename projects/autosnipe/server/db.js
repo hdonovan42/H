@@ -1,0 +1,92 @@
+import Database from 'better-sqlite3'
+import { resolve, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { mkdirSync } from 'node:fs'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const DATA_DIR = resolve(__dirname, 'data')
+const DB_PATH = resolve(DATA_DIR, 'autosnipe.db')
+
+let db
+
+export function getDb() {
+  if (!db) {
+    mkdirSync(DATA_DIR, { recursive: true })
+    db = new Database(DB_PATH)
+    db.pragma('journal_mode = WAL')
+    db.pragma('foreign_keys = ON')
+    migrate(db)
+  }
+  return db
+}
+
+function migrate(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT UNIQUE NOT NULL,
+      phone TEXT,
+      tier TEXT DEFAULT 'free' CHECK(tier IN ('free', 'pro')),
+      stripe_customer_id TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS magic_links (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      token TEXT UNIQUE NOT NULL,
+      expires_at TEXT NOT NULL,
+      used INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS searches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      name TEXT,
+      criteria TEXT NOT NULL,
+      autotrader_url TEXT,
+      active INTEGER DEFAULT 1,
+      last_checked TEXT,
+      last_result_count INTEGER,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS listings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      search_id INTEGER NOT NULL REFERENCES searches(id),
+      autotrader_id TEXT NOT NULL,
+      title TEXT,
+      price INTEGER,
+      mileage INTEGER,
+      year INTEGER,
+      fuel_type TEXT,
+      transmission TEXT,
+      url TEXT,
+      image_url TEXT,
+      seller_type TEXT,
+      location TEXT,
+      first_seen TEXT DEFAULT (datetime('now')),
+      notified_at TEXT,
+      UNIQUE(search_id, autotrader_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS poll_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      search_id INTEGER NOT NULL REFERENCES searches(id),
+      started_at TEXT DEFAULT (datetime('now')),
+      completed_at TEXT,
+      status TEXT DEFAULT 'running',
+      listings_found INTEGER DEFAULT 0,
+      new_listings INTEGER DEFAULT 0,
+      iterations INTEGER DEFAULT 0,
+      cost_estimate REAL DEFAULT 0,
+      error TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_listings_search ON listings(search_id);
+    CREATE INDEX IF NOT EXISTS idx_listings_autotrader ON listings(autotrader_id);
+    CREATE INDEX IF NOT EXISTS idx_searches_user ON searches(user_id);
+    CREATE INDEX IF NOT EXISTS idx_searches_active ON searches(active);
+  `)
+}

@@ -1,0 +1,21 @@
+{
+  "name": "autosnipe-api",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.72.1",
+    "better-sqlite3": "^12.6.2",
+    "cors": "^2.8.5",
+    "croner": "^10.0.1",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "puppeteer": "^24.37.5",
+    "resend": "^4.0.0",
+    "stripe": "^17.0.0"
+  }
+}

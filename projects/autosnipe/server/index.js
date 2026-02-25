@@ -1,0 +1,221 @@
+import 'dotenv/config'
+import express from 'express'
+import cors from 'cors'
+import { getDb } from './db.js'
+import { sendMagicLink, verifyMagicLink, requireAuth } from './auth.js'
+import { createCheckoutSession, handleWebhook } from './stripe.js'
+import { startScheduler, runPollCycle } from './scheduler.js'
+import { buildAutotraderUrl } from './scraper.js'
+import { FREE_TIER_SEARCHES, PRO_TIER_SEARCHES } from '../shared/config.js'
+
+const app = express()
+const PORT = process.env.PORT || 3103
+
+// Stripe webhook needs raw body — must be before json parser
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  try {
+    const result = await handleWebhook(req.body, req.headers['stripe-signature'])
+    res.json(result)
+  } catch (err) {
+    res.status(400).json({ error: err.message })
+  }
+})
+
+app.use(cors())
+app.use(express.json())
+
+// Request logging
+app.use((req, res, next) => {
+  const start = Date.now()
+  res.on('finish', () => {
+    console.log(`${req.method} ${req.path} ${res.statusCode} ${Date.now() - start}ms`)
+  })
+  next()
+})
+
+// ===== HEALTH =====
+
+app.get('/api/health', (req, res) => {
+  const db = getDb()
+  res.json({
+    ok: true,
+    uptime: process.uptime(),
+    activeSearches: db.prepare('SELECT COUNT(*) as n FROM searches WHERE active = 1').get().n,
+    totalUsers: db.prepare('SELECT COUNT(*) as n FROM users').get().n
+  })
+})
+
+// ===== AUTH =====
+
+app.post('/api/auth/magic-link', async (req, res) => {
+  const { email } = req.body
+  if (!email) return res.status(400).json({ error: 'Email required' })
+  try {
+    const result = await sendMagicLink(email)
+    res.json(result)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.get('/api/auth/verify', (req, res) => {
+  const { token } = req.query
+  if (!token) return res.status(400).json({ error: 'Token required' })
+
+  const result = verifyMagicLink(token)
+  if (result.success) {
+    res.redirect(`/#/auth-callback?token=${result.token}`)
+  } else {
+    res.redirect('/#/login?error=invalid_link')
+  }
+})
+
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  const user = getDb()
+    .prepare('SELECT id, email, phone, tier, created_at FROM users WHERE id = ?')
+    .get(req.user.userId)
+  if (!user) return res.status(404).json({ error: 'User not found' })
+  res.json(user)
+})
+
+// ===== SEARCHES =====
+
+app.get('/api/searches', requireAuth, (req, res) => {
+  const searches = getDb().prepare(`
+    SELECT s.*,
+      (SELECT COUNT(*) FROM listings WHERE search_id = s.id) as total_listings,
+      (SELECT COUNT(*) FROM listings WHERE search_id = s.id AND notified_at IS NOT NULL) as notified_count
+    FROM searches s WHERE s.user_id = ? ORDER BY s.created_at DESC
+  `).all(req.user.userId)
+  res.json(searches)
+})
+
+app.post('/api/searches', requireAuth, (req, res) => {
+  const db = getDb()
+  const user = db.prepare('SELECT tier FROM users WHERE id = ?').get(req.user.userId)
+  const activeCount = db.prepare('SELECT COUNT(*) as n FROM searches WHERE user_id = ? AND active = 1')
+    .get(req.user.userId).n
+
+  const maxSearches = user.tier === 'pro' ? PRO_TIER_SEARCHES : FREE_TIER_SEARCHES
+  if (activeCount >= maxSearches) {
+    return res.status(403).json({
+      error: `Maximum ${maxSearches} active search${maxSearches > 1 ? 'es' : ''} on ${user.tier} tier`,
+      upgrade: user.tier === 'free'
+    })
+  }
+
+  const { name, criteria } = req.body
+  if (!criteria) return res.status(400).json({ error: 'Criteria required' })
+
+  const autotraderUrl = buildAutotraderUrl(criteria)
+
+  const result = db.prepare(`
+    INSERT INTO searches (user_id, name, criteria, autotrader_url)
+    VALUES (?, ?, ?, ?)
+  `).run(req.user.userId, name || null, JSON.stringify(criteria), autotraderUrl)
+
+  res.json({ success: true, id: result.lastInsertRowid, autotraderUrl })
+})
+
+app.delete('/api/searches/:id', requireAuth, (req, res) => {
+  const db = getDb()
+  const search = db.prepare('SELECT * FROM searches WHERE id = ? AND user_id = ?')
+    .get(req.params.id, req.user.userId)
+  if (!search) return res.status(404).json({ error: 'Search not found' })
+
+  db.prepare('UPDATE searches SET active = 0 WHERE id = ?').run(req.params.id)
+  res.json({ success: true })
+})
+
+// ===== LISTINGS =====
+
+app.get('/api/searches/:id/listings', requireAuth, (req, res) => {
+  const db = getDb()
+  const search = db.prepare('SELECT * FROM searches WHERE id = ? AND user_id = ?')
+    .get(req.params.id, req.user.userId)
+  if (!search) return res.status(404).json({ error: 'Search not found' })
+
+  const listings = db.prepare(`
+    SELECT * FROM listings WHERE search_id = ? ORDER BY first_seen DESC LIMIT 100
+  `).all(req.params.id)
+  res.json(listings)
+})
+
+app.get('/api/matches/recent', requireAuth, (req, res) => {
+  const listings = getDb().prepare(`
+    SELECT l.*, s.name as search_name, s.criteria
+    FROM listings l
+    JOIN searches s ON l.search_id = s.id
+    WHERE s.user_id = ?
+    ORDER BY l.first_seen DESC
+    LIMIT 50
+  `).all(req.user.userId)
+  res.json(listings)
+})
+
+// ===== SETTINGS =====
+
+app.patch('/api/settings', requireAuth, (req, res) => {
+  const { phone } = req.body
+  getDb().prepare('UPDATE users SET phone = ? WHERE id = ?')
+    .run(phone || null, req.user.userId)
+  res.json({ success: true })
+})
+
+// ===== STRIPE =====
+
+app.post('/api/stripe/checkout', requireAuth, async (req, res) => {
+  try {
+    const result = await createCheckoutSession(req.user.userId, req.user.email)
+    res.json(result)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ===== ADMIN =====
+
+app.post('/api/admin/poll', requireAuth, async (req, res) => {
+  try {
+    await runPollCycle()
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// These endpoints are protected by nginx basic auth on dash.autosnipe.co.uk
+app.get('/api/admin/stats', (req, res) => {
+  const db = getDb()
+  const users = db.prepare('SELECT COUNT(*) as total FROM users').get().total
+  const searches = db.prepare('SELECT COUNT(*) as total FROM searches WHERE active = 1').get().total
+  const listings = db.prepare('SELECT COUNT(*) as total FROM listings').get().total
+  res.json({ users, activeSearches: searches, totalListings: listings })
+})
+
+app.get('/api/admin/users', (req, res) => {
+  const users = getDb().prepare(`
+    SELECT id, email, phone, tier, created_at FROM users ORDER BY created_at DESC
+  `).all()
+  res.json(users)
+})
+
+app.get('/api/admin/poll-log-all', (req, res) => {
+  const logs = getDb().prepare(`
+    SELECT pl.*, s.name as search_name
+    FROM poll_log pl
+    JOIN searches s ON pl.search_id = s.id
+    ORDER BY pl.started_at DESC
+    LIMIT 50
+  `).all()
+  res.json(logs)
+})
+
+// ===== START =====
+
+app.listen(PORT, () => {
+  console.log(`AutoSnipe API running on port ${PORT}`)
+  getDb()
+  startScheduler()
+  console.log('Ready.')
+})
