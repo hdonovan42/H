@@ -1,0 +1,178 @@
+#!/usr/bin/env node
+// Monthly Magnificent 7 tracker — appends monthly snapshot to MagSeven.xlsx
+// Usage: node mag7-tracker.js [--month "February 2026"]
+
+import XLSX from 'xlsx';
+import { existsSync, mkdirSync } from 'fs';
+import { join } from 'path';
+
+const EXPORT_DIR = process.env.EXPORT_DIR || './exports';
+const WORKER_URL = 'https://dry-poetry-72b5.donovanh59.workers.dev';
+
+const MAG7 = ['NVDA', 'MSFT', 'AAPL', 'GOOGL', 'AMZN', 'META', 'TSLA'];
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+function getCurrentMonth() {
+  const now = new Date();
+  return `${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
+}
+
+function parseMonthArg(raw) {
+  const match = raw.match(/^(\w+)\s+(\d{4})$/);
+  if (!match || !MONTHS.includes(match[1])) {
+    console.error(`Invalid month format: "${raw}" (expected "February 2026")`);
+    process.exit(1);
+  }
+  return `${match[1]} ${match[2]}`;
+}
+
+async function fetchSP500Weights() {
+  const url = `${WORKER_URL}/fmp/sp500-weight?symbols=${MAG7.join(',')}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Worker /fmp/sp500-weight error: ${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+
+function monthExistsInSheet(ws, monthLabel) {
+  if (!ws || !ws['!ref']) return false;
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  for (let r = range.s.r; r <= range.e.r; r++) {
+    const cell = ws[XLSX.utils.encode_cell({ r, c: 0 })];
+    if (cell && cell.v === monthLabel) return true;
+  }
+  return false;
+}
+
+function getNextRow(ws) {
+  if (!ws || !ws['!ref']) return 0;
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  return range.e.r + 1;
+}
+
+function setCell(ws, r, c, value, opts = {}) {
+  const addr = XLSX.utils.encode_cell({ r, c });
+  const cell = { v: value, t: typeof value === 'number' ? 'n' : 's' };
+  if (opts.bold) cell.s = { font: { bold: true } };
+  if (opts.numFmt) cell.z = opts.numFmt;
+  ws[addr] = cell;
+}
+
+function updateRange(ws, maxRow, maxCol) {
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: maxRow, c: maxCol } });
+}
+
+// --- Main ---
+async function main() {
+  const args = process.argv.slice(2);
+  let monthLabel;
+
+  const mIdx = args.indexOf('--month');
+  if (mIdx !== -1 && args[mIdx + 1]) {
+    // Handle both: --month "February 2026" and --month February 2026
+    if (args[mIdx + 2] && /^\d{4}$/.test(args[mIdx + 2])) {
+      monthLabel = parseMonthArg(`${args[mIdx + 1]} ${args[mIdx + 2]}`);
+    } else {
+      monthLabel = parseMonthArg(args[mIdx + 1]);
+    }
+  } else {
+    monthLabel = getCurrentMonth();
+  }
+
+  if (!existsSync(EXPORT_DIR)) {
+    mkdirSync(EXPORT_DIR, { recursive: true });
+  }
+
+  const outputPath = join(EXPORT_DIR, 'MagSeven.xlsx');
+
+  // Load or create workbook
+  let wb, ws;
+  if (existsSync(outputPath)) {
+    wb = XLSX.readFile(outputPath);
+    ws = wb.Sheets['Mag 7'];
+  }
+  if (!ws) {
+    wb = wb || XLSX.utils.book_new();
+    ws = {};
+    ws['!cols'] = [
+      { wch: 8 },   // Ticker
+      { wch: 14 },  // Share Price
+      { wch: 16 },  // Mkt Cap ($B)
+      { wch: 14 },  // % of S&P 500
+    ];
+    XLSX.utils.book_append_sheet(wb, ws, 'Mag 7');
+  }
+
+  // Idempotent — skip if month already recorded
+  if (monthExistsInSheet(ws, monthLabel)) {
+    console.log(`${monthLabel} already in MagSeven.xlsx, skipping.`);
+    process.exit(0);
+  }
+
+  console.log(`Fetching Mag 7 data for ${monthLabel}...`);
+  const data = await fetchSP500Weights();
+
+  if (!data.stocks || Object.keys(data.stocks).length === 0) {
+    console.error('No stock data returned from worker.');
+    process.exit(1);
+  }
+
+  // --- Append monthly block ---
+  let row = getNextRow(ws);
+  if (row > 0) row++; // blank separator
+
+  // Month header (merged across all columns)
+  setCell(ws, row, 0, monthLabel, { bold: true });
+  ws['!merges'] = ws['!merges'] || [];
+  ws['!merges'].push({ s: { r: row, c: 0 }, e: { r: row, c: 3 } });
+  row++;
+
+  // Column headers
+  setCell(ws, row, 0, 'Ticker', { bold: true });
+  setCell(ws, row, 1, 'Share Price', { bold: true });
+  setCell(ws, row, 2, 'Mkt Cap ($B)', { bold: true });
+  setCell(ws, row, 3, '% of S&P 500', { bold: true });
+  row++;
+
+  let totalMktCap = 0;
+  let totalWeight = 0;
+
+  // Stock rows
+  for (const symbol of MAG7) {
+    const stock = data.stocks[symbol];
+    if (!stock) {
+      console.error(`No data for ${symbol}, skipping row.`);
+      setCell(ws, row, 0, symbol);
+      row++;
+      continue;
+    }
+
+    const mktCapB = stock.marketCap / 1e9;
+    totalMktCap += mktCapB;
+    totalWeight += stock.weight;
+
+    setCell(ws, row, 0, symbol);
+    setCell(ws, row, 1, stock.price, { numFmt: '$#,##0.00' });
+    setCell(ws, row, 2, Math.round(mktCapB * 10) / 10, { numFmt: '$#,##0.0' });
+    setCell(ws, row, 3, stock.weight / 100, { numFmt: '0.00%' });
+    row++;
+  }
+
+  // Total row
+  setCell(ws, row, 0, 'TOTAL', { bold: true });
+  setCell(ws, row, 2, Math.round(totalMktCap * 10) / 10, { numFmt: '$#,##0.0', bold: true });
+  setCell(ws, row, 3, totalWeight / 100, { numFmt: '0.00%', bold: true });
+
+  updateRange(ws, row, 3);
+  XLSX.writeFile(wb, outputPath);
+  console.log(`Updated ${outputPath} with ${monthLabel}`);
+}
+
+main().catch((err) => {
+  console.error(err.message);
+  process.exit(1);
+});

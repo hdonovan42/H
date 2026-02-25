@@ -598,6 +598,59 @@ export default {
         });
       }
 
+      // GET /fmp/sp500-weight?symbols=NVDA,MSFT,... - Mag 7 market cap + S&P 500 weight
+      if (path === '/fmp/sp500-weight') {
+        const requestedSymbols = url.searchParams.get('symbols')?.split(',') || [];
+        const cache = caches.default;
+        const cacheKey = new Request(url.toString(), request);
+        let response = await cache.match(cacheKey);
+
+        if (!response) {
+          // Fetch market cap per stock: shares outstanding (FMP) × price (Yahoo)
+          const stocks = {};
+          await Promise.all(requestedSymbols.map(async (symbol) => {
+            const [floatResp, chartResp] = await Promise.all([
+              fetch(`https://financialmodelingprep.com/stable/shares-float?symbol=${symbol}&apikey=${FMP_KEY}`),
+              fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1d`, { headers: yahooHeaders }),
+            ]);
+            const floatData = floatResp.ok ? await floatResp.json() : [];
+            const chartData = chartResp.ok ? await chartResp.json() : {};
+            const shares = floatData[0]?.outstandingShares;
+            const price = chartData.chart?.result?.[0]?.meta?.regularMarketPrice;
+            if (shares && price) {
+              stocks[symbol] = { price, marketCap: shares * price };
+            }
+          }));
+
+          // S&P 500 total market cap = index level × divisor
+          // Divisor derived: $62T total / 6928 index = ~8.95B (Feb 2026)
+          const gspcResp = await fetch(
+            'https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=1d',
+            { headers: yahooHeaders }
+          );
+          const gspcData = gspcResp.ok ? await gspcResp.json() : {};
+          const indexLevel = gspcData.chart?.result?.[0]?.meta?.regularMarketPrice || 6000;
+          const SP500_DIVISOR = 8_950_000_000;
+          const total = indexLevel * SP500_DIVISOR;
+
+          const result = { total, indexLevel, stocks: {} };
+          for (const [sym, data] of Object.entries(stocks)) {
+            result.stocks[sym] = {
+              price: data.price,
+              marketCap: data.marketCap,
+              weight: (data.marketCap / total) * 100,
+            };
+          }
+
+          response = new Response(JSON.stringify(result), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=86400' },
+          });
+          ctx.waitUntil(cache.put(cacheKey, response.clone()));
+        }
+
+        return response;
+      }
+
       // ============================================================
       // ALPHAVANTAGE ROUTES
       // ============================================================
