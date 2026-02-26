@@ -5,13 +5,30 @@ export default function Settings({ user, onRefresh }) {
   const [phone, setPhone] = useState(user.phone || '')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [error, setError] = useState('')
+
+  const normalisePhone = (raw) => {
+    const digits = raw.replace(/[\s\-\(\)]/g, '')
+    // Already international: +447...
+    if (/^\+44\d{10}$/.test(digits)) return digits
+    // 07... UK mobile — swap leading 0 for +44
+    if (/^0\d{10}$/.test(digits)) return '+44' + digits.slice(1)
+    return null
+  }
 
   const handleSave = async (e) => {
     e.preventDefault()
+    const normalised = phone.trim() ? normalisePhone(phone.trim()) : null
+    if (phone.trim() && !normalised) {
+      setError('Enter a valid UK mobile number, e.g. 07702 188120')
+      return
+    }
     setSaving(true)
     setSaved(false)
+    setError('')
     try {
-      await apiPatch('/api/settings', { phone: phone.trim() || null })
+      await apiPatch('/api/settings', { phone: normalised })
+      setPhone(normalised || '')
       setSaved(true)
       if (onRefresh) onRefresh()
     } catch (err) {
@@ -77,10 +94,14 @@ export default function Settings({ user, onRefresh }) {
                 type="tel"
                 placeholder="+447700000000"
                 value={phone}
-                onChange={e => setPhone(e.target.value)}
+                onChange={e => { setPhone(e.target.value); setSaved(false); setError('') }}
               />
             </div>
-            <button className="btn btn-primary btn-sm" disabled={saving}>
+            {error && <div style={{ color: '#ff4444', fontSize: 12, marginBottom: 8 }}>{error}</div>}
+            <button
+              className={`btn btn-sm ${saved ? 'btn-saved' : 'btn-primary'}`}
+              disabled={saving}
+            >
               {saving ? 'Saving...' : saved ? 'Saved' : 'Save'}
             </button>
           </form>

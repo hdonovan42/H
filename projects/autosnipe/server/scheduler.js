@@ -2,6 +2,7 @@ import { Cron } from 'croner'
 import { getDb } from './db.js'
 import { scrapeSearch } from './scraper.js'
 import { sendWhatsApp, formatListingAlert } from './whatsapp.js'
+import { sendListingEmail } from './notify.js'
 import { refreshTaxonomy, taxonomyNeedsRefresh } from './taxonomy.js'
 import { POLL_INTERVAL_MINUTES, QUIET_START_UTC, QUIET_END_UTC } from '../shared/config.js'
 
@@ -107,11 +108,18 @@ export async function runPollCycle() {
       db.prepare("UPDATE searches SET last_checked = datetime('now'), last_result_count = ? WHERE id = ?")
         .run(result.listings.length, search.id)
 
-      // WhatsApp for new listings
-      if (newListings.length > 0 && search.phone) {
+      // Notify on new listings
+      if (newListings.length > 0) {
         const searchName = search.name || `${JSON.parse(search.criteria).make || ''} ${JSON.parse(search.criteria).model || ''}`.trim()
-        const message = formatListingAlert(newListings, searchName)
-        await sendWhatsApp(search.phone, message)
+
+        // Email (always)
+        await sendListingEmail(search.email, newListings, searchName)
+
+        // WhatsApp (if phone set)
+        if (search.phone) {
+          const message = formatListingAlert(newListings, searchName)
+          await sendWhatsApp(search.phone, message)
+        }
 
         // Mark as notified
         for (const listing of newListings) {
