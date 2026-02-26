@@ -29,20 +29,27 @@ export default function SearchCard({ search, onToggle }) {
       .finally(() => setLoadingListings(false))
   }, [expanded, search.id, listings.length])
 
-  const grid = [
-    { label: 'Make',      value: criteria.make },
-    { label: 'Model',     value: criteria.model },
-    { label: 'Variant',   value: criteria.variant },
-    { label: 'Year From', value: criteria.year_from },
-    { label: 'Year To',   value: criteria.year_to },
-    { label: 'Colour',    value: criteria.colour },
-    { label: 'Min Price', value: criteria.price_from ? `£${criteria.price_from.toLocaleString()}` : null },
-    { label: 'Max Price', value: criteria.price_to ? `£${criteria.price_to.toLocaleString()}` : null },
-    { label: 'Mileage',   value: criteria.mileage_max ? `${criteria.mileage_max.toLocaleString()}` : null },
-    { label: 'Fuel',      value: criteria.fuel_type },
-    { label: 'Gearbox',   value: criteria.transmission },
-    { label: 'Body Type', value: criteria.body_type },
-  ]
+  const autoNames = new Set([
+    `${criteria.make || 'Any'} ${criteria.model || ''}`.trim(),
+    `${criteria.make || 'Any'} ${criteria.model || ''} ${criteria.variant || ''}`.trim(),
+  ])
+  const hasNickname = search.name && !autoNames.has(search.name)
+
+  const tags = [
+    ...(hasNickname ? [criteria.make, criteria.model, criteria.variant] : []),
+    criteria.year_from && criteria.year_to
+      ? `${criteria.year_from}-${criteria.year_to}`
+      : criteria.year_from || criteria.year_to,
+    criteria.price_from || criteria.price_to
+      ? `£${(criteria.price_from || 0).toLocaleString()}-£${(criteria.price_to || '?').toLocaleString()}`
+      : null,
+    criteria.mileage_max ? `<${criteria.mileage_max.toLocaleString()}mi` : null,
+    criteria.fuel_type,
+    criteria.transmission,
+    criteria.colour,
+    criteria.body_type,
+    criteria.postcode ? `${criteria.postcode} (${criteria.radius || 50}mi)` : null
+  ].filter(Boolean)
 
   const count = search.total_listings || 0
 
@@ -61,18 +68,13 @@ export default function SearchCard({ search, onToggle }) {
       </div>
       <div className="search-card-header">
         <span className="search-card-name">
-          {search.name || `${criteria.make || 'Any'} ${criteria.model || ''} ${criteria.variant || ''}`.trim()}
+          {hasNickname ? search.name : `${criteria.make || 'Any'} ${criteria.model || ''} ${criteria.variant || ''}`.trim()}
         </span>
       </div>
 
-      <div className="search-card-grid">
-        {grid.map((cell, i) => (
-          <div key={i} className="search-card-cell">
-            <span className="search-card-cell-label">{cell.label}</span>
-            <span className={`search-card-cell-value${cell.value ? '' : ' empty'}`}>
-              {cell.value || '—'}
-            </span>
-          </div>
+      <div className="search-card-criteria">
+        {tags.map((tag, i) => (
+          <span key={i} className="search-card-tag">{tag}</span>
         ))}
       </div>
 

@@ -61,5 +61,34 @@
     { "value": "100", "label": "100 miles" },
     { "value": "200", "label": "200 miles" },
     { "value": "1500", "label": "National" }
+  ],
+  "colours": [
+    { "value": "Black", "label": "Black" },
+    { "value": "Blue", "label": "Blue" },
+    { "value": "Bronze", "label": "Bronze" },
+    { "value": "Brown", "label": "Brown" },
+    { "value": "Burgundy", "label": "Burgundy" },
+    { "value": "Gold", "label": "Gold" },
+    { "value": "Green", "label": "Green" },
+    { "value": "Grey", "label": "Grey" },
+    { "value": "Ivory", "label": "Ivory" },
+    { "value": "Orange", "label": "Orange" },
+    { "value": "Pink", "label": "Pink" },
+    { "value": "Purple", "label": "Purple" },
+    { "value": "Red", "label": "Red" },
+    { "value": "Silver", "label": "Silver" },
+    { "value": "Turquoise", "label": "Turquoise" },
+    { "value": "White", "label": "White" },
+    { "value": "Yellow", "label": "Yellow" }
+  ],
+  "bodyTypes": [
+    { "value": "Convertible", "label": "Convertible" },
+    { "value": "Coupe", "label": "Coupe" },
+    { "value": "Estate", "label": "Estate" },
+    { "value": "Hatchback", "label": "Hatchback" },
+    { "value": "MPV", "label": "MPV" },
+    { "value": "Pickup", "label": "Pickup" },
+    { "value": "Saloon", "label": "Saloon" },
+    { "value": "SUV", "label": "SUV" }
   ]
 }
