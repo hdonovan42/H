@@ -6,6 +6,12 @@ import modelsData from '../data/models.json'
 const currentYear = new Date().getFullYear()
 const years = Array.from({ length: 30 }, (_, i) => currentYear - i)
 
+const formatNumber = (v) => {
+  const raw = String(v).replace(/[^0-9]/g, '')
+  return raw ? Number(raw).toLocaleString('en-GB') : ''
+}
+const parseNumber = (v) => String(v).replace(/,/g, '')
+
 export default function SearchEditor() {
   const { createSearch } = useSearches()
   const [saving, setSaving] = useState(false)
@@ -23,13 +29,17 @@ export default function SearchEditor() {
     fuel_type: '',
     transmission: '',
     postcode: '',
-    radius: '50'
+    radius: '1500'
   })
+
+  const NUMERIC_FIELDS = ['price_from', 'price_to', 'mileage_max']
 
   const set = (key) => (e) => {
     const val = e.target.value
     if (key === 'make') {
       setForm(f => ({ ...f, make: val, model: '' }))
+    } else if (NUMERIC_FIELDS.includes(key)) {
+      setForm(f => ({ ...f, [key]: formatNumber(val) }))
     } else {
       setForm(f => ({ ...f, [key]: val }))
     }
@@ -46,13 +56,15 @@ export default function SearchEditor() {
       if (form.model) criteria.model = form.model
       if (form.year_from) criteria.year_from = Number(form.year_from)
       if (form.year_to) criteria.year_to = Number(form.year_to)
-      if (form.price_from) criteria.price_from = Number(form.price_from)
-      if (form.price_to) criteria.price_to = Number(form.price_to)
-      if (form.mileage_max) criteria.mileage_max = Number(form.mileage_max)
+      if (form.price_from) criteria.price_from = Number(parseNumber(form.price_from))
+      if (form.price_to) criteria.price_to = Number(parseNumber(form.price_to))
+      if (form.mileage_max) criteria.mileage_max = Number(parseNumber(form.mileage_max))
       if (form.fuel_type) criteria.fuel_type = form.fuel_type
       if (form.transmission) criteria.transmission = form.transmission
-      if (form.postcode) criteria.postcode = form.postcode
-      if (form.radius) criteria.radius = Number(form.radius)
+      if (form.postcode) {
+        criteria.postcode = form.postcode
+        if (form.radius) criteria.radius = Number(form.radius)
+      }
 
       const name = form.name || `${form.make || 'Any'} ${form.model || ''}`.trim()
       await createSearch(name, criteria)
@@ -124,33 +136,33 @@ export default function SearchEditor() {
             <div className="input-group">
               <label>Min Price (\u00a3)</label>
               <input
-                type="number"
-                placeholder="e.g. 5000"
+                type="text"
+                inputMode="numeric"
+                placeholder="e.g. 5,000"
                 value={form.price_from}
                 onChange={set('price_from')}
-                min="0"
               />
             </div>
 
             <div className="input-group">
               <label>Max Price (\u00a3)</label>
               <input
-                type="number"
-                placeholder="e.g. 25000"
+                type="text"
+                inputMode="numeric"
+                placeholder="e.g. 25,000"
                 value={form.price_to}
                 onChange={set('price_to')}
-                min="0"
               />
             </div>
 
             <div className="input-group">
               <label>Max Mileage</label>
               <input
-                type="number"
-                placeholder="e.g. 60000"
+                type="text"
+                inputMode="numeric"
+                placeholder="e.g. 60,000"
                 value={form.mileage_max}
                 onChange={set('mileage_max')}
-                min="0"
               />
             </div>
 
@@ -185,8 +197,8 @@ export default function SearchEditor() {
             </div>
 
             <div className="input-group">
-              <label>Radius</label>
-              <select value={form.radius} onChange={set('radius')}>
+              <label>Distance</label>
+              <select value={form.postcode ? form.radius : '1500'} onChange={set('radius')} disabled={!form.postcode}>
                 {makesData.radiusOptions.map(r => (
                   <option key={r.value} value={r.value}>{r.label}</option>
                 ))}

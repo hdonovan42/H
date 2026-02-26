@@ -5,8 +5,8 @@ import * as cheerio from 'cheerio'
 export function buildAutotraderUrl(criteria) {
   const params = new URLSearchParams()
 
-  if (criteria.postcode) params.set('postcode', criteria.postcode)
-  if (criteria.radius) params.set('radius', String(criteria.radius))
+  params.set('postcode', criteria.postcode || 'SW1A 1AA')
+  params.set('radius', criteria.radius ? String(criteria.radius) : '1500')
   if (criteria.make) params.set('make', criteria.make)
   if (criteria.model) params.set('model', criteria.model)
   if (criteria.year_from) params.set('year-from', String(criteria.year_from))
