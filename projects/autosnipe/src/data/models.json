@@ -41,13 +41,22 @@
   "Vauxhall": [],
   "Volkswagen": [
     { "value": "Beetle", "label": "Beetle" },
+    { "value": "e-Golf", "label": "e-Golf" },
+    { "value": "Eos", "label": "Eos" },
     { "value": "Golf", "label": "Golf" },
+    { "value": "Golf Plus", "label": "Golf Plus" },
+    { "value": "Golf SV", "label": "Golf SV" },
+    { "value": "Lupo", "label": "Lupo" },
     { "value": "Passat", "label": "Passat" },
     { "value": "Polo", "label": "Polo" },
     { "value": "Scirocco", "label": "Scirocco" },
+    { "value": "Sharan", "label": "Sharan" },
     { "value": "T-Roc", "label": "T-Roc" },
+    { "value": "Tiguan", "label": "Tiguan" },
+    { "value": "Tiguan Allspace", "label": "Tiguan Allspace" },
     { "value": "Touareg", "label": "Touareg" },
-    { "value": "Touran", "label": "Touran" }
+    { "value": "Touran", "label": "Touran" },
+    { "value": "up!", "label": "up!" }
   ],
   "Volvo": []
 }

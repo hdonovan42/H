@@ -36,7 +36,8 @@ ssh "$VPS" bash <<'EOF'
   [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 
   cd /home/hq/autosnipe/server
-  npm ci --omit=dev
+  # Use system npm/node so native modules match what PM2 spawns with
+  /usr/bin/npm ci --omit=dev
 
   cd /home/hq/autosnipe
   mkdir -p logs server/data
