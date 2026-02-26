@@ -127,13 +127,12 @@ export default function SearchEditor() {
 
             {(() => {
               const selectedModel = (modelsData[form.make] || []).find(m => m.value === form.model)
-              const variants = selectedModel?.variants
-              if (!variants?.length) return null
+              const variants = selectedModel?.variants || []
               return (
                 <div className="input-group">
                   <label>Variant</label>
-                  <select value={form.variant} onChange={set('variant')}>
-                    <option value="">Any</option>
+                  <select value={form.variant} onChange={set('variant')} disabled={!variants.length}>
+                    <option value="">{variants.length ? 'Any' : 'Select model first'}</option>
                     {variants.map(v => (
                       <option key={v.value} value={v.value}>{v.label}</option>
                     ))}
