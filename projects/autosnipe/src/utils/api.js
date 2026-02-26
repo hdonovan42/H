@@ -22,10 +22,20 @@ export async function apiFetch(path, options = {}) {
   return res
 }
 
+async function safeJson(res) {
+  const text = await res.text()
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw new Error(res.ok ? 'Invalid server response' : `Server error (${res.status})`)
+  }
+}
+
 export async function apiGet(path) {
   const res = await apiFetch(path)
-  if (!res.ok) throw new Error((await res.json()).error || res.statusText)
-  return res.json()
+  const data = await safeJson(res)
+  if (!res.ok) throw new Error(data.error || res.statusText)
+  return data
 }
 
 export async function apiPost(path, body) {
@@ -33,15 +43,16 @@ export async function apiPost(path, body) {
     method: 'POST',
     body: JSON.stringify(body)
   })
-  const data = await res.json()
+  const data = await safeJson(res)
   if (!res.ok) throw new Error(data.error || res.statusText)
   return data
 }
 
 export async function apiDelete(path) {
   const res = await apiFetch(path, { method: 'DELETE' })
-  if (!res.ok) throw new Error((await res.json()).error || res.statusText)
-  return res.json()
+  const data = await safeJson(res)
+  if (!res.ok) throw new Error(data.error || res.statusText)
+  return data
 }
 
 export async function apiPatch(path, body) {
@@ -49,6 +60,7 @@ export async function apiPatch(path, body) {
     method: 'PATCH',
     body: JSON.stringify(body)
   })
-  if (!res.ok) throw new Error((await res.json()).error || res.statusText)
-  return res.json()
+  const data = await safeJson(res)
+  if (!res.ok) throw new Error(data.error || res.statusText)
+  return data
 }

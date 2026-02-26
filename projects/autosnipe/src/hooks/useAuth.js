@@ -16,9 +16,11 @@ export default function useAuth() {
     try {
       const data = await apiGet('/api/auth/me')
       setUser(data)
-    } catch {
-      localStorage.removeItem(TOKEN_KEY)
-      setToken(null)
+    } catch (err) {
+      if (err.message === 'Not authenticated') {
+        localStorage.removeItem(TOKEN_KEY)
+        setToken(null)
+      }
     } finally {
       setLoading(false)
     }
