@@ -70,7 +70,7 @@ export default function Landing() {
         <div className="landing-feature">
           <div className="landing-feature-icon">{'>>'}</div>
           <h3>AI Monitors</h3>
-          <p>Computer vision scans Autotrader every few hours, like a human would.</p>
+          <p>Computer vision scans Autotrader endlessly</p>
         </div>
         <div className="landing-feature">
           <div className="landing-feature-icon">{'<!'}</div>
