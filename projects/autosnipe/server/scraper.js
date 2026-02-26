@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio'
+import { getPage } from './browser.js'
 
 // ===== URL BUILDER =====
 
@@ -21,43 +22,6 @@ export function buildAutotraderUrl(criteria) {
   params.set('advertising-location', 'at_cars')
 
   return `https://www.autotrader.co.uk/car-search?${params.toString()}`
-}
-
-// ===== SCRAPINGBEE CLIENT =====
-
-const SCRAPINGBEE_URL = 'https://app.scrapingbee.com/api/v1/'
-const CREDITS_DEFAULT = 5
-const CREDITS_PREMIUM = 25
-
-async function fetchViaScrapingBee(url, { premium = false } = {}) {
-  const apiKey = process.env.SCRAPINGBEE_API_KEY
-  if (!apiKey) throw new Error('SCRAPINGBEE_API_KEY not set')
-
-  const params = new URLSearchParams({
-    api_key: apiKey,
-    url,
-    render_js: 'true',
-    country_code: 'gb',
-    wait: '8000'
-  })
-
-  if (premium) {
-    params.set('premium_proxy', 'true')
-  }
-
-  const credits = premium ? CREDITS_PREMIUM : CREDITS_DEFAULT
-  console.log(`[ScrapingBee] Fetching (${premium ? 'premium' : 'default'}, ${credits} credits): ${url}`)
-
-  const res = await fetch(`${SCRAPINGBEE_URL}?${params.toString()}`)
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    throw new Error(`ScrapingBee ${res.status}: ${body.slice(0, 200)}`)
-  }
-
-  const html = await res.text()
-  console.log(`[ScrapingBee] Got ${html.length} bytes (${credits} credits used)`)
-  return { html, credits }
 }
 
 // ===== HTML PARSER =====
@@ -143,22 +107,14 @@ export async function scrapeSearch(search) {
   console.log(`[Scraper] Search #${search.id}: ${url}`)
 
   try {
-    // First attempt: default proxy (5 credits)
-    let result = await fetchViaScrapingBee(url)
-    let listings = parseListings(result.html)
-
-    // Fallback: if no listings found, retry with premium proxy (25 credits)
-    if (listings.length === 0) {
-      console.log(`[Scraper] Search #${search.id}: no listings with default proxy, escalating to premium`)
-      result = await fetchViaScrapingBee(url, { premium: true })
-      listings = parseListings(result.html)
-    }
+    const { html, cfCost, cfIterations } = await getPage(url)
+    const listings = parseListings(html)
 
     console.log(`[Scraper] Search #${search.id}: ${listings.length} listings extracted`)
-    return { listings, iterations: 1, success: true }
+    return { listings, iterations: cfIterations || 1, success: true, cost: cfCost || 0 }
 
   } catch (err) {
     console.error(`[Scraper] Search #${search.id} failed:`, err.message)
-    return { listings: [], iterations: 1, success: false }
+    return { listings: [], iterations: 1, success: false, cost: 0 }
   }
 }

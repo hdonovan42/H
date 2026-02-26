@@ -7,5 +7,5 @@ export const SUPPORTED_CURRENCIES = ['gbp', 'usd', 'eur']
 export const CURRENCY_SYMBOLS = { gbp: '£', usd: '$', eur: '€' }
 export const POLL_INTERVAL_HOURS = 3
 export const MAX_AGENT_ITERATIONS = 8
-export const SCRAPINGBEE_CREDITS_DEFAULT = 5
-export const SCRAPINGBEE_CREDITS_PREMIUM = 25
+export const NIGHT_SKIP_START = 0  // Hour (Europe/London) to start skipping polls
+export const NIGHT_SKIP_END = 6    // Hour (Europe/London) to resume polls

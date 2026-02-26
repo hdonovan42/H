@@ -4,6 +4,44 @@ All notable changes to AutoSnipe are documented here.
 
 ---
 
+## v1.2.0 — Cloudflare Solver + Cost Optimisations (26 Feb 2026)
+
+**Deployed**: 26 Feb 2026 — `autosnipe-api` online, PM2 pid 2969115
+
+### Cloudflare Turnstile Solver
+- Anthropic Computer Use (Haiku 4.5) agent loop to solve Cloudflare challenges
+- New `server/cloudflare-solver.js` — screenshot → Claude → click → repeat (max 8 iterations)
+- New `server/browser.js` — headed Puppeteer on Xvfb (`:99`, 1280×800), persistent user data dir, cookie banner dismissal
+- Scraper rewritten to use headed browser with CF solver fallback
+- Deploy script ensures Xvfb is running on VPS
+
+### Computer Use Cost Optimisations
+- **Screenshot stripping**: old screenshots replaced with `[previous screenshot]` text placeholder before each API call — saves ~80% of image input tokens on later iterations
+- **Prompt caching**: system prompt and computer tool definition marked with `cache_control: { type: 'ephemeral' }` — 90% discount on cached tokens for back-to-back calls
+- **Night-skipping**: polls skip midnight–6am London time — eliminates ~25% of daily API spend
+- `calcCost()` updated to account for cache read/write token pricing
+
+### Files Modified
+| File | Change |
+|------|--------|
+| `server/cloudflare-solver.js` | New — CU agent loop with screenshot stripping + prompt caching |
+| `server/browser.js` | New — headed Puppeteer browser management |
+| `server/scraper.js` | Rewritten for headed browser + CF solver |
+| `server/scheduler.js` | Night-skip guard (0:00–6:00 London) |
+| `server/index.js` | Browser lifecycle integration |
+| `server/package.json` | Puppeteer + dependencies |
+| `shared/config.js` | `NIGHT_SKIP_START`, `NIGHT_SKIP_END` constants |
+| `deploy/deploy.sh` | Xvfb check, rsync updates |
+| `deploy/ecosystem.config.cjs` | `DISPLAY=:99` env var |
+| `src/data/models.json` | Make/model data for search form |
+
+### What to Watch
+- Cache hit rate in logs (`[CF-Solver] Iteration N cache:` lines)
+- Night skip logs at 0:00–6:00 London time
+- `cost_estimate` in poll_log — compare against pre-optimisation polls
+
+---
+
 ## v1.1.0 — Pay-Per-Slot Model (26 Feb 2026)
 
 Replaced the free/pro subscription tier system with a simpler pay-per-slot model.

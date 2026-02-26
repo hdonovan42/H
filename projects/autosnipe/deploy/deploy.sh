@@ -41,6 +41,15 @@ ssh "$VPS" bash <<'EOF'
   cd /home/hq/autosnipe
   mkdir -p logs server/data
 
+  # Ensure Xvfb is running for headed Chrome
+  if ! pgrep -f "Xvfb :99" > /dev/null; then
+    echo "[Deploy] Starting Xvfb..."
+    Xvfb :99 -screen 0 1280x800x24 &
+    sleep 1
+  else
+    echo "[Deploy] Xvfb already running"
+  fi
+
   pm2 restart deploy/ecosystem.config.cjs --update-env 2>/dev/null \
     || pm2 start deploy/ecosystem.config.cjs
   pm2 save

@@ -4,8 +4,9 @@ import cors from 'cors'
 import { getDb } from './db.js'
 import { sendMagicLink, verifyMagicLink, requireAuth } from './auth.js'
 import { createSlotCheckout, handleWebhook } from './stripe.js'
-import { startScheduler, runPollCycle } from './scheduler.js'
+import { startScheduler, stopScheduler, runPollCycle } from './scheduler.js'
 import { buildAutotraderUrl } from './scraper.js'
+import { closeBrowser, isBrowserAlive } from './browser.js'
 import { FREE_SEARCHES } from '../shared/config.js'
 
 const app = express()
@@ -40,6 +41,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
     uptime: process.uptime(),
+    browserAlive: isBrowserAlive(),
     activeSearches: db.prepare('SELECT COUNT(*) as n FROM searches WHERE active = 1').get().n,
     totalUsers: db.prepare('SELECT COUNT(*) as n FROM users').get().n
   })
@@ -227,3 +229,15 @@ app.listen(PORT, () => {
   startScheduler()
   console.log('Ready.')
 })
+
+// ===== GRACEFUL SHUTDOWN =====
+
+async function shutdown(signal) {
+  console.log(`\n[Shutdown] ${signal} received, cleaning up...`)
+  stopScheduler()
+  await closeBrowser()
+  process.exit(0)
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'))
+process.on('SIGINT', () => shutdown('SIGINT'))

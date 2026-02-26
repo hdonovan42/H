@@ -2,7 +2,7 @@ import { Cron } from 'croner'
 import { getDb } from './db.js'
 import { scrapeSearch } from './scraper.js'
 import { sendWhatsApp, formatListingAlert } from './whatsapp.js'
-import { POLL_INTERVAL_HOURS } from '../shared/config.js'
+import { POLL_INTERVAL_HOURS, NIGHT_SKIP_START, NIGHT_SKIP_END } from '../shared/config.js'
 
 let job = null
 let isRunning = false
@@ -29,6 +29,14 @@ export function startScheduler() {
 }
 
 export async function runPollCycle() {
+  // Skip overnight polls — few listings posted, saves ~25% of API spend
+  const londonHour = new Date().toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false })
+  const hour = parseInt(londonHour, 10)
+  if (hour >= NIGHT_SKIP_START && hour < NIGHT_SKIP_END) {
+    console.log(`[Scheduler] Night skip — ${hour}:00 London time (window: ${NIGHT_SKIP_START}:00–${NIGHT_SKIP_END}:00)`)
+    return
+  }
+
   const db = getDb()
 
   const searches = db.prepare(`
@@ -89,9 +97,9 @@ export async function runPollCycle() {
       // Update poll log
       db.prepare(`
         UPDATE poll_log SET completed_at = datetime('now'), status = 'success',
-        listings_found = ?, new_listings = ?, iterations = ?
+        listings_found = ?, new_listings = ?, iterations = ?, cost_estimate = ?
         WHERE id = ?
-      `).run(result.listings.length, newListings.length, result.iterations, logId)
+      `).run(result.listings.length, newListings.length, result.iterations, result.cost || 0, logId)
 
       console.log(`[Scheduler] Search #${search.id}: ${result.listings.length} found, ${newListings.length} new`)
 
