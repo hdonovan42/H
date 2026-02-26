@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 
-async function fetchJSON(url, creds) {
-  const headers = {};
-  if (creds) headers['Authorization'] = 'Basic ' + btoa(creds.user + ':' + creds.pass);
-  const res = await fetch(url, { headers });
+async function fetchJSON(url) {
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }
@@ -24,7 +22,7 @@ const OUTCOME_LABELS = {
   skipped: 'Skipped',
 };
 
-export default function SmartMoneyPanel({ creds }) {
+export default function SmartMoneyPanel() {
   const [summary, setSummary] = useState(null);
   const [logEntries, setLogEntries] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -32,8 +30,8 @@ export default function SmartMoneyPanel({ creds }) {
   const refresh = useCallback(async () => {
     try {
       const [s, l] = await Promise.all([
-        fetchJSON('/api/v1/smart-money/summary', creds).catch(() => null),
-        fetchJSON('/api/v1/smart-money/log?limit=20', creds).catch(() => []),
+        fetchJSON('/api/v1/smart-money/summary').catch(() => null),
+        fetchJSON('/api/v1/smart-money/log?limit=20').catch(() => []),
       ]);
       setSummary(s);
       setLogEntries(l);
@@ -42,7 +40,7 @@ export default function SmartMoneyPanel({ creds }) {
     } finally {
       setLoading(false);
     }
-  }, [creds]);
+  }, []);
 
   useEffect(() => {
     refresh();

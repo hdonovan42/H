@@ -3,15 +3,13 @@ import EstimateCard from './EstimateCard';
 import XFeedPanel from './XFeedPanel';
 import CalibrationChart from './CalibrationChart';
 
-async function fetchJSON(url, creds) {
-  const headers = {};
-  if (creds) headers['Authorization'] = 'Basic ' + btoa(creds.user + ':' + creds.pass);
-  const res = await fetch(url, { headers });
+async function fetchJSON(url) {
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }
 
-export default function PipelineView({ calibration, creds }) {
+export default function PipelineView({ calibration }) {
   const [pipeline, setPipeline] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -25,10 +23,10 @@ export default function PipelineView({ calibration, creds }) {
     try {
       const url = cid ? `/api/v1/pipeline/${cid}` : '/api/v1/pipeline/latest';
       const [data, intelData, opusData, alertsData] = await Promise.all([
-        fetchJSON(url, creds),
-        fetchJSON('/api/v1/intelligence/latest', creds).catch(() => null),
-        fetchJSON('/api/v1/opus-estimates', creds).catch(() => []),
-        fetchJSON('/api/v1/sentinel/alerts?limit=10', creds).catch(() => []),
+        fetchJSON(url),
+        fetchJSON('/api/v1/intelligence/latest').catch(() => null),
+        fetchJSON('/api/v1/opus-estimates').catch(() => []),
+        fetchJSON('/api/v1/sentinel/alerts?limit=10').catch(() => []),
       ]);
       setPipeline(data);
       if (intelData && !intelData.error) setIntelligence(intelData);
@@ -41,7 +39,7 @@ export default function PipelineView({ calibration, creds }) {
     } finally {
       setLoading(false);
     }
-  }, [creds]);
+  }, []);
 
   useEffect(() => { fetchPipeline(); }, [fetchPipeline]);
 
