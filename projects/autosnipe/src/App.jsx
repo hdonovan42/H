@@ -38,7 +38,7 @@ export default function App() {
   const renderPage = () => {
     if (page.startsWith('#/new-search')) return <SearchEditor />
     if (page.startsWith('#/settings')) return <Settings user={user} onRefresh={refresh} />
-    if (page.startsWith('#/buy-slot')) return <BuySlotPage user={user} />
+    if (page.startsWith('#/buy-slot')) return <BuySlotPage user={user} onRefresh={refresh} />
     return <Dashboard />
   }
 

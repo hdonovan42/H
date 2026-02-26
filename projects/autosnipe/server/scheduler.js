@@ -3,28 +3,41 @@ import { getDb } from './db.js'
 import { scrapeSearch } from './scraper.js'
 import { sendWhatsApp, formatListingAlert } from './whatsapp.js'
 import { refreshTaxonomy, taxonomyNeedsRefresh } from './taxonomy.js'
-import { POLL_INTERVAL_MINUTES, NIGHT_SKIP_START, NIGHT_SKIP_END } from '../shared/config.js'
+import { POLL_INTERVAL_MINUTES, QUIET_START_UTC, QUIET_END_UTC } from '../shared/config.js'
 
 let job = null
+let quietJob = null
 let taxonomyJob = null
 let isRunning = false
 
-export function startScheduler() {
-  job = new Cron(`*/${POLL_INTERVAL_MINUTES} * * * *`, async () => {
-    if (isRunning) {
-      console.log('[Scheduler] Previous run still active, skipping')
-      return
-    }
-    isRunning = true
-    console.log('[Scheduler] Starting poll cycle')
+async function triggerPoll(label) {
+  if (isRunning) {
+    console.log('[Scheduler] Previous run still active, skipping')
+    return
+  }
+  isRunning = true
+  console.log(`[Scheduler] Starting poll cycle (${label})`)
 
-    try {
-      await runPollCycle()
-    } catch (err) {
-      console.error('[Scheduler] Cycle error:', err.message)
-    } finally {
-      isRunning = false
-    }
+  try {
+    await runPollCycle()
+  } catch (err) {
+    console.error('[Scheduler] Cycle error:', err.message)
+  } finally {
+    isRunning = false
+  }
+}
+
+export function startScheduler() {
+  // Main job: every N minutes, but skip during quiet hours
+  job = new Cron(`*/${POLL_INTERVAL_MINUTES} * * * *`, async () => {
+    const utcHour = new Date().getUTCHours()
+    if (utcHour >= QUIET_START_UTC && utcHour < QUIET_END_UTC) return
+    await triggerPoll('normal')
+  })
+
+  // Quiet hours: once per hour at :59 during 02:00–04:59 UTC
+  quietJob = new Cron(`59 ${QUIET_START_UTC}-${QUIET_END_UTC - 1} * * *`, async () => {
+    await triggerPoll('quiet')
   })
 
   // Taxonomy refresh — every Monday at 06:00 London time
@@ -46,18 +59,10 @@ export function startScheduler() {
     )
   }
 
-  console.log(`[Scheduler] Active — polling every ${POLL_INTERVAL_MINUTES}m, taxonomy every Monday 06:00`)
+  console.log(`[Scheduler] Active — every ${POLL_INTERVAL_MINUTES}m, quiet ${QUIET_START_UTC}:00–${QUIET_END_UTC}:00 UTC (hourly at :59), taxonomy Mon 06:00`)
 }
 
 export async function runPollCycle() {
-  // Skip overnight polls — few listings posted, saves ~25% of API spend
-  const londonHour = new Date().toLocaleString('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false })
-  const hour = parseInt(londonHour, 10)
-  if (hour >= NIGHT_SKIP_START && hour < NIGHT_SKIP_END) {
-    console.log(`[Scheduler] Night skip — ${hour}:00 London time (window: ${NIGHT_SKIP_START}:00–${NIGHT_SKIP_END}:00)`)
-    return
-  }
-
   const db = getDb()
 
   const searches = db.prepare(`
@@ -139,6 +144,10 @@ export function stopScheduler() {
   if (job) {
     job.stop()
     console.log('[Scheduler] Poll job stopped')
+  }
+  if (quietJob) {
+    quietJob.stop()
+    console.log('[Scheduler] Quiet hours job stopped')
   }
   if (taxonomyJob) {
     taxonomyJob.stop()

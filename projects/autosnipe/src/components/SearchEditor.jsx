@@ -83,7 +83,7 @@ export default function SearchEditor() {
       await createSearch(name, criteria)
       window.location.hash = '#/dashboard'
     } catch (err) {
-      if (err.message.includes('Buy another slot')) {
+      if (err.message.includes('Subscribe') || err.message.includes('Buy another slot')) {
         setError(null)
         window.location.hash = '#/buy-slot'
         return

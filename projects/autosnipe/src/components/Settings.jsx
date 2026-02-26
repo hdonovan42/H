@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { apiPatch } from '../utils/api'
+import { apiPatch, apiGet } from '../utils/api'
 
 export default function Settings({ user, onRefresh }) {
   const [phone, setPhone] = useState(user.phone || '')
@@ -18,6 +18,15 @@ export default function Settings({ user, onRefresh }) {
       console.error(err)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleManageSubscription = async () => {
+    try {
+      const { url } = await apiGet('/api/stripe/portal')
+      window.location.href = url
+    } catch (err) {
+      console.error(err)
     }
   }
 
@@ -41,10 +50,21 @@ export default function Settings({ user, onRefresh }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <span className="navbar-slots">{active}/{max} used</span>
               <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-                (1 free + {paidSlots} purchased)
+                (1 free{paidSlots > 0 ? ` + ${paidSlots} subscribed` : ''})
               </span>
-              <a href="#/buy-slot" className="btn btn-primary btn-sm">Buy More</a>
+              <a href="#/buy-slot" className="btn btn-primary btn-sm">
+                {user.has_subscription ? 'Add Slot' : 'Subscribe'}
+              </a>
             </div>
+            {user.has_subscription && (
+              <button
+                className="btn btn-secondary btn-sm"
+                style={{ marginTop: 8 }}
+                onClick={handleManageSubscription}
+              >
+                Manage Subscription
+              </button>
+            )}
           </div>
         </div>
 

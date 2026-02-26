@@ -107,4 +107,16 @@ function migrate(db) {
   } catch {
     db.exec('ALTER TABLE users ADD COLUMN paid_slots INTEGER DEFAULT 0')
   }
+
+  // Add stripe subscription columns if missing
+  try {
+    db.prepare('SELECT stripe_subscription_id FROM users LIMIT 1').get()
+  } catch {
+    db.exec('ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT')
+  }
+  try {
+    db.prepare('SELECT stripe_subscription_item_id FROM users LIMIT 1').get()
+  } catch {
+    db.exec('ALTER TABLE users ADD COLUMN stripe_subscription_item_id TEXT')
+  }
 }

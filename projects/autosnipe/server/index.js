@@ -3,7 +3,7 @@ import express from 'express'
 import cors from 'cors'
 import { getDb } from './db.js'
 import { sendMagicLink, verifyMagicLink, requireAuth } from './auth.js'
-import { createSlotCheckout, handleWebhook } from './stripe.js'
+import { createSubscriptionCheckout, addSlot, createPortalSession, handleWebhook } from './stripe.js'
 import { startScheduler, stopScheduler, runPollCycle } from './scheduler.js'
 import { buildAutotraderUrl } from './scraper.js'
 import { closeBrowser } from './browser.js'
@@ -21,6 +21,13 @@ const EURO_LANGS = new Set([
 ])
 
 function detectCurrency(req) {
+  // Cloudflare IP geolocation (if site is behind CF)
+  const cfCountry = (req.headers['cf-ipcountry'] || '').toUpperCase()
+  if (cfCountry === 'GB') return 'gbp'
+  if (EUROZONE_COUNTRIES.has(cfCountry)) return 'eur'
+  if (cfCountry && cfCountry !== 'XX') return 'usd'
+
+  // Accept-Language parsing
   const accept = req.headers['accept-language'] || ''
   const top = accept.split(',')[0]?.trim() || ''
   const parts = top.split('-')
@@ -29,11 +36,13 @@ function detectCurrency(req) {
   if (parts.length >= 2) {
     const country = parts[parts.length - 1].replace(/;.*/, '').toUpperCase()
     if (country === 'GB') return 'gbp'
+    if (country === 'US') return 'usd'
     if (EUROZONE_COUNTRIES.has(country)) return 'eur'
   }
 
   // Fall back to language code (e.g. bare "de", "fr")
   const lang = parts[0]?.toLowerCase()
+  if (lang === 'en') return 'gbp'  // UK product — bare "en" defaults to GBP
   if (EURO_LANGS.has(lang)) return 'eur'
 
   return 'usd'
@@ -104,7 +113,7 @@ app.get('/api/auth/verify', (req, res) => {
 app.get('/api/auth/me', requireAuth, (req, res) => {
   const db = getDb()
   const user = db
-    .prepare('SELECT id, email, phone, paid_slots, created_at FROM users WHERE id = ?')
+    .prepare('SELECT id, email, phone, paid_slots, stripe_subscription_id, created_at FROM users WHERE id = ?')
     .get(req.user.userId)
   if (!user) return res.status(404).json({ error: 'User not found' })
 
@@ -112,7 +121,7 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
     .get(req.user.userId).n
   const maxSearches = FREE_SEARCHES + (user.paid_slots || 0)
 
-  res.json({ ...user, active_searches: activeCount, max_searches: maxSearches })
+  res.json({ ...user, active_searches: activeCount, max_searches: maxSearches, has_subscription: !!user.stripe_subscription_id })
 })
 
 // ===== SEARCHES =====
@@ -136,7 +145,7 @@ app.post('/api/searches', requireAuth, (req, res) => {
   const maxSearches = FREE_SEARCHES + (user.paid_slots || 0)
   if (activeCount >= maxSearches) {
     return res.status(403).json({
-      error: `You have ${activeCount} active search${activeCount > 1 ? 'es' : ''}. Buy another slot to add more.`,
+      error: `You have ${activeCount} active search${activeCount > 1 ? 'es' : ''}. Subscribe for more slots.`,
       buy_slot: true
     })
   }
@@ -210,8 +219,35 @@ app.get('/api/geo/currency', (req, res) => {
 
 app.post('/api/stripe/checkout', requireAuth, async (req, res) => {
   try {
-    const currency = detectCurrency(req)
-    const result = await createSlotCheckout(req.user.userId, req.user.email, currency)
+    const db = getDb()
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.userId)
+
+    if (user.stripe_subscription_id) {
+      // Existing subscriber — bump quantity
+      const result = await addSlot(req.user.userId)
+      res.json({ added: true, paid_slots: result.paid_slots })
+    } else {
+      // New subscriber — redirect to Stripe Checkout
+      const currency = detectCurrency(req)
+      const result = await createSubscriptionCheckout(req.user.userId, req.user.email, currency)
+      res.json({ url: result.url })
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.get('/api/stripe/portal', requireAuth, async (req, res) => {
+  try {
+    const db = getDb()
+    const user = db.prepare('SELECT stripe_customer_id FROM users WHERE id = ?')
+      .get(req.user.userId)
+
+    if (!user?.stripe_customer_id) {
+      return res.status(400).json({ error: 'No billing account found' })
+    }
+
+    const result = await createPortalSession(user.stripe_customer_id)
     res.json(result)
   } catch (err) {
     res.status(500).json({ error: err.message })
