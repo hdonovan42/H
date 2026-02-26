@@ -3,14 +3,14 @@ import { getDb } from './db.js'
 import { scrapeSearch } from './scraper.js'
 import { sendWhatsApp, formatListingAlert } from './whatsapp.js'
 import { refreshTaxonomy, taxonomyNeedsRefresh } from './taxonomy.js'
-import { POLL_INTERVAL_HOURS, NIGHT_SKIP_START, NIGHT_SKIP_END } from '../shared/config.js'
+import { POLL_INTERVAL_MINUTES, NIGHT_SKIP_START, NIGHT_SKIP_END } from '../shared/config.js'
 
 let job = null
 let taxonomyJob = null
 let isRunning = false
 
 export function startScheduler() {
-  job = new Cron(`0 */${POLL_INTERVAL_HOURS} * * *`, async () => {
+  job = new Cron(`*/${POLL_INTERVAL_MINUTES} * * * *`, async () => {
     if (isRunning) {
       console.log('[Scheduler] Previous run still active, skipping')
       return
@@ -46,7 +46,7 @@ export function startScheduler() {
     )
   }
 
-  console.log(`[Scheduler] Active — polling every ${POLL_INTERVAL_HOURS}h, taxonomy every Monday 06:00`)
+  console.log(`[Scheduler] Active — polling every ${POLL_INTERVAL_MINUTES}m, taxonomy every Monday 06:00`)
 }
 
 export async function runPollCycle() {
@@ -99,7 +99,7 @@ export async function runPollCycle() {
       }
 
       // Update search
-      db.prepare('UPDATE searches SET last_checked = datetime("now"), last_result_count = ? WHERE id = ?')
+      db.prepare("UPDATE searches SET last_checked = datetime('now'), last_result_count = ? WHERE id = ?")
         .run(result.listings.length, search.id)
 
       // WhatsApp for new listings
@@ -110,7 +110,7 @@ export async function runPollCycle() {
 
         // Mark as notified
         for (const listing of newListings) {
-          db.prepare('UPDATE listings SET notified_at = datetime("now") WHERE search_id = ? AND autotrader_id = ?')
+          db.prepare("UPDATE listings SET notified_at = datetime('now') WHERE search_id = ? AND autotrader_id = ?")
             .run(search.id, listing.autotrader_id)
         }
       }
