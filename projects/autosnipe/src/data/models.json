@@ -43,9 +43,13 @@
     { "value": "Beetle", "label": "Beetle" },
     { "value": "e-Golf", "label": "e-Golf" },
     { "value": "Eos", "label": "Eos" },
-    { "value": "Golf", "label": "Golf" },
+    { "value": "Golf", "label": "Golf", "variants": [
+      { "value": "Golf GTI", "label": "GTI" },
+      { "value": "Golf R", "label": "R" },
+      { "value": "Golf GTE", "label": "GTE" },
+      { "value": "Golf SV", "label": "SV" }
+    ]},
     { "value": "Golf Plus", "label": "Golf Plus" },
-    { "value": "Golf SV", "label": "Golf SV" },
     { "value": "Lupo", "label": "Lupo" },
     { "value": "Passat", "label": "Passat" },
     { "value": "Polo", "label": "Polo" },

@@ -21,6 +21,7 @@ export default function SearchEditor() {
     name: '',
     make: '',
     model: '',
+    variant: '',
     year_from: '',
     year_to: '',
     price_from: '',
@@ -37,7 +38,9 @@ export default function SearchEditor() {
   const set = (key) => (e) => {
     const val = e.target.value
     if (key === 'make') {
-      setForm(f => ({ ...f, make: val, model: '' }))
+      setForm(f => ({ ...f, make: val, model: '', variant: '' }))
+    } else if (key === 'model') {
+      setForm(f => ({ ...f, model: val, variant: '' }))
     } else if (NUMERIC_FIELDS.includes(key)) {
       setForm(f => ({ ...f, [key]: formatNumber(val) }))
     } else {
@@ -53,7 +56,12 @@ export default function SearchEditor() {
     try {
       const criteria = {}
       if (form.make) criteria.make = form.make
-      if (form.model) criteria.model = form.model
+      if (form.variant) {
+        criteria.model = form.variant
+        criteria.variant = form.variant
+      } else if (form.model) {
+        criteria.model = form.model
+      }
       if (form.year_from) criteria.year_from = Number(form.year_from)
       if (form.year_to) criteria.year_to = Number(form.year_to)
       if (form.price_from) criteria.price_from = Number(parseNumber(form.price_from))
@@ -116,6 +124,23 @@ export default function SearchEditor() {
                 ))}
               </select>
             </div>
+
+            {(() => {
+              const selectedModel = (modelsData[form.make] || []).find(m => m.value === form.model)
+              const variants = selectedModel?.variants
+              if (!variants?.length) return null
+              return (
+                <div className="input-group">
+                  <label>Variant</label>
+                  <select value={form.variant} onChange={set('variant')}>
+                    <option value="">Any</option>
+                    {variants.map(v => (
+                      <option key={v.value} value={v.value}>{v.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )
+            })()}
 
             <div className="input-group">
               <label>Year From</label>

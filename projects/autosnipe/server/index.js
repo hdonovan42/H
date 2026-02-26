@@ -7,7 +7,36 @@ import { createSlotCheckout, handleWebhook } from './stripe.js'
 import { startScheduler, stopScheduler, runPollCycle } from './scheduler.js'
 import { buildAutotraderUrl } from './scraper.js'
 import { closeBrowser, isBrowserAlive } from './browser.js'
-import { FREE_SEARCHES } from '../shared/config.js'
+import { FREE_SEARCHES, CURRENCY_SYMBOLS } from '../shared/config.js'
+
+// ===== GEO CURRENCY =====
+
+const EUROZONE_COUNTRIES = new Set([
+  'AT','BE','CY','DE','EE','ES','FI','FR','GR','HR',
+  'IE','IT','LT','LU','LV','MT','NL','PT','SI','SK'
+])
+const EURO_LANGS = new Set([
+  'de','fr','it','es','nl','pt','el','fi','et','lt','lv','mt','sk','sl','hr'
+])
+
+function detectCurrency(req) {
+  const accept = req.headers['accept-language'] || ''
+  const top = accept.split(',')[0]?.trim() || ''
+  const parts = top.split('-')
+
+  // Check country subtag (e.g. en-GB → GB, de-DE → DE)
+  if (parts.length >= 2) {
+    const country = parts[parts.length - 1].replace(/;.*/, '').toUpperCase()
+    if (country === 'GB') return 'gbp'
+    if (EUROZONE_COUNTRIES.has(country)) return 'eur'
+  }
+
+  // Fall back to language code (e.g. bare "de", "fr")
+  const lang = parts[0]?.toLowerCase()
+  if (EURO_LANGS.has(lang)) return 'eur'
+
+  return 'usd'
+}
 
 const app = express()
 const PORT = process.env.PORT || 3103
@@ -170,12 +199,18 @@ app.patch('/api/settings', requireAuth, (req, res) => {
   res.json({ success: true })
 })
 
+// ===== GEO =====
+
+app.get('/api/geo/currency', (req, res) => {
+  const currency = detectCurrency(req)
+  res.json({ currency, symbol: CURRENCY_SYMBOLS[currency] })
+})
+
 // ===== STRIPE =====
 
 app.post('/api/stripe/checkout', requireAuth, async (req, res) => {
   try {
-    const { currency } = req.body
-    if (!currency) return res.status(400).json({ error: 'Currency required (gbp, usd, eur)' })
+    const currency = detectCurrency(req)
     const result = await createSlotCheckout(req.user.userId, req.user.email, currency)
     res.json(result)
   } catch (err) {

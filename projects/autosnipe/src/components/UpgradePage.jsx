@@ -1,24 +1,22 @@
-import React, { useState } from 'react'
-import { apiPost } from '../utils/api'
-
-const CURRENCIES = [
-  { code: 'gbp', symbol: '£', label: 'GBP (£)' },
-  { code: 'usd', symbol: '$', label: 'USD ($)' },
-  { code: 'eur', symbol: '€', label: 'EUR (€)' }
-]
+import React, { useState, useEffect } from 'react'
+import { apiGet, apiPost } from '../utils/api'
 
 export default function BuySlotPage({ user }) {
-  const [currency, setCurrency] = useState('gbp')
+  const [currency, setCurrency] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  const selected = CURRENCIES.find(c => c.code === currency)
+  useEffect(() => {
+    apiGet('/api/geo/currency').then(setCurrency).catch(() => {
+      setCurrency({ currency: 'usd', symbol: '$' })
+    })
+  }, [])
 
   const handleBuy = async () => {
     setLoading(true)
     setError(null)
     try {
-      const { url } = await apiPost('/api/stripe/checkout', { currency })
+      const { url } = await apiPost('/api/stripe/checkout')
       window.location.href = url
     } catch (err) {
       setError(err.message)
@@ -29,6 +27,7 @@ export default function BuySlotPage({ user }) {
   const activeCount = user.active_searches || 0
   const maxSearches = user.max_searches || 1
   const slotsUsed = `${activeCount} / ${maxSearches}`
+  const sym = currency?.symbol || '...'
 
   return (
     <div className="page">
@@ -36,40 +35,25 @@ export default function BuySlotPage({ user }) {
         <h2>Buy Another Search Slot</h2>
         <p className="buy-slot-subtitle">
           You're using {slotsUsed} search slots.
-          Each additional concurrent search costs just {selected.symbol}1 — one-off, no subscription.
+          Each additional concurrent search costs just {sym}1 — one-off, no subscription.
         </p>
 
         <div className="buy-slot-card">
           <div className="buy-slot-price">
-            {selected.symbol}1
+            {sym}1
             <span className="buy-slot-once">one-off</span>
           </div>
           <p className="buy-slot-desc">+1 concurrent search slot, yours forever</p>
-
-          <div className="buy-slot-currency">
-            <label>Currency</label>
-            <div className="buy-slot-options">
-              {CURRENCIES.map(c => (
-                <button
-                  key={c.code}
-                  className={`buy-slot-option ${currency === c.code ? 'active' : ''}`}
-                  onClick={() => setCurrency(c.code)}
-                >
-                  {c.label}
-                </button>
-              ))}
-            </div>
-          </div>
 
           {error && <p className="error-msg">{error}</p>}
 
           <button
             className="btn btn-primary"
             onClick={handleBuy}
-            disabled={loading}
+            disabled={loading || !currency}
             style={{ width: '100%', marginTop: 20 }}
           >
-            {loading ? 'Redirecting to checkout...' : `Pay ${selected.symbol}1`}
+            {loading ? 'Redirecting to checkout...' : `Pay ${sym}1`}
           </button>
         </div>
       </div>
