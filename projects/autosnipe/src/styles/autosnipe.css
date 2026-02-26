@@ -565,8 +565,8 @@ select {
 }
 
 .btn-toggle.active {
-  border-color: var(--success);
-  color: var(--success);
+  border-color: var(--border-light);
+  color: var(--text);
 }
 
 .search-editor-actions {
