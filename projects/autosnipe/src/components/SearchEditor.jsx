@@ -284,7 +284,7 @@ export default function SearchEditor({ editId }) {
               <label>CAT Vehicles</label>
               <button
                 type="button"
-                className={`btn-toggle ${form.exclude_cat ? 'active' : ''}`}
+                className={`btn-toggle ${form.exclude_cat ? 'active' : 'warning'}`}
                 onClick={() => setForm(f => ({ ...f, exclude_cat: !f.exclude_cat }))}
               >
                 {form.exclude_cat ? 'Excluded' : 'Included'}

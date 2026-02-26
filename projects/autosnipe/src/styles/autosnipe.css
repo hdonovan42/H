@@ -561,12 +561,18 @@ select {
 }
 
 .btn-toggle:hover {
-  border-color: var(--accent);
+  border-color: var(--border-light);
 }
 
 .btn-toggle.active {
-  border-color: var(--border-light);
+  border-color: var(--border);
+  color: var(--text-dim);
+}
+
+.btn-toggle.warning {
+  border-color: rgba(231, 76, 60, 0.4);
   color: var(--text);
+  box-shadow: 0 0 8px rgba(231, 76, 60, 0.15);
 }
 
 .search-editor-actions {
