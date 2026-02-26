@@ -21,6 +21,10 @@ export default function Settings({ user, onRefresh }) {
     }
   }
 
+  const active = user.active_searches || 0
+  const max = user.max_searches || 1
+  const paidSlots = user.paid_slots || 0
+
   return (
     <div className="page">
       <div className="settings">
@@ -33,12 +37,13 @@ export default function Settings({ user, onRefresh }) {
             <input type="text" value={user.email} disabled style={{ opacity: 0.5 }} />
           </div>
           <div className="input-group">
-            <label>Tier</label>
+            <label>Search Slots</label>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span className={`navbar-tier ${user.tier}`}>{user.tier}</span>
-              {user.tier === 'free' && (
-                <a href="#/upgrade" className="btn btn-primary btn-sm">Upgrade</a>
-              )}
+              <span className="navbar-slots">{active}/{max} used</span>
+              <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                (1 free + {paidSlots} purchased)
+              </span>
+              <a href="#/buy-slot" className="btn btn-primary btn-sm">Buy More</a>
             </div>
           </div>
         </div>

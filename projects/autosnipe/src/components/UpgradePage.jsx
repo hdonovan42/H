@@ -1,70 +1,76 @@
 import React, { useState } from 'react'
 import { apiPost } from '../utils/api'
 
-export default function UpgradePage({ user }) {
-  const [loading, setLoading] = useState(false)
+const CURRENCIES = [
+  { code: 'gbp', symbol: '£', label: 'GBP (£)' },
+  { code: 'usd', symbol: '$', label: 'USD ($)' },
+  { code: 'eur', symbol: '€', label: 'EUR (€)' }
+]
 
-  const handleUpgrade = async () => {
+export default function BuySlotPage({ user }) {
+  const [currency, setCurrency] = useState('gbp')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  const selected = CURRENCIES.find(c => c.code === currency)
+
+  const handleBuy = async () => {
     setLoading(true)
+    setError(null)
     try {
-      const { url } = await apiPost('/api/stripe/checkout')
+      const { url } = await apiPost('/api/stripe/checkout', { currency })
       window.location.href = url
     } catch (err) {
-      console.error(err)
+      setError(err.message)
       setLoading(false)
     }
   }
 
-  if (user.tier === 'pro') {
-    return (
-      <div className="page">
-        <div className="upgrade">
-          <h2>You're on Pro</h2>
-          <p className="upgrade-subtitle">
-            You have access to up to 10 active searches. Enjoy sniping.
-          </p>
-        </div>
-      </div>
-    )
-  }
+  const activeCount = user.active_searches || 0
+  const maxSearches = user.max_searches || 1
+  const slotsUsed = `${activeCount} / ${maxSearches}`
 
   return (
     <div className="page">
-      <div className="upgrade">
-        <h2>Upgrade to Pro</h2>
-        <p className="upgrade-subtitle">
-          Unlock more active searches and never miss a deal.
+      <div className="buy-slot">
+        <h2>Buy Another Search Slot</h2>
+        <p className="buy-slot-subtitle">
+          You're using {slotsUsed} search slots.
+          Each additional concurrent search costs just {selected.symbol}1 — one-off, no subscription.
         </p>
 
-        <div className="upgrade-tiers">
-          <div className="upgrade-tier">
-            <h3>Free</h3>
-            <div className="upgrade-price">&pound;0<span> / month</span></div>
-            <ul className="upgrade-features">
-              <li>1 active search</li>
-              <li>WhatsApp alerts</li>
-              <li>Scans every 3 hours</li>
-            </ul>
+        <div className="buy-slot-card">
+          <div className="buy-slot-price">
+            {selected.symbol}1
+            <span className="buy-slot-once">one-off</span>
+          </div>
+          <p className="buy-slot-desc">+1 concurrent search slot, yours forever</p>
+
+          <div className="buy-slot-currency">
+            <label>Currency</label>
+            <div className="buy-slot-options">
+              {CURRENCIES.map(c => (
+                <button
+                  key={c.code}
+                  className={`buy-slot-option ${currency === c.code ? 'active' : ''}`}
+                  onClick={() => setCurrency(c.code)}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="upgrade-tier pro">
-            <h3>Pro</h3>
-            <div className="upgrade-price">&pound;9.99<span> / month</span></div>
-            <ul className="upgrade-features">
-              <li>10 active searches</li>
-              <li>WhatsApp alerts</li>
-              <li>Scans every 3 hours</li>
-              <li>Priority support</li>
-            </ul>
-            <button
-              className="btn btn-primary"
-              onClick={handleUpgrade}
-              disabled={loading}
-              style={{ width: '100%', marginTop: 20 }}
-            >
-              {loading ? 'Redirecting...' : 'Upgrade Now'}
-            </button>
-          </div>
+          {error && <p className="error-msg">{error}</p>}
+
+          <button
+            className="btn btn-primary"
+            onClick={handleBuy}
+            disabled={loading}
+            style={{ width: '100%', marginTop: 20 }}
+          >
+            {loading ? 'Redirecting to checkout...' : `Pay ${selected.symbol}1`}
+          </button>
         </div>
       </div>
     </div>

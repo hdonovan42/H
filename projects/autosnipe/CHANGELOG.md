@@ -4,6 +4,41 @@ All notable changes to AutoSnipe are documented here.
 
 ---
 
+## v1.1.0 — Pay-Per-Slot Model (26 Feb 2026)
+
+Replaced the free/pro subscription tier system with a simpler pay-per-slot model.
+
+### New Pricing Model
+- **1 free active search** for all users
+- **£1 / $1 / €1** one-off payment per additional concurrent search slot — no subscription
+- Only GBP, USD, and EUR accepted
+- Slots are permanent once purchased
+
+### Backend Changes
+- `users` table: added `paid_slots` column (default 0), `tier` column retained but unused
+- New `purchases` table tracking each slot purchase (user, Stripe session, currency, amount)
+- Migration logic for existing databases (adds `paid_slots` if missing)
+- Stripe integration rewritten: `payment` mode (not `subscription`), inline `price_data` at £1/$1/€1, idempotent webhook with duplicate-session guard
+- `/api/auth/me` now returns `active_searches` and `max_searches` (computed as `1 + paid_slots`)
+- Search creation limit: `FREE_SEARCHES + paid_slots` replaces old tier check
+- `/api/stripe/checkout` now requires `currency` body param (`gbp`, `usd`, or `eur`)
+- Admin users endpoint returns `paid_slots` instead of `tier`
+
+### Frontend Changes
+- **Buy Slot page** (`#/buy-slot`) replaces Upgrade page — currency picker (GBP/USD/EUR), single card showing "£1 one-off", Stripe checkout
+- **NavBar**: tier badge replaced with `X/Y slots` counter
+- **Settings**: shows "X/Y used (1 free + N purchased)" with "Buy More" link
+- **SearchEditor**: auto-redirects to `#/buy-slot` when at slot limit
+
+### Admin Dashboard
+- "Tier" column replaced with "Slots" column showing `1+N` format
+
+### Config
+- `shared/config.js`: `FREE_SEARCHES`, `SLOT_PRICE`, `SUPPORTED_CURRENCIES`, `CURRENCY_SYMBOLS` replace old tier constants
+- Version bumped to 1.1.0
+
+---
+
 ## v1.0.0 — Initial Build (25 Feb 2026)
 
 Full-stack used car search alerting system, built and deployed in a single session.

@@ -87,16 +87,15 @@
       font-size: 12px;
     }
     tr:hover td { background: var(--card); }
-    .tier {
+    .slots {
       font-size: 10px;
       padding: 2px 8px;
       border-radius: 3px;
-      text-transform: uppercase;
       letter-spacing: 0.5px;
       font-weight: 600;
+      background: var(--border);
+      color: var(--dim);
     }
-    .tier.free { background: var(--border); color: var(--dim); }
-    .tier.pro { background: #cc5500; color: #fff; }
     .refresh-btn {
       font-family: 'IBM Plex Mono', monospace;
       font-size: 11px;
@@ -125,7 +124,7 @@
 
   <h2>Users <button class="refresh-btn" onclick="load()">Refresh</button></h2>
   <table>
-    <thead><tr><th>#</th><th>Email</th><th>Phone</th><th>Tier</th><th>Signed Up</th></tr></thead>
+    <thead><tr><th>#</th><th>Email</th><th>Phone</th><th>Slots</th><th>Signed Up</th></tr></thead>
     <tbody id="users-body"><tr><td colspan="5" class="empty">Loading...</td></tr></tbody>
   </table>
 
@@ -159,7 +158,7 @@
             <td>${u.id}</td>
             <td>${u.email}</td>
             <td>${u.phone || '<span style="color:var(--dim)">—</span>'}</td>
-            <td><span class="tier ${u.tier}">${u.tier}</span></td>
+            <td><span class="slots">1+${u.paid_slots || 0}</span></td>
             <td>${u.created_at}</td>
           </tr>`).join('')
         }

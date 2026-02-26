@@ -26,7 +26,8 @@ function migrate(db) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       email TEXT UNIQUE NOT NULL,
       phone TEXT,
-      tier TEXT DEFAULT 'free' CHECK(tier IN ('free', 'pro')),
+      tier TEXT DEFAULT 'free',
+      paid_slots INTEGER DEFAULT 0,
       stripe_customer_id TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     );
@@ -84,9 +85,26 @@ function migrate(db) {
       error TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS purchases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      stripe_session_id TEXT UNIQUE,
+      currency TEXT NOT NULL,
+      amount INTEGER NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_listings_search ON listings(search_id);
     CREATE INDEX IF NOT EXISTS idx_listings_autotrader ON listings(autotrader_id);
     CREATE INDEX IF NOT EXISTS idx_searches_user ON searches(user_id);
     CREATE INDEX IF NOT EXISTS idx_searches_active ON searches(active);
+    CREATE INDEX IF NOT EXISTS idx_purchases_user ON purchases(user_id);
   `)
+
+  // Migrate existing DBs: add paid_slots column if missing
+  try {
+    db.prepare('SELECT paid_slots FROM users LIMIT 1').get()
+  } catch {
+    db.exec('ALTER TABLE users ADD COLUMN paid_slots INTEGER DEFAULT 0')
+  }
 }

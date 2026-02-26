@@ -3,10 +3,10 @@ import express from 'express'
 import cors from 'cors'
 import { getDb } from './db.js'
 import { sendMagicLink, verifyMagicLink, requireAuth } from './auth.js'
-import { createCheckoutSession, handleWebhook } from './stripe.js'
+import { createSlotCheckout, handleWebhook } from './stripe.js'
 import { startScheduler, runPollCycle } from './scheduler.js'
 import { buildAutotraderUrl } from './scraper.js'
-import { FREE_TIER_SEARCHES, PRO_TIER_SEARCHES } from '../shared/config.js'
+import { FREE_SEARCHES } from '../shared/config.js'
 
 const app = express()
 const PORT = process.env.PORT || 3103
@@ -71,11 +71,17 @@ app.get('/api/auth/verify', (req, res) => {
 })
 
 app.get('/api/auth/me', requireAuth, (req, res) => {
-  const user = getDb()
-    .prepare('SELECT id, email, phone, tier, created_at FROM users WHERE id = ?')
+  const db = getDb()
+  const user = db
+    .prepare('SELECT id, email, phone, paid_slots, created_at FROM users WHERE id = ?')
     .get(req.user.userId)
   if (!user) return res.status(404).json({ error: 'User not found' })
-  res.json(user)
+
+  const activeCount = db.prepare('SELECT COUNT(*) as n FROM searches WHERE user_id = ? AND active = 1')
+    .get(req.user.userId).n
+  const maxSearches = FREE_SEARCHES + (user.paid_slots || 0)
+
+  res.json({ ...user, active_searches: activeCount, max_searches: maxSearches })
 })
 
 // ===== SEARCHES =====
@@ -92,15 +98,15 @@ app.get('/api/searches', requireAuth, (req, res) => {
 
 app.post('/api/searches', requireAuth, (req, res) => {
   const db = getDb()
-  const user = db.prepare('SELECT tier FROM users WHERE id = ?').get(req.user.userId)
+  const user = db.prepare('SELECT paid_slots FROM users WHERE id = ?').get(req.user.userId)
   const activeCount = db.prepare('SELECT COUNT(*) as n FROM searches WHERE user_id = ? AND active = 1')
     .get(req.user.userId).n
 
-  const maxSearches = user.tier === 'pro' ? PRO_TIER_SEARCHES : FREE_TIER_SEARCHES
+  const maxSearches = FREE_SEARCHES + (user.paid_slots || 0)
   if (activeCount >= maxSearches) {
     return res.status(403).json({
-      error: `Maximum ${maxSearches} active search${maxSearches > 1 ? 'es' : ''} on ${user.tier} tier`,
-      upgrade: user.tier === 'free'
+      error: `You have ${activeCount} active search${activeCount > 1 ? 'es' : ''}. Buy another slot to add more.`,
+      buy_slot: true
     })
   }
 
@@ -166,7 +172,9 @@ app.patch('/api/settings', requireAuth, (req, res) => {
 
 app.post('/api/stripe/checkout', requireAuth, async (req, res) => {
   try {
-    const result = await createCheckoutSession(req.user.userId, req.user.email)
+    const { currency } = req.body
+    if (!currency) return res.status(400).json({ error: 'Currency required (gbp, usd, eur)' })
+    const result = await createSlotCheckout(req.user.userId, req.user.email, currency)
     res.json(result)
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -195,7 +203,7 @@ app.get('/api/admin/stats', (req, res) => {
 
 app.get('/api/admin/users', (req, res) => {
   const users = getDb().prepare(`
-    SELECT id, email, phone, tier, created_at FROM users ORDER BY created_at DESC
+    SELECT id, email, phone, paid_slots, created_at FROM users ORDER BY created_at DESC
   `).all()
   res.json(users)
 })

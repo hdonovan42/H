@@ -1,8 +1,10 @@
 export const APP_NAME = 'AutoSnipe'
-export const APP_VERSION = '1.0.0'
+export const APP_VERSION = '1.1.0'
 export const ACCENT_COLOR = '#FF6B00'
-export const FREE_TIER_SEARCHES = 1
-export const PRO_TIER_SEARCHES = 10
+export const FREE_SEARCHES = 1
+export const SLOT_PRICE = 1
+export const SUPPORTED_CURRENCIES = ['gbp', 'usd', 'eur']
+export const CURRENCY_SYMBOLS = { gbp: '£', usd: '$', eur: '€' }
 export const POLL_INTERVAL_HOURS = 3
 export const MAX_AGENT_ITERATIONS = 8
 export const SCRAPINGBEE_CREDITS_DEFAULT = 5

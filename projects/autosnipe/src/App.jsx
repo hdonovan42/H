@@ -5,7 +5,7 @@ import Landing from './components/Landing'
 import Dashboard from './components/Dashboard'
 import SearchEditor from './components/SearchEditor'
 import Settings from './components/Settings'
-import UpgradePage from './components/UpgradePage'
+import BuySlotPage from './components/UpgradePage'
 
 export default function App() {
   const [page, setPage] = useState(window.location.hash || '#/')
@@ -38,7 +38,7 @@ export default function App() {
   const renderPage = () => {
     if (page.startsWith('#/new-search')) return <SearchEditor />
     if (page.startsWith('#/settings')) return <Settings user={user} onRefresh={refresh} />
-    if (page.startsWith('#/upgrade')) return <UpgradePage user={user} />
+    if (page.startsWith('#/buy-slot')) return <BuySlotPage user={user} />
     return <Dashboard />
   }
 

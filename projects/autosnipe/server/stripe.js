@@ -1,15 +1,18 @@
 import Stripe from 'stripe'
 import { getDb } from './db.js'
+import { SLOT_PRICE, SUPPORTED_CURRENCIES } from '../shared/config.js'
 
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY)
   : null
 
-const PRICE_ID = process.env.STRIPE_PRICE_ID
 const APP_URL = process.env.APP_URL || 'http://localhost:5177'
 
-export async function createCheckoutSession(userId, email) {
+export async function createSlotCheckout(userId, email, currency) {
   if (!stripe) throw new Error('Stripe not configured')
+  if (!SUPPORTED_CURRENCIES.includes(currency)) {
+    throw new Error(`Unsupported currency. Use: ${SUPPORTED_CURRENCIES.join(', ')}`)
+  }
 
   const db = getDb()
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId)
@@ -24,10 +27,21 @@ export async function createCheckoutSession(userId, email) {
 
   const session = await stripe.checkout.sessions.create({
     customer: customerId,
-    mode: 'subscription',
-    line_items: [{ price: PRICE_ID, quantity: 1 }],
-    success_url: `${APP_URL}/#/dashboard?upgraded=true`,
-    cancel_url: `${APP_URL}/#/upgrade`
+    mode: 'payment',
+    line_items: [{
+      price_data: {
+        currency,
+        unit_amount: SLOT_PRICE * 100,
+        product_data: {
+          name: 'AutoSnipe — Extra Search Slot',
+          description: 'One additional concurrent search'
+        }
+      },
+      quantity: 1
+    }],
+    metadata: { user_id: String(userId) },
+    success_url: `${APP_URL}/#/dashboard?purchased=true`,
+    cancel_url: `${APP_URL}/#/buy-slot`
   })
 
   return { url: session.url }
@@ -44,20 +58,29 @@ export async function handleWebhook(rawBody, signature) {
 
   const db = getDb()
 
-  switch (event.type) {
-    case 'checkout.session.completed': {
-      const session = event.data.object
-      db.prepare('UPDATE users SET tier = ? WHERE stripe_customer_id = ?')
-        .run('pro', session.customer)
-      console.log(`[Stripe] User upgraded to pro: ${session.customer}`)
-      break
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object
+    const userId = session.metadata?.user_id
+
+    if (!userId) {
+      console.warn('[Stripe] checkout.session.completed without user_id metadata')
+      return { received: true }
     }
-    case 'customer.subscription.deleted': {
-      const sub = event.data.object
-      db.prepare('UPDATE users SET tier = ? WHERE stripe_customer_id = ?')
-        .run('free', sub.customer)
-      console.log(`[Stripe] Subscription cancelled: ${sub.customer}`)
-      break
+
+    // Record purchase and increment slots
+    const existing = db.prepare('SELECT id FROM purchases WHERE stripe_session_id = ?')
+      .get(session.id)
+
+    if (!existing) {
+      db.prepare(`
+        INSERT INTO purchases (user_id, stripe_session_id, currency, amount)
+        VALUES (?, ?, ?, ?)
+      `).run(userId, session.id, session.currency, session.amount_total)
+
+      db.prepare('UPDATE users SET paid_slots = paid_slots + 1 WHERE id = ?')
+        .run(userId)
+
+      console.log(`[Stripe] Slot purchased for user ${userId} (${session.currency} ${session.amount_total})`)
     }
   }
 
