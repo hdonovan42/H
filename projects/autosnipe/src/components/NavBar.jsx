@@ -1,6 +1,14 @@
 import React from 'react'
 
+const NAV_LINKS = [
+  { hash: '#/dashboard', label: 'Dashboard' },
+  { hash: '#/new-search', label: 'New Search' },
+  { hash: '#/settings', label: 'Settings' },
+]
+
 export default function NavBar({ user, onLogout }) {
+  const page = window.location.hash || '#/dashboard'
+
   return (
     <nav className="navbar">
       <a href="#/dashboard" className="navbar-brand">
@@ -8,10 +16,11 @@ export default function NavBar({ user, onLogout }) {
         AUTOSNIPE
       </a>
       <div className="navbar-links">
-        <a href="#/dashboard">Dashboard</a>
-        <a href="#/new-search">New Search</a>
-        <a href="#/settings">Settings</a>
-        <span className={`navbar-tier ${user.tier}`}>{user.tier}</span>
+        {NAV_LINKS.map(l => (
+          <a key={l.hash} href={l.hash} className={page.startsWith(l.hash) ? 'active' : ''}>
+            {l.label}
+          </a>
+        ))}
         <button onClick={onLogout}>Sign Out</button>
       </div>
     </nav>

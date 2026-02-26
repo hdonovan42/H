@@ -104,17 +104,11 @@ a:hover { color: var(--accent-light); }
   color: var(--text-bright);
 }
 
-.navbar-tier {
-  font-size: 10px;
-  padding: 2px 8px;
-  border-radius: 3px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  font-weight: 600;
+.navbar-links a.active {
+  color: var(--text-bright);
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
-
-.navbar-tier.free { background: var(--border); color: var(--text-dim); }
-.navbar-tier.pro { background: var(--accent-dim); color: #fff; }
 
 /* ===== BUTTONS ===== */
 
@@ -533,79 +527,97 @@ select {
   margin-bottom: 12px;
 }
 
-/* ===== UPGRADE ===== */
+/* ===== BUY SLOT ===== */
 
-.upgrade {
-  max-width: 600px;
+.buy-slot {
+  max-width: 440px;
   margin: 0 auto;
   text-align: center;
 }
 
-.upgrade h2 {
+.buy-slot h2 {
   font-size: 20px;
   color: var(--text-bright);
   margin-bottom: 8px;
 }
 
-.upgrade-subtitle {
+.buy-slot-subtitle {
   color: var(--text-dim);
   font-size: 13px;
-  margin-bottom: 40px;
-}
-
-.upgrade-tiers {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
   margin-bottom: 32px;
+  line-height: 1.8;
 }
 
-.upgrade-tier {
+.buy-slot-card {
   background: var(--bg-card);
-  border: 1px solid var(--border);
+  border: 1px solid var(--accent);
   border-radius: 8px;
-  padding: 28px 24px;
-  text-align: left;
-}
-
-.upgrade-tier.pro {
-  border-color: var(--accent);
+  padding: 32px 28px;
   box-shadow: 0 0 20px var(--accent-glow);
 }
 
-.upgrade-tier h3 {
-  font-size: 14px;
-  color: var(--text-bright);
+.buy-slot-price {
+  font-size: 48px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
   margin-bottom: 4px;
 }
 
-.upgrade-price {
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--accent);
-  margin-bottom: 16px;
-}
-
-.upgrade-price span {
+.buy-slot-once {
+  display: block;
   font-size: 12px;
   font-weight: 400;
   color: var(--text-dim);
+  margin-top: 4px;
 }
 
-.upgrade-features {
-  list-style: none;
+.buy-slot-desc {
   font-size: 12px;
+  color: var(--text);
+  margin-bottom: 24px;
 }
 
-.upgrade-features li {
-  padding: 6px 0;
+.buy-slot-currency {
+  margin-bottom: 8px;
+}
+
+.buy-slot-currency label {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.buy-slot-options {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.buy-slot-option {
+  font-family: var(--font);
+  font-size: 12px;
+  padding: 8px 16px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-dark);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.buy-slot-option:hover {
+  border-color: var(--accent);
   color: var(--text);
 }
 
-.upgrade-features li::before {
-  content: '\2713 ';
-  color: var(--success);
-  margin-right: 6px;
+.buy-slot-option.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
 }
 
 /* ===== LOADING ===== */
@@ -648,5 +660,4 @@ select {
   .dashboard { grid-template-columns: 1fr; }
   .search-editor-grid { grid-template-columns: 1fr; }
   .landing-features { grid-template-columns: 1fr; }
-  .upgrade-tiers { grid-template-columns: 1fr; }
 }
