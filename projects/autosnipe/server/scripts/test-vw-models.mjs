@@ -15,7 +15,13 @@ import 'dotenv/config'
 import { getPage, closeBrowser } from '../browser.js'
 
 const MAKE = 'Volkswagen'
-const URL = `https://www.autotrader.co.uk/car-search?make=${encodeURIComponent(MAKE)}&advertising-location=at_cars`
+const PAGES = [
+  `https://www.autotrader.co.uk/car-search?postcode=SW1A+1AA&radius=1500&make=${encodeURIComponent(MAKE)}&sort=relevance&advertising-location=at_cars`,
+  `https://www.autotrader.co.uk/car-search?postcode=SW1A+1AA&radius=1500&make=${encodeURIComponent(MAKE)}&sort=relevance&advertising-location=at_cars&page=2`,
+  `https://www.autotrader.co.uk/car-search?postcode=SW1A+1AA&radius=1500&make=${encodeURIComponent(MAKE)}&sort=relevance&advertising-location=at_cars&page=3`,
+  `https://www.autotrader.co.uk/car-search?postcode=SW1A+1AA&radius=1500&make=${encodeURIComponent(MAKE)}&sort=relevance&advertising-location=at_cars&page=5`,
+  `https://www.autotrader.co.uk/car-search?postcode=SW1A+1AA&radius=1500&make=${encodeURIComponent(MAKE)}&sort=relevance&advertising-location=at_cars&page=10`,
+]
 
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -53,41 +59,44 @@ function extractModels(html, make) {
 }
 
 async function main() {
-  console.log(`\n=== Testing browser pipeline: ${MAKE} models ===\n`)
-  console.log(`URL: ${URL}\n`)
+  console.log(`\n=== Testing browser pipeline: ${MAKE} models (${PAGES.length} pages) ===\n`)
 
   const start = Date.now()
+  const allModels = new Set()
+  let totalCost = 0
+  let totalCards = 0
 
   try {
-    const result = await getPage(URL)
-    const { html, cfSolved, cfCost, cfIterations } = result
+    for (let i = 0; i < PAGES.length; i++) {
+      const pageUrl = PAGES[i]
+      console.log(`\n--- Page ${i + 1}/${PAGES.length} ---`)
+
+      const { html, cfSolved, cfCost } = await getPage(pageUrl)
+      totalCost += cfCost
+
+      const models = extractModels(html, MAKE)
+      models.forEach(m => allModels.add(m))
+
+      const $ = cheerio.load(html)
+      const cardCount = $('[data-testid*="advertCard"]').not('[data-testid*="skeleton"]').length
+      totalCards += cardCount
+
+      console.log(`  ${cardCount} cards, ${models.length} models, CF: ${cfSolved ? `solved ($${cfCost.toFixed(4)})` : 'not needed'}`)
+      console.log(`  Models: ${models.join(', ')}`)
+
+      // Brief pause between pages
+      if (i < PAGES.length - 1) await new Promise(r => setTimeout(r, 2000))
+    }
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(1)
-    console.log(`\n--- Results ---`)
-    console.log(`HTML length: ${html.length} bytes`)
-    console.log(`Cloudflare solved: ${cfSolved}`)
-    console.log(`CF iterations: ${cfIterations}`)
-    console.log(`CF cost: $${cfCost.toFixed(4)}`)
+    const sorted = [...allModels].sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))
+
+    console.log(`\n=== FINAL RESULTS ===`)
+    console.log(`Total cards: ${totalCards}`)
+    console.log(`Total CF cost: $${totalCost.toFixed(4)}`)
     console.log(`Time: ${elapsed}s`)
-
-    // Extract models
-    const models = extractModels(html, MAKE)
-    console.log(`\nModels found (${models.length}):`)
-    models.forEach(m => console.log(`  - ${m}`))
-
-    // Also count raw listing cards for sanity
-    const $ = cheerio.load(html)
-    const cardCount = $('[data-testid*="advertCard"]').not('[data-testid*="skeleton"]').length
-    const allTestIds = new Set()
-    $('[data-testid]').each((_, el) => allTestIds.add($(el).attr('data-testid')))
-    console.log(`\nRaw advert cards: ${cardCount}`)
-    console.log(`Unique data-testid values (${allTestIds.size}): ${[...allTestIds].slice(0, 20).join(', ')}`)
-
-    if (models.length === 0) {
-      const bodyText = $('body').text().replace(/\s+/g, ' ').slice(0, 800)
-      console.log('\nBody text (first 800 chars):')
-      console.log(bodyText)
-    }
+    console.log(`\nAll models found (${sorted.length}):`)
+    sorted.forEach(m => console.log(`  - ${m}`))
 
   } catch (err) {
     console.error(`\nFailed: ${err.message}`)

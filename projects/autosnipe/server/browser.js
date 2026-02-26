@@ -94,6 +94,9 @@ export async function getPage(url) {
       await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: PAGE_TIMEOUT }).catch(() => {})
     }
 
+    // Handle postcode prompt — SPA sometimes requires form entry even with URL param
+    await handlePostcodePrompt(page, url)
+
     // Wait for listing cards to render (SPA may need time for async API calls)
     try {
       await page.waitForSelector('[data-testid*="advertCard"]', { timeout: LISTING_WAIT_TIMEOUT })
@@ -113,6 +116,31 @@ export async function getPage(url) {
   } finally {
     await page.close().catch(() => {})
   }
+}
+
+// ===== POSTCODE HANDLING =====
+
+async function handlePostcodePrompt(page, url) {
+  // Check if page is showing "Please enter a postcode" prompt
+  const postcodeInput = await page.$('[data-testid="input-postcode"]').catch(() => null)
+  if (!postcodeInput) return
+
+  // Extract postcode from URL
+  const parsed = new URL(url)
+  const postcode = parsed.searchParams.get('postcode')
+  if (!postcode) return
+
+  // Check if the input is visible and the results aren't already showing
+  const hasCards = await page.$('[data-testid*="advertCard"]').catch(() => null)
+  if (hasCards) return
+
+  console.log(`[Browser] Postcode prompt detected, entering: ${postcode}`)
+  await postcodeInput.click({ clickCount: 3 }) // Select all existing text
+  await postcodeInput.type(postcode)
+  await page.keyboard.press('Enter')
+
+  // Wait for results to load after postcode submission
+  await new Promise(r => setTimeout(r, 3000))
 }
 
 // ===== CLOUDFLARE DETECTION =====

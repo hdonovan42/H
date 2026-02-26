@@ -39,6 +39,15 @@
   "Tesla": [],
   "Toyota": [],
   "Vauxhall": [],
-  "Volkswagen": [],
+  "Volkswagen": [
+    { "value": "Beetle", "label": "Beetle" },
+    { "value": "Golf", "label": "Golf" },
+    { "value": "Passat", "label": "Passat" },
+    { "value": "Polo", "label": "Polo" },
+    { "value": "Scirocco", "label": "Scirocco" },
+    { "value": "T-Roc", "label": "T-Roc" },
+    { "value": "Touareg", "label": "Touareg" },
+    { "value": "Touran", "label": "Touran" }
+  ],
   "Volvo": []
 }

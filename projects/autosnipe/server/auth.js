@@ -13,7 +13,7 @@ export async function sendMagicLink(email) {
   const db = getDb()
   const token = randomBytes(32).toString('hex')
   const id = randomUUID()
-  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString().replace('T', ' ').replace('Z', '')
 
   db.prepare(`
     INSERT INTO magic_links (id, email, token, expires_at)
