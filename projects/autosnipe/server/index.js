@@ -6,7 +6,7 @@ import { sendMagicLink, verifyMagicLink, requireAuth } from './auth.js'
 import { createSlotCheckout, handleWebhook } from './stripe.js'
 import { startScheduler, stopScheduler, runPollCycle } from './scheduler.js'
 import { buildAutotraderUrl } from './scraper.js'
-import { closeBrowser, isBrowserAlive } from './browser.js'
+import { closeBrowser } from './browser.js'
 import { FREE_SEARCHES, CURRENCY_SYMBOLS } from '../shared/config.js'
 
 // ===== GEO CURRENCY =====
@@ -70,7 +70,6 @@ app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
     uptime: process.uptime(),
-    browserAlive: isBrowserAlive(),
     activeSearches: db.prepare('SELECT COUNT(*) as n FROM searches WHERE active = 1').get().n,
     totalUsers: db.prepare('SELECT COUNT(*) as n FROM users').get().n
   })
