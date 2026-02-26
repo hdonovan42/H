@@ -142,7 +142,7 @@ export default function SearchEditor({ editId }) {
             <label>Search Name (optional)</label>
             <input
               type="text"
-              placeholder="e.g. Weekend car"
+              placeholder={`Default: ${form.make || 'Make'} ${form.model || ''} ${form.variant || ''}`.trim()}
               value={form.name}
               onChange={set('name')}
             />
