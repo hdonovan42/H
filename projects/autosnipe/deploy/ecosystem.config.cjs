@@ -3,6 +3,7 @@ module.exports = {
     name: 'autosnipe-api',
     cwd: '/home/hq/autosnipe/server',
     script: 'index.js',
+    interpreter: '/home/hq/.nvm/versions/node/v22.22.0/bin/node',
     env: { NODE_ENV: 'production', PORT: 3103, DISPLAY: ':99' },
     kill_timeout: 10000,
     autorestart: true,
