@@ -32,9 +32,6 @@ export default function MatchFeed({ matches }) {
           className="match-item"
           style={{ textDecoration: 'none', color: 'inherit' }}
         >
-          <div className="match-image">
-            {m.image_url && <img src={m.image_url} alt="" loading="lazy" />}
-          </div>
           <div className="match-info">
             <div className="match-title">{m.title || 'Untitled listing'}</div>
             <div className="match-price">

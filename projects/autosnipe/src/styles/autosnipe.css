@@ -483,20 +483,7 @@ select {
 
 .match-item:last-child { border-bottom: none; }
 
-.match-image {
-  width: 100px;
-  height: 70px;
-  background: var(--bg-dark);
-  border-radius: 4px;
-  overflow: hidden;
-  flex-shrink: 0;
-}
 
-.match-image img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
 
 .match-info {
   flex: 1;
@@ -721,5 +708,4 @@ select {
   .search-editor-grid { grid-template-columns: 1fr; }
   .search-editor-location { grid-template-columns: 1fr; }
   .landing-features { grid-template-columns: 1fr; }
-  .match-image { width: 80px; height: 56px; }
 }
