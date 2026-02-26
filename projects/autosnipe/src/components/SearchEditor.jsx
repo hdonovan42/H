@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import useSearches from '../hooks/useSearches'
+import { apiPost } from '../utils/api'
 import makesData from '../data/makes.json'
 
 const currentYear = new Date().getFullYear()
@@ -72,6 +73,44 @@ export default function SearchEditor({ editId }) {
     setLoaded(true)
   }, [editId, searches, loaded])
 
+  const [resultCount, setResultCount] = useState(null)
+  const countTimer = useRef(null)
+
+  useEffect(() => {
+    clearTimeout(countTimer.current)
+    setResultCount(null)
+
+    // Build criteria object (same logic as handleSubmit)
+    const criteria = {}
+    if (form.make) criteria.make = form.make
+    if (form.model) criteria.model = form.model
+    if (form.variant) criteria.variant = form.variant
+    if (form.year_from) criteria.year_from = Number(form.year_from)
+    if (form.year_to) criteria.year_to = Number(form.year_to)
+    if (form.colour) criteria.colour = form.colour
+    if (form.price_from) criteria.price_from = Number(parseNumber(form.price_from))
+    if (form.price_to) criteria.price_to = Number(parseNumber(form.price_to))
+    if (form.mileage_max) criteria.mileage_max = Number(parseNumber(form.mileage_max))
+    if (form.fuel_type) criteria.fuel_type = form.fuel_type
+    if (form.transmission) criteria.transmission = form.transmission
+    if (form.body_type) criteria.body_type = form.body_type
+    criteria.exclude_cat = form.exclude_cat
+    if (form.postcode) {
+      criteria.postcode = form.postcode
+      if (form.radius) criteria.radius = Number(form.radius)
+    }
+
+    countTimer.current = setTimeout(() => {
+      apiPost('/api/search-count', criteria)
+        .then(r => setResultCount(r.count))
+        .catch(() => {})
+    }, 500)
+
+    return () => clearTimeout(countTimer.current)
+  }, [form.make, form.model, form.variant, form.year_from, form.year_to, form.colour,
+      form.price_from, form.price_to, form.mileage_max, form.fuel_type, form.transmission,
+      form.body_type, form.exclude_cat, form.postcode, form.radius])
+
   const NUMERIC_FIELDS = ['price_from', 'price_to', 'mileage_max']
 
   const set = (key) => (e) => {
@@ -139,7 +178,10 @@ export default function SearchEditor({ editId }) {
   return (
     <div className="page">
       <div className="search-editor">
-        <h2>{editId ? 'Edit Search' : 'New Search'}</h2>
+        <h2>
+          {editId ? 'Edit Search' : 'New Search'}
+          {resultCount !== null && ` (${resultCount.toLocaleString('en-GB')})`}
+        </h2>
         <form onSubmit={handleSubmit}>
           <div className="input-group" style={{ marginBottom: 16 }}>
             <label>Search Name (optional)</label>

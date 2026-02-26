@@ -5,7 +5,7 @@ import { getDb } from './db.js'
 import { sendMagicLink, verifyMagicLink, requireAuth } from './auth.js'
 import { createSubscriptionCheckout, addSlot, createPortalSession, handleWebhook } from './stripe.js'
 import { startScheduler, stopScheduler, runPollCycle } from './scheduler.js'
-import { buildAutotraderUrl } from './scraper.js'
+import { buildAutotraderUrl, countSearch } from './scraper.js'
 import { closeBrowser } from './browser.js'
 import { getTaxonomy, refreshTaxonomy } from './taxonomy.js'
 import { FREE_SEARCHES } from '../shared/config.js'
@@ -193,6 +193,17 @@ app.get('/api/matches/recent', requireAuth, (req, res) => {
     LIMIT 50
   `).all(req.user.userId)
   res.json(listings)
+})
+
+// ===== SEARCH COUNT =====
+
+app.post('/api/search-count', requireAuth, async (req, res) => {
+  try {
+    const count = await countSearch(req.body)
+    res.json({ count })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
 })
 
 // ===== SETTINGS =====

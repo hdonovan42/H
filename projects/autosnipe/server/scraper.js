@@ -170,6 +170,41 @@ function parseListings(data) {
   return results
 }
 
+// ===== COUNT (lightweight — size=0, no listings parsed) =====
+
+export async function countSearch(criteria) {
+  const params = buildSearchParams(criteria)
+  params.set('size', '0')
+  const url = `${CWS_BASE}/sss/searchone/adverts?${params.toString()}`
+
+  const token = await getAccessToken()
+  const res = await fetch(url, {
+    headers: {
+      'Accept': 'application/json',
+      'Access-Token': token,
+      'channel': 'Cars',
+      'sessionId': randomUUID(),
+      'deviceId': randomUUID(),
+      'platform': 'android',
+      'platform-version': APP_VERSION,
+      'composableVersion': COMPOSABLE_VERSION,
+      'X-Request-Options': 'PI_V3,EXCLUDE_TECH_SPEC,DISCLAIMERS,COMPOSABLE_V1_3,FPA_CONSOLIDATION'
+    }
+  })
+
+  if (!res.ok) {
+    if ((res.status === 401 || res.status === 403) && cachedToken) {
+      cachedToken = null
+      tokenExpiry = 0
+      return countSearch(criteria)
+    }
+    throw new Error(`CWS API returned ${res.status}`)
+  }
+
+  const data = await res.json()
+  return data?.page?.totalElements ?? 0
+}
+
 // ===== SCRAPER =====
 
 export async function scrapeSearch(search) {
