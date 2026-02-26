@@ -1,3 +1,6 @@
+* { scrollbar-width: none; }
+*::-webkit-scrollbar { display: none; }
+
 :root {
   --bg-dark: #0a0a0f;
   --bg-panel: #111118;
