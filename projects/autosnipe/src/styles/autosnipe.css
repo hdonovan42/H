@@ -141,6 +141,11 @@ a:hover { color: var(--accent-light); }
   color: var(--text-dim);
   cursor: not-allowed;
 }
+.btn-saved {
+  background: var(--success);
+  color: #0a0a0f;
+  transition: background 0.3s ease, color 0.3s ease;
+}
 
 .btn-secondary {
   background: var(--bg-card);
