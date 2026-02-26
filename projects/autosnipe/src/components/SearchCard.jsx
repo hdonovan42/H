@@ -48,6 +48,7 @@ export default function SearchCard({ search, onToggle }) {
     criteria.transmission,
     criteria.colour,
     criteria.body_type,
+    criteria.exclude_cat === false ? 'Incl. CAT' : null,
     criteria.postcode ? `${criteria.postcode} (${criteria.radius || 50}mi)` : null
   ].filter(Boolean)
 

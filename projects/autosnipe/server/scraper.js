@@ -64,6 +64,7 @@ export function buildAutotraderUrl(criteria) {
   if (criteria.fuel_type) params.set('fuel-type', criteria.fuel_type)
   if (criteria.transmission) params.set('transmission', criteria.transmission)
   if (criteria.variant) params.set('aggregatedTrim', criteria.variant)
+  if (criteria.exclude_cat) params.set('exclude-writeoff-categories', 'on')
 
   params.set('sort', 'relevance')
   params.set('advertising-location', 'at_cars')
@@ -89,6 +90,7 @@ function buildSearchParams(criteria) {
   if (criteria.mileage_max) params.set('max_mileage', String(criteria.mileage_max))
   if (criteria.fuel_type) params.set('fuel_type', criteria.fuel_type)
   if (criteria.transmission) params.set('transmission', criteria.transmission)
+  if (criteria.exclude_cat) params.set('exclude_cat_scdn', 'true')
 
   params.set('sort', 'datedesc')
   params.set('size', '20')

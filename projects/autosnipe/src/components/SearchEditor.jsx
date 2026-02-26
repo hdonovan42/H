@@ -41,6 +41,7 @@ export default function SearchEditor({ editId }) {
     fuel_type: '',
     transmission: '',
     body_type: '',
+    exclude_cat: true,
     postcode: '',
     radius: '1500'
   })
@@ -64,6 +65,7 @@ export default function SearchEditor({ editId }) {
       fuel_type: c.fuel_type || '',
       transmission: c.transmission || '',
       body_type: c.body_type || '',
+      exclude_cat: c.exclude_cat !== false,
       postcode: c.postcode || '',
       radius: c.radius ? String(c.radius) : '1500'
     })
@@ -104,6 +106,7 @@ export default function SearchEditor({ editId }) {
       if (form.fuel_type) criteria.fuel_type = form.fuel_type
       if (form.transmission) criteria.transmission = form.transmission
       if (form.body_type) criteria.body_type = form.body_type
+      criteria.exclude_cat = form.exclude_cat
       if (form.postcode) {
         criteria.postcode = form.postcode
         if (form.radius) criteria.radius = Number(form.radius)
@@ -245,7 +248,7 @@ export default function SearchEditor({ editId }) {
               />
             </div>
 
-            {/* Row 4: Fuel, Gearbox, Body Type */}
+            {/* Row 4: Fuel, Postcode, Distance */}
             <div className="input-group">
               <label>Fuel</label>
               <select value={form.fuel_type} onChange={set('fuel_type')}>
@@ -254,6 +257,38 @@ export default function SearchEditor({ editId }) {
                   <option key={f.value} value={f.value}>{f.label}</option>
                 ))}
               </select>
+            </div>
+
+            <div className="input-group">
+              <label>Postcode</label>
+              <input
+                type="text"
+                placeholder="e.g. SW1A 1AA"
+                value={form.postcode}
+                onChange={set('postcode')}
+              />
+            </div>
+
+            <div className="input-group">
+              <label>Distance</label>
+              <select value={form.postcode ? form.radius : '1500'} onChange={set('radius')} disabled={!form.postcode}>
+                {makesData.radiusOptions.map(r => (
+                  <option key={r.value} value={r.value}>{r.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="search-editor-bottom">
+            <div className="input-group">
+              <label>CAT Vehicles</label>
+              <button
+                type="button"
+                className={`btn-toggle ${form.exclude_cat ? 'active' : ''}`}
+                onClick={() => setForm(f => ({ ...f, exclude_cat: !f.exclude_cat }))}
+              >
+                {form.exclude_cat ? 'Excluded' : 'Included'}
+              </button>
             </div>
 
             <div className="input-group">
@@ -272,27 +307,6 @@ export default function SearchEditor({ editId }) {
                 <option value="">Any</option>
                 {makesData.bodyTypes.map(b => (
                   <option key={b.value} value={b.value}>{b.label}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="search-editor-location">
-            <div className="input-group">
-              <label>Postcode</label>
-              <input
-                type="text"
-                placeholder="e.g. SW1A 1AA"
-                value={form.postcode}
-                onChange={set('postcode')}
-              />
-            </div>
-
-            <div className="input-group">
-              <label>Distance</label>
-              <select value={form.postcode ? form.radius : '1500'} onChange={set('radius')} disabled={!form.postcode}>
-                {makesData.radiusOptions.map(r => (
-                  <option key={r.value} value={r.value}>{r.label}</option>
                 ))}
               </select>
             </div>
