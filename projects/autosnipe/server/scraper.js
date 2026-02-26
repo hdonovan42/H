@@ -1,14 +1,53 @@
-// ===== AUTOTRADER GRAPHQL API SCRAPER =====
-// Solves Cloudflare once via Puppeteer, then makes GraphQL
-// fetch() calls from within the browser context.
+// ===== AUTOTRADER CWS API SCRAPER =====
+// Uses the mobile app's internal API (reverse-engineered from APK).
+// No browser, no Cloudflare, zero cost per request.
 
-import { getBrowser } from './browser.js'
-import { solveCloudflareTurnstile } from './cloudflare-solver.js'
+import { randomUUID } from 'crypto'
 
-const AT_GATEWAY = '/at-gateway'
-const CF_SEED_URL = 'https://www.autotrader.co.uk/car-search?advertising-location=at_cars'
+const CWS_BASE = 'https://cws.autotrader.co.uk/CoordinatedWebService/application/crs'
+const CWS_USERNAME = 'consumerandroid'
+const CWS_PASSWORD = '0diordnaremusnoc2'
+const APP_VERSION = '7.48'
+const COMPOSABLE_VERSION = 'v1_17'
 
-// ===== URL BUILDER (still used for autotrader_url column) =====
+// ===== ACCESS TOKEN CACHE =====
+
+let cachedToken = null
+let tokenExpiry = 0
+const TOKEN_TTL = 23 * 60 * 60 * 1000 // 23h (server allows 24h, we refresh early)
+
+async function getAccessToken() {
+  if (cachedToken && Date.now() < tokenExpiry) return cachedToken
+
+  const sessionId = randomUUID()
+  const deviceId = randomUUID()
+
+  const res = await fetch(
+    `${CWS_BASE}/connect/${CWS_USERNAME}/${CWS_PASSWORD}?version=${APP_VERSION}`,
+    {
+      headers: {
+        'Accept': 'application/json',
+        'sessionId': sessionId,
+        'deviceId': deviceId,
+        'platform': 'android',
+        'platform-version': APP_VERSION,
+        'channel': 'Cars'
+      }
+    }
+  )
+
+  if (!res.ok) throw new Error(`CWS connect failed: HTTP ${res.status}`)
+
+  const token = await res.text()
+  if (!token || token.length < 50) throw new Error('CWS connect returned invalid token')
+
+  cachedToken = token
+  tokenExpiry = Date.now() + TOKEN_TTL
+  console.log(`[Scraper] CWS access token acquired (${token.length} chars, expires in 23h)`)
+  return token
+}
+
+// ===== URL BUILDER (kept for autotrader_url column in DB) =====
 
 export function buildAutotraderUrl(criteria) {
   const params = new URLSearchParams()
@@ -24,6 +63,7 @@ export function buildAutotraderUrl(criteria) {
   if (criteria.mileage_max) params.set('maximum-mileage', String(criteria.mileage_max))
   if (criteria.fuel_type) params.set('fuel-type', criteria.fuel_type)
   if (criteria.transmission) params.set('transmission', criteria.transmission)
+  if (criteria.variant) params.set('aggregatedTrim', criteria.variant)
 
   params.set('sort', 'relevance')
   params.set('advertising-location', 'at_cars')
@@ -31,153 +71,97 @@ export function buildAutotraderUrl(criteria) {
   return `https://www.autotrader.co.uk/car-search?${params.toString()}`
 }
 
-// ===== GRAPHQL QUERY BUILDER =====
+// ===== CWS QUERY BUILDER =====
 
-function buildFilters(criteria) {
-  const filters = [
-    { filter: 'postcode', selected: [String(criteria.postcode || 'SW1A1AA').replace(/\s/g, '')] },
-    { filter: 'advertising_location', selected: ['at_cars'] },
-    { filter: 'price_search_type', selected: ['total'] }
-  ]
+function buildSearchParams(criteria) {
+  const params = new URLSearchParams()
 
-  if (criteria.make) filters.push({ filter: 'make', selected: [criteria.make] })
-  if (criteria.model) filters.push({ filter: 'model', selected: [criteria.model] })
-  if (criteria.year_from) filters.push({ filter: 'min_year_manufactured', selected: [String(criteria.year_from)] })
-  if (criteria.year_to) filters.push({ filter: 'max_year_manufactured', selected: [String(criteria.year_to)] })
-  if (criteria.price_from) filters.push({ filter: 'min_price', selected: [String(criteria.price_from)] })
-  if (criteria.price_to) filters.push({ filter: 'max_price', selected: [String(criteria.price_to)] })
-  if (criteria.mileage_max) filters.push({ filter: 'max_mileage', selected: [String(criteria.mileage_max)] })
-  if (criteria.fuel_type) filters.push({ filter: 'fuel_type', selected: [criteria.fuel_type] })
-  if (criteria.transmission) filters.push({ filter: 'transmission', selected: [criteria.transmission] })
-  if (criteria.radius) filters.push({ filter: 'distance', selected: [String(criteria.radius)] })
+  params.set('advertising_location', 'at_cars')
+  params.set('postcode', String(criteria.postcode || 'SW1A 1AA').replace(/\s/g, ''))
+  if (criteria.radius) params.set('distance', String(criteria.radius))
+  if (criteria.make) params.set('make', criteria.make)
+  if (criteria.model) params.set('model', criteria.model)
+  if (criteria.variant) params.set('aggregated_trim', criteria.variant)
+  if (criteria.year_from) params.set('min_year_manufactured', String(criteria.year_from))
+  if (criteria.year_to) params.set('max_year_manufactured', String(criteria.year_to))
+  if (criteria.price_from) params.set('min_price', String(criteria.price_from))
+  if (criteria.price_to) params.set('max_price', String(criteria.price_to))
+  if (criteria.mileage_max) params.set('max_mileage', String(criteria.mileage_max))
+  if (criteria.fuel_type) params.set('fuel_type', criteria.fuel_type)
+  if (criteria.transmission) params.set('transmission', criteria.transmission)
 
-  return filters
-}
+  params.set('sort', 'datedesc')
+  params.set('size', '20')
+  params.set('page', '1')
 
-function buildQuery(filters, page = 1) {
-  const filtersStr = filters
-    .map(f => `{filter: ${f.filter}, selected: [${f.selected.map(v => `"${v}"`).join(', ')}]}`)
-    .join(', ')
-
-  return `{
-    searchResults(input: {
-      facets: [],
-      filters: [${filtersStr}],
-      channel: cars,
-      page: ${page},
-      sortBy: relevance,
-      searchId: "autosnipe-${Date.now()}"
-    }) {
-      page { number count results { count } }
-      listings {
-        ... on SearchListing {
-          advertId title subTitle attentionGrabber price
-          vehicleLocation images sellerType fpaLink
-          badges { type displayText }
-          trackingContext {
-            advertContext { id make model year condition price }
-            distance { distance }
-          }
-        }
-      }
-    }
-  }`
-}
-
-// ===== CLOUDFLARE SESSION =====
-
-let cfPage = null
-
-async function ensureCfSession() {
-  const b = await getBrowser()
-
-  // Reuse existing page if still open
-  if (cfPage && !cfPage.isClosed()) {
-    // Quick health check — try a small fetch
-    const ok = await cfPage.evaluate(async (gw) => {
-      try {
-        const r = await fetch(gw, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: '{ __typename }' })
-        })
-        return r.status !== 403
-      } catch { return false }
-    }, AT_GATEWAY).catch(() => false)
-
-    if (ok) return cfPage
-    console.log('[Scraper] CF session expired, re-solving...')
-    await cfPage.close().catch(() => {})
-    cfPage = null
-  }
-
-  // Open a fresh page and solve Cloudflare
-  console.log('[Scraper] Solving Cloudflare challenge...')
-  const page = await b.newPage()
-  await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
-
-  await page.goto(CF_SEED_URL, { waitUntil: 'networkidle2', timeout: 60_000 })
-
-  const title = await page.title()
-  if (title.toLowerCase().includes('just a moment') || title.toLowerCase().includes('cloudflare')) {
-    const result = await solveCloudflareTurnstile(page)
-    if (!result.solved) {
-      await page.close().catch(() => {})
-      throw new Error('Cloudflare challenge failed')
-    }
-    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30_000 }).catch(() => {})
-    // Brief pause for page to fully settle
-    await new Promise(r => setTimeout(r, 3000))
-    console.log(`[Scraper] CF solved (cost: $${result.cost?.toFixed(4) || 0})`)
-  } else {
-    console.log('[Scraper] No CF challenge needed')
-  }
-
-  cfPage = page
-  return page
+  return params
 }
 
 // ===== RESPONSE PARSER =====
 
 function parseListings(data) {
   const results = []
-  const listings = data?.data?.searchResults?.listings || []
+  const adverts = data?._embedded?.results || []
 
-  for (const listing of listings) {
+  for (const listing of adverts) {
     if (!listing.advertId) continue
 
-    const ctx = listing.trackingContext?.advertContext || {}
-    const badges = listing.badges || []
+    const spec = listing.specification || {}
+    const vehicle = listing.vehicle || {}
+    const sale = listing.sale || {}
+    const pricing = sale.pricing || {}
+    const advertiser = listing.advertiser || {}
+    const advLocation = advertiser.location || {}
+    const mileageInfo = vehicle.mileage || {}
+    const media = listing.media || {}
+    const images = media.images || []
 
-    // Mileage from badges
-    const mileageBadge = badges.find(b => b.type === 'MILEAGE')
-    const mileageMatch = mileageBadge?.displayText?.match(/([\d,]+)\s*miles/i)
-    const mileage = mileageMatch ? parseInt(mileageMatch[1].replace(/,/g, '')) : null
+    // Title: use sale.title (full derivative) falling back to make+model
+    const title = sale.title || `${spec.make || ''} ${spec.model || ''}`.trim()
 
-    // Fuel type and transmission from subtitle
-    const subtitle = listing.subTitle || ''
-    const fuelMatch = subtitle.match(/\b(Petrol|Diesel|Electric|Hybrid|Plug-in Hybrid)\b/i)
-    const transMatch = subtitle.match(/\b(Automatic|Manual|Auto)\b/i)
-    const transmission = transMatch ? (transMatch[1] === 'Auto' ? 'Automatic' : transMatch[1]) : null
+    // Price
+    const price = pricing.totalPrice || pricing.price || null
 
-    // Image URL
-    const rawImage = listing.images?.[0] || ''
-    const imageUrl = rawImage.replace('{resize}', '800x600') || null
+    // Mileage
+    const mileage = typeof mileageInfo.mileage === 'number' ? mileageInfo.mileage : null
 
-    const title = listing.title || `${ctx.make || ''} ${ctx.model || ''}`.trim()
+    // Fuel type: extract from suppliedDerivative (e.g. "2.0 18d SE SUV 5dr Diesel Auto")
+    const derivative = spec.suppliedDerivative || spec.derivative || ''
+    const fuelMatch = derivative.match(/\b(Petrol|Diesel|Electric|Hybrid|Plug-in Hybrid)\b/i)
+    const fuelType = fuelMatch ? fuelMatch[1] : null
+
+    // Transmission
+    const transMatch = derivative.match(/\b(Automatic|Manual|Auto|Steptronic|DCT|PDK|DSG|CVT|Tiptronic)\b/i)
+    let transmission = null
+    if (transMatch) {
+      const raw = transMatch[1]
+      transmission = (raw === 'Manual') ? 'Manual' : 'Automatic'
+    }
+
+    // Image URL (templated: replace {resize} with size)
+    let imageUrl = null
+    if (images.length > 0) {
+      const href = images[0]?._links?.self?.href
+      if (href) imageUrl = href.replace('{resize}', '800x600')
+    }
+
+    // Location
+    const town = advLocation.town || ''
+    const region = advLocation.region || ''
+    const location = town || region || null
 
     results.push({
       autotrader_id: listing.advertId,
       title,
-      price: ctx.price || null,
+      price,
       mileage,
-      year: ctx.year || null,
-      fuel_type: fuelMatch ? fuelMatch[1] : null,
+      year: vehicle.manufacturedYear || null,
+      fuel_type: fuelType,
       transmission,
-      url: `https://www.autotrader.co.uk${listing.fpaLink?.split('?')[0] || `/car-details/${listing.advertId}`}`,
+      url: listing.autotraderWebsiteLink || `https://www.autotrader.co.uk/car-details/${listing.advertId}`,
       image_url: imageUrl,
-      seller_type: listing.sellerType || null,
-      location: listing.vehicleLocation || null
+      seller_type: advertiser.type || null,
+      location
     })
   }
 
@@ -188,41 +172,46 @@ function parseListings(data) {
 
 export async function scrapeSearch(search) {
   const criteria = JSON.parse(search.criteria)
-  const filters = buildFilters(criteria)
-  const query = buildQuery(filters, 1)
+  const params = buildSearchParams(criteria)
+  const url = `${CWS_BASE}/sss/searchone/adverts?${params.toString()}`
 
-  console.log(`[Scraper] Search #${search.id}: querying GraphQL API`)
+  console.log(`[Scraper] Search #${search.id}: querying CWS API`)
 
   try {
-    const page = await ensureCfSession()
+    const token = await getAccessToken()
+    const sessionId = randomUUID()
+    const deviceId = randomUUID()
 
-    // Execute fetch inside the browser context (uses CF-cleared cookies)
-    const raw = await page.evaluate(async (gw, gqlQuery) => {
-      const res = await fetch(gw, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: gqlQuery })
-      })
-      if (!res.ok) return { error: `API returned ${res.status}` }
-      return { data: await res.json() }
-    }, AT_GATEWAY, query)
+    const res = await fetch(url, {
+      headers: {
+        'Accept': 'application/json',
+        'Access-Token': token,
+        'channel': 'Cars',
+        'sessionId': sessionId,
+        'deviceId': deviceId,
+        'platform': 'android',
+        'platform-version': APP_VERSION,
+        'composableVersion': COMPOSABLE_VERSION,
+        'X-Request-Options': 'PI_V3,EXCLUDE_TECH_SPEC,DISCLAIMERS,COMPOSABLE_V1_3,FPA_CONSOLIDATION'
+      }
+    })
 
-    if (raw.error) {
-      // CF session likely expired — clear it so next call re-solves
-      if (cfPage && !cfPage.isClosed()) await cfPage.close().catch(() => {})
-      cfPage = null
-      throw new Error(raw.error)
+    if (!res.ok) {
+      // If 401/403, invalidate token and retry once
+      if ((res.status === 401 || res.status === 403) && cachedToken) {
+        console.log(`[Scraper] Token rejected (${res.status}), refreshing...`)
+        cachedToken = null
+        tokenExpiry = 0
+        return scrapeSearch(search)
+      }
+      throw new Error(`CWS API returned ${res.status}`)
     }
 
-    const data = raw.data
-    if (data.errors) {
-      throw new Error(`GraphQL error: ${data.errors[0]?.message || 'unknown'}`)
-    }
-
+    const data = await res.json()
     const listings = parseListings(data)
-    const totalResults = data?.data?.searchResults?.page?.results?.count || listings.length
+    const totalResults = data?.page?.totalElements || listings.length
 
-    console.log(`[Scraper] Search #${search.id}: ${listings.length} listings (${totalResults} total)`)
+    console.log(`[Scraper] Search #${search.id}: ${listings.length} listings (${totalResults} total matches)`)
     return { listings, iterations: 1, success: true, cost: 0 }
 
   } catch (err) {

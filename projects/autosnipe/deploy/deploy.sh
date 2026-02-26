@@ -25,9 +25,10 @@ rsync -az --delete \
   --exclude='data/' \
   "$PROJECT_DIR/server/" "$VPS:$REMOTE/server/"
 
-# 4. Sync shared/ + deploy config
-echo "[4/5] Syncing shared/ and deploy config..."
+# 4. Sync shared/, src/data/ + deploy config
+echo "[4/5] Syncing shared/, static data, and deploy config..."
 rsync -az "$PROJECT_DIR/shared/" "$VPS:$REMOTE/shared/"
+rsync -az "$PROJECT_DIR/src/data/" "$VPS:$REMOTE/src/data/"
 rsync -az "$PROJECT_DIR/deploy/ecosystem.config.cjs" "$VPS:$REMOTE/deploy/"
 
 # 5. Remote: install deps + restart PM2

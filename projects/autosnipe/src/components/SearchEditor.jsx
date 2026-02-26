@@ -1,7 +1,6 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import useSearches from '../hooks/useSearches'
 import makesData from '../data/makes.json'
-import modelsData from '../data/models.json'
 
 const currentYear = new Date().getFullYear()
 const years = Array.from({ length: 30 }, (_, i) => currentYear - i)
@@ -16,6 +15,16 @@ export default function SearchEditor() {
   const { createSearch } = useSearches()
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
+  const [taxonomy, setTaxonomy] = useState(null)
+  const [taxonomyLoading, setTaxonomyLoading] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/taxonomy')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => setTaxonomy(data))
+      .catch(() => {})
+      .finally(() => setTaxonomyLoading(false))
+  }, [])
 
   const [form, setForm] = useState({
     name: '',
@@ -56,12 +65,8 @@ export default function SearchEditor() {
     try {
       const criteria = {}
       if (form.make) criteria.make = form.make
-      if (form.variant) {
-        criteria.model = form.variant
-        criteria.variant = form.variant
-      } else if (form.model) {
-        criteria.model = form.model
-      }
+      if (form.model) criteria.model = form.model
+      if (form.variant) criteria.variant = form.variant
       if (form.year_from) criteria.year_from = Number(form.year_from)
       if (form.year_to) criteria.year_to = Number(form.year_to)
       if (form.price_from) criteria.price_from = Number(parseNumber(form.price_from))
@@ -115,29 +120,38 @@ export default function SearchEditor() {
               </select>
             </div>
 
-            <div className="input-group">
-              <label>Model</label>
-              <select value={form.model} onChange={set('model')} disabled={!form.make}>
-                <option value="">{form.make ? 'Any' : 'Select make'}</option>
-                {(modelsData[form.make] || []).map(m => (
-                  <option key={m.value} value={m.value}>{m.label}</option>
-                ))}
-              </select>
-            </div>
-
             {(() => {
-              const selectedModel = (modelsData[form.make] || []).find(m => m.value === form.model)
-              const variants = selectedModel?.variants || []
+              const models = taxonomy?.makes?.[form.make]?.models || []
+              const selectedModel = models.find(m => m.value === form.model)
+              const trims = selectedModel?.trims || []
+              const fmtCount = (n) => n > 0 ? ` (${n.toLocaleString('en-GB')})` : ''
+
               return (
-                <div className="input-group">
-                  <label>Variant</label>
-                  <select value={form.variant} onChange={set('variant')} disabled={!variants.length}>
-                    <option value="">{variants.length ? 'Any' : 'Select model'}</option>
-                    {variants.map(v => (
-                      <option key={v.value} value={v.value}>{v.label}</option>
-                    ))}
-                  </select>
-                </div>
+                <>
+                  <div className="input-group">
+                    <label>Model</label>
+                    <select value={form.model} onChange={set('model')} disabled={!form.make || taxonomyLoading}>
+                      <option value="">
+                        {!form.make ? 'Select make' : taxonomyLoading ? 'Loading...' : 'Any'}
+                      </option>
+                      {models.map(m => (
+                        <option key={m.value} value={m.value}>{m.label}{fmtCount(m.count)}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="input-group">
+                    <label>Variant</label>
+                    <select value={form.variant} onChange={set('variant')} disabled={!trims.length}>
+                      <option value="">
+                        {trims.length ? 'Any' : !form.model ? 'Select model' : 'No variants'}
+                      </option>
+                      {trims.map(v => (
+                        <option key={v.value} value={v.value}>{v.label}{fmtCount(v.count)}</option>
+                      ))}
+                    </select>
+                  </div>
+                </>
               )
             })()}
 

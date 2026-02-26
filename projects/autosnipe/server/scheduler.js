@@ -2,9 +2,11 @@ import { Cron } from 'croner'
 import { getDb } from './db.js'
 import { scrapeSearch } from './scraper.js'
 import { sendWhatsApp, formatListingAlert } from './whatsapp.js'
+import { refreshTaxonomy, taxonomyNeedsRefresh } from './taxonomy.js'
 import { POLL_INTERVAL_HOURS, NIGHT_SKIP_START, NIGHT_SKIP_END } from '../shared/config.js'
 
 let job = null
+let taxonomyJob = null
 let isRunning = false
 
 export function startScheduler() {
@@ -25,7 +27,26 @@ export function startScheduler() {
     }
   })
 
-  console.log(`[Scheduler] Active — polling every ${POLL_INTERVAL_HOURS}h`)
+  // Taxonomy refresh — every Monday at 06:00 London time
+  taxonomyJob = new Cron('0 6 * * 1', { timezone: 'Europe/London' }, async () => {
+    console.log('[Scheduler] Starting weekly taxonomy refresh')
+    try {
+      await refreshTaxonomy()
+      console.log('[Scheduler] Taxonomy refresh complete')
+    } catch (err) {
+      console.error('[Scheduler] Taxonomy refresh failed:', err.message)
+    }
+  })
+
+  // Refresh taxonomy on startup if stale or missing
+  if (taxonomyNeedsRefresh()) {
+    console.log('[Scheduler] Taxonomy stale or missing, refreshing in background...')
+    refreshTaxonomy().catch(err =>
+      console.error('[Scheduler] Startup taxonomy refresh failed:', err.message)
+    )
+  }
+
+  console.log(`[Scheduler] Active — polling every ${POLL_INTERVAL_HOURS}h, taxonomy every Monday 06:00`)
 }
 
 export async function runPollCycle() {
@@ -117,6 +138,10 @@ export async function runPollCycle() {
 export function stopScheduler() {
   if (job) {
     job.stop()
-    console.log('[Scheduler] Stopped')
+    console.log('[Scheduler] Poll job stopped')
+  }
+  if (taxonomyJob) {
+    taxonomyJob.stop()
+    console.log('[Scheduler] Taxonomy job stopped')
   }
 }

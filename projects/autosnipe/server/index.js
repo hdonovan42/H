@@ -7,6 +7,7 @@ import { createSlotCheckout, handleWebhook } from './stripe.js'
 import { startScheduler, stopScheduler, runPollCycle } from './scheduler.js'
 import { buildAutotraderUrl } from './scraper.js'
 import { closeBrowser } from './browser.js'
+import { getTaxonomy, refreshTaxonomy } from './taxonomy.js'
 import { FREE_SEARCHES, CURRENCY_SYMBOLS } from '../shared/config.js'
 
 // ===== GEO CURRENCY =====
@@ -217,7 +218,24 @@ app.post('/api/stripe/checkout', requireAuth, async (req, res) => {
   }
 })
 
+// ===== TAXONOMY =====
+
+app.get('/api/taxonomy', (req, res) => {
+  const taxonomy = getTaxonomy()
+  if (!taxonomy) return res.status(503).json({ error: 'Taxonomy not yet generated' })
+  res.json(taxonomy)
+})
+
 // ===== ADMIN =====
+
+app.post('/api/admin/refresh-taxonomy', requireAuth, async (req, res) => {
+  try {
+    await refreshTaxonomy()
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
 
 app.post('/api/admin/poll', requireAuth, async (req, res) => {
   try {
