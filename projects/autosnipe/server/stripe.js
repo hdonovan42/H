@@ -1,6 +1,6 @@
 import Stripe from 'stripe'
 import { getDb } from './db.js'
-import { SLOT_PRICE, FREE_SEARCHES, SUPPORTED_CURRENCIES } from '../shared/config.js'
+import { SLOT_PRICE, FREE_SEARCHES, CURRENCY } from '../shared/config.js'
 
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY)
@@ -10,11 +10,8 @@ const APP_URL = process.env.APP_URL || 'http://localhost:5177'
 
 // ===== CHECKOUT (first paid slot) =====
 
-export async function createSubscriptionCheckout(userId, email, currency) {
+export async function createSubscriptionCheckout(userId, email) {
   if (!stripe) throw new Error('Stripe not configured')
-  if (!SUPPORTED_CURRENCIES.includes(currency)) {
-    throw new Error(`Unsupported currency. Use: ${SUPPORTED_CURRENCIES.join(', ')}`)
-  }
 
   const db = getDb()
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId)
@@ -32,7 +29,7 @@ export async function createSubscriptionCheckout(userId, email, currency) {
     mode: 'subscription',
     line_items: [{
       price_data: {
-        currency,
+        currency: CURRENCY,
         unit_amount: SLOT_PRICE * 100,
         recurring: { interval: 'month' },
         product_data: {
