@@ -13,7 +13,7 @@ function timeAgo(dateStr) {
   return `${days}d ago`
 }
 
-export default function SearchCard({ search, onDelete, index = 0 }) {
+export default function SearchCard({ search, onDelete }) {
   const [expanded, setExpanded] = useState(false)
   const [listings, setListings] = useState([])
   const [loadingListings, setLoadingListings] = useState(false)
@@ -34,54 +34,34 @@ export default function SearchCard({ search, onDelete, index = 0 }) {
     criteria.model,
     criteria.variant,
     criteria.year_from && criteria.year_to
-      ? `${criteria.year_from}\u2013${criteria.year_to}`
+      ? `${criteria.year_from}-${criteria.year_to}`
       : criteria.year_from || criteria.year_to,
     criteria.price_from || criteria.price_to
-      ? `\u00a3${(criteria.price_from || 0).toLocaleString()}\u2013\u00a3${(criteria.price_to || '\u221e').toLocaleString()}`
+      ? `\u00a3${(criteria.price_from || 0).toLocaleString()}-\u00a3${(criteria.price_to || '?').toLocaleString()}`
       : null,
-    criteria.mileage_max ? `< ${criteria.mileage_max.toLocaleString()} mi` : null,
+    criteria.mileage_max ? `<${criteria.mileage_max.toLocaleString()}mi` : null,
     criteria.fuel_type,
     criteria.transmission,
-    criteria.postcode ? `${criteria.postcode} (${criteria.radius || 50} mi)` : null
+    criteria.postcode ? `${criteria.postcode} (${criteria.radius || 50}mi)` : null
   ].filter(Boolean)
 
   const count = search.total_listings || 0
 
   return (
-    <div className="search-card" style={{ '--i': index }}>
+    <div className="search-card">
       <div className="search-card-header">
-        <div className="search-card-header-left">
-          <span className="search-card-name">
-            {search.name || `${criteria.make || 'Any'} ${criteria.model || ''}`}
-          </span>
-          {search.active && (
-            <span className="search-card-live">
-              <span className="search-card-live-dot" />
-              Live
-            </span>
-          )}
-        </div>
+        <span className="search-card-name">
+          {search.name || `${criteria.make || 'Any'} ${criteria.model || ''}`}
+        </span>
         <div className="search-card-header-right">
+          <span className={`search-card-status ${search.active ? 'active' : 'inactive'}`}>
+            {search.active ? 'Active' : 'Paused'}
+          </span>
           {search.active && (
             <button className="btn btn-danger btn-sm" onClick={() => onDelete(search.id)}>
               Remove
             </button>
           )}
-        </div>
-      </div>
-
-      <div className="search-card-stats">
-        <div className="search-card-stat">
-          <span className="search-card-stat-value">{count}</span>
-          <span className="search-card-stat-label">Listings</span>
-        </div>
-        <div className="search-card-stat">
-          <span className="search-card-stat-value">{timeAgo(search.last_checked)}</span>
-          <span className="search-card-stat-label">Last Scan</span>
-        </div>
-        <div className="search-card-stat">
-          <span className="search-card-stat-value">{search.last_result_count || '\u2014'}</span>
-          <span className="search-card-stat-label">Last Results</span>
         </div>
       </div>
 
@@ -95,54 +75,57 @@ export default function SearchCard({ search, onDelete, index = 0 }) {
         className={`search-card-toggle ${expanded ? 'expanded' : ''}`}
         onClick={() => setExpanded(!expanded)}
       >
-        <span className="search-card-toggle-arrow">{'\u25B6'}</span>
-        <span>{expanded ? 'Hide listings' : 'View listings'}</span>
+        <span className="search-card-toggle-arrow">{expanded ? '\u25BC' : '\u25B6'}</span>
+        <span>
+          {count} listing{count !== 1 ? 's' : ''} found
+          <span className="search-card-toggle-sep">/</span>
+          Last checked: {timeAgo(search.last_checked)}
+        </span>
       </button>
 
       {expanded && (
         <div className="search-card-listings">
           {loadingListings ? (
-            <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-dim)', fontSize: 12 }}>
+            <div className="search-card-listings-loading">
               <span className="spinner" /> Loading listings...
             </div>
           ) : listings.length === 0 ? (
-            <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-dim)', fontSize: 12 }}>
+            <div className="search-card-listings-empty">
               No listings yet. Results will appear after the next scan.
             </div>
           ) : (
-            <div className="listing-grid">
-              {listings.map((m, i) => (
-                <a
-                  key={m.id}
-                  href={m.url || '#'}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="listing-card"
-                  style={{ '--i': i }}
-                >
-                  <div className="listing-card-img">
-                    {m.image_url && <img src={m.image_url} alt="" loading="lazy" />}
+            listings.map(m => (
+              <a
+                key={m.id}
+                href={m.url || '#'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="match-item"
+              >
+                <div className="match-image">
+                  {m.image_url && <img src={m.image_url} alt="" loading="lazy" />}
+                </div>
+                <div className="match-info">
+                  <div className="match-title">{m.title || 'Untitled listing'}</div>
+                  <div className="match-price">
+                    {m.price ? `\u00a3${m.price.toLocaleString()}` : 'Price on request'}
                   </div>
-                  <div className="listing-card-body">
-                    <div className="listing-card-price">
-                      {m.price ? `\u00a3${m.price.toLocaleString()}` : 'POA'}
-                    </div>
-                    <div className="listing-card-title">{m.title || 'Untitled listing'}</div>
-                    <div className="listing-card-specs">
-                      {[
-                        m.year,
-                        m.mileage ? `${m.mileage.toLocaleString()} mi` : null,
-                        m.fuel_type,
-                        m.transmission
-                      ].filter(Boolean).join(' \u00b7 ')}
-                    </div>
-                    <div className="listing-card-meta">
-                      {[m.location, m.seller_type, timeAgo(m.first_seen)].filter(Boolean).join(' \u00b7 ')}
-                    </div>
+                  <div className="match-specs">
+                    {[
+                      m.year,
+                      m.mileage ? `${m.mileage.toLocaleString()} miles` : null,
+                      m.fuel_type,
+                      m.transmission
+                    ].filter(Boolean).join(' \u00b7 ')}
                   </div>
-                </a>
-              ))}
-            </div>
+                  <div className="match-meta">
+                    {m.location && `${m.location} \u00b7 `}
+                    {m.seller_type && `${m.seller_type} \u00b7 `}
+                    {timeAgo(m.first_seen)}
+                  </div>
+                </div>
+              </a>
+            ))
           )}
         </div>
       )}
