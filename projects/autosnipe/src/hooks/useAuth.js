@@ -4,7 +4,16 @@ import { apiGet } from '../utils/api'
 const TOKEN_KEY = 'autosnipe_token'
 
 export default function useAuth() {
-  const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY))
+  const [token, setToken] = useState(() => {
+    const stored = localStorage.getItem(TOKEN_KEY)
+    if (stored) return stored
+    // Auto-auth in dev mode so previews skip the landing page
+    if (import.meta.env.DEV) {
+      localStorage.setItem(TOKEN_KEY, 'dev-preview-token')
+      return 'dev-preview-token'
+    }
+    return null
+  })
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
