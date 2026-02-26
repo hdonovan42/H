@@ -78,7 +78,6 @@ export default function SearchEditor({ editId }) {
 
   useEffect(() => {
     clearTimeout(countTimer.current)
-    setResultCount(null)
 
     // Build criteria object (same logic as handleSubmit)
     const criteria = {}
