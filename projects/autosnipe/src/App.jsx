@@ -36,6 +36,10 @@ export default function App() {
   if (!user) return <Landing />
 
   const renderPage = () => {
+    if (page.startsWith('#/edit-search/')) {
+      const id = page.split('/').pop()
+      return <SearchEditor editId={id} />
+    }
     if (page.startsWith('#/new-search')) return <SearchEditor />
     if (page.startsWith('#/settings')) return <Settings user={user} onRefresh={refresh} />
     if (page.startsWith('#/buy-slot')) return <BuySlotPage user={user} onRefresh={refresh} />

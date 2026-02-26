@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { apiGet, apiPost, apiDelete } from '../utils/api'
+import { apiGet, apiPost, apiDelete, apiPatch } from '../utils/api'
 
 export default function useSearches() {
   const [searches, setSearches] = useState([])
@@ -29,5 +29,15 @@ export default function useSearches() {
     await fetchSearches()
   }
 
-  return { searches, loading, createSearch, deleteSearch, refresh: fetchSearches }
+  const toggleSearch = async (id, active) => {
+    await apiPatch(`/api/searches/${id}`, { active })
+    await fetchSearches()
+  }
+
+  const updateSearch = async (id, { name, criteria }) => {
+    await apiPatch(`/api/searches/${id}`, { name, criteria })
+    await fetchSearches()
+  }
+
+  return { searches, loading, createSearch, deleteSearch, toggleSearch, updateSearch, refresh: fetchSearches }
 }

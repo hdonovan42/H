@@ -3,9 +3,10 @@ import useSearches from '../hooks/useSearches'
 import SearchCard from './SearchCard'
 
 export default function Dashboard() {
-  const { searches, deleteSearch } = useSearches()
+  const { searches, toggleSearch } = useSearches()
 
   const activeSearches = searches.filter(s => s.active)
+  const parkedSearches = searches.filter(s => !s.active)
 
   return (
     <div className="page page-wide">
@@ -21,8 +22,19 @@ export default function Dashboard() {
         </div>
       ) : (
         activeSearches.map(s => (
-          <SearchCard key={s.id} search={s} onDelete={deleteSearch} />
+          <SearchCard key={s.id} search={s} onToggle={toggleSearch} />
         ))
+      )}
+
+      {parkedSearches.length > 0 && (
+        <>
+          <div className="dashboard-header" style={{ marginTop: 32 }}>
+            <h2>Parked</h2>
+          </div>
+          {parkedSearches.map(s => (
+            <SearchCard key={s.id} search={s} onToggle={toggleSearch} />
+          ))}
+        </>
       )}
     </div>
   )

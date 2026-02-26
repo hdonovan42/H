@@ -173,6 +173,40 @@ app.delete('/api/searches/:id', requireAuth, (req, res) => {
   res.json({ success: true })
 })
 
+app.patch('/api/searches/:id', requireAuth, (req, res) => {
+  const db = getDb()
+  const search = db.prepare('SELECT * FROM searches WHERE id = ? AND user_id = ?')
+    .get(req.params.id, req.user.userId)
+  if (!search) return res.status(404).json({ error: 'Search not found' })
+
+  const { active, name, criteria } = req.body
+
+  if (typeof active === 'boolean') {
+    if (active && !search.active) {
+      const user = db.prepare('SELECT paid_slots FROM users WHERE id = ?').get(req.user.userId)
+      const activeCount = db.prepare('SELECT COUNT(*) as n FROM searches WHERE user_id = ? AND active = 1')
+        .get(req.user.userId).n
+      const maxSearches = FREE_SEARCHES + (user.paid_slots || 0)
+      if (activeCount >= maxSearches) {
+        return res.status(403).json({ error: 'No available search slots. Buy another slot to unpark this search.' })
+      }
+    }
+    db.prepare('UPDATE searches SET active = ? WHERE id = ?').run(active ? 1 : 0, search.id)
+  }
+
+  if (name !== undefined) {
+    db.prepare('UPDATE searches SET name = ? WHERE id = ?').run(name || null, search.id)
+  }
+
+  if (criteria) {
+    const autotraderUrl = buildAutotraderUrl(criteria)
+    db.prepare('UPDATE searches SET criteria = ?, autotrader_url = ? WHERE id = ?')
+      .run(JSON.stringify(criteria), autotraderUrl, search.id)
+  }
+
+  res.json({ success: true })
+})
+
 // ===== LISTINGS =====
 
 app.get('/api/searches/:id/listings', requireAuth, (req, res) => {

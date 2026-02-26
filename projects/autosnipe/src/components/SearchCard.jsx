@@ -13,7 +13,7 @@ function timeAgo(dateStr) {
   return `${days}d ago`
 }
 
-export default function SearchCard({ search, onDelete }) {
+export default function SearchCard({ search, onToggle }) {
   const [expanded, setExpanded] = useState(false)
   const [listings, setListings] = useState([])
   const [loadingListings, setLoadingListings] = useState(false)
@@ -29,45 +29,50 @@ export default function SearchCard({ search, onDelete }) {
       .finally(() => setLoadingListings(false))
   }, [expanded, search.id, listings.length])
 
-  const tags = [
-    criteria.make,
-    criteria.model,
-    criteria.variant,
-    criteria.year_from && criteria.year_to
-      ? `${criteria.year_from}-${criteria.year_to}`
-      : criteria.year_from || criteria.year_to,
-    criteria.price_from || criteria.price_to
-      ? `\u00a3${(criteria.price_from || 0).toLocaleString()}-\u00a3${(criteria.price_to || '?').toLocaleString()}`
-      : null,
-    criteria.mileage_max ? `<${criteria.mileage_max.toLocaleString()}mi` : null,
-    criteria.fuel_type,
-    criteria.transmission,
-    criteria.postcode ? `${criteria.postcode} (${criteria.radius || 50}mi)` : null
-  ].filter(Boolean)
+  const grid = [
+    { label: 'Make',      value: criteria.make },
+    { label: 'Model',     value: criteria.model },
+    { label: 'Variant',   value: criteria.variant },
+    { label: 'Year From', value: criteria.year_from },
+    { label: 'Year To',   value: criteria.year_to },
+    { label: 'Colour',    value: criteria.colour },
+    { label: 'Min Price', value: criteria.price_from ? `£${criteria.price_from.toLocaleString()}` : null },
+    { label: 'Max Price', value: criteria.price_to ? `£${criteria.price_to.toLocaleString()}` : null },
+    { label: 'Mileage',   value: criteria.mileage_max ? `${criteria.mileage_max.toLocaleString()}` : null },
+    { label: 'Fuel',      value: criteria.fuel_type },
+    { label: 'Gearbox',   value: criteria.transmission },
+    { label: 'Body Type', value: criteria.body_type },
+  ]
 
   const count = search.total_listings || 0
 
   return (
     <div className="search-card">
+      <div className="search-card-actions">
+        <span className={`search-card-status ${search.active ? 'active' : 'inactive'}`}>
+          {search.active ? 'Active' : 'Parked'}
+        </span>
+        <button className="btn btn-secondary btn-sm" onClick={() => { window.location.hash = `#/edit-search/${search.id}` }}>
+          Edit
+        </button>
+        <button className="btn btn-secondary btn-sm" onClick={() => onToggle(search.id, !search.active)}>
+          {search.active ? 'Park' : 'Unpark'}
+        </button>
+      </div>
       <div className="search-card-header">
         <span className="search-card-name">
-          {search.name || `${criteria.make || 'Any'} ${criteria.model || ''}`}
+          {search.name || `${criteria.make || 'Any'} ${criteria.model || ''} ${criteria.variant || ''}`.trim()}
         </span>
-        <div className="search-card-header-right">
-          <span className={`search-card-status ${search.active ? 'active' : 'inactive'}`}>
-            {search.active ? 'Active' : 'Paused'}
-          </span>
-          {search.active && (
-            <button className="btn btn-danger btn-sm" onClick={() => onDelete(search.id)}>
-              Remove
-            </button>
-          )}
-        </div>
       </div>
 
-      <div className="search-card-criteria">
-        {tags.map((tag, i) => (
-          <span key={i} className="search-card-tag">{tag}</span>
+      <div className="search-card-grid">
+        {grid.map((cell, i) => (
+          <div key={i} className="search-card-cell">
+            <span className="search-card-cell-label">{cell.label}</span>
+            <span className={`search-card-cell-value${cell.value ? '' : ' empty'}`}>
+              {cell.value || '—'}
+            </span>
+          </div>
         ))}
       </div>
 

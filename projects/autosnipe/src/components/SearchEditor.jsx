@@ -11,12 +11,13 @@ const formatNumber = (v) => {
 }
 const parseNumber = (v) => String(v).replace(/,/g, '')
 
-export default function SearchEditor() {
-  const { createSearch } = useSearches()
+export default function SearchEditor({ editId }) {
+  const { searches, createSearch, updateSearch } = useSearches()
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [taxonomy, setTaxonomy] = useState(null)
   const [taxonomyLoading, setTaxonomyLoading] = useState(true)
+  const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
     fetch('/api/taxonomy')
@@ -33,14 +34,41 @@ export default function SearchEditor() {
     variant: '',
     year_from: '',
     year_to: '',
+    colour: '',
     price_from: '',
     price_to: '',
     mileage_max: '',
     fuel_type: '',
     transmission: '',
+    body_type: '',
     postcode: '',
     radius: '1500'
   })
+
+  useEffect(() => {
+    if (!editId || loaded || !searches.length) return
+    const search = searches.find(s => String(s.id) === String(editId))
+    if (!search) return
+    const c = JSON.parse(search.criteria)
+    setForm({
+      name: search.name || '',
+      make: c.make || '',
+      model: c.model || '',
+      variant: c.variant || '',
+      year_from: c.year_from ? String(c.year_from) : '',
+      year_to: c.year_to ? String(c.year_to) : '',
+      colour: c.colour || '',
+      price_from: c.price_from ? formatNumber(c.price_from) : '',
+      price_to: c.price_to ? formatNumber(c.price_to) : '',
+      mileage_max: c.mileage_max ? formatNumber(c.mileage_max) : '',
+      fuel_type: c.fuel_type || '',
+      transmission: c.transmission || '',
+      body_type: c.body_type || '',
+      postcode: c.postcode || '',
+      radius: c.radius ? String(c.radius) : '1500'
+    })
+    setLoaded(true)
+  }, [editId, searches, loaded])
 
   const NUMERIC_FIELDS = ['price_from', 'price_to', 'mileage_max']
 
@@ -69,18 +97,24 @@ export default function SearchEditor() {
       if (form.variant) criteria.variant = form.variant
       if (form.year_from) criteria.year_from = Number(form.year_from)
       if (form.year_to) criteria.year_to = Number(form.year_to)
+      if (form.colour) criteria.colour = form.colour
       if (form.price_from) criteria.price_from = Number(parseNumber(form.price_from))
       if (form.price_to) criteria.price_to = Number(parseNumber(form.price_to))
       if (form.mileage_max) criteria.mileage_max = Number(parseNumber(form.mileage_max))
       if (form.fuel_type) criteria.fuel_type = form.fuel_type
       if (form.transmission) criteria.transmission = form.transmission
+      if (form.body_type) criteria.body_type = form.body_type
       if (form.postcode) {
         criteria.postcode = form.postcode
         if (form.radius) criteria.radius = Number(form.radius)
       }
 
       const name = form.name || `${form.make || 'Any'} ${form.model || ''}`.trim()
-      await createSearch(name, criteria)
+      if (editId) {
+        await updateSearch(editId, { name, criteria })
+      } else {
+        await createSearch(name, criteria)
+      }
       window.location.hash = '#/dashboard'
     } catch (err) {
       if (err.message.includes('Subscribe') || err.message.includes('Buy another slot')) {
@@ -94,22 +128,28 @@ export default function SearchEditor() {
     }
   }
 
+  const models = taxonomy?.makes?.[form.make]?.models || []
+  const selectedModel = models.find(m => m.value === form.model)
+  const trims = selectedModel?.trims || []
+  const fmtCount = (n) => n > 0 ? ` (${n.toLocaleString('en-GB')})` : ''
+
   return (
     <div className="page">
       <div className="search-editor">
-        <h2>New Search</h2>
+        <h2>{editId ? 'Edit Search' : 'New Search'}</h2>
         <form onSubmit={handleSubmit}>
-          <div className="search-editor-grid">
-            <div className="input-group full">
-              <label>Search Name (optional)</label>
-              <input
-                type="text"
-                placeholder="e.g. Weekend car"
-                value={form.name}
-                onChange={set('name')}
-              />
-            </div>
+          <div className="input-group" style={{ marginBottom: 16 }}>
+            <label>Search Name (optional)</label>
+            <input
+              type="text"
+              placeholder="e.g. Weekend car"
+              value={form.name}
+              onChange={set('name')}
+            />
+          </div>
 
+          <div className="search-editor-grid">
+            {/* Row 1: Make, Model, Variant */}
             <div className="input-group">
               <label>Make</label>
               <select value={form.make} onChange={set('make')}>
@@ -120,41 +160,31 @@ export default function SearchEditor() {
               </select>
             </div>
 
-            {(() => {
-              const models = taxonomy?.makes?.[form.make]?.models || []
-              const selectedModel = models.find(m => m.value === form.model)
-              const trims = selectedModel?.trims || []
-              const fmtCount = (n) => n > 0 ? ` (${n.toLocaleString('en-GB')})` : ''
+            <div className="input-group">
+              <label>Model</label>
+              <select value={form.model} onChange={set('model')} disabled={!form.make || taxonomyLoading}>
+                <option value="">
+                  {!form.make ? 'Select make' : taxonomyLoading ? 'Loading...' : 'Any'}
+                </option>
+                {models.map(m => (
+                  <option key={m.value} value={m.value}>{m.label}{fmtCount(m.count)}</option>
+                ))}
+              </select>
+            </div>
 
-              return (
-                <>
-                  <div className="input-group">
-                    <label>Model</label>
-                    <select value={form.model} onChange={set('model')} disabled={!form.make || taxonomyLoading}>
-                      <option value="">
-                        {!form.make ? 'Select make' : taxonomyLoading ? 'Loading...' : 'Any'}
-                      </option>
-                      {models.map(m => (
-                        <option key={m.value} value={m.value}>{m.label}{fmtCount(m.count)}</option>
-                      ))}
-                    </select>
-                  </div>
+            <div className="input-group">
+              <label>Variant</label>
+              <select value={form.variant} onChange={set('variant')} disabled={!trims.length}>
+                <option value="">
+                  {trims.length ? 'Any' : !form.model ? 'Select model' : 'No variants'}
+                </option>
+                {trims.map(v => (
+                  <option key={v.value} value={v.value}>{v.label}{fmtCount(v.count)}</option>
+                ))}
+              </select>
+            </div>
 
-                  <div className="input-group">
-                    <label>Variant</label>
-                    <select value={form.variant} onChange={set('variant')} disabled={!trims.length}>
-                      <option value="">
-                        {trims.length ? 'Any' : !form.model ? 'Select model' : 'No variants'}
-                      </option>
-                      {trims.map(v => (
-                        <option key={v.value} value={v.value}>{v.label}{fmtCount(v.count)}</option>
-                      ))}
-                    </select>
-                  </div>
-                </>
-              )
-            })()}
-
+            {/* Row 2: Year From, Year To, Colour */}
             <div className="input-group">
               <label>Year From</label>
               <select value={form.year_from} onChange={set('year_from')}>
@@ -172,7 +202,18 @@ export default function SearchEditor() {
             </div>
 
             <div className="input-group">
-              <label>Min Price (\u00a3)</label>
+              <label>Colour</label>
+              <select value={form.colour} onChange={set('colour')}>
+                <option value="">Any</option>
+                {makesData.colours.map(c => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Row 3: Min Price, Max Price, Mileage */}
+            <div className="input-group">
+              <label>Min Price (£)</label>
               <input
                 type="text"
                 inputMode="numeric"
@@ -183,7 +224,7 @@ export default function SearchEditor() {
             </div>
 
             <div className="input-group">
-              <label>Max Price (\u00a3)</label>
+              <label>Max Price (£)</label>
               <input
                 type="text"
                 inputMode="numeric"
@@ -204,8 +245,9 @@ export default function SearchEditor() {
               />
             </div>
 
+            {/* Row 4: Fuel, Gearbox, Body Type */}
             <div className="input-group">
-              <label>Fuel Type</label>
+              <label>Fuel</label>
               <select value={form.fuel_type} onChange={set('fuel_type')}>
                 <option value="">Any</option>
                 {makesData.fuelTypes.map(f => (
@@ -215,7 +257,7 @@ export default function SearchEditor() {
             </div>
 
             <div className="input-group">
-              <label>Transmission</label>
+              <label>Gearbox</label>
               <select value={form.transmission} onChange={set('transmission')}>
                 <option value="">Any</option>
                 {makesData.transmissions.map(t => (
@@ -224,6 +266,18 @@ export default function SearchEditor() {
               </select>
             </div>
 
+            <div className="input-group">
+              <label>Body Type</label>
+              <select value={form.body_type} onChange={set('body_type')}>
+                <option value="">Any</option>
+                {makesData.bodyTypes.map(b => (
+                  <option key={b.value} value={b.value}>{b.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="search-editor-location">
             <div className="input-group">
               <label>Postcode</label>
               <input
@@ -249,7 +303,7 @@ export default function SearchEditor() {
           <div className="search-editor-actions">
             <a href="#/dashboard" className="btn btn-secondary">Cancel</a>
             <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? 'Creating...' : 'Create Search'}
+              {saving ? 'Saving...' : editId ? 'Save Changes' : 'Create Search'}
             </button>
           </div>
         </form>
