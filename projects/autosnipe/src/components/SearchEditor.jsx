@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import useSearches from '../hooks/useSearches'
 import makesData from '../data/makes.json'
+import modelsData from '../data/models.json'
 
 const currentYear = new Date().getFullYear()
 const years = Array.from({ length: 30 }, (_, i) => currentYear - i)
@@ -25,7 +26,14 @@ export default function SearchEditor() {
     radius: '50'
   })
 
-  const set = (key) => (e) => setForm(f => ({ ...f, [key]: e.target.value }))
+  const set = (key) => (e) => {
+    const val = e.target.value
+    if (key === 'make') {
+      setForm(f => ({ ...f, make: val, model: '' }))
+    } else {
+      setForm(f => ({ ...f, [key]: val }))
+    }
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -89,12 +97,12 @@ export default function SearchEditor() {
 
             <div className="input-group">
               <label>Model</label>
-              <input
-                type="text"
-                placeholder="e.g. 3 Series"
-                value={form.model}
-                onChange={set('model')}
-              />
+              <select value={form.model} onChange={set('model')} disabled={!form.make}>
+                <option value="">{form.make ? 'Any' : 'Select make first'}</option>
+                {(modelsData[form.make] || []).map(m => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
             </div>
 
             <div className="input-group">

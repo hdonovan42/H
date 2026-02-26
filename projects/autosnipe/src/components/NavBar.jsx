@@ -21,7 +21,7 @@ export default function NavBar({ user, onLogout }) {
             {l.label}
           </a>
         ))}
-        <button onClick={onLogout}>Sign Out</button>
+        <button onClick={() => { if (window.confirm('Are you sure you want to sign out?')) onLogout() }}>Sign Out</button>
       </div>
     </nav>
   )
