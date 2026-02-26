@@ -2,13 +2,16 @@ import { useState, useEffect, useCallback } from 'react';
 
 const POLL_INTERVAL = 10_000; // 10 seconds
 
-async function fetchJSON(url) {
-  const res = await fetch(url);
+async function fetchJSON(url, creds) {
+  const headers = {};
+  if (creds) headers['Authorization'] = 'Basic ' + btoa(creds.user + ':' + creds.pass);
+  const res = await fetch(url, { headers });
+  if (res.status === 401) throw new Error('401 Unauthorised');
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }
 
-export function useVaultData() {
+export function useVaultData(creds) {
   const [status, setStatus] = useState(null);
   const [balanceHistory, setBalanceHistory] = useState([]);
   const [cycles, setCycles] = useState([]);
@@ -25,16 +28,16 @@ export function useVaultData() {
   const refresh = useCallback(async () => {
     try {
       const [s, bh, cy, co, po, ev, me, pr, ca, sm] = await Promise.all([
-        fetchJSON('/api/v1/status'),
-        fetchJSON('/api/v1/balance/history?limit=2000'),
-        fetchJSON('/api/v1/cycles?limit=50'),
-        fetchJSON('/api/v1/costs'),
-        fetchJSON('/api/v1/positions'),
-        fetchJSON('/api/v1/events?limit=50'),
-        fetchJSON('/api/v1/memories?limit=30'),
-        fetchJSON('/api/v1/predictions'),
-        fetchJSON('/api/v1/calibration').catch(() => null),
-        fetchJSON('/api/v1/smart-money/summary').catch(() => null),
+        fetchJSON('/api/v1/status', creds),
+        fetchJSON('/api/v1/balance/history?limit=2000', creds),
+        fetchJSON('/api/v1/cycles?limit=50', creds),
+        fetchJSON('/api/v1/costs', creds),
+        fetchJSON('/api/v1/positions', creds),
+        fetchJSON('/api/v1/events?limit=50', creds),
+        fetchJSON('/api/v1/memories?limit=30', creds),
+        fetchJSON('/api/v1/predictions', creds),
+        fetchJSON('/api/v1/calibration', creds).catch(() => null),
+        fetchJSON('/api/v1/smart-money/summary', creds).catch(() => null),
       ]);
       setStatus(s);
       setBalanceHistory(bh);
@@ -52,13 +55,14 @@ export function useVaultData() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [creds]);
 
   useEffect(() => {
+    if (!creds) return;
     refresh();
     const id = setInterval(refresh, POLL_INTERVAL);
     return () => clearInterval(id);
-  }, [refresh]);
+  }, [refresh, creds]);
 
   return { status, balanceHistory, cycles, costs, positions, events, memories, predictions, calibration, smartMoney, error, loading, refresh };
 }
