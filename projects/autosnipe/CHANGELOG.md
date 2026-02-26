@@ -4,6 +4,45 @@ All notable changes to AutoSnipe are documented here.
 
 ---
 
+## v1.3.0 — Live Autotrader Taxonomy (26 Feb 2026)
+
+**Deployed**: 26 Feb 2026 — `autosnipe-api` online, taxonomy populated
+
+Replaced the hand-typed `models.json` (only VW populated, 16 models, 4 variants) with a live taxonomy scraped from Autotrader's GraphQL facets API. Navigates search pages in a CF-cleared browser session, intercepts batched `at-gateway` responses, and extracts `model` + `aggregated_trim` facets with listing counts.
+
+### Results
+- **42 makes, 1,133 models, 7,924 trims** — all populated automatically
+- VW: 53 models (was 16), Golf: 56 trims (was 4)
+- Listing counts shown in dropdowns: "Golf (8,835)" / "GTI (576)"
+- Trims only fetched for models with >50 listings; trims with <2 listings excluded
+
+### Architecture
+- `server/taxonomy.js` — `refreshTaxonomy()` solves CF once, iterates makes, captures facets from batched GraphQL responses (`sr.facets` array, keyed by `.facet`), writes `server/data/taxonomy.json`
+- Scheduler: `0 6 * * 1` (Monday 06:00 London) + stale-on-startup check (>8 days)
+- `GET /api/taxonomy` serves cached JSON (503 if not yet generated)
+- `POST /api/admin/refresh-taxonomy` for manual trigger
+- SearchEditor fetches from API, populates model/variant dropdowns with counts
+- Scraper: `aggregatedTrim` URL param + `aggregated_trim` GraphQL filter for variant searches
+- Deploy: syncs `src/data/` to VPS for `makes.json` access
+
+### Files Modified
+| File | Change |
+|------|--------|
+| `server/taxonomy.js` | New — facet extraction from batched GraphQL responses |
+| `server/scheduler.js` | Monday 06:00 taxonomy cron + startup refresh |
+| `server/index.js` | `/api/taxonomy` + `/api/admin/refresh-taxonomy` endpoints |
+| `server/scraper.js` | `aggregatedTrim` support in URL builder + GraphQL filters |
+| `src/components/SearchEditor.jsx` | Live taxonomy fetch, counts in dropdowns |
+| `src/data/models.json` | Deleted — replaced by live API |
+| `deploy/deploy.sh` | Syncs `src/data/` to VPS |
+
+### What to Watch
+- `[Taxonomy]` log lines on Monday mornings — full refresh ~22 mins
+- CF solve cost per refresh (~$0.008)
+- Model/trim counts updating weekly in the dropdown
+
+---
+
 ## v1.2.0 — Cloudflare Solver + Cost Optimisations (26 Feb 2026)
 
 **Deployed**: 26 Feb 2026 — `autosnipe-api` online, PM2 pid 2969115
