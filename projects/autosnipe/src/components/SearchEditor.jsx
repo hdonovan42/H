@@ -118,7 +118,7 @@ export default function SearchEditor() {
             <div className="input-group">
               <label>Model</label>
               <select value={form.model} onChange={set('model')} disabled={!form.make}>
-                <option value="">{form.make ? 'Any' : 'Select make first'}</option>
+                <option value="">{form.make ? 'Any' : 'Select make'}</option>
                 {(modelsData[form.make] || []).map(m => (
                   <option key={m.value} value={m.value}>{m.label}</option>
                 ))}
@@ -132,7 +132,7 @@ export default function SearchEditor() {
                 <div className="input-group">
                   <label>Variant</label>
                   <select value={form.variant} onChange={set('variant')} disabled={!variants.length}>
-                    <option value="">{variants.length ? 'Any' : 'Select model first'}</option>
+                    <option value="">{variants.length ? 'Any' : 'Select model'}</option>
                     {variants.map(v => (
                       <option key={v.value} value={v.value}>{v.label}</option>
                     ))}
