@@ -24,7 +24,7 @@ export default function App() {
       const t = params.get('token')
       if (t) {
         login(t)
-        window.location.hash = '#/dashboard'
+        window.location.hash = '#/'
       }
     }
   }, [page, login])

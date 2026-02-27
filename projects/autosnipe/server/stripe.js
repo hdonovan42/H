@@ -40,7 +40,7 @@ export async function createSubscriptionCheckout(userId, email) {
       quantity: 1
     }],
     metadata: { user_id: String(userId) },
-    success_url: `${APP_URL}/#/dashboard?subscribed=true`,
+    success_url: `${APP_URL}/#/?subscribed=true`,
     cancel_url: `${APP_URL}/#/buy-slot`
   })
 
