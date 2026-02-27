@@ -63,7 +63,7 @@ export function startScheduler() {
   console.log(`[Scheduler] Active — every ${POLL_INTERVAL_MINUTES}m, quiet ${QUIET_START_UTC}:00–${QUIET_END_UTC}:00 UTC (hourly at :59), taxonomy Mon 06:00`)
 }
 
-export async function pollSingleSearch(search) {
+export async function pollSingleSearch(search, { skipNotify = false } = {}) {
   const db = getDb()
 
   const logId = db.prepare(`
@@ -97,8 +97,8 @@ export async function pollSingleSearch(search) {
     db.prepare("UPDATE searches SET last_checked = datetime('now'), last_result_count = ? WHERE id = ?")
       .run(result.listings.length, search.id)
 
-    // Notify on new listings
-    if (newListings.length > 0) {
+    // Notify on new listings (skip for silent polls like criteria edits)
+    if (newListings.length > 0 && !skipNotify) {
       const searchName = search.name || `${JSON.parse(search.criteria).make || ''} ${JSON.parse(search.criteria).model || ''}`.trim()
 
       // Email (always)

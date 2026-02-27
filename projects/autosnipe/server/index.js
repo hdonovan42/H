@@ -137,7 +137,9 @@ app.delete('/api/searches/:id', requireAuth, (req, res) => {
     .get(req.params.id, req.user.userId)
   if (!search) return res.status(404).json({ error: 'Search not found' })
 
-  db.prepare('UPDATE searches SET active = 0 WHERE id = ?').run(req.params.id)
+  db.prepare('DELETE FROM listings WHERE search_id = ?').run(search.id)
+  db.prepare('DELETE FROM poll_log WHERE search_id = ?').run(search.id)
+  db.prepare('DELETE FROM searches WHERE id = ?').run(search.id)
   res.json({ success: true })
 })
 
@@ -177,7 +179,7 @@ app.patch('/api/searches/:id', requireAuth, (req, res) => {
     // Fire-and-forget: re-poll with new criteria
     const userInfo = db.prepare('SELECT email, phone FROM users WHERE id = ?').get(req.user.userId)
     const updatedSearch = db.prepare('SELECT * FROM searches WHERE id = ?').get(search.id)
-    pollSingleSearch({ ...updatedSearch, email: userInfo.email, phone: userInfo.phone })
+    pollSingleSearch({ ...updatedSearch, email: userInfo.email, phone: userInfo.phone }, { skipNotify: true })
       .catch(err => console.error(`[ImmediatePoll] Search #${search.id} re-poll failed:`, err.message))
   }
 
