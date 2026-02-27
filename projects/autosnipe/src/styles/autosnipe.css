@@ -191,6 +191,7 @@ input, select {
   color: var(--text);
   outline: none;
   transition: border-color 0.15s;
+  width: 100%;
 }
 
 input:focus, select:focus {
@@ -552,6 +553,11 @@ select {
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
   margin-bottom: 16px;
+}
+
+.search-editor-grid > *,
+.search-editor-bottom > * {
+  min-width: 0;
 }
 
 .search-editor-bottom {
