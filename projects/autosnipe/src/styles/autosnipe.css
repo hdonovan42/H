@@ -382,16 +382,13 @@ select {
 
 .search-card-actions {
   position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 90px;
-  padding: 16px 16px;
+  top: 16px;
+  right: 16px;
+  width: 58px;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  justify-content: space-evenly;
-  gap: 0;
+  gap: 6px;
 }
 
 .search-card-actions .search-card-status,
