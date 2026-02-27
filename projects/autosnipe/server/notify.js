@@ -47,7 +47,7 @@ export async function sendListingEmail(email, listings, searchName) {
       <table style="width:100%;border-collapse:collapse;">${rows}</table>
       ${overflow}
       <div style="margin-top:20px;">
-        <a href="${APP_URL}/#/" style="color:#FF6B00;font-size:12px;text-decoration:none;">View dashboard →</a>
+        <a href="${APP_URL}/" style="color:#FF6B00;font-size:12px;text-decoration:none;">View dashboard →</a>
       </div>
     </div>`
 

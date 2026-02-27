@@ -67,7 +67,7 @@ export default function Settings({ user, onRefresh }) {
               <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
                 (1 free{paidSlots > 0 ? ` + ${paidSlots} subscribed` : ''})
               </span>
-              <a href="#/buy-slot" className="btn btn-primary btn-sm">
+              <a href="/buy-slot" className="btn btn-primary btn-sm">
                 {user.has_subscription ? 'Add Slot' : 'Subscribe'}
               </a>
             </div>

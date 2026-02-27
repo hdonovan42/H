@@ -52,7 +52,7 @@ export default function useAuth() {
     localStorage.removeItem(TOKEN_KEY)
     setToken(null)
     setUser(null)
-    window.location.hash = '#/'
+    window.location.pathname = '/'
   }
 
   return { user, loading, token, login, logout, refresh: fetchUser }

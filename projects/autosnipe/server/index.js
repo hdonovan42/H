@@ -66,9 +66,9 @@ app.get('/api/auth/verify', (req, res) => {
 
   const result = verifyMagicLink(token)
   if (result.success) {
-    res.redirect(`/#/auth-callback?token=${result.token}`)
+    res.redirect(`/auth-callback?token=${result.token}`)
   } else {
-    res.redirect(`/#/login?error=${result.error || 'invalid_link'}`)
+    res.redirect(`/?error=${result.error || 'invalid_link'}`)
   }
 })
 

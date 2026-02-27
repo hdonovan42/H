@@ -15,7 +15,7 @@ export async function apiFetch(path, options = {}) {
 
   if (res.status === 401) {
     localStorage.removeItem(TOKEN_KEY)
-    window.location.hash = '#/'
+    window.location.pathname = '/'
     throw new Error('Not authenticated')
   }
 

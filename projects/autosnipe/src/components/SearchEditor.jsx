@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import useSearches from '../hooks/useSearches'
 import { apiPost } from '../utils/api'
+import { navigate } from '../App'
 import makesData from '../data/makes.json'
 
 const currentYear = new Date().getFullYear()
@@ -181,11 +182,11 @@ export default function SearchEditor({ editId }) {
         await createSearch(name, criteria)
       }
       localStorage.removeItem(draftKey)
-      window.location.hash = '#/'
+      navigate('/')
     } catch (err) {
       if (err.message.includes('Subscribe') || err.message.includes('Buy another slot')) {
         setError(null)
-        window.location.hash = '#/buy-slot'
+        navigate('/buy-slot')
         return
       }
       setError(err.message)
@@ -450,7 +451,7 @@ export default function SearchEditor({ editId }) {
           {error && <p className="error-msg">{error}</p>}
 
           <div className="search-editor-actions">
-            <a href="#/" className="btn btn-secondary">Cancel</a>
+            <a href="/" className="btn btn-secondary" onClick={e => { e.preventDefault(); localStorage.removeItem(draftKey); navigate('/') }}>Cancel</a>
             <button type="submit" className="btn btn-primary" disabled={saving}>
               {saving ? 'Saving...' : editId ? 'Save Changes' : 'Create Search'}
             </button>

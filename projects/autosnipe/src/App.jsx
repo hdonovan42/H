@@ -7,27 +7,41 @@ import SearchEditor from './components/SearchEditor'
 import Settings from './components/Settings'
 import BuySlotPage from './components/UpgradePage'
 
+export function navigate(path) {
+  window.history.pushState(null, '', path)
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
 export default function App() {
-  const [page, setPage] = useState(window.location.hash || '#/')
+  const [path, setPath] = useState(window.location.pathname)
   const { user, loading, login, logout, refresh } = useAuth()
 
   useEffect(() => {
-    const handler = () => setPage(window.location.hash || '#/')
-    window.addEventListener('hashchange', handler)
-    return () => window.removeEventListener('hashchange', handler)
+    const handler = () => setPath(window.location.pathname)
+    window.addEventListener('popstate', handler)
+    return () => window.removeEventListener('popstate', handler)
   }, [])
 
   // Handle auth callback from magic link
   useEffect(() => {
-    if (page.startsWith('#/auth-callback')) {
-      const params = new URLSearchParams(page.split('?')[1])
+    if (path === '/auth-callback') {
+      const params = new URLSearchParams(window.location.search)
       const t = params.get('token')
       if (t) {
         login(t)
-        window.location.hash = '#/'
+        navigate('/')
       }
     }
-  }, [page, login])
+  }, [path, login])
+
+  // Redirect legacy hash routes
+  useEffect(() => {
+    const hash = window.location.hash
+    if (hash && hash.startsWith('#/')) {
+      const newPath = hash.slice(1)
+      navigate(newPath)
+    }
+  }, [])
 
   if (loading) {
     return <div className="loading"><span className="spinner" /> Loading...</div>
@@ -36,13 +50,13 @@ export default function App() {
   if (!user) return <Landing />
 
   const renderPage = () => {
-    if (page.startsWith('#/edit-search/')) {
-      const id = page.split('/').pop()
+    if (path.startsWith('/edit-search/')) {
+      const id = path.split('/').pop()
       return <SearchEditor editId={id} />
     }
-    if (page.startsWith('#/new-search')) return <SearchEditor />
-    if (page.startsWith('#/settings')) return <Settings user={user} onRefresh={refresh} />
-    if (page.startsWith('#/buy-slot')) return <BuySlotPage user={user} onRefresh={refresh} />
+    if (path.startsWith('/new-search')) return <SearchEditor />
+    if (path.startsWith('/settings')) return <Settings user={user} onRefresh={refresh} />
+    if (path.startsWith('/buy-slot')) return <BuySlotPage user={user} onRefresh={refresh} />
     return <Dashboard />
   }
 

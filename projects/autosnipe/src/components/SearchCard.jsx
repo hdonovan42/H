@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { apiGet } from '../utils/api'
+import { navigate } from '../App'
 
 function timeAgo(dateStr) {
   if (!dateStr) return 'Never'
@@ -60,7 +61,7 @@ export default function SearchCard({ search, onToggle, onDelete }) {
         {search.active ? (
           <>
             <span className="search-card-status active">Active</span>
-            <button className="btn btn-secondary btn-sm" onClick={() => { window.location.hash = `#/edit-search/${search.id}` }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => { navigate(`/edit-search/${search.id}`) }}>
               Edit
             </button>
             <button className="btn btn-secondary btn-sm" onClick={() => onToggle(search.id, false)}>
@@ -72,7 +73,7 @@ export default function SearchCard({ search, onToggle, onDelete }) {
             <button className="btn btn-secondary btn-sm" onClick={() => onToggle(search.id, true)}>
               Unpark
             </button>
-            <button className="btn btn-secondary btn-sm" onClick={() => { window.location.hash = `#/edit-search/${search.id}` }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => { navigate(`/edit-search/${search.id}`) }}>
               Edit
             </button>
             <button className="btn btn-danger btn-sm" onClick={() => { if (confirm('Delete this search? This cannot be undone.')) onDelete(search.id) }}>

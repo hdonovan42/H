@@ -12,13 +12,13 @@ export default function Dashboard() {
     <div className="page page-wide">
       <div className="dashboard-header">
         <h2>Active Searches</h2>
-        <a href="#/new-search" className="btn btn-primary btn-sm">+ New</a>
+        <a href="/new-search" className="btn btn-primary btn-sm">+ New</a>
       </div>
       {activeSearches.length === 0 ? (
         <div className="dashboard-empty">
           No active searches.
           <br />
-          <a href="#/new-search">Create your first search</a> to start sniping.
+          <a href="/new-search">Create your first search</a> to start sniping.
         </div>
       ) : (
         activeSearches.map(s => (

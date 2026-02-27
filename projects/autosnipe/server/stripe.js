@@ -40,8 +40,8 @@ export async function createSubscriptionCheckout(userId, email) {
       quantity: 1
     }],
     metadata: { user_id: String(userId) },
-    success_url: `${APP_URL}/#/?subscribed=true`,
-    cancel_url: `${APP_URL}/#/buy-slot`
+    success_url: `${APP_URL}/?subscribed=true`,
+    cancel_url: `${APP_URL}/buy-slot`
   })
 
   return { url: session.url }
@@ -81,7 +81,7 @@ export async function createPortalSession(customerId) {
 
   const session = await stripe.billingPortal.sessions.create({
     customer: customerId,
-    return_url: `${APP_URL}/#/settings`
+    return_url: `${APP_URL}/settings`
   })
 
   return { url: session.url }
