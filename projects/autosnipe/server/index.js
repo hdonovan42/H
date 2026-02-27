@@ -282,14 +282,6 @@ app.get('/api/taxonomy', (req, res) => {
 
 // ===== ADMIN =====
 
-function requireAdminAuth(req, res, next) {
-  const token = req.headers['x-admin-token']
-  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN) {
-    return res.status(401).json({ error: 'Unauthorised' })
-  }
-  next()
-}
-
 app.post('/api/admin/refresh-taxonomy', requireAuth, async (req, res) => {
   try {
     await refreshTaxonomy()
@@ -308,8 +300,8 @@ app.post('/api/admin/poll', requireAuth, async (req, res) => {
   }
 })
 
-// Protected by X-Admin-Token header (+ nginx basic auth on dash.autosnipe.co.uk)
-app.get('/api/admin/stats', requireAdminAuth, (req, res) => {
+// Protected by nginx basic auth on dash.autosnipe.co.uk
+app.get('/api/admin/stats', (req, res) => {
   const db = getDb()
   const users = db.prepare('SELECT COUNT(*) as total FROM users').get().total
   const searches = db.prepare('SELECT COUNT(*) as total FROM searches WHERE active = 1').get().total
@@ -317,14 +309,14 @@ app.get('/api/admin/stats', requireAdminAuth, (req, res) => {
   res.json({ users, activeSearches: searches, totalListings: listings })
 })
 
-app.get('/api/admin/users', requireAdminAuth, (req, res) => {
+app.get('/api/admin/users', (req, res) => {
   const users = getDb().prepare(`
     SELECT id, email, phone, paid_slots, created_at FROM users ORDER BY created_at DESC
   `).all()
   res.json(users)
 })
 
-app.get('/api/admin/poll-log-all', requireAdminAuth, (req, res) => {
+app.get('/api/admin/poll-log-all', (req, res) => {
   const logs = getDb().prepare(`
     SELECT pl.*, s.name as search_name
     FROM poll_log pl

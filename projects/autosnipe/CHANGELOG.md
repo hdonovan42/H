@@ -16,7 +16,6 @@ Hardened the server against 6 critical issues identified by reliability audit: r
 3. **WhatsApp shell injection** — removed `$(cat ...)` pattern, uses `escapeShell()` with single-quote wrapping + phone sanitisation
 4. **Stripe webhook idempotency** — `stripe_events` table deduplicates before processing
 5. **Silent immediate-poll failures** — `Promise.resolve()` wrapper guarantees catch handler attaches
-6. **Admin endpoint auth** — `requireAdminAuth` middleware checks `X-Admin-Token` header
 
 ### Quick Wins Bundled
 - Magic link: specific error codes (`already_used`, `expired`, `invalid`) + daily cleanup cron
@@ -41,7 +40,7 @@ Hardened the server against 6 critical issues identified by reliability audit: r
 ### What to Watch
 - `[Cleanup]` log lines daily at 03:00 London time
 - `[Scheduler] Previous run still active, skipping` — confirms lock works under load
-- Admin GET endpoints now require `X-Admin-Token` header — update dash.autosnipe.co.uk if needed
+- Admin endpoints remain behind nginx basic auth on dash.autosnipe.co.uk
 
 ---
 
