@@ -5,12 +5,14 @@ import { cssSearch } from './scraper-css.js'
 import { sendWhatsApp, formatListingAlert } from './whatsapp.js'
 import { sendListingEmail } from './notify.js'
 import { refreshTaxonomy, taxonomyNeedsRefresh } from './taxonomy.js'
+import { alertHealthCheckFailed, trackZeroResults, alertScraperError, checkApkVersion } from './alerting.js'
 import { POLL_INTERVAL_MINUTES, QUIET_START_UTC, QUIET_END_UTC } from '../shared/config.js'
 
 let job = null
 let quietJob = null
 let taxonomyJob = null
 let cleanupJob = null
+let apkWatcherJob = null
 let sssHealthy = true // assume healthy until proven otherwise
 
 async function triggerPoll(label) {
@@ -80,7 +82,24 @@ export function startScheduler() {
     if (oldEvents.changes > 0) console.log(`[Cleanup] Purged ${oldEvents.changes} old stripe events`)
   })
 
-  console.log(`[Scheduler] Active — every ${POLL_INTERVAL_MINUTES}m, quiet ${QUIET_START_UTC}:00–${QUIET_END_UTC}:00 UTC (hourly at :59), taxonomy Mon 06:00, cleanup daily 03:00`)
+  // APK version watcher — Wednesdays at noon London time
+  apkWatcherJob = new Cron('0 12 * * 3', { timezone: 'Europe/London' }, async () => {
+    console.log('[Scheduler] Running weekly APK version check')
+    await checkApkVersion()
+  })
+
+  // Check APK on startup if stale (>7 days) or never checked
+  const db = getDb()
+  const lastChecked = db.prepare("SELECT value FROM kv WHERE key = 'apk_last_checked'").get()
+  const stale = !lastChecked?.value || (Date.now() - new Date(lastChecked.value).getTime() > 7 * 24 * 60 * 60 * 1000)
+  if (stale) {
+    console.log('[Scheduler] APK version check stale or missing, running now...')
+    checkApkVersion().catch(err =>
+      console.error('[Scheduler] Startup APK check failed:', err.message)
+    )
+  }
+
+  console.log(`[Scheduler] Active — every ${POLL_INTERVAL_MINUTES}m, quiet ${QUIET_START_UTC}:00–${QUIET_END_UTC}:00 UTC (hourly at :59), taxonomy Mon 06:00, cleanup daily 03:00, APK watcher Wed 12:00`)
 }
 
 // ===== FALLBACK SCRAPE =====
@@ -140,6 +159,9 @@ export async function pollSingleSearch(search, { skipNotify = false } = {}) {
     db.prepare("UPDATE searches SET last_checked = datetime('now'), last_result_count = ? WHERE id = ?")
       .run(result.listings.length, search.id)
 
+    // Track consecutive zero-result polls
+    trackZeroResults(search.id, result.listings.length, search.last_result_count)
+
     // Notify on new listings (skip for silent polls like criteria edits)
     if (newListings.length > 0 && !skipNotify) {
       const searchName = search.name || `${JSON.parse(search.criteria).make || ''} ${JSON.parse(search.criteria).model || ''}`.trim()
@@ -179,6 +201,7 @@ export async function pollSingleSearch(search, { skipNotify = false } = {}) {
       UPDATE poll_log SET completed_at = datetime('now'), status = 'error', error = ?
       WHERE id = ?
     `).run(err.message, logId)
+    alertScraperError(search.id, err.message)
     console.error(`[Poll] Search #${search.id} failed:`, err.message)
   }
 }
@@ -190,6 +213,7 @@ export async function runPollCycle() {
   const health = await healthCheck()
   if (!health.healthy) {
     console.warn(`[Scheduler] SSS health check FAILED (status=${health.statusCode}, ${health.latencyMs}ms${health.error ? ', ' + health.error : ''}) — polls will use CSS fallback`)
+    alertHealthCheckFailed(health)
     sssHealthy = false
   } else if (!sssHealthy) {
     console.log(`[Scheduler] SSS health check recovered (${health.latencyMs}ms)`)
@@ -230,5 +254,9 @@ export function stopScheduler() {
   if (cleanupJob) {
     cleanupJob.stop()
     console.log('[Scheduler] Cleanup job stopped')
+  }
+  if (apkWatcherJob) {
+    apkWatcherJob.stop()
+    console.log('[Scheduler] APK watcher job stopped')
   }
 }

@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto'
 import { readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { validateSssSchema } from './alerting.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = resolve(__dirname, 'data')
@@ -389,6 +390,7 @@ export async function scrapeSearch(search) {
     const params = buildSearchParams(criteria, { page: 1 })
     const url = `${CWS_BASE}/sss/searchone/adverts?${params.toString()}`
     const data = await cwsFetch(url)
+    validateSssSchema(data) // alert on format drift, non-blocking
 
     const totalResults = data?.page?.totalElements || 0
     const totalPages = data?.page?.totalPages || 1
