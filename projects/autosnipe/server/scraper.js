@@ -92,7 +92,7 @@ function buildSearchParams(criteria, { page = 1, size = PAGE_SIZE } = {}) {
   if (criteria.mileage_max) params.set('max_mileage', String(criteria.mileage_max))
   if (criteria.fuel_type) params.set('fuel_type', criteria.fuel_type)
   if (criteria.transmission) params.set('transmission', criteria.transmission)
-  if (criteria.exclude_cat) params.set('exclude_cat_scdn', 'true')
+  if (criteria.exclude_cat) params.set('is_writeoff', 'false')
 
   params.set('sort', 'datedesc')
   params.set('size', String(size))
