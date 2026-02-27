@@ -227,7 +227,10 @@ export default function SearchEditor({ editId }) {
         }
       }
     }
-    items.sort((a, b) => b.count - a.count)
+
+    // Sort by count once any other criterion is set (facets are filtered)
+    const hasCriteria = form.make || form.price_from || form.price_to || form.year_from || form.year_to || form.mileage_max || form.fuel_type || form.transmission
+    if (hasCriteria) items.sort((a, b) => b.count - a.count)
 
     const opts = []
     for (const bt of items) {

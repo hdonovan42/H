@@ -82,23 +82,23 @@
     { "value": "Yellow", "label": "Yellow" }
   ],
   "bodyTypes": [
+    { "value": "Hatchback", "label": "Hatchback" },
+    { "value": "Saloon", "label": "Saloon" },
     { "value": "Convertible", "label": "Convertible" },
     { "value": "Coupe", "label": "Coupe" },
     { "value": "Estate", "label": "Estate" },
-    { "value": "Hatchback", "label": "Hatchback" },
-    { "value": "MPV", "label": "MPV" },
+    { "value": "SUV", "label": "SUV" },
     { "value": "Pickup", "label": "Pickup" },
-    { "value": "Saloon", "label": "Saloon" },
-    { "value": "SUV", "label": "SUV" }
+    { "value": "MPV", "label": "MPV" }
   ],
   "bodyTypeDoors": {
-    "Convertible": [2],
-    "Coupe": [2],
-    "Estate": [5],
+    "Convertible": [],
+    "Coupe": [],
+    "Estate": [],
     "Hatchback": [3, 5],
-    "MPV": [5, 7],
-    "Pickup": [2, 4],
-    "Saloon": [4],
+    "MPV": [],
+    "Pickup": [],
+    "Saloon": [],
     "SUV": [3, 5]
   }
 }
