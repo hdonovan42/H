@@ -18,7 +18,12 @@ export default function SearchEditor({ editId }) {
   const [error, setError] = useState(null)
   const [taxonomy, setTaxonomy] = useState(null)
   const [taxonomyLoading, setTaxonomyLoading] = useState(true)
-  const [loaded, setLoaded] = useState(false)
+  const draftKey = `autosnipe-draft:${editId || 'new'}`
+  const savedDraft = (() => {
+    try { return JSON.parse(localStorage.getItem(draftKey)) } catch { return null }
+  })()
+
+  const [loaded, setLoaded] = useState(!!savedDraft)
 
   useEffect(() => {
     fetch('/api/taxonomy')
@@ -28,7 +33,7 @@ export default function SearchEditor({ editId }) {
       .finally(() => setTaxonomyLoading(false))
   }, [])
 
-  const [form, setForm] = useState({
+  const defaults = {
     name: '',
     make: '',
     model: '',
@@ -45,7 +50,14 @@ export default function SearchEditor({ editId }) {
     exclude_cat: true,
     postcode: '',
     radius: '1500'
-  })
+  }
+
+  const [form, setForm] = useState(savedDraft || defaults)
+
+  // Persist draft to localStorage on every change
+  useEffect(() => {
+    localStorage.setItem(draftKey, JSON.stringify(form))
+  }, [form, draftKey])
 
   useEffect(() => {
     if (!editId || loaded || !searches.length) return
@@ -168,7 +180,8 @@ export default function SearchEditor({ editId }) {
       } else {
         await createSearch(name, criteria)
       }
-      window.location.hash = '#/dashboard'
+      localStorage.removeItem(draftKey)
+      window.location.hash = '#/'
     } catch (err) {
       if (err.message.includes('Subscribe') || err.message.includes('Buy another slot')) {
         setError(null)
@@ -437,7 +450,7 @@ export default function SearchEditor({ editId }) {
           {error && <p className="error-msg">{error}</p>}
 
           <div className="search-editor-actions">
-            <a href="#/dashboard" className="btn btn-secondary">Cancel</a>
+            <a href="#/" className="btn btn-secondary">Cancel</a>
             <button type="submit" className="btn btn-primary" disabled={saving}>
               {saving ? 'Saving...' : editId ? 'Save Changes' : 'Create Search'}
             </button>
