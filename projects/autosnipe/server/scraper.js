@@ -66,6 +66,7 @@ export function buildAutotraderUrl(criteria) {
   if (criteria.fuel_type) params.set('fuel-type', criteria.fuel_type)
   if (criteria.transmission) params.set('transmission', criteria.transmission)
   if (criteria.body_type) params.set('body-type', criteria.body_type)
+  if (criteria.doors) params.set('quantity-of-doors', criteria.doors)
   if (criteria.colour) params.set('colour', criteria.colour)
   if (criteria.variant) params.set('aggregatedTrim', criteria.variant)
   if (criteria.exclude_cat) params.set('exclude-writeoff-categories', 'on')
@@ -95,6 +96,7 @@ function buildSearchParams(criteria, { page = 1, size = PAGE_SIZE } = {}) {
   if (criteria.fuel_type) params.set('fuel_type', criteria.fuel_type)
   if (criteria.transmission) params.set('transmission', criteria.transmission)
   if (criteria.body_type) params.set('raw_body_type', criteria.body_type)
+  if (criteria.doors) params.set('doors_values', criteria.doors)
   if (criteria.colour) params.set('colour', criteria.colour)
   if (criteria.exclude_cat) params.set('is_writeoff', 'false')
 
@@ -226,7 +228,7 @@ async function cwsFetch(url) {
 export async function countSearch(criteria) {
   const params = buildSearchParams(criteria, { size: 0 })
   // Request facets for dynamic dropdowns
-  for (const f of ['raw_body_type', 'fuel_type', 'transmission', 'colour']) {
+  for (const f of ['raw_body_type', 'fuel_type', 'transmission', 'colour', 'doors_values']) {
     params.append('facet', f)
   }
   const url = `${CWS_BASE}/sss/searchone/adverts?${params.toString()}`
@@ -240,6 +242,7 @@ export async function countSearch(criteria) {
       fuel_type: rawFacets.fuel_type || [],
       transmission: rawFacets.transmission || [],
       colour: rawFacets.colour || [],
+      doors: rawFacets.doors_values || [],
     }
   }
 }

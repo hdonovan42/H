@@ -65,7 +65,7 @@ export default function SearchEditor({ editId }) {
       mileage_max: c.mileage_max ? formatNumber(c.mileage_max) : '',
       fuel_type: c.fuel_type || '',
       transmission: c.transmission || '',
-      body_type: c.body_type || '',
+      body_type: c.doors ? `${c.body_type}|${c.doors}` : (c.body_type || ''),
       exclude_cat: c.exclude_cat !== false,
       postcode: c.postcode || '',
       radius: c.radius ? String(c.radius) : '1500'
@@ -93,7 +93,11 @@ export default function SearchEditor({ editId }) {
     if (form.mileage_max) criteria.mileage_max = Number(parseNumber(form.mileage_max))
     if (form.fuel_type) criteria.fuel_type = form.fuel_type
     if (form.transmission) criteria.transmission = form.transmission
-    if (form.body_type) criteria.body_type = form.body_type
+    if (form.body_type) {
+      const [bt, doors] = form.body_type.split('|')
+      criteria.body_type = bt
+      if (doors) criteria.doors = doors
+    }
     criteria.exclude_cat = form.exclude_cat
     if (form.postcode) {
       criteria.postcode = form.postcode
@@ -147,7 +151,11 @@ export default function SearchEditor({ editId }) {
       if (form.mileage_max) criteria.mileage_max = Number(parseNumber(form.mileage_max))
       if (form.fuel_type) criteria.fuel_type = form.fuel_type
       if (form.transmission) criteria.transmission = form.transmission
-      if (form.body_type) criteria.body_type = form.body_type
+      if (form.body_type) {
+        const [bt, doors] = form.body_type.split('|')
+        criteria.body_type = bt
+        if (doors) criteria.doors = doors
+      }
       criteria.exclude_cat = form.exclude_cat
       if (form.postcode) {
         criteria.postcode = form.postcode
@@ -200,7 +208,46 @@ export default function SearchEditor({ editId }) {
     return opts.sort((a, b) => (b._count ?? 0) - (a._count ?? 0))
   }
 
-  const bodyTypeOpts = facetOptions('body_type', makesData.bodyTypes)
+  const buildBodyDoorOptions = () => {
+    const doorMap = makesData.bodyTypeDoors || {}
+    const entries = facets?.body_type
+    const countMap = entries?.length
+      ? Object.fromEntries(entries.map(f => [f.value, f]))
+      : {}
+
+    const items = makesData.bodyTypes.map(bt => {
+      const f = countMap[bt.value]
+      return { ...bt, count: f ? f.count : 0 }
+    })
+    const seen = new Set(makesData.bodyTypes.map(bt => bt.value))
+    if (entries) {
+      for (const f of entries) {
+        if (!seen.has(f.value)) {
+          items.push({ value: f.value, label: f.displayName, count: f.count })
+        }
+      }
+    }
+    items.sort((a, b) => b.count - a.count)
+
+    const opts = []
+    for (const bt of items) {
+      const doors = doorMap[bt.value]
+      const countStr = bt.count.toLocaleString('en-GB')
+      if (!doors || doors.length === 0) {
+        opts.push({ value: bt.value, label: `${bt.label} (${countStr})` })
+      } else if (doors.length === 1) {
+        opts.push({ value: `${bt.value}|${doors[0]}`, label: `${bt.label} ${doors[0]}dr (${countStr})` })
+      } else {
+        opts.push({ value: bt.value, label: `${bt.label} (${countStr})` })
+        for (const d of doors) {
+          opts.push({ value: `${bt.value}|${d}`, label: `\u00a0\u00a0${bt.label} ${d}dr` })
+        }
+      }
+    }
+    return opts
+  }
+
+  const bodyTypeOpts = buildBodyDoorOptions()
   const fuelTypeOpts = facetOptions('fuel_type', makesData.fuelTypes)
   const transmissionOpts = facetOptions('transmission', makesData.transmissions)
   const colourOpts = facetOptions('colour', makesData.colours)

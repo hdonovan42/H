@@ -90,5 +90,15 @@
     { "value": "Pickup", "label": "Pickup" },
     { "value": "Saloon", "label": "Saloon" },
     { "value": "SUV", "label": "SUV" }
-  ]
+  ],
+  "bodyTypeDoors": {
+    "Convertible": [2],
+    "Coupe": [2],
+    "Estate": [5],
+    "Hatchback": [3, 5],
+    "MPV": [5, 7],
+    "Pickup": [2, 4],
+    "Saloon": [4],
+    "SUV": [3, 5]
+  }
 }
