@@ -1,6 +1,7 @@
 import { Cron } from 'croner'
 import { getDb } from './db.js'
-import { scrapeSearch } from './scraper.js'
+import { scrapeSearch, healthCheck } from './scraper.js'
+import { cssSearch } from './scraper-css.js'
 import { sendWhatsApp, formatListingAlert } from './whatsapp.js'
 import { sendListingEmail } from './notify.js'
 import { refreshTaxonomy, taxonomyNeedsRefresh } from './taxonomy.js'
@@ -9,14 +10,20 @@ import { POLL_INTERVAL_MINUTES, QUIET_START_UTC, QUIET_END_UTC } from '../shared
 let job = null
 let quietJob = null
 let taxonomyJob = null
-let isRunning = false
+let cleanupJob = null
+let sssHealthy = true // assume healthy until proven otherwise
 
 async function triggerPoll(label) {
-  if (isRunning) {
+  const db = getDb()
+
+  // Atomic lock check via DB — better-sqlite3 is single-threaded so this is safe
+  const lock = db.prepare("SELECT value FROM kv WHERE key = 'poll_running'").get()
+  if (lock?.value === '1') {
     console.log('[Scheduler] Previous run still active, skipping')
     return
   }
-  isRunning = true
+
+  db.prepare("INSERT OR REPLACE INTO kv (key, value) VALUES ('poll_running', '1')").run()
   console.log(`[Scheduler] Starting poll cycle (${label})`)
 
   try {
@@ -24,7 +31,7 @@ async function triggerPoll(label) {
   } catch (err) {
     console.error('[Scheduler] Cycle error:', err.message)
   } finally {
-    isRunning = false
+    db.prepare("INSERT OR REPLACE INTO kv (key, value) VALUES ('poll_running', '0')").run()
   }
 }
 
@@ -60,7 +67,43 @@ export function startScheduler() {
     )
   }
 
-  console.log(`[Scheduler] Active — every ${POLL_INTERVAL_MINUTES}m, quiet ${QUIET_START_UTC}:00–${QUIET_END_UTC}:00 UTC (hourly at :59), taxonomy Mon 06:00`)
+  // Daily cleanup: purge poll_log entries older than 90 days + expired magic links
+  cleanupJob = new Cron('0 3 * * *', { timezone: 'Europe/London' }, () => {
+    const db = getDb()
+    const deleted = db.prepare("DELETE FROM poll_log WHERE started_at < datetime('now', '-90 days')").run()
+    if (deleted.changes > 0) console.log(`[Cleanup] Purged ${deleted.changes} poll_log entries >90 days`)
+
+    const expiredLinks = db.prepare("DELETE FROM magic_links WHERE expires_at < datetime('now', '-1 day')").run()
+    if (expiredLinks.changes > 0) console.log(`[Cleanup] Purged ${expiredLinks.changes} expired magic links`)
+
+    const oldEvents = db.prepare("DELETE FROM stripe_events WHERE handled_at < datetime('now', '-90 days')").run()
+    if (oldEvents.changes > 0) console.log(`[Cleanup] Purged ${oldEvents.changes} old stripe events`)
+  })
+
+  console.log(`[Scheduler] Active — every ${POLL_INTERVAL_MINUTES}m, quiet ${QUIET_START_UTC}:00–${QUIET_END_UTC}:00 UTC (hourly at :59), taxonomy Mon 06:00, cleanup daily 03:00`)
+}
+
+// ===== FALLBACK SCRAPE =====
+// Tries SSS first, falls back to CSS Core Search on failure.
+
+async function scrapeWithFallback(search) {
+  // Try SSS first
+  try {
+    const result = await scrapeSearch(search)
+    return result
+  } catch (sssErr) {
+    console.warn(`[Fallback] SSS failed for search #${search.id}: ${sssErr.message} — trying CSS...`)
+
+    // Try CSS fallback
+    try {
+      const result = await cssSearch(search)
+      console.log(`[Fallback] CSS succeeded for search #${search.id}`)
+      return result
+    } catch (cssErr) {
+      console.error(`[Fallback] Both SSS and CSS failed for search #${search.id}: SSS=${sssErr.message}, CSS=${cssErr.message}`)
+      return { listings: [], iterations: 1, success: false, cost: 0, engine: 'none', responseTimeMs: 0 }
+    }
+  }
 }
 
 export async function pollSingleSearch(search, { skipNotify = false } = {}) {
@@ -71,7 +114,7 @@ export async function pollSingleSearch(search, { skipNotify = false } = {}) {
   `).run(search.id).lastInsertRowid
 
   try {
-    const result = await scrapeSearch(search)
+    const result = await scrapeWithFallback(search)
 
     // Find new listings
     const newListings = []
@@ -81,15 +124,15 @@ export async function pollSingleSearch(search, { skipNotify = false } = {}) {
       ).get(search.id, listing.autotrader_id)
 
       if (!existing) {
-        db.prepare(`
-          INSERT INTO listings (search_id, autotrader_id, title, price, mileage, year, fuel_type, transmission, url, image_url, seller_type, location)
+        const inserted = db.prepare(`
+          INSERT OR IGNORE INTO listings (search_id, autotrader_id, title, price, mileage, year, fuel_type, transmission, url, image_url, seller_type, location)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           search.id, listing.autotrader_id, listing.title, listing.price,
           listing.mileage, listing.year, listing.fuel_type, listing.transmission,
           listing.url, listing.image_url, listing.seller_type, listing.location
         )
-        newListings.push(listing)
+        if (inserted.changes > 0) newListings.push(listing)
       }
     }
 
@@ -117,24 +160,41 @@ export async function pollSingleSearch(search, { skipNotify = false } = {}) {
       }
     }
 
-    // Update poll log
+    // Update poll log with metrics
     db.prepare(`
       UPDATE poll_log SET completed_at = datetime('now'), status = 'success',
-      listings_found = ?, new_listings = ?, iterations = ?, cost_estimate = ?
+      listings_found = ?, new_listings = ?, iterations = ?, cost_estimate = ?,
+      response_time_ms = ?, scraper_engine = ?
       WHERE id = ?
-    `).run(result.listings.length, newListings.length, result.iterations, result.cost || 0, logId)
+    `).run(
+      result.listings.length, newListings.length, result.iterations,
+      result.cost || 0, result.responseTimeMs || null, result.engine || 'sss',
+      logId
+    )
 
-    console.log(`[Poll] Search #${search.id}: ${result.listings.length} found, ${newListings.length} new`)
+    console.log(`[Poll] Search #${search.id}: ${result.listings.length} found, ${newListings.length} new (engine=${result.engine || 'sss'})`)
 
   } catch (err) {
-    db.prepare("UPDATE poll_log SET completed_at = datetime('now'), status = 'error', error = ? WHERE id = ?")
-      .run(err.message, logId)
+    db.prepare(`
+      UPDATE poll_log SET completed_at = datetime('now'), status = 'error', error = ?
+      WHERE id = ?
+    `).run(err.message, logId)
     console.error(`[Poll] Search #${search.id} failed:`, err.message)
   }
 }
 
 export async function runPollCycle() {
   const db = getDb()
+
+  // Canary health check before polling
+  const health = await healthCheck()
+  if (!health.healthy) {
+    console.warn(`[Scheduler] SSS health check FAILED (status=${health.statusCode}, ${health.latencyMs}ms${health.error ? ', ' + health.error : ''}) — polls will use CSS fallback`)
+    sssHealthy = false
+  } else if (!sssHealthy) {
+    console.log(`[Scheduler] SSS health check recovered (${health.latencyMs}ms)`)
+    sssHealthy = true
+  }
 
   const searches = db.prepare(`
     SELECT s.*, u.phone, u.email
@@ -166,5 +226,9 @@ export function stopScheduler() {
   if (taxonomyJob) {
     taxonomyJob.stop()
     console.log('[Scheduler] Taxonomy job stopped')
+  }
+  if (cleanupJob) {
+    cleanupJob.stop()
+    console.log('[Scheduler] Cleanup job stopped')
   }
 }

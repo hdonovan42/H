@@ -1,23 +1,23 @@
 // WhatsApp bridge via moltbot gateway on same VPS
 // Requires: hq user has SSH key access to moltbot@localhost
-import { writeFileSync, unlinkSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 
+function escapeShell(str) {
+  return "'" + str.replace(/'/g, "'\\''") + "'"
+}
+
 export async function sendWhatsApp(phone, message) {
-  const tmpFile = `/tmp/autosnipe-msg-${Date.now()}.txt`
-
   try {
-    writeFileSync(tmpFile, message, { mode: 0o644 })
+    const safePhone = phone.replace(/[^0-9+]/g, '')
+    const safeMessage = escapeShell(message)
 
-    const cmd = `ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes moltbot@localhost 'cd ~/moltbot && node scripts/run-node.mjs agent --agent kimi --to "${phone}" --channel whatsapp --deliver --timeout 60 --message "$(cat ${tmpFile})"'`
+    const cmd = `ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes moltbot@localhost 'cd ~/moltbot && node scripts/run-node.mjs agent --agent kimi --to "${safePhone}" --channel whatsapp --deliver --timeout 60 --message ${safeMessage}'`
     execSync(cmd, { timeout: 60000, encoding: 'utf-8' })
-    console.log(`[WhatsApp] Sent to ${phone} (${message.length} chars)`)
+    console.log(`[WhatsApp] Sent to ${safePhone} (${message.length} chars)`)
     return { success: true }
   } catch (err) {
     console.error(`[WhatsApp] Failed: ${err.message}`)
     return { success: false, error: err.message }
-  } finally {
-    try { unlinkSync(tmpFile) } catch {}
   }
 }
 

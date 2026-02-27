@@ -15,6 +15,10 @@ export function getDb() {
     db = new Database(DB_PATH)
     db.pragma('journal_mode = WAL')
     db.pragma('foreign_keys = ON')
+    db.pragma('busy_timeout = 10000')
+    db.pragma('synchronous = NORMAL')
+    db.pragma('cache_size = -64000')
+    db.pragma('temp_store = MEMORY')
     migrate(db)
   }
   return db
@@ -94,6 +98,17 @@ function migrate(db) {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS kv (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS stripe_events (
+      event_id TEXT PRIMARY KEY,
+      event_type TEXT NOT NULL,
+      handled_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_listings_search ON listings(search_id);
     CREATE INDEX IF NOT EXISTS idx_listings_autotrader ON listings(autotrader_id);
     CREATE INDEX IF NOT EXISTS idx_searches_user ON searches(user_id);
@@ -106,6 +121,18 @@ function migrate(db) {
     db.prepare('SELECT paid_slots FROM users LIMIT 1').get()
   } catch {
     db.exec('ALTER TABLE users ADD COLUMN paid_slots INTEGER DEFAULT 0')
+  }
+
+  // Add poll_log metrics columns if missing
+  try {
+    db.prepare('SELECT response_time_ms FROM poll_log LIMIT 1').get()
+  } catch {
+    db.exec('ALTER TABLE poll_log ADD COLUMN response_time_ms INTEGER')
+  }
+  try {
+    db.prepare('SELECT scraper_engine FROM poll_log LIMIT 1').get()
+  } catch {
+    db.exec("ALTER TABLE poll_log ADD COLUMN scraper_engine TEXT DEFAULT 'sss'")
   }
 
   // Add stripe subscription columns if missing

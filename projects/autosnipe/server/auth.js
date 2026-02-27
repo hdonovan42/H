@@ -53,7 +53,16 @@ export function verifyMagicLink(token) {
     WHERE token = ? AND used = 0 AND expires_at > datetime('now')
   `).get(token)
 
-  if (!link) return { success: false, error: 'Invalid or expired link' }
+  if (!link) {
+    // Check if it was already used vs truly expired/invalid
+    const usedLink = db.prepare('SELECT * FROM magic_links WHERE token = ? AND used = 1').get(token)
+    if (usedLink) return { success: false, error: 'already_used' }
+
+    const expiredLink = db.prepare('SELECT * FROM magic_links WHERE token = ?').get(token)
+    if (expiredLink) return { success: false, error: 'expired' }
+
+    return { success: false, error: 'invalid' }
+  }
 
   db.prepare('UPDATE magic_links SET used = 1 WHERE id = ?').run(link.id)
 

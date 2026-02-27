@@ -68,7 +68,7 @@ app.get('/api/auth/verify', (req, res) => {
   if (result.success) {
     res.redirect(`/#/auth-callback?token=${result.token}`)
   } else {
-    res.redirect('/#/login?error=invalid_link')
+    res.redirect(`/#/login?error=${result.error || 'invalid_link'}`)
   }
 })
 
@@ -125,7 +125,8 @@ app.post('/api/searches', requireAuth, (req, res) => {
   // Fire-and-forget: poll immediately so listings appear on dashboard
   const userInfo = db.prepare('SELECT email, phone FROM users WHERE id = ?').get(req.user.userId)
   const searchRow = db.prepare('SELECT * FROM searches WHERE id = ?').get(result.lastInsertRowid)
-  pollSingleSearch({ ...searchRow, email: userInfo.email, phone: userInfo.phone })
+  Promise.resolve()
+    .then(() => pollSingleSearch({ ...searchRow, email: userInfo.email, phone: userInfo.phone }))
     .catch(err => console.error(`[ImmediatePoll] Search #${result.lastInsertRowid} failed:`, err.message))
 
   res.json({ success: true, id: result.lastInsertRowid, autotraderUrl })
@@ -179,7 +180,8 @@ app.patch('/api/searches/:id', requireAuth, (req, res) => {
     // Fire-and-forget: re-poll with new criteria
     const userInfo = db.prepare('SELECT email, phone FROM users WHERE id = ?').get(req.user.userId)
     const updatedSearch = db.prepare('SELECT * FROM searches WHERE id = ?').get(search.id)
-    pollSingleSearch({ ...updatedSearch, email: userInfo.email, phone: userInfo.phone }, { skipNotify: true })
+    Promise.resolve()
+      .then(() => pollSingleSearch({ ...updatedSearch, email: userInfo.email, phone: userInfo.phone }, { skipNotify: true }))
       .catch(err => console.error(`[ImmediatePoll] Search #${search.id} re-poll failed:`, err.message))
   }
 
@@ -280,6 +282,14 @@ app.get('/api/taxonomy', (req, res) => {
 
 // ===== ADMIN =====
 
+function requireAdminAuth(req, res, next) {
+  const token = req.headers['x-admin-token']
+  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN) {
+    return res.status(401).json({ error: 'Unauthorised' })
+  }
+  next()
+}
+
 app.post('/api/admin/refresh-taxonomy', requireAuth, async (req, res) => {
   try {
     await refreshTaxonomy()
@@ -298,8 +308,8 @@ app.post('/api/admin/poll', requireAuth, async (req, res) => {
   }
 })
 
-// These endpoints are protected by nginx basic auth on dash.autosnipe.co.uk
-app.get('/api/admin/stats', (req, res) => {
+// Protected by X-Admin-Token header (+ nginx basic auth on dash.autosnipe.co.uk)
+app.get('/api/admin/stats', requireAdminAuth, (req, res) => {
   const db = getDb()
   const users = db.prepare('SELECT COUNT(*) as total FROM users').get().total
   const searches = db.prepare('SELECT COUNT(*) as total FROM searches WHERE active = 1').get().total
@@ -307,14 +317,14 @@ app.get('/api/admin/stats', (req, res) => {
   res.json({ users, activeSearches: searches, totalListings: listings })
 })
 
-app.get('/api/admin/users', (req, res) => {
+app.get('/api/admin/users', requireAdminAuth, (req, res) => {
   const users = getDb().prepare(`
     SELECT id, email, phone, paid_slots, created_at FROM users ORDER BY created_at DESC
   `).all()
   res.json(users)
 })
 
-app.get('/api/admin/poll-log-all', (req, res) => {
+app.get('/api/admin/poll-log-all', requireAdminAuth, (req, res) => {
   const logs = getDb().prepare(`
     SELECT pl.*, s.name as search_name
     FROM poll_log pl
@@ -339,6 +349,17 @@ app.listen(PORT, () => {
 async function shutdown(signal) {
   console.log(`\n[Shutdown] ${signal} received, cleaning up...`)
   stopScheduler()
+
+  // Wait for active poll to finish (up to 50s, leaving 10s for cleanup)
+  const db = getDb()
+  const deadline = Date.now() + 50000
+  while (Date.now() < deadline) {
+    const lock = db.prepare("SELECT value FROM kv WHERE key = 'poll_running'").get()
+    if (!lock || lock.value !== '1') break
+    console.log('[Shutdown] Waiting for active poll to finish...')
+    await new Promise(r => setTimeout(r, 2000))
+  }
+
   await closeBrowser()
   process.exit(0)
 }

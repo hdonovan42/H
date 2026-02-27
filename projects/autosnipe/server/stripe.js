@@ -100,6 +100,16 @@ export async function handleWebhook(rawBody, signature) {
 
   const db = getDb()
 
+  // Global webhook idempotency — skip if already processed
+  const existing = db.prepare('SELECT event_id FROM stripe_events WHERE event_id = ?')
+    .get(event.id)
+  if (existing) {
+    console.log(`[Stripe] Skipping duplicate event ${event.id}`)
+    return { received: true, duplicate: true }
+  }
+  db.prepare('INSERT INTO stripe_events (event_id, event_type) VALUES (?, ?)')
+    .run(event.id, event.type)
+
   switch (event.type) {
 
     case 'checkout.session.completed': {

@@ -3,50 +3,145 @@
 // No browser, no Cloudflare, zero cost per request.
 
 import { randomUUID } from 'crypto'
+import { readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { resolve, dirname } from 'path'
+import { fileURLToPath } from 'url'
 
-const CWS_BASE = 'https://cws.autotrader.co.uk/CoordinatedWebService/application/crs'
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const DATA_DIR = resolve(__dirname, 'data')
+const DEVICE_ID_PATH = resolve(DATA_DIR, '.device-id')
+
+export const CWS_BASE = 'https://cws.autotrader.co.uk/CoordinatedWebService/application/crs'
 const CWS_USERNAME = 'consumerandroid'
 const CWS_PASSWORD = '0diordnaremusnoc2'
-const APP_VERSION = '7.48'
-const COMPOSABLE_VERSION = 'v1_17'
+let appVersion = '7.48'
+export const COMPOSABLE_VERSION = 'v1_17'
 const PAGE_SIZE = 20
 const MAX_PAGES = 5 // Cap at 100 listings per search to stay polite
+
+// ===== PERSISTENT DEVICE ID =====
+
+let deviceId
+
+function getDeviceId() {
+  if (deviceId) return deviceId
+  try {
+    deviceId = readFileSync(DEVICE_ID_PATH, 'utf8').trim()
+    if (deviceId) return deviceId
+  } catch { /* file doesn't exist yet */ }
+  deviceId = randomUUID()
+  mkdirSync(DATA_DIR, { recursive: true })
+  writeFileSync(DEVICE_ID_PATH, deviceId)
+  console.log(`[Scraper] Generated new deviceId: ${deviceId}`)
+  return deviceId
+}
 
 // ===== ACCESS TOKEN CACHE =====
 
 let cachedToken = null
 let tokenExpiry = 0
-const TOKEN_TTL = 23 * 60 * 60 * 1000 // 23h (server allows 24h, we refresh early)
+let tokenRefreshPromise = null
+let sessionId = null // persisted per token lifetime
+const TOKEN_TTL = 22 * 60 * 60 * 1000 // 22h (server allows 24h, extra buffer)
+const TOKEN_BUFFER = 60 * 60 * 1000    // Refresh if <1h remaining
 
-async function getAccessToken() {
-  if (cachedToken && Date.now() < tokenExpiry) return cachedToken
+export async function getAccessToken() {
+  if (cachedToken && Date.now() < tokenExpiry - TOKEN_BUFFER) return cachedToken
+  if (tokenRefreshPromise) return tokenRefreshPromise
 
-  const sessionId = randomUUID()
-  const deviceId = randomUUID()
+  tokenRefreshPromise = (async () => {
+    try {
+      sessionId = randomUUID() // new session per token lifetime
+      const did = getDeviceId()
 
-  const res = await fetch(
-    `${CWS_BASE}/connect/${CWS_USERNAME}/${CWS_PASSWORD}?version=${APP_VERSION}`,
-    {
-      headers: {
-        'Accept': 'application/json',
-        'sessionId': sessionId,
-        'deviceId': deviceId,
-        'platform': 'android',
-        'platform-version': APP_VERSION,
-        'channel': 'Cars'
+      const res = await fetch(
+        `${CWS_BASE}/connect/${CWS_USERNAME}/${CWS_PASSWORD}?version=${appVersion}`,
+        {
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': `Consumer_Android/v${appVersion}`,
+            'Accept-Encoding': 'gzip',
+            'Content-Type': 'application/json',
+            'sessionId': sessionId,
+            'deviceId': did,
+            'platform': 'android',
+            'platform-version': appVersion,
+            'platform-os-version': '14',
+            'channel': 'Cars'
+          }
+        }
+      )
+
+      if (!res.ok) {
+        // Version probing: try incrementing if auth fails
+        const probed = await probeVersion(res.status)
+        if (probed) return probed
+        throw new Error(`CWS connect failed: HTTP ${res.status}`)
       }
+
+      const token = await res.text()
+      if (!token || token.length < 50) throw new Error('CWS connect returned invalid token')
+
+      cachedToken = token
+      tokenExpiry = Date.now() + TOKEN_TTL
+      console.log(`[Scraper] CWS access token acquired (${token.length} chars, v${appVersion}, expires in 22h)`)
+      return token
+    } finally {
+      tokenRefreshPromise = null
     }
-  )
+  })()
 
-  if (!res.ok) throw new Error(`CWS connect failed: HTTP ${res.status}`)
+  return tokenRefreshPromise
+}
 
-  const token = await res.text()
-  if (!token || token.length < 50) throw new Error('CWS connect returned invalid token')
+// ===== VERSION PROBING =====
 
-  cachedToken = token
-  tokenExpiry = Date.now() + TOKEN_TTL
-  console.log(`[Scraper] CWS access token acquired (${token.length} chars, expires in 23h)`)
-  return token
+async function probeVersion(originalStatus) {
+  const baseMinor = 48
+  const maxMinor = 60
+  const baseMajor = 7
+
+  console.log(`[Scraper] Auth failed (HTTP ${originalStatus}), probing versions ${baseMajor}.${baseMinor + 1}–${baseMajor}.${maxMinor}...`)
+
+  for (let minor = baseMinor + 1; minor <= maxMinor; minor++) {
+    const testVersion = `${baseMajor}.${minor}`
+    try {
+      const did = getDeviceId()
+      const sid = randomUUID()
+      const res = await fetch(
+        `${CWS_BASE}/connect/${CWS_USERNAME}/${CWS_PASSWORD}?version=${testVersion}`,
+        {
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': `Consumer_Android/v${testVersion}`,
+            'Accept-Encoding': 'gzip',
+            'Content-Type': 'application/json',
+            'sessionId': sid,
+            'deviceId': did,
+            'platform': 'android',
+            'platform-version': testVersion,
+            'platform-os-version': '14',
+            'channel': 'Cars'
+          }
+        }
+      )
+
+      if (res.ok) {
+        const token = await res.text()
+        if (token && token.length >= 50) {
+          appVersion = testVersion
+          sessionId = sid
+          cachedToken = token
+          tokenExpiry = Date.now() + TOKEN_TTL
+          console.log(`[Scraper] Version probe SUCCESS: v${testVersion} works! (was v7.48)`)
+          return token
+        }
+      }
+    } catch { /* probe failed, try next */ }
+  }
+
+  console.error('[Scraper] Version probe exhausted (7.49–7.60), no working version found')
+  return null
 }
 
 // ===== URL BUILDER (kept for autotrader_url column in DB) =====
@@ -79,7 +174,7 @@ export function buildAutotraderUrl(criteria) {
 
 // ===== CWS QUERY BUILDER =====
 
-function buildSearchParams(criteria, { page = 1, size = PAGE_SIZE } = {}) {
+export function buildSearchParams(criteria, { page = 1, size = PAGE_SIZE } = {}) {
   const params = new URLSearchParams()
 
   params.set('advertising_location', 'at_cars')
@@ -112,7 +207,7 @@ function buildSearchParams(criteria, { page = 1, size = PAGE_SIZE } = {}) {
 // Primary source: the search criteria (AT's own filter guarantees every result matches).
 // Fallback: best-effort parse from the derivative string (dealer-supplied text).
 
-function parseListings(data, criteria = {}) {
+export function parseListings(data, criteria = {}) {
   const results = []
   const adverts = data?._embedded?.results || []
 
@@ -188,30 +283,36 @@ function parseListings(data, criteria = {}) {
 
 // ===== SHARED FETCH HELPER =====
 
-function buildHeaders(token) {
+export function buildHeaders(token) {
   return {
     'Accept': 'application/json',
+    'User-Agent': `Consumer_Android/v${appVersion}`,
+    'Accept-Encoding': 'gzip',
+    'Content-Type': 'application/json',
     'Access-Token': token,
     'channel': 'Cars',
-    'sessionId': randomUUID(),
-    'deviceId': randomUUID(),
+    'sessionId': sessionId || randomUUID(),
+    'deviceId': getDeviceId(),
     'platform': 'android',
-    'platform-version': APP_VERSION,
+    'platform-version': appVersion,
+    'platform-os-version': '14',
     'composableVersion': COMPOSABLE_VERSION,
+    'sss-version': '1',
     'X-Request-Options': 'PI_V3,EXCLUDE_TECH_SPEC,DISCLAIMERS,COMPOSABLE_V1_3,FPA_CONSOLIDATION'
   }
 }
 
-async function cwsFetch(url) {
+export async function cwsFetch(url) {
   const token = await getAccessToken()
   const res = await fetch(url, { headers: buildHeaders(token) })
 
   if (!res.ok) {
-    // Retry once on auth failure with a fresh token
+    // Retry once on auth failure with a fresh token (safe — getAccessToken deduplicates)
     if ((res.status === 401 || res.status === 403) && cachedToken) {
-      console.log(`[Scraper] Token rejected (${res.status}), refreshing...`)
+      console.log(`[Scraper] Token rejected (${res.status}), invalidating and refreshing...`)
       cachedToken = null
       tokenExpiry = 0
+      tokenRefreshPromise = null // clear any in-flight refresh with the old token
       const freshToken = await getAccessToken()
       const retry = await fetch(url, { headers: buildHeaders(freshToken) })
       if (!retry.ok) throw new Error(`CWS API returned ${retry.status} after token refresh`)
@@ -221,6 +322,33 @@ async function cwsFetch(url) {
   }
 
   return res.json()
+}
+
+// ===== HEALTH CHECK =====
+
+export async function healthCheck() {
+  const start = Date.now()
+  try {
+    const params = buildSearchParams(
+      { make: 'BMW', postcode: 'SW1A1AA', price_from: 5000, price_to: 50000 },
+      { size: 1 }
+    )
+    const url = `${CWS_BASE}/sss/searchone/adverts?${params.toString()}`
+    const token = await getAccessToken()
+    const res = await fetch(url, { headers: buildHeaders(token) })
+    const latencyMs = Date.now() - start
+
+    if (!res.ok) {
+      return { healthy: false, latencyMs, statusCode: res.status }
+    }
+
+    const data = await res.json()
+    const hasResults = !!data?._embedded?.results?.[0]?.advertId
+
+    return { healthy: hasResults, latencyMs, statusCode: res.status }
+  } catch (err) {
+    return { healthy: false, latencyMs: Date.now() - start, statusCode: 0, error: err.message }
+  }
 }
 
 // ===== COUNT (lightweight — size=0, no listings parsed) =====
@@ -252,7 +380,9 @@ export async function countSearch(criteria) {
 export async function scrapeSearch(search) {
   const criteria = JSON.parse(search.criteria)
 
-  console.log(`[Scraper] Search #${search.id}: querying CWS API`)
+  console.log(`[Scraper] Search #${search.id}: querying CWS SSS API`)
+
+  const startTime = Date.now()
 
   try {
     // Fetch page 1
@@ -273,11 +403,13 @@ export async function scrapeSearch(search) {
       allListings.push(...parseListings(pageData, criteria))
     }
 
-    console.log(`[Scraper] Search #${search.id}: ${allListings.length} listings fetched (${totalResults} total matches, ${pagesToFetch} page${pagesToFetch > 1 ? 's' : ''})`)
-    return { listings: allListings, iterations: pagesToFetch, success: true, cost: 0 }
+    const responseTimeMs = Date.now() - startTime
+    console.log(`[Scraper] Search #${search.id}: ${allListings.length} listings fetched (${totalResults} total, ${pagesToFetch} pages, ${responseTimeMs}ms)`)
+    return { listings: allListings, iterations: pagesToFetch, success: true, cost: 0, engine: 'sss', responseTimeMs }
 
   } catch (err) {
-    console.error(`[Scraper] Search #${search.id} failed:`, err.message)
-    return { listings: [], iterations: 1, success: false, cost: 0 }
+    const responseTimeMs = Date.now() - startTime
+    console.error(`[Scraper] Search #${search.id} SSS failed (${responseTimeMs}ms):`, err.message)
+    throw err // let caller handle fallback
   }
 }

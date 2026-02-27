@@ -51,17 +51,26 @@ export async function sendListingEmail(email, listings, searchName) {
       </div>
     </div>`
 
-  try {
-    await resend.emails.send({
-      from: 'AutoSnipe <noreply@autosnipe.co.uk>',
-      to: email,
-      subject,
-      html
-    })
-    console.log(`[Email] Sent to ${email} (${count} listing${count > 1 ? 's' : ''})`)
-    return { success: true }
-  } catch (err) {
-    console.error(`[Email] Failed to ${email}: ${err.message}`)
-    return { success: false, error: err.message }
+  const MAX_RETRIES = 3
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      await resend.emails.send({
+        from: 'AutoSnipe <noreply@autosnipe.co.uk>',
+        to: email,
+        subject,
+        html
+      })
+      console.log(`[Email] Sent to ${email} (${count} listing${count > 1 ? 's' : ''})`)
+      return { success: true }
+    } catch (err) {
+      if (attempt < MAX_RETRIES) {
+        const delay = 1000 * Math.pow(2, attempt - 1) // 1s, 2s
+        console.warn(`[Email] Attempt ${attempt}/${MAX_RETRIES} failed for ${email}: ${err.message}, retrying in ${delay}ms`)
+        await new Promise(r => setTimeout(r, delay))
+      } else {
+        console.error(`[Email] Failed to ${email} after ${MAX_RETRIES} attempts: ${err.message}`)
+        return { success: false, error: err.message }
+      }
+    }
   }
 }

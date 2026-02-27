@@ -4,6 +4,47 @@ All notable changes to AutoSnipe are documented here.
 
 ---
 
+## v1.4.0 — Phase 0 Critical Fixes (27 Feb 2026)
+
+**Deployed**: 27 Feb 2026 — `autosnipe-api` online, 1 active search, 1 user
+
+Hardened the server against 6 critical issues identified by reliability audit: race conditions in token refresh and poll locking, a shell injection vulnerability in WhatsApp messaging, missing webhook idempotency, silent fire-and-forget failures, and unprotected admin endpoints. Also added email retry, magic link cleanup, poll log archival, and graceful shutdown with poll-wait logic.
+
+### Fixes
+1. **Token refresh race** — `tokenRefreshPromise` singleton deduplicates concurrent 401 retries
+2. **Poll lock race** — DB-level lock via `kv` table replaces non-atomic `isRunning` boolean; `INSERT OR IGNORE` for listings
+3. **WhatsApp shell injection** — removed `$(cat ...)` pattern, uses `escapeShell()` with single-quote wrapping + phone sanitisation
+4. **Stripe webhook idempotency** — `stripe_events` table deduplicates before processing
+5. **Silent immediate-poll failures** — `Promise.resolve()` wrapper guarantees catch handler attaches
+6. **Admin endpoint auth** — `requireAdminAuth` middleware checks `X-Admin-Token` header
+
+### Quick Wins Bundled
+- Magic link: specific error codes (`already_used`, `expired`, `invalid`) + daily cleanup cron
+- Email retry: 3 attempts with exponential backoff (1s, 2s)
+- SQLite pragmas: `busy_timeout=10s`, `synchronous=NORMAL`, 64MB cache, temp in RAM
+- Poll log cleanup: daily cron purges entries >90 days
+- PM2 `kill_timeout`: 10s → 60s, shutdown waits for active poll (50s max)
+
+### Files Modified
+| File | Change |
+|------|--------|
+| `server/db.js` | Pragma tuning + `kv` table + `stripe_events` table |
+| `server/scraper.js` | Token refresh deduplication, TTL 22h with 1h buffer |
+| `server/scheduler.js` | DB-level poll lock, `INSERT OR IGNORE`, daily cleanup cron |
+| `server/whatsapp.js` | Shell injection fix (`escapeShell` + phone sanitisation) |
+| `server/stripe.js` | Global webhook idempotency via `stripe_events` |
+| `server/auth.js` | Specific magic link error codes |
+| `server/notify.js` | Email retry with exponential backoff |
+| `server/index.js` | Immediate-poll safety, admin auth, shutdown poll-wait |
+| `deploy/ecosystem.config.cjs` | `kill_timeout` 10s → 60s |
+
+### What to Watch
+- `[Cleanup]` log lines daily at 03:00 London time
+- `[Scheduler] Previous run still active, skipping` — confirms lock works under load
+- Admin GET endpoints now require `X-Admin-Token` header — update dash.autosnipe.co.uk if needed
+
+---
+
 ## v1.3.0 — Live Autotrader Taxonomy (26 Feb 2026)
 
 **Deployed**: 26 Feb 2026 — `autosnipe-api` online, taxonomy populated
