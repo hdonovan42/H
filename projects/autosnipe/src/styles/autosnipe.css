@@ -142,9 +142,10 @@ a:hover { color: var(--accent-light); }
   cursor: not-allowed;
 }
 .btn-saved {
-  background: var(--success);
-  color: #0a0a0f;
-  transition: background 0.3s ease, color 0.3s ease;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  cursor: default;
 }
 
 .btn-secondary {
