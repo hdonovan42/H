@@ -452,6 +452,7 @@ export default function SearchEditor({ editId }) {
 
           <div className="search-editor-actions">
             <a href="/" className="btn btn-secondary" onClick={e => { e.preventDefault(); localStorage.removeItem(draftKey); navigate('/') }}>Cancel</a>
+            <button type="button" className="btn btn-secondary" onClick={() => { setForm(defaults); localStorage.removeItem(draftKey) }}>Clear</button>
             <button type="submit" className="btn btn-primary" disabled={saving}>
               {saving ? 'Saving...' : editId ? 'Save Changes' : 'Create Search'}
             </button>
