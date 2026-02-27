@@ -75,7 +75,7 @@ export default function SearchCard({ search, onToggle, onDelete }) {
             <button className="btn btn-secondary btn-sm" onClick={() => { window.location.hash = `#/edit-search/${search.id}` }}>
               Edit
             </button>
-            <button className="btn btn-danger btn-sm" onClick={() => onDelete(search.id)}>
+            <button className="btn btn-danger btn-sm" onClick={() => { if (confirm('Delete this search? This cannot be undone.')) onDelete(search.id) }}>
               Delete
             </button>
           </>
