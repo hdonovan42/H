@@ -55,8 +55,8 @@ export default function BuySlotPage({ user, onRefresh }) {
           </div>
           <p className="buy-slot-desc">
             {hasSub
-              ? '+1 concurrent search slot, added to your subscription'
-              : '+1 concurrent search slot, cancel any time'}
+              ? '1 additional ACTIVE search slot, added to your subscription'
+              : '1 additional ACTIVE search slot, cancel any time'}
           </p>
 
           {error && <p className="error-msg">{error}</p>}
