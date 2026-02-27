@@ -22,6 +22,12 @@ export default function useAuth() {
       setLoading(false)
       return
     }
+    // Skip API call in dev mode — return dummy user
+    if (import.meta.env.DEV && token === 'dev-preview-token') {
+      setUser({ id: 0, email: 'dev@preview.local', tier: 'pro', phone: null })
+      setLoading(false)
+      return
+    }
     try {
       const data = await apiGet('/api/auth/me')
       setUser(data)

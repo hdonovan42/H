@@ -382,12 +382,21 @@ select {
 
 .search-card-actions {
   position: absolute;
-  top: 16px;
-  right: 16px;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 90px;
+  padding: 16px 16px;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 6px;
+  align-items: stretch;
+  justify-content: space-evenly;
+  gap: 0;
+}
+
+.search-card-actions .search-card-status,
+.search-card-actions .btn {
+  text-align: center;
 }
 
 .search-card-name {
@@ -397,11 +406,14 @@ select {
 }
 
 .search-card-status {
-  font-size: 10px;
-  padding: 2px 8px;
-  border-radius: 3px;
+  font-size: 11px;
+  padding: 6px 12px;
+  border-radius: 4px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .search-card-status.active { background: rgba(69, 212, 138, 0.15); color: var(--success); }
@@ -429,7 +441,7 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
+  width: calc(100% - 100px);
   padding: 10px 0;
   border: none;
   border-top: 1px solid var(--border);
