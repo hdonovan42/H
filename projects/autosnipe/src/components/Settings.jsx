@@ -4,8 +4,8 @@ import { apiPatch, apiGet } from '../utils/api'
 export default function Settings({ user, onRefresh }) {
   const [phone, setPhone] = useState(user.phone || '')
   const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
+  const dirty = phone !== (user.phone || '')
 
   const normalisePhone = (raw) => {
     const digits = raw.replace(/[\s\-\(\)]/g, '')
@@ -24,12 +24,10 @@ export default function Settings({ user, onRefresh }) {
       return
     }
     setSaving(true)
-    setSaved(false)
     setError('')
     try {
       await apiPatch('/api/settings', { phone: normalised })
       setPhone(normalised || '')
-      setSaved(true)
       if (onRefresh) onRefresh()
     } catch (err) {
       console.error(err)
@@ -94,15 +92,15 @@ export default function Settings({ user, onRefresh }) {
                 type="tel"
                 placeholder="+447700000000"
                 value={phone}
-                onChange={e => { setPhone(e.target.value); setSaved(false); setError('') }}
+                onChange={e => { setPhone(e.target.value); setError('') }}
               />
             </div>
             {error && <div style={{ color: '#ff4444', fontSize: 12, marginBottom: 8 }}>{error}</div>}
             <button
-              className={`btn btn-sm ${saved ? 'btn-saved' : 'btn-primary'}`}
-              disabled={saving}
+              className={`btn btn-sm ${dirty ? 'btn-primary' : 'btn-saved'}`}
+              disabled={!dirty || saving}
             >
-              {saving ? 'Saving...' : saved ? 'Saved' : 'Save'}
+              {saving ? 'Saving...' : dirty ? 'Save' : 'Saved'}
             </button>
           </form>
         </div>
