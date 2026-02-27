@@ -3,7 +3,7 @@ import useSearches from '../hooks/useSearches'
 import SearchCard from './SearchCard'
 
 export default function Dashboard() {
-  const { searches, toggleSearch } = useSearches()
+  const { searches, toggleSearch, deleteSearch } = useSearches()
 
   const activeSearches = searches.filter(s => s.active)
   const parkedSearches = searches.filter(s => !s.active)
@@ -22,7 +22,7 @@ export default function Dashboard() {
         </div>
       ) : (
         activeSearches.map(s => (
-          <SearchCard key={s.id} search={s} onToggle={toggleSearch} />
+          <SearchCard key={s.id} search={s} onToggle={toggleSearch} onDelete={deleteSearch} />
         ))
       )}
 
@@ -32,7 +32,7 @@ export default function Dashboard() {
             <h2>Parked</h2>
           </div>
           {parkedSearches.map(s => (
-            <SearchCard key={s.id} search={s} onToggle={toggleSearch} />
+            <SearchCard key={s.id} search={s} onToggle={toggleSearch} onDelete={deleteSearch} />
           ))}
         </>
       )}

@@ -13,7 +13,7 @@ function timeAgo(dateStr) {
   return `${days}d ago`
 }
 
-export default function SearchCard({ search, onToggle }) {
+export default function SearchCard({ search, onToggle, onDelete }) {
   const [expanded, setExpanded] = useState(false)
   const [listings, setListings] = useState([])
   const [loadingListings, setLoadingListings] = useState(false)
@@ -57,15 +57,29 @@ export default function SearchCard({ search, onToggle }) {
   return (
     <div className="search-card">
       <div className="search-card-actions">
-        <span className={`search-card-status ${search.active ? 'active' : 'inactive'}`}>
-          {search.active ? 'Active' : 'Parked'}
-        </span>
-        <button className="btn btn-secondary btn-sm" onClick={() => { window.location.hash = `#/edit-search/${search.id}` }}>
-          Edit
-        </button>
-        <button className="btn btn-secondary btn-sm" onClick={() => onToggle(search.id, !search.active)}>
-          {search.active ? 'Park' : 'Unpark'}
-        </button>
+        {search.active ? (
+          <>
+            <span className="search-card-status active">Active</span>
+            <button className="btn btn-secondary btn-sm" onClick={() => { window.location.hash = `#/edit-search/${search.id}` }}>
+              Edit
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => onToggle(search.id, false)}>
+              Park
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="btn btn-secondary btn-sm" onClick={() => onToggle(search.id, true)}>
+              Unpark
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => { window.location.hash = `#/edit-search/${search.id}` }}>
+              Edit
+            </button>
+            <button className="btn btn-danger btn-sm" onClick={() => onDelete(search.id)}>
+              Delete
+            </button>
+          </>
+        )}
       </div>
       <div className="search-card-header">
         <span className="search-card-name">
