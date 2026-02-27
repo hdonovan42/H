@@ -4,7 +4,7 @@ import cors from 'cors'
 import { getDb } from './db.js'
 import { sendMagicLink, verifyMagicLink, requireAuth } from './auth.js'
 import { createSubscriptionCheckout, addSlot, createPortalSession, handleWebhook } from './stripe.js'
-import { startScheduler, stopScheduler, runPollCycle } from './scheduler.js'
+import { startScheduler, stopScheduler, runPollCycle, pollSingleSearch } from './scheduler.js'
 import { buildAutotraderUrl, countSearch } from './scraper.js'
 import { closeBrowser } from './browser.js'
 import { getTaxonomy, refreshTaxonomy } from './taxonomy.js'
@@ -122,6 +122,12 @@ app.post('/api/searches', requireAuth, (req, res) => {
     VALUES (?, ?, ?, ?)
   `).run(req.user.userId, name || null, JSON.stringify(criteria), autotraderUrl)
 
+  // Fire-and-forget: poll immediately so listings appear on dashboard
+  const userInfo = db.prepare('SELECT email, phone FROM users WHERE id = ?').get(req.user.userId)
+  const searchRow = db.prepare('SELECT * FROM searches WHERE id = ?').get(result.lastInsertRowid)
+  pollSingleSearch({ ...searchRow, email: userInfo.email, phone: userInfo.phone })
+    .catch(err => console.error(`[ImmediatePoll] Search #${result.lastInsertRowid} failed:`, err.message))
+
   res.json({ success: true, id: result.lastInsertRowid, autotraderUrl })
 })
 
@@ -162,8 +168,17 @@ app.patch('/api/searches/:id', requireAuth, (req, res) => {
 
   if (criteria) {
     const autotraderUrl = buildAutotraderUrl(criteria)
-    db.prepare('UPDATE searches SET criteria = ?, autotrader_url = ? WHERE id = ?')
+    db.prepare('UPDATE searches SET criteria = ?, autotrader_url = ?, last_checked = NULL WHERE id = ?')
       .run(JSON.stringify(criteria), autotraderUrl, search.id)
+
+    // Purge old listings that may no longer match new criteria
+    db.prepare('DELETE FROM listings WHERE search_id = ?').run(search.id)
+
+    // Fire-and-forget: re-poll with new criteria
+    const userInfo = db.prepare('SELECT email, phone FROM users WHERE id = ?').get(req.user.userId)
+    const updatedSearch = db.prepare('SELECT * FROM searches WHERE id = ?').get(search.id)
+    pollSingleSearch({ ...updatedSearch, email: userInfo.email, phone: userInfo.phone })
+      .catch(err => console.error(`[ImmediatePoll] Search #${search.id} re-poll failed:`, err.message))
   }
 
   res.json({ success: true })

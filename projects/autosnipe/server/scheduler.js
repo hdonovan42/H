@@ -63,6 +63,76 @@ export function startScheduler() {
   console.log(`[Scheduler] Active — every ${POLL_INTERVAL_MINUTES}m, quiet ${QUIET_START_UTC}:00–${QUIET_END_UTC}:00 UTC (hourly at :59), taxonomy Mon 06:00`)
 }
 
+export async function pollSingleSearch(search) {
+  const db = getDb()
+
+  const logId = db.prepare(`
+    INSERT INTO poll_log (search_id) VALUES (?)
+  `).run(search.id).lastInsertRowid
+
+  try {
+    const result = await scrapeSearch(search)
+
+    // Find new listings
+    const newListings = []
+    for (const listing of result.listings) {
+      const existing = db.prepare(
+        'SELECT id FROM listings WHERE search_id = ? AND autotrader_id = ?'
+      ).get(search.id, listing.autotrader_id)
+
+      if (!existing) {
+        db.prepare(`
+          INSERT INTO listings (search_id, autotrader_id, title, price, mileage, year, fuel_type, transmission, url, image_url, seller_type, location)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          search.id, listing.autotrader_id, listing.title, listing.price,
+          listing.mileage, listing.year, listing.fuel_type, listing.transmission,
+          listing.url, listing.image_url, listing.seller_type, listing.location
+        )
+        newListings.push(listing)
+      }
+    }
+
+    // Update search
+    db.prepare("UPDATE searches SET last_checked = datetime('now'), last_result_count = ? WHERE id = ?")
+      .run(result.listings.length, search.id)
+
+    // Notify on new listings
+    if (newListings.length > 0) {
+      const searchName = search.name || `${JSON.parse(search.criteria).make || ''} ${JSON.parse(search.criteria).model || ''}`.trim()
+
+      // Email (always)
+      await sendListingEmail(search.email, newListings, searchName)
+
+      // WhatsApp (if phone set)
+      if (search.phone) {
+        const message = formatListingAlert(newListings, searchName)
+        await sendWhatsApp(search.phone, message)
+      }
+
+      // Mark as notified
+      for (const listing of newListings) {
+        db.prepare("UPDATE listings SET notified_at = datetime('now') WHERE search_id = ? AND autotrader_id = ?")
+          .run(search.id, listing.autotrader_id)
+      }
+    }
+
+    // Update poll log
+    db.prepare(`
+      UPDATE poll_log SET completed_at = datetime('now'), status = 'success',
+      listings_found = ?, new_listings = ?, iterations = ?, cost_estimate = ?
+      WHERE id = ?
+    `).run(result.listings.length, newListings.length, result.iterations, result.cost || 0, logId)
+
+    console.log(`[Poll] Search #${search.id}: ${result.listings.length} found, ${newListings.length} new`)
+
+  } catch (err) {
+    db.prepare("UPDATE poll_log SET completed_at = datetime('now'), status = 'error', error = ? WHERE id = ?")
+      .run(err.message, logId)
+    console.error(`[Poll] Search #${search.id} failed:`, err.message)
+  }
+}
+
 export async function runPollCycle() {
   const db = getDb()
 
@@ -77,71 +147,7 @@ export async function runPollCycle() {
   console.log(`[Scheduler] ${searches.length} active search(es) to poll`)
 
   for (const search of searches) {
-    const logId = db.prepare(`
-      INSERT INTO poll_log (search_id) VALUES (?)
-    `).run(search.id).lastInsertRowid
-
-    try {
-      const result = await scrapeSearch(search)
-
-      // Find new listings
-      const newListings = []
-      for (const listing of result.listings) {
-        const existing = db.prepare(
-          'SELECT id FROM listings WHERE search_id = ? AND autotrader_id = ?'
-        ).get(search.id, listing.autotrader_id)
-
-        if (!existing) {
-          db.prepare(`
-            INSERT INTO listings (search_id, autotrader_id, title, price, mileage, year, fuel_type, transmission, url, image_url, seller_type, location)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(
-            search.id, listing.autotrader_id, listing.title, listing.price,
-            listing.mileage, listing.year, listing.fuel_type, listing.transmission,
-            listing.url, listing.image_url, listing.seller_type, listing.location
-          )
-          newListings.push(listing)
-        }
-      }
-
-      // Update search
-      db.prepare("UPDATE searches SET last_checked = datetime('now'), last_result_count = ? WHERE id = ?")
-        .run(result.listings.length, search.id)
-
-      // Notify on new listings
-      if (newListings.length > 0) {
-        const searchName = search.name || `${JSON.parse(search.criteria).make || ''} ${JSON.parse(search.criteria).model || ''}`.trim()
-
-        // Email (always)
-        await sendListingEmail(search.email, newListings, searchName)
-
-        // WhatsApp (if phone set)
-        if (search.phone) {
-          const message = formatListingAlert(newListings, searchName)
-          await sendWhatsApp(search.phone, message)
-        }
-
-        // Mark as notified
-        for (const listing of newListings) {
-          db.prepare("UPDATE listings SET notified_at = datetime('now') WHERE search_id = ? AND autotrader_id = ?")
-            .run(search.id, listing.autotrader_id)
-        }
-      }
-
-      // Update poll log
-      db.prepare(`
-        UPDATE poll_log SET completed_at = datetime('now'), status = 'success',
-        listings_found = ?, new_listings = ?, iterations = ?, cost_estimate = ?
-        WHERE id = ?
-      `).run(result.listings.length, newListings.length, result.iterations, result.cost || 0, logId)
-
-      console.log(`[Scheduler] Search #${search.id}: ${result.listings.length} found, ${newListings.length} new`)
-
-    } catch (err) {
-      db.prepare("UPDATE poll_log SET completed_at = datetime('now'), status = 'error', error = ? WHERE id = ?")
-        .run(err.message, logId)
-      console.error(`[Scheduler] Search #${search.id} failed:`, err.message)
-    }
+    await pollSingleSearch(search)
 
     // Pause between searches
     await new Promise(r => setTimeout(r, 2000))
