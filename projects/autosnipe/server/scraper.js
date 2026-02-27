@@ -9,6 +9,8 @@ const CWS_USERNAME = 'consumerandroid'
 const CWS_PASSWORD = '0diordnaremusnoc2'
 const APP_VERSION = '7.48'
 const COMPOSABLE_VERSION = 'v1_17'
+const PAGE_SIZE = 20
+const MAX_PAGES = 5 // Cap at 100 listings per search to stay polite
 
 // ===== ACCESS TOKEN CACHE =====
 
@@ -74,7 +76,7 @@ export function buildAutotraderUrl(criteria) {
 
 // ===== CWS QUERY BUILDER =====
 
-function buildSearchParams(criteria) {
+function buildSearchParams(criteria, { page = 1, size = PAGE_SIZE } = {}) {
   const params = new URLSearchParams()
 
   params.set('advertising_location', 'at_cars')
@@ -93,15 +95,18 @@ function buildSearchParams(criteria) {
   if (criteria.exclude_cat) params.set('exclude_cat_scdn', 'true')
 
   params.set('sort', 'datedesc')
-  params.set('size', '20')
-  params.set('page', '1')
+  params.set('size', String(size))
+  params.set('page', String(page))
 
   return params
 }
 
 // ===== RESPONSE PARSER =====
+// The CWS API does NOT return fuel type or transmission as structured fields.
+// Primary source: the search criteria (AT's own filter guarantees every result matches).
+// Fallback: best-effort parse from the derivative string (dealer-supplied text).
 
-function parseListings(data) {
+function parseListings(data, criteria = {}) {
   const results = []
   const adverts = data?._embedded?.results || []
 
@@ -127,17 +132,22 @@ function parseListings(data) {
     // Mileage
     const mileage = typeof mileageInfo.mileage === 'number' ? mileageInfo.mileage : null
 
-    // Fuel type: extract from suppliedDerivative (e.g. "2.0 18d SE SUV 5dr Diesel Auto")
-    const derivative = spec.suppliedDerivative || spec.derivative || ''
-    const fuelMatch = derivative.match(/\b(Petrol|Diesel|Electric|Hybrid|Plug-in Hybrid)\b/i)
-    const fuelType = fuelMatch ? fuelMatch[1] : null
+    // Fuel type: criteria is authoritative (AT filtered on it), derivative is fallback
+    let fuelType = criteria.fuel_type || null
+    if (!fuelType) {
+      const derivative = spec.suppliedDerivative || spec.derivative || ''
+      const fuelMatch = derivative.match(/\b(Petrol|Diesel|Electric|Hybrid|Plug-in Hybrid)\b/i)
+      fuelType = fuelMatch ? fuelMatch[1] : null
+    }
 
-    // Transmission
-    const transMatch = derivative.match(/\b(Automatic|Manual|Auto|Steptronic|DCT|PDK|DSG|CVT|Tiptronic)\b/i)
-    let transmission = null
-    if (transMatch) {
-      const raw = transMatch[1]
-      transmission = (raw === 'Manual') ? 'Manual' : 'Automatic'
+    // Transmission: same logic — criteria first, derivative fallback
+    let transmission = criteria.transmission || null
+    if (!transmission) {
+      const derivative = spec.suppliedDerivative || spec.derivative || ''
+      const transMatch = derivative.match(/\b(Automatic|Manual|Auto|Steptronic|DCT|PDK|DSG|CVT|Tiptronic)\b/i)
+      if (transMatch) {
+        transmission = (transMatch[1] === 'Manual') ? 'Manual' : 'Automatic'
+      }
     }
 
     // Image URL (templated: replace {resize} with size)
@@ -170,38 +180,49 @@ function parseListings(data) {
   return results
 }
 
-// ===== COUNT (lightweight — size=0, no listings parsed) =====
+// ===== SHARED FETCH HELPER =====
 
-export async function countSearch(criteria) {
-  const params = buildSearchParams(criteria)
-  params.set('size', '0')
-  const url = `${CWS_BASE}/sss/searchone/adverts?${params.toString()}`
+function buildHeaders(token) {
+  return {
+    'Accept': 'application/json',
+    'Access-Token': token,
+    'channel': 'Cars',
+    'sessionId': randomUUID(),
+    'deviceId': randomUUID(),
+    'platform': 'android',
+    'platform-version': APP_VERSION,
+    'composableVersion': COMPOSABLE_VERSION,
+    'X-Request-Options': 'PI_V3,EXCLUDE_TECH_SPEC,DISCLAIMERS,COMPOSABLE_V1_3,FPA_CONSOLIDATION'
+  }
+}
 
+async function cwsFetch(url) {
   const token = await getAccessToken()
-  const res = await fetch(url, {
-    headers: {
-      'Accept': 'application/json',
-      'Access-Token': token,
-      'channel': 'Cars',
-      'sessionId': randomUUID(),
-      'deviceId': randomUUID(),
-      'platform': 'android',
-      'platform-version': APP_VERSION,
-      'composableVersion': COMPOSABLE_VERSION,
-      'X-Request-Options': 'PI_V3,EXCLUDE_TECH_SPEC,DISCLAIMERS,COMPOSABLE_V1_3,FPA_CONSOLIDATION'
-    }
-  })
+  const res = await fetch(url, { headers: buildHeaders(token) })
 
   if (!res.ok) {
+    // Retry once on auth failure with a fresh token
     if ((res.status === 401 || res.status === 403) && cachedToken) {
+      console.log(`[Scraper] Token rejected (${res.status}), refreshing...`)
       cachedToken = null
       tokenExpiry = 0
-      return countSearch(criteria)
+      const freshToken = await getAccessToken()
+      const retry = await fetch(url, { headers: buildHeaders(freshToken) })
+      if (!retry.ok) throw new Error(`CWS API returned ${retry.status} after token refresh`)
+      return retry.json()
     }
     throw new Error(`CWS API returned ${res.status}`)
   }
 
-  const data = await res.json()
+  return res.json()
+}
+
+// ===== COUNT (lightweight — size=0, no listings parsed) =====
+
+export async function countSearch(criteria) {
+  const params = buildSearchParams(criteria, { size: 0 })
+  const url = `${CWS_BASE}/sss/searchone/adverts?${params.toString()}`
+  const data = await cwsFetch(url)
   return data?.page?.totalElements ?? 0
 }
 
@@ -209,47 +230,30 @@ export async function countSearch(criteria) {
 
 export async function scrapeSearch(search) {
   const criteria = JSON.parse(search.criteria)
-  const params = buildSearchParams(criteria)
-  const url = `${CWS_BASE}/sss/searchone/adverts?${params.toString()}`
 
   console.log(`[Scraper] Search #${search.id}: querying CWS API`)
 
   try {
-    const token = await getAccessToken()
-    const sessionId = randomUUID()
-    const deviceId = randomUUID()
+    // Fetch page 1
+    const params = buildSearchParams(criteria, { page: 1 })
+    const url = `${CWS_BASE}/sss/searchone/adverts?${params.toString()}`
+    const data = await cwsFetch(url)
 
-    const res = await fetch(url, {
-      headers: {
-        'Accept': 'application/json',
-        'Access-Token': token,
-        'channel': 'Cars',
-        'sessionId': sessionId,
-        'deviceId': deviceId,
-        'platform': 'android',
-        'platform-version': APP_VERSION,
-        'composableVersion': COMPOSABLE_VERSION,
-        'X-Request-Options': 'PI_V3,EXCLUDE_TECH_SPEC,DISCLAIMERS,COMPOSABLE_V1_3,FPA_CONSOLIDATION'
-      }
-    })
+    const totalResults = data?.page?.totalElements || 0
+    const totalPages = data?.page?.totalPages || 1
+    const allListings = parseListings(data, criteria)
 
-    if (!res.ok) {
-      // If 401/403, invalidate token and retry once
-      if ((res.status === 401 || res.status === 403) && cachedToken) {
-        console.log(`[Scraper] Token rejected (${res.status}), refreshing...`)
-        cachedToken = null
-        tokenExpiry = 0
-        return scrapeSearch(search)
-      }
-      throw new Error(`CWS API returned ${res.status}`)
+    // Fetch remaining pages up to MAX_PAGES
+    const pagesToFetch = Math.min(totalPages, MAX_PAGES)
+    for (let page = 2; page <= pagesToFetch; page++) {
+      const pageParams = buildSearchParams(criteria, { page })
+      const pageUrl = `${CWS_BASE}/sss/searchone/adverts?${pageParams.toString()}`
+      const pageData = await cwsFetch(pageUrl)
+      allListings.push(...parseListings(pageData, criteria))
     }
 
-    const data = await res.json()
-    const listings = parseListings(data)
-    const totalResults = data?.page?.totalElements || listings.length
-
-    console.log(`[Scraper] Search #${search.id}: ${listings.length} listings (${totalResults} total matches)`)
-    return { listings, iterations: 1, success: true, cost: 0 }
+    console.log(`[Scraper] Search #${search.id}: ${allListings.length} listings fetched (${totalResults} total matches, ${pagesToFetch} page${pagesToFetch > 1 ? 's' : ''})`)
+    return { listings: allListings, iterations: pagesToFetch, success: true, cost: 0 }
 
   } catch (err) {
     console.error(`[Scraper] Search #${search.id} failed:`, err.message)
