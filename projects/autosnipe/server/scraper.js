@@ -65,6 +65,8 @@ export function buildAutotraderUrl(criteria) {
   if (criteria.mileage_max) params.set('maximum-mileage', String(criteria.mileage_max))
   if (criteria.fuel_type) params.set('fuel-type', criteria.fuel_type)
   if (criteria.transmission) params.set('transmission', criteria.transmission)
+  if (criteria.body_type) params.set('body-type', criteria.body_type)
+  if (criteria.colour) params.set('colour', criteria.colour)
   if (criteria.variant) params.set('aggregatedTrim', criteria.variant)
   if (criteria.exclude_cat) params.set('exclude-writeoff-categories', 'on')
 
@@ -92,6 +94,8 @@ function buildSearchParams(criteria, { page = 1, size = PAGE_SIZE } = {}) {
   if (criteria.mileage_max) params.set('max_mileage', String(criteria.mileage_max))
   if (criteria.fuel_type) params.set('fuel_type', criteria.fuel_type)
   if (criteria.transmission) params.set('transmission', criteria.transmission)
+  if (criteria.body_type) params.set('raw_body_type', criteria.body_type)
+  if (criteria.colour) params.set('colour', criteria.colour)
   if (criteria.exclude_cat) params.set('is_writeoff', 'false')
 
   params.set('sort', 'datedesc')
@@ -221,9 +225,23 @@ async function cwsFetch(url) {
 
 export async function countSearch(criteria) {
   const params = buildSearchParams(criteria, { size: 0 })
+  // Request facets for dynamic dropdowns
+  for (const f of ['raw_body_type', 'fuel_type', 'transmission', 'colour']) {
+    params.append('facet', f)
+  }
   const url = `${CWS_BASE}/sss/searchone/adverts?${params.toString()}`
   const data = await cwsFetch(url)
-  return data?.page?.totalElements ?? 0
+  const count = data?.page?.totalElements ?? 0
+  const rawFacets = data?.facets || {}
+  return {
+    count,
+    facets: {
+      body_type: rawFacets.raw_body_type || [],
+      fuel_type: rawFacets.fuel_type || [],
+      transmission: rawFacets.transmission || [],
+      colour: rawFacets.colour || [],
+    }
+  }
 }
 
 // ===== SCRAPER =====

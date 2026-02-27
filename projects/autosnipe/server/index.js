@@ -199,8 +199,8 @@ app.get('/api/matches/recent', requireAuth, (req, res) => {
 
 app.post('/api/search-count', requireAuth, async (req, res) => {
   try {
-    const count = await countSearch(req.body)
-    res.json({ count })
+    const { count, facets } = await countSearch(req.body)
+    res.json({ count, facets })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }

@@ -74,6 +74,7 @@ export default function SearchEditor({ editId }) {
   }, [editId, searches, loaded])
 
   const [resultCount, setResultCount] = useState(null)
+  const [facets, setFacets] = useState(null)
   const countTimer = useRef(null)
 
   useEffect(() => {
@@ -101,7 +102,10 @@ export default function SearchEditor({ editId }) {
 
     countTimer.current = setTimeout(() => {
       apiPost('/api/search-count', criteria)
-        .then(r => setResultCount(r.count))
+        .then(r => {
+          setResultCount(r.count)
+          if (r.facets) setFacets(r.facets)
+        })
         .catch(() => {})
     }, 500)
 
@@ -173,6 +177,28 @@ export default function SearchEditor({ editId }) {
   const selectedModel = models.find(m => m.value === form.model)
   const trims = selectedModel?.trims || []
   const fmtCount = (n) => n > 0 ? ` (${n.toLocaleString('en-GB')})` : ''
+
+  // Build dynamic options from facets, falling back to static data
+  // Each facet entry is { name: "Petrol", count: 1234 } (CWS format)
+  const facetOptions = (facetKey, staticList) => {
+    const entries = facets?.[facetKey]
+    if (!entries?.length) return staticList
+    const opts = entries.map(f => ({
+      value: f.name,
+      label: `${f.name} (${f.count.toLocaleString('en-GB')})`
+    }))
+    // If the user's current selection isn't in the facet list, keep it visible
+    const currentVal = form[facetKey]
+    if (currentVal && !entries.some(f => f.name === currentVal)) {
+      opts.push({ value: currentVal, label: currentVal })
+    }
+    return opts
+  }
+
+  const bodyTypeOpts = facetOptions('body_type', makesData.bodyTypes)
+  const fuelTypeOpts = facetOptions('fuel_type', makesData.fuelTypes)
+  const transmissionOpts = facetOptions('transmission', makesData.transmissions)
+  const colourOpts = facetOptions('colour', makesData.colours)
 
   return (
     <div className="page">
@@ -249,7 +275,7 @@ export default function SearchEditor({ editId }) {
               <label>Colour</label>
               <select value={form.colour} onChange={set('colour')}>
                 <option value="">Any</option>
-                {makesData.colours.map(c => (
+                {colourOpts.map(c => (
                   <option key={c.value} value={c.value}>{c.label}</option>
                 ))}
               </select>
@@ -294,7 +320,7 @@ export default function SearchEditor({ editId }) {
               <label>Fuel</label>
               <select value={form.fuel_type} onChange={set('fuel_type')}>
                 <option value="">Any</option>
-                {makesData.fuelTypes.map(f => (
+                {fuelTypeOpts.map(f => (
                   <option key={f.value} value={f.value}>{f.label}</option>
                 ))}
               </select>
@@ -336,7 +362,7 @@ export default function SearchEditor({ editId }) {
               <label>Gearbox</label>
               <select value={form.transmission} onChange={set('transmission')}>
                 <option value="">Any</option>
-                {makesData.transmissions.map(t => (
+                {transmissionOpts.map(t => (
                   <option key={t.value} value={t.value}>{t.label}</option>
                 ))}
               </select>
@@ -346,7 +372,7 @@ export default function SearchEditor({ editId }) {
               <label>Body Type</label>
               <select value={form.body_type} onChange={set('body_type')}>
                 <option value="">Any</option>
-                {makesData.bodyTypes.map(b => (
+                {bodyTypeOpts.map(b => (
                   <option key={b.value} value={b.value}>{b.label}</option>
                 ))}
               </select>
