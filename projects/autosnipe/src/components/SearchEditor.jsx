@@ -179,17 +179,17 @@ export default function SearchEditor({ editId }) {
   const fmtCount = (n) => n > 0 ? ` (${n.toLocaleString('en-GB')})` : ''
 
   // Build dynamic options from facets, falling back to static data
-  // Each facet entry is { name: "Petrol", count: 1234 } (CWS format)
+  // CWS facet entries: { value: "Petrol", displayName: "Petrol", count: 1234 }
   const facetOptions = (facetKey, staticList) => {
     const entries = facets?.[facetKey]
     if (!entries?.length) return staticList
     const opts = entries.map(f => ({
-      value: f.name,
-      label: `${f.name} (${f.count.toLocaleString('en-GB')})`
+      value: f.value,
+      label: `${f.displayName} (${f.count.toLocaleString('en-GB')})`
     }))
     // If the user's current selection isn't in the facet list, keep it visible
     const currentVal = form[facetKey]
-    if (currentVal && !entries.some(f => f.name === currentVal)) {
+    if (currentVal && !entries.some(f => f.value === currentVal)) {
       opts.push({ value: currentVal, label: currentVal })
     }
     return opts
