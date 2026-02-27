@@ -329,8 +329,8 @@ app.get('/api/admin/poll-log-all', (req, res) => {
 
 // ===== START =====
 
-app.listen(PORT, () => {
-  console.log(`AutoSnipe API running on port ${PORT}`)
+app.listen(PORT, '127.0.0.1', () => {
+  console.log(`AutoSnipe API running on 127.0.0.1:${PORT}`)
   getDb()
   startScheduler()
   console.log('Ready.')
