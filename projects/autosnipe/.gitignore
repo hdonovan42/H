@@ -5,3 +5,4 @@ server/.env
 server/data/
 *.log
 .DS_Store
+re/
