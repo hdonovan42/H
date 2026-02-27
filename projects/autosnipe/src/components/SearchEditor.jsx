@@ -173,26 +173,31 @@ export default function SearchEditor({ editId }) {
     }
   }
 
-  const models = taxonomy?.makes?.[form.make]?.models || []
+  const models = [...(taxonomy?.makes?.[form.make]?.models || [])].sort((a, b) => (b.count ?? 0) - (a.count ?? 0))
   const selectedModel = models.find(m => m.value === form.model)
-  const trims = selectedModel?.trims || []
+  const trims = [...(selectedModel?.trims || [])].sort((a, b) => a.label.localeCompare(b.label))
   const fmtCount = (n) => n > 0 ? ` (${n.toLocaleString('en-GB')})` : ''
 
-  // Build dynamic options from facets, falling back to static data
-  // CWS facet entries: { value: "Petrol", displayName: "Petrol", count: 1234 }
+  // Merge static options with facet counts — all static options always visible,
+  // faceted options show count, non-faceted show (0)
   const facetOptions = (facetKey, staticList) => {
     const entries = facets?.[facetKey]
     if (!entries?.length) return staticList
-    const opts = entries.map(f => ({
-      value: f.value,
-      label: `${f.displayName} (${f.count.toLocaleString('en-GB')})`
-    }))
-    // If the user's current selection isn't in the facet list, keep it visible
-    const currentVal = form[facetKey]
-    if (currentVal && !entries.some(f => f.value === currentVal)) {
-      opts.push({ value: currentVal, label: currentVal })
+    const countMap = Object.fromEntries(entries.map(f => [f.value, f]))
+    // Start with static list, annotate with counts
+    const opts = staticList.map(s => {
+      const f = countMap[s.value]
+      const rawCount = f ? f.count : 0
+      return { value: s.value, label: `${s.label} (${rawCount.toLocaleString('en-GB')})`, _count: rawCount }
+    })
+    // Add any facet entries not in the static list (edge cases)
+    for (const f of entries) {
+      if (!staticList.some(s => s.value === f.value)) {
+        opts.push({ value: f.value, label: `${f.displayName} (${f.count.toLocaleString('en-GB')})`, _count: f.count })
+      }
     }
-    return opts
+    // Sort by count descending
+    return opts.sort((a, b) => (b._count ?? 0) - (a._count ?? 0))
   }
 
   const bodyTypeOpts = facetOptions('body_type', makesData.bodyTypes)
@@ -330,7 +335,7 @@ export default function SearchEditor({ editId }) {
               <label>Postcode</label>
               <input
                 type="text"
-                placeholder="e.g. SW1A 1AA"
+                placeholder="Optional"
                 value={form.postcode}
                 onChange={set('postcode')}
               />
