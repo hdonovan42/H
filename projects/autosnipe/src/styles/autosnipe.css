@@ -488,6 +488,103 @@ select {
   justify-content: center;
 }
 
+/* ===== VIEWING BAR ===== */
+
+.viewing-bar {
+  border-bottom: 1px solid rgba(255, 107, 0, 0.2);
+  background: var(--bg-dark);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.viewing-bar-header {
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 10px;
+  border-bottom: 1px solid rgba(255, 107, 0, 0.1);
+}
+
+.viewing-bar-brand {
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 2px;
+  font-size: 10px;
+}
+
+.viewing-bar-sep {
+  color: rgba(255, 107, 0, 0.27);
+}
+
+.viewing-bar-title {
+  color: var(--text-bright);
+  font-size: 11px;
+  font-weight: 600;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewing-bar-price {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.viewing-bar-close {
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 9px;
+}
+
+.viewing-bar-close:hover {
+  color: var(--text-bright);
+}
+
+.viewing-bar-footer {
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 9px;
+  background: linear-gradient(180deg, var(--bg-dark), #161620);
+}
+
+.viewing-bar-nav {
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+
+.viewing-bar-nav:hover:not(.dim) {
+  color: var(--accent);
+}
+
+.viewing-bar-nav.dim {
+  color: rgba(144, 144, 168, 0.27);
+  cursor: default;
+}
+
+.viewing-bar-dots {
+  display: flex;
+  gap: 4px;
+}
+
+.viewing-bar-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(144, 144, 168, 0.27);
+}
+
+.viewing-bar-dot.active {
+  background: var(--accent);
+}
+
 /* ===== MATCH FEED ===== */
 
 .match-item {
@@ -502,6 +599,12 @@ select {
 }
 
 .match-item:hover { background: var(--bg-card-hover); }
+
+.match-item-active {
+  background: rgba(255, 107, 0, 0.08);
+  border-left: 2px solid var(--accent);
+  padding-left: 10px;
+}
 
 .match-item:last-child { border-bottom: none; }
 

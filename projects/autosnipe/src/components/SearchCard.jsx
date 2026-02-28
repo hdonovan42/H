@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { apiGet } from '../utils/api'
 import { navigate } from '../App'
-import { openNavPopup, updateNavPopup, NAV_HEIGHT, POPUP_WIDTH } from './ListingNav'
 
 function timeAgo(dateStr) {
   if (!dateStr) return 'Never'
@@ -15,66 +14,81 @@ function timeAgo(dateStr) {
   return `${days}d ago`
 }
 
+const ACCENT = '#FF6B00'
+const BG_DARK = '#0a0a0f'
+const TEXT_DIM = '#9090a8'
+
+function ViewingBar({ listing, current, total, onPrev, onNext, onClose }) {
+  return (
+    <div className="viewing-bar">
+      <div className="viewing-bar-header">
+        <span className="viewing-bar-brand">AUTOSNIPE</span>
+        <span className="viewing-bar-sep">{'\u2502'}</span>
+        <span className="viewing-bar-title">{listing?.title || 'Listing'}</span>
+        {listing?.price && (
+          <span className="viewing-bar-price">
+            {'\u00a3'}{listing.price.toLocaleString()}
+          </span>
+        )}
+        <span className="viewing-bar-sep">{'\u2502'}</span>
+        <span className="viewing-bar-close" onClick={onClose}>[ CLOSE ]</span>
+      </div>
+      <div className="viewing-bar-footer">
+        <span
+          className={`viewing-bar-nav ${current <= 0 ? 'dim' : ''}`}
+          onClick={current > 0 ? onPrev : undefined}
+        >{'\u2190'} Prev</span>
+        <div className="viewing-bar-dots">
+          {Array.from({ length: total || 0 }, (_, i) => (
+            <span key={i} className={`viewing-bar-dot ${i === current ? 'active' : ''}`} />
+          ))}
+        </div>
+        <span
+          className={`viewing-bar-nav ${current >= total - 1 ? 'dim' : ''}`}
+          onClick={current < total - 1 ? onNext : undefined}
+        >Next {'\u2192'}</span>
+      </div>
+    </div>
+  )
+}
+
 export default function SearchCard({ search, onToggle, onDelete }) {
   const [expanded, setExpanded] = useState(false)
   const [listings, setListings] = useState([])
   const [loadingListings, setLoadingListings] = useState(false)
+  const [viewingIndex, setViewingIndex] = useState(null)
   const popupRef = useRef(null)
-  const navRef = useRef(null)
-  const indexRef = useRef(0)
-
-  const closeAll = useCallback(() => {
-    if (popupRef.current && !popupRef.current.closed) popupRef.current.close()
-    if (navRef.current && !navRef.current.closed) navRef.current.close()
-    popupRef.current = null
-    navRef.current = null
-  }, [])
 
   const openListing = useCallback((index) => {
     const listing = listings[index]
     if (!listing?.url) return
-    indexRef.current = index
-    const left = screen.availWidth - POPUP_WIDTH
-    const contentTop = NAV_HEIGHT
-    const contentHeight = screen.availHeight - NAV_HEIGHT
-    const contentFeatures = `popup=yes,width=${POPUP_WIDTH},height=${contentHeight},top=${contentTop},left=${left},scrollbars=yes`
+    const features = `width=1000,height=${screen.availHeight},top=0,left=${screen.availWidth - 1000},scrollbars=yes`
     if (popupRef.current && !popupRef.current.closed) {
       popupRef.current.location.href = listing.url
       popupRef.current.focus()
-      updateNavPopup(navRef.current, listing, index, listings.length)
     } else {
-      navRef.current = openNavPopup(listing, index, listings.length)
-      popupRef.current = window.open(listing.url, 'autotrader-preview', contentFeatures)
+      popupRef.current = window.open(listing.url, 'autotrader-preview', features)
     }
+    setViewingIndex(index)
   }, [listings])
 
-  // Listen for nav bar messages (prev/next/close)
-  useEffect(() => {
-    const handler = (e) => {
-      if (e.data?.source !== 'autosnipe-nav') return
-      if (e.data.action === 'prev') {
-        openListing(Math.max(0, indexRef.current - 1))
-      } else if (e.data.action === 'next') {
-        openListing(Math.min(listings.length - 1, indexRef.current + 1))
-      } else if (e.data.action === 'close') {
-        closeAll()
-      }
-    }
-    window.addEventListener('message', handler)
-    return () => window.removeEventListener('message', handler)
-  }, [openListing, closeAll, listings.length])
+  const closeViewing = useCallback(() => {
+    if (popupRef.current && !popupRef.current.closed) popupRef.current.close()
+    popupRef.current = null
+    setViewingIndex(null)
+  }, [])
 
-  // Detect popups closed externally
+  // Detect popup closed externally
   useEffect(() => {
+    if (viewingIndex === null) return
     const check = setInterval(() => {
-      if (popupRef.current?.closed && navRef.current && !navRef.current.closed) {
-        navRef.current.close()
-        navRef.current = null
+      if (popupRef.current?.closed) {
         popupRef.current = null
+        setViewingIndex(null)
       }
     }, 500)
     return () => clearInterval(check)
-  }, [])
+  }, [viewingIndex])
 
   const criteria = JSON.parse(search.criteria)
 
@@ -165,6 +179,16 @@ export default function SearchCard({ search, onToggle, onDelete }) {
 
       {expanded && (
         <div className="search-card-listings">
+          {viewingIndex !== null && (
+            <ViewingBar
+              listing={listings[viewingIndex]}
+              current={viewingIndex}
+              total={listings.length}
+              onPrev={() => openListing(Math.max(0, viewingIndex - 1))}
+              onNext={() => openListing(Math.min(listings.length - 1, viewingIndex + 1))}
+              onClose={closeViewing}
+            />
+          )}
           {loadingListings ? (
             <div className="search-card-listings-loading">
               <span className="spinner" /> Loading listings...
@@ -177,7 +201,7 @@ export default function SearchCard({ search, onToggle, onDelete }) {
             listings.map((m, i) => (
               <div
                 key={m.id}
-                className="match-item"
+                className={`match-item ${i === viewingIndex ? 'match-item-active' : ''}`}
                 onClick={() => openListing(i)}
               >
                 <div className="match-info">
