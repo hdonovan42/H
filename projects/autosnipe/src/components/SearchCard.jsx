@@ -123,9 +123,6 @@ export default function SearchCard({ search, onToggle, onDelete }) {
                 className="match-item"
                 onClick={() => m.url && window.open(m.url, 'autotrader-preview', `width=1000,height=${screen.height},top=0,left=${screen.width - 1000},scrollbars=yes`)}
               >
-                <div className="match-image">
-                  {m.image_url && <img src={m.image_url} alt="" loading="lazy" />}
-                </div>
                 <div className="match-info">
                   <div className="match-title">{m.title || 'Untitled listing'}</div>
                   <div className="match-price">
