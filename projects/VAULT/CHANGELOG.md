@@ -5,6 +5,35 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v17 — Fix Momentum Churn Bug + Dashboard 2dp Formatting
+
+**Deployed**: 2026-02-28 | **Baseline**: $96.19 balance, $111.69 total value, 107.6d runway
+
+### Momentum churn bug (critical)
+50.8% of all trades (1,002/1,973) were being opened and immediately sold at $0.00 P&L. Root cause: `_exit_substandard_positions()` compared momentum `entry_edge` (velocity, ~5-9.5%) against `margin_of_safety` (10%). Since velocity < 10%, momentum positions were flagged as "substandard" and closed every cycle. The guard at line 970 was supposed to skip momentum positions but only checked `entry_confidence <= 0` — momentum positions have confidence (0.75-0.8) so they weren't skipped. Fixed by adding the same `entry_reasoning` prefix check used by the other 3 exit functions.
+
+### Dashboard formatting
+Changed all dollar displays from 4dp ($0.0000) to 2dp ($0.00) across 7 dashboard files.
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `vault/agent.py` | Add momentum reasoning guard to `_exit_substandard_positions()` |
+| `dashboard/src/components/BetsPanel.jsx` | `toFixed(4)` → `toFixed(2)` |
+| `dashboard/src/components/CostBreakdown.jsx` | `toFixed(4)` → `toFixed(2)` |
+| `dashboard/src/components/CycleLog.jsx` | `toFixed(4)` → `toFixed(2)` |
+| `dashboard/src/components/PipelineView.jsx` | `toFixed(4)` → `toFixed(2)` (×2) |
+| `dashboard/src/components/PositionsPanel.jsx` | `toFixed(4)` → `toFixed(2)` |
+| `dashboard/src/components/PredictionsPanel.jsx` | `toFixed(4)` → `toFixed(2)` |
+| `dashboard/src/components/StatusBar.jsx` | `toFixed(4)` → `toFixed(2)` |
+
+### What to watch
+- Momentum positions should now hold until a proper exit trigger fires (reversal, trailing stop, stale, or settlement)
+- Zero-pnl churn rate should drop to near zero
+- Dashboard dollar values should all show 2dp
+
+---
+
 ## v16.23.2 — Fix 18s Dashboard Load (Dead Code Removal)
 
 **Deployed**: 2026-02-28 | **Baseline**: $101.80 balance, $111.96 total value, 114.5d runway
