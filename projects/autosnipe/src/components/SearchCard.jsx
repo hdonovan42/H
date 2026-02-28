@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { apiGet } from '../utils/api'
 import { navigate } from '../App'
-import ListingNav from './ListingNav'
+import { openNavPopup, updateNavPopup } from './ListingNav'
 
 function timeAgo(dateStr) {
   if (!dateStr) return 'Never'
@@ -19,39 +19,63 @@ export default function SearchCard({ search, onToggle, onDelete }) {
   const [expanded, setExpanded] = useState(false)
   const [listings, setListings] = useState([])
   const [loadingListings, setLoadingListings] = useState(false)
-  const [navIndex, setNavIndex] = useState(null)
   const popupRef = useRef(null)
+  const navRef = useRef(null)
+  const indexRef = useRef(0)
+
+  const closeAll = useCallback(() => {
+    if (popupRef.current && !popupRef.current.closed) popupRef.current.close()
+    if (navRef.current && !navRef.current.closed) navRef.current.close()
+    popupRef.current = null
+    navRef.current = null
+  }, [])
 
   const openListing = useCallback((index) => {
     const listing = listings[index]
     if (!listing?.url) return
-    const features = `width=1000,height=${screen.height},top=0,left=${screen.width - 1000},scrollbars=yes`
+    indexRef.current = index
+    const navHeight = 52
+    const left = screen.width - 1000
+    const contentTop = navHeight
+    const contentHeight = screen.height - navHeight
+    const contentFeatures = `width=1000,height=${contentHeight},top=${contentTop},left=${left},scrollbars=yes`
     if (popupRef.current && !popupRef.current.closed) {
       popupRef.current.location.href = listing.url
       popupRef.current.focus()
+      updateNavPopup(navRef.current, listing, index, listings.length)
     } else {
-      popupRef.current = window.open(listing.url, 'autotrader-preview', features)
+      navRef.current = openNavPopup(listing, index, listings.length)
+      popupRef.current = window.open(listing.url, 'autotrader-preview', contentFeatures)
     }
-    setNavIndex(index)
   }, [listings])
 
-  const closeNav = useCallback(() => {
-    if (popupRef.current && !popupRef.current.closed) popupRef.current.close()
-    popupRef.current = null
-    setNavIndex(null)
-  }, [])
-
-  // Detect popup closed externally
+  // Listen for nav bar messages (prev/next/close)
   useEffect(() => {
-    if (navIndex === null) return
+    const handler = (e) => {
+      if (e.data?.source !== 'autosnipe-nav') return
+      if (e.data.action === 'prev') {
+        openListing(Math.max(0, indexRef.current - 1))
+      } else if (e.data.action === 'next') {
+        openListing(Math.min(listings.length - 1, indexRef.current + 1))
+      } else if (e.data.action === 'close') {
+        closeAll()
+      }
+    }
+    window.addEventListener('message', handler)
+    return () => window.removeEventListener('message', handler)
+  }, [openListing, closeAll, listings.length])
+
+  // Detect popups closed externally
+  useEffect(() => {
     const check = setInterval(() => {
-      if (popupRef.current?.closed) {
+      if (popupRef.current?.closed && navRef.current && !navRef.current.closed) {
+        navRef.current.close()
+        navRef.current = null
         popupRef.current = null
-        setNavIndex(null)
       }
     }, 500)
     return () => clearInterval(check)
-  }, [navIndex])
+  }, [])
 
   const criteria = JSON.parse(search.criteria)
 
@@ -139,17 +163,6 @@ export default function SearchCard({ search, onToggle, onDelete }) {
           Last checked: {timeAgo(search.last_checked)}
         </span>
       </button>
-
-      {navIndex !== null && (
-        <ListingNav
-          listing={listings[navIndex]}
-          current={navIndex}
-          total={listings.length}
-          onPrev={() => openListing(Math.max(0, navIndex - 1))}
-          onNext={() => openListing(Math.min(listings.length - 1, navIndex + 1))}
-          onClose={closeNav}
-        />
-      )}
 
       {expanded && (
         <div className="search-card-listings">
