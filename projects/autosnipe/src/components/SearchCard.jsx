@@ -117,11 +117,14 @@ export default function SearchCard({ search, onToggle, onDelete }) {
               No listings yet. Results will appear after the next scan.
             </div>
           ) : (
-            listings.map(m => (
+            listings.map((m, i) => (
               <div
                 key={m.id}
                 className="match-item"
-                onClick={() => m.url && window.open(m.url, 'autotrader-preview', `width=1000,height=${screen.height},top=0,left=${screen.width - 1000},scrollbars=yes`)}
+                onClick={() => {
+                  sessionStorage.setItem(`listings-${search.id}`, JSON.stringify(listings))
+                  window.open(`/popup.html?searchId=${search.id}&index=${i}`, 'autotrader-preview', `width=1000,height=${screen.height},top=0,left=${screen.width - 1000},scrollbars=yes`)
+                }}
               >
                 <div className="match-info">
                   <div className="match-title">{m.title || 'Untitled listing'}</div>
