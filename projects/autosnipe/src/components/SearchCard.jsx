@@ -118,12 +118,10 @@ export default function SearchCard({ search, onToggle, onDelete }) {
             </div>
           ) : (
             listings.map(m => (
-              <a
+              <div
                 key={m.id}
-                href={m.url || '#'}
-                target="_blank"
-                rel="noopener noreferrer"
                 className="match-item"
+                onClick={() => m.url && window.open(m.url, 'autotrader-preview', `width=1000,height=${screen.height},top=0,left=${screen.width - 1000},scrollbars=yes`)}
               >
                 <div className="match-image">
                   {m.image_url && <img src={m.image_url} alt="" loading="lazy" />}
@@ -147,7 +145,7 @@ export default function SearchCard({ search, onToggle, onDelete }) {
                     {timeAgo(m.first_seen)}
                   </div>
                 </div>
-              </a>
+              </div>
             ))
           )}
         </div>
