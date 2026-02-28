@@ -55,15 +55,6 @@ export default function SearchCard({ search, onToggle, onDelete }) {
 
   const count = search.total_listings || 0
 
-  const openListing = (i) => {
-    sessionStorage.setItem(`listings-${search.id}`, JSON.stringify(listings))
-    window.open(
-      `/popup.html?searchId=${search.id}&index=${i}`,
-      'autotrader-preview',
-      `width=1000,height=${screen.availHeight},top=0,left=${screen.availWidth - 1000},scrollbars=yes`
-    )
-  }
-
   return (
     <div className="search-card">
       <div className="search-card-actions">
@@ -130,7 +121,7 @@ export default function SearchCard({ search, onToggle, onDelete }) {
               <div
                 key={m.id}
                 className="match-item"
-                onClick={() => openListing(i)}
+                onClick={() => m.url && window.open(m.url, 'autotrader-preview', `width=1000,height=${screen.availHeight},top=0,left=${screen.availWidth - 1000},scrollbars=yes`)}
               >
                 <div className="match-info">
                   <div className="match-title">{m.title || 'Untitled listing'}</div>
