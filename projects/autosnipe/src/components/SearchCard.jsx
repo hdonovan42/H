@@ -65,11 +65,12 @@ export default function SearchCard({ search, onToggle, onDelete }) {
     const features = `width=1000,height=${screen.availHeight},top=0,left=${screen.availWidth - 1000},scrollbars=yes`
     if (popupRef.current && !popupRef.current.closed) {
       popupRef.current.location.href = listing.url
-      popupRef.current.focus()
     } else {
       popupRef.current = window.open(listing.url, 'autotrader-preview', features)
     }
     setViewingIndex(index)
+    // Keep dashboard in focus so viewing bar is visible
+    setTimeout(() => window.focus(), 100)
   }, [listings])
 
   const closeViewing = useCallback(() => {
