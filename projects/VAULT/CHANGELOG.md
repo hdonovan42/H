@@ -5,6 +5,22 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v16.23.2 — Fix 18s Dashboard Load (Dead Code Removal)
+
+**Deployed**: 2026-02-28 | **Baseline**: $101.80 balance, $111.96 total value, 114.5d runway
+
+The dashboard showed "Connecting to VAULT API..." for ~18 seconds on every page load. Root cause: `useVaultData.js` fetched `/api/v1/smart-money/summary` (which makes external Polymarket HTTP calls) inside the shared `Promise.all`, blocking all rendering until every endpoint resolved. This fetch was dead code — `SmartMoneyPanel` already fetches its own data independently with its own 15s polling interval. Removed the redundant fetch; load time drops from ~18s to ~300ms.
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `dashboard/src/hooks/useVaultData.js` | Remove dead `smartMoney` state + fetch from `Promise.all` |
+
+### What to watch
+- Smart Money tab should still populate via its own self-contained fetch
+
+---
+
 ## v16.23.1 — Dashboard: ARR + British Spelling
 
 **Deployed**: 2026-02-24 | **Baseline**: $52.73 balance, $78.00 total value, 144.8d runway
