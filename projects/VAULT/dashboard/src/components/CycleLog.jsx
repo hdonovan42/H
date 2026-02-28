@@ -28,7 +28,7 @@ export default function CycleLog({ cycles }) {
             <div>
               <div className="cycle-meta">
                 {formatTs(c.ts_start)}
-                {' | '}${(c.total_cost || 0).toFixed(4)}
+                {' | '}${(c.total_cost || 0).toFixed(2)}
                 {' | '}{c.rounds_used || 0}r
                 {c.balance_after != null && ` | bal: $${c.balance_after.toFixed(2)}`}
               </div>

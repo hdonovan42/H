@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 
 function formatCost(n) {
   if (n == null) return '$0.00';
-  return n < 0.01 && n > -0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
+  return `$${n.toFixed(2)}`;
 }
 
 function formatPct(n) {

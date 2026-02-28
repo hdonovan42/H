@@ -49,7 +49,7 @@ function LogPage({ cycles, costs, events }) {
                 <div style={{ flex: 1 }}>
                   <div className="cycle-meta">
                     #{c.id} | {c.ts_start?.slice(0, 16).replace('T', ' ')}
-                    {' | '}${(c.total_cost || 0).toFixed(4)}
+                    {' | '}${(c.total_cost || 0).toFixed(2)}
                     {' | '}{c.rounds_used || 0} rounds
                     {c.balance_after != null && ` | bal: $${c.balance_after.toFixed(2)}`}
                     {c.asset && ` | ${c.asset}`}

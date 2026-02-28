@@ -106,7 +106,7 @@ export default function PipelineView({ calibration }) {
               <span className="digest-label">{intelligence.model_used || 'Opus'}</span>
               <span className="digest-meta">
                 {intelligence.ts?.slice(0, 16).replace('T', ' ')} — {intelligence.tweet_count} tweets analysed
-                {intelligence.cost_usd > 0 && ` — $${intelligence.cost_usd.toFixed(4)}`}
+                {intelligence.cost_usd > 0 && ` — $${intelligence.cost_usd.toFixed(2)}`}
               </span>
             </div>
             <div className="digest-text" style={{ whiteSpace: 'pre-wrap' }}>{intelligence.document}</div>
@@ -165,7 +165,7 @@ export default function PipelineView({ calibration }) {
             <span className={`action-badge ${decision.action}`}>
               {decision.action}
             </span>
-            <span className="decision-cost">${(decision.total_cost || 0).toFixed(4)}</span>
+            <span className="decision-cost">${(decision.total_cost || 0).toFixed(2)}</span>
             {decision.balance_after != null && (
               <span className="decision-balance">bal: ${decision.balance_after.toFixed(2)}</span>
             )}

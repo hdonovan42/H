@@ -8,7 +8,7 @@ function balanceColor(balance) {
 
 function formatCost(n) {
   if (n == null) return 'N/A';
-  return n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
+  return `$${n.toFixed(2)}`;
 }
 
 export default function StatusBar({ status }) {

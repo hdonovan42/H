@@ -966,9 +966,12 @@ def _exit_substandard_positions(conn, open_preds, odds_cache):
     margin_of_safety = edge_cfg.get("margin_of_safety", 0.10)
 
     for pred in open_preds:
+        reasoning = pred.get("entry_reasoning") or ""
+        if reasoning.startswith("Momentum") or reasoning.startswith("Sharp move"):
+            continue  # momentum positions use velocity, not edge/confidence
         conf = pred.get("entry_confidence")
         if not conf or conf <= 0:
-            continue  # legacy/momentum — not subject to intel gates
+            continue  # legacy — not subject to intel gates
 
         edge = abs(pred.get("entry_edge") or 0)
         reason = None
