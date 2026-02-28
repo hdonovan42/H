@@ -106,7 +106,7 @@ export default function App() {
   const pulseClass = !status ? 'offline' : alive ? 'alive' : 'dead';
 
   const navItems = [
-    { hash: '#/', label: 'Dashboard' },
+    { hash: '#/', label: 'Home' },
     { hash: '#/pipeline', label: 'Pipeline' },
     { hash: '#/smart-money', label: 'Smart $' },
     { hash: '#/log', label: 'Log' },
