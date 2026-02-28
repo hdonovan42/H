@@ -35,6 +35,33 @@ app.use((req, res, next) => {
   next()
 })
 
+// ===== FRAME PROXY =====
+
+app.get('/api/frame', async (req, res) => {
+  const url = req.query.url
+  if (!url || !url.startsWith('https://www.autotrader.co.uk/')) {
+    return res.status(400).json({ error: 'Invalid URL' })
+  }
+  try {
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' }
+    })
+    // Copy safe headers, strip framing restrictions
+    const skipHeaders = new Set(['x-frame-options', 'content-security-policy', 'content-encoding', 'transfer-encoding', 'content-length'])
+    for (const [key, value] of response.headers) {
+      if (!skipHeaders.has(key.toLowerCase())) {
+        res.setHeader(key, value)
+      }
+    }
+    let html = await response.text()
+    // Inject <base> so relative URLs resolve to Autotrader
+    html = html.replace(/<head([^>]*)>/i, `<head$1><base href="https://www.autotrader.co.uk/">`)
+    res.send(html)
+  } catch (err) {
+    res.status(502).json({ error: err.message })
+  }
+})
+
 // ===== HEALTH =====
 
 app.get('/api/health', (req, res) => {
