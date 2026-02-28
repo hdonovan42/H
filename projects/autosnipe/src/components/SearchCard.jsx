@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { apiGet } from '../utils/api'
 import { navigate } from '../App'
-import { openNavPopup, updateNavPopup } from './ListingNav'
+import { openNavPopup, updateNavPopup, NAV_HEIGHT, POPUP_WIDTH } from './ListingNav'
 
 function timeAgo(dateStr) {
   if (!dateStr) return 'Never'
@@ -34,11 +34,10 @@ export default function SearchCard({ search, onToggle, onDelete }) {
     const listing = listings[index]
     if (!listing?.url) return
     indexRef.current = index
-    const navHeight = 52
-    const left = screen.width - 1000
-    const contentTop = navHeight
-    const contentHeight = screen.height - navHeight
-    const contentFeatures = `width=1000,height=${contentHeight},top=${contentTop},left=${left},scrollbars=yes`
+    const left = screen.availWidth - POPUP_WIDTH
+    const contentTop = NAV_HEIGHT
+    const contentHeight = screen.availHeight - NAV_HEIGHT
+    const contentFeatures = `popup=yes,width=${POPUP_WIDTH},height=${contentHeight},top=${contentTop},left=${left},scrollbars=yes`
     if (popupRef.current && !popupRef.current.closed) {
       popupRef.current.location.href = listing.url
       popupRef.current.focus()
