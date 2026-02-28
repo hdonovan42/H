@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { apiGet } from '../utils/api'
 import { navigate } from '../App'
+import ListingNav from './ListingNav'
 
 function timeAgo(dateStr) {
   if (!dateStr) return 'Never'
@@ -18,6 +19,39 @@ export default function SearchCard({ search, onToggle, onDelete }) {
   const [expanded, setExpanded] = useState(false)
   const [listings, setListings] = useState([])
   const [loadingListings, setLoadingListings] = useState(false)
+  const [navIndex, setNavIndex] = useState(null)
+  const popupRef = useRef(null)
+
+  const openListing = useCallback((index) => {
+    const listing = listings[index]
+    if (!listing?.url) return
+    const features = `width=1000,height=${screen.height},top=0,left=${screen.width - 1000},scrollbars=yes`
+    if (popupRef.current && !popupRef.current.closed) {
+      popupRef.current.location.href = listing.url
+      popupRef.current.focus()
+    } else {
+      popupRef.current = window.open(listing.url, 'autotrader-preview', features)
+    }
+    setNavIndex(index)
+  }, [listings])
+
+  const closeNav = useCallback(() => {
+    if (popupRef.current && !popupRef.current.closed) popupRef.current.close()
+    popupRef.current = null
+    setNavIndex(null)
+  }, [])
+
+  // Detect popup closed externally
+  useEffect(() => {
+    if (navIndex === null) return
+    const check = setInterval(() => {
+      if (popupRef.current?.closed) {
+        popupRef.current = null
+        setNavIndex(null)
+      }
+    }, 500)
+    return () => clearInterval(check)
+  }, [navIndex])
 
   const criteria = JSON.parse(search.criteria)
 
@@ -106,6 +140,17 @@ export default function SearchCard({ search, onToggle, onDelete }) {
         </span>
       </button>
 
+      {navIndex !== null && (
+        <ListingNav
+          listing={listings[navIndex]}
+          current={navIndex}
+          total={listings.length}
+          onPrev={() => openListing(Math.max(0, navIndex - 1))}
+          onNext={() => openListing(Math.min(listings.length - 1, navIndex + 1))}
+          onClose={closeNav}
+        />
+      )}
+
       {expanded && (
         <div className="search-card-listings">
           {loadingListings ? (
@@ -121,10 +166,7 @@ export default function SearchCard({ search, onToggle, onDelete }) {
               <div
                 key={m.id}
                 className="match-item"
-                onClick={() => {
-                  sessionStorage.setItem(`listings-${search.id}`, JSON.stringify(listings))
-                  window.open(`/popup.html?searchId=${search.id}&index=${i}`, 'autotrader-preview', `width=1000,height=${screen.height},top=0,left=${screen.width - 1000},scrollbars=yes`)
-                }}
+                onClick={() => openListing(i)}
               >
                 <div className="match-info">
                   <div className="match-title">{m.title || 'Untitled listing'}</div>
