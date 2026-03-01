@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { apiGet, apiPost, apiDelete, apiPatch } from '../utils/api'
 
 const DEV_SEARCHES = [
@@ -23,24 +23,50 @@ export default function useSearches() {
   const isDev = import.meta.env.DEV && localStorage.getItem('autosnipe_token') === 'dev-preview-token'
   const [searches, setSearches] = useState(isDev ? DEV_SEARCHES : [])
   const [loading, setLoading] = useState(!isDev)
+  const pollRef = useRef(null)
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+  }, [])
 
   const fetchSearches = useCallback(async () => {
-    if (isDev) return
+    if (isDev) return null
     try {
       const data = await apiGet('/api/searches')
       setSearches(data)
+      return data
     } catch (err) {
       console.error('Failed to fetch searches:', err)
+      return null
     } finally {
       setLoading(false)
     }
   }, [isDev])
 
-  useEffect(() => { fetchSearches() }, [fetchSearches])
+  // Poll every 2s while any active search has never been checked (background poll still running)
+  const startPolling = useCallback(() => {
+    stopPolling()
+    let attempts = 0
+    pollRef.current = setInterval(async () => {
+      attempts++
+      const data = await fetchSearches()
+      if (!data || !data.some(s => s.active && !s.last_checked) || attempts >= 15) {
+        stopPolling()
+      }
+    }, 2000)
+  }, [fetchSearches, stopPolling])
+
+  useEffect(() => {
+    fetchSearches().then(data => {
+      if (data?.some(s => s.active && !s.last_checked)) startPolling()
+    })
+    return stopPolling
+  }, [fetchSearches, startPolling, stopPolling])
 
   const createSearch = async (name, criteria) => {
     const result = await apiPost('/api/searches', { name, criteria })
     await fetchSearches()
+    startPolling()
     return result
   }
 
