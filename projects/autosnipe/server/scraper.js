@@ -396,13 +396,17 @@ export async function scrapeSearch(search) {
     const totalPages = data?.page?.totalPages || 1
     const allListings = parseListings(data, criteria)
 
-    // Fetch remaining pages up to MAX_PAGES
+    // Fetch remaining pages in parallel
     const pagesToFetch = Math.min(totalPages, MAX_PAGES)
-    for (let page = 2; page <= pagesToFetch; page++) {
-      const pageParams = buildSearchParams(criteria, { page })
-      const pageUrl = `${CWS_BASE}/sss/searchone/adverts?${pageParams.toString()}`
-      const pageData = await cwsFetch(pageUrl)
-      allListings.push(...parseListings(pageData, criteria))
+    if (pagesToFetch > 1) {
+      const pagePromises = []
+      for (let page = 2; page <= pagesToFetch; page++) {
+        const pageParams = buildSearchParams(criteria, { page })
+        const pageUrl = `${CWS_BASE}/sss/searchone/adverts?${pageParams.toString()}`
+        pagePromises.push(cwsFetch(pageUrl).then(d => parseListings(d, criteria)))
+      }
+      const pageResults = await Promise.all(pagePromises)
+      for (const listings of pageResults) allListings.push(...listings)
     }
 
     const responseTimeMs = Date.now() - startTime

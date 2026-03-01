@@ -135,24 +135,25 @@ export async function pollSingleSearch(search, { skipNotify = false } = {}) {
   try {
     const result = await scrapeWithFallback(search)
 
-    // Find new listings
+    // Find new listings (batch lookup instead of per-listing query)
+    const existingIds = new Set(
+      db.prepare('SELECT autotrader_id FROM listings WHERE search_id = ?')
+        .all(search.id)
+        .map(r => r.autotrader_id)
+    )
+
     const newListings = []
     for (const listing of result.listings) {
-      const existing = db.prepare(
-        'SELECT id FROM listings WHERE search_id = ? AND autotrader_id = ?'
-      ).get(search.id, listing.autotrader_id)
-
-      if (!existing) {
-        const inserted = db.prepare(`
-          INSERT OR IGNORE INTO listings (search_id, autotrader_id, title, price, mileage, year, fuel_type, transmission, url, image_url, seller_type, location)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          search.id, listing.autotrader_id, listing.title, listing.price,
-          listing.mileage, listing.year, listing.fuel_type, listing.transmission,
-          listing.url, listing.image_url, listing.seller_type, listing.location
-        )
-        if (inserted.changes > 0) newListings.push(listing)
-      }
+      if (existingIds.has(listing.autotrader_id)) continue
+      const inserted = db.prepare(`
+        INSERT OR IGNORE INTO listings (search_id, autotrader_id, title, price, mileage, year, fuel_type, transmission, url, image_url, seller_type, location)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        search.id, listing.autotrader_id, listing.title, listing.price,
+        listing.mileage, listing.year, listing.fuel_type, listing.transmission,
+        listing.url, listing.image_url, listing.seller_type, listing.location
+      )
+      if (inserted.changes > 0) newListings.push(listing)
     }
 
     // Update search
