@@ -66,6 +66,7 @@ velocity:
   momentum_vel_scale_20: 1.5        # 1.5x at |v_1h| >= 20%
   momentum_vel_scale_40: 2.0        # 2x at |v_1h| >= 40%
   momentum_add_min_roi: 0.02         # only add if existing position ROI > 2% (filters noise)
+  momentum_add_cooldown_minutes: 10  # minimum minutes between adds to same market+side
   max_momentum_per_cycle: 3
   momentum_max_exposure_pct: 0.50
   momentum_min_volume: 5000      # skip markets below $5k volume (thin/manipulable)

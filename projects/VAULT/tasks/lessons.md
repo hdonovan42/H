@@ -1,0 +1,69 @@
+# VAULT Trading Lessons
+
+## 48h Analysis — 1 March 2026
+
+**Dataset:** 844 trades | -$1.58 net P&L | $2,453 cost basis | $93 total value (from $50 seed)
+**Period:** 27 Feb 15:55 – 1 Mar 15:55 UTC
+**Analysts:** 4 parallel agents (wins/losses × prior/recent 24h) + synthesiser with cross-debate
+
+---
+
+### Actionable Changes (ranked by expected P&L impact)
+
+| # | Change | Config / Code | Current | Proposed | Expected +P&L/48h | Risk of Lost Profit (1=high) |
+|---|--------|---------------|---------|----------|-------------------|------------------------------|
+| 1 | Per-market add cooldown | Code: track `last_add_time` per market+side | None | 10-min gate between adds | +$40–50 | 5 — Profitable adds are naturally spaced (Musk cluster: minutes apart but across different markets). Rapid-fire same-market stacking is almost never correct; 3 clusters totalling -$57 prove the pattern. Negligible upside risk. |
+| 2 | Tighter trailing stop (sports/near-resolution) | `trailing_stop_min_peak` / `trailing_stop_drop` | 0.15 / 0.15 | 0.10 / 0.10 for live sports + odds >0.75; keep 0.15/0.15 for geo-political/crypto | +$25–40 | 3 — Sports markets resolve fast and irreversibly, so tighter stops suit them. But geo-political markets have noisier price action where dips recover — applying universally would clip winners. Category differentiation mitigates this, but edge cases (a sports market with a genuine second-half comeback) will get stopped out prematurely. |
+| 3 | Hard-block burned markets | Code: early return when guard fires + lower threshold | Labels only, threshold -$2.00 | Hard block + -$1.50 for sports | +$10–15 | 2 — Highest upside risk. Markets that burned us once can genuinely reverse (mean-reversion plays, late-breaking news). Hard-blocking means we can never "buy the dip" on a market where we lost early. The Palantir cluster (-$13.05) shows the guard is needed, but a blanket block could miss recovery entries. Consider a cooldown (e.g. 30 min) rather than permanent block within the 4h window. |
+| 4 | Raise add ROI floor | `momentum_add_min_roi` | 0.02 (2%) | 0.06 (6%) | +$15–20 | 4 — Low-ROI adds (2–6% bucket) are the noise zone — the position has barely moved, signal strength is ambiguous. Raising to 6% still preserves the high-conviction adds (22% avg ROI) that drive pyramiding profits. Small risk of missing an early add on a fast mover, but the velocity check at add time compensates. |
+| 5 | Block weather/novelty markets | `momentum_min_volume` (category-aware) | 5000 (uniform) | 15000 for non-core categories | +$8–12 | 5 — These markets are consistently the worst performers across both periods. Weather: -$20.37 in recent 24h alone. "Other" category: 6.9% ROI (worst by far). Momentum signals on temperature forecasts are genuinely meaningless. Zero upside sacrificed. |
+
+**Risk ranking key:** 1 = highest risk of limiting profitable trades, 5 = lowest risk
+
+---
+
+### Consensus Findings
+
+1. **Momentum adds are the dominant loss vector.** Adds generated 81–82% of all losses across both periods. Avg loss per add: -$1.27 vs -$0.475 for initial follows (2.7x worse). But they also produce the best ROI when they work (22.2% vs 3.1% for initials). The problem is execution speed, not the strategy itself.
+
+2. **Burned-market guard is cosmetic.** Trade ID 1635 entered with `[BURNED MARKET]` tag but still executed. NYC weather traded both YES and NO simultaneously. The guard annotates but does not block.
+
+3. **Trailing stop is misconfigured for sports.** The 15pp peak + 15pp drop combination lets live sports positions round-trip from +41% to -$7.05 (XRP ID 2092). 24 trades peaked ≥15% then ended as losses — $54.08 theoretical save.
+
+4. **Weather/novelty markets waste capital allocation slots.** Seoul weather: -$15.17 (5 trades). NYC weather: -$4.08 (8 trades, traded both sides). "Other" category: worst ROI by every metric across both periods.
+
+---
+
+### Debate Resolutions
+
+**"Hold winners longer" vs "Exit faster"** — Both are right for different market types. Sports resolve fast → tighter stops. Geo-political is noisy → let winners breathe. Single universal setting fails both.
+
+**"More pyramid adds" vs "Fewer adds"** — The wins analyst wins on mechanism. Problem is speed (4 adds in 3 min) not volume. A 10-min cooldown preserves the profitable adds while blocking the rapid-fire disasters.
+
+**"Raise velocity floor" vs "Keep sports floor low"** — Keep the 5% sports floor. Esports (29.9% ROI) and cricket (61.5% ROI) prove it works. The tennis problem is position persistence across cycles, not velocity.
+
+---
+
+### What NOT to Change
+
+- **Pyramiding strategy** — 22% ROI vs 3% for initials. The edge is real.
+- **Stale exit asymmetry** — 3h profitable / 30min losing. The 2–3h window is the profit sweet spot.
+- **Sports velocity floor (5%)** — Best-performing categories use this floor.
+- **Exposure caps** — `max_exposure 50%`, `max_positions_per_market 5`. Doing real work preventing worst-case concentration.
+- **Musk ecosystem coverage** — 83% avg ROI, $22.56 from 5 trades in a single period. Genuine intelligence edge.
+
+---
+
+### Evidence (trade IDs)
+
+| Pattern | Trade IDs | Loss |
+|---------|-----------|------|
+| Tiafoe rapid-fire adds (3.4 min) | 1371–1374 | -$29.54 |
+| XRP rapid-fire adds (4 min) | 2092–2095 | -$16.30 |
+| Cricket rapid-fire adds (~10 min) | 1605–1609 | -$11.16 |
+| Palantir burned-market compound | cluster | -$13.05 |
+| Seoul weather (5 NO trades) | cluster | -$15.17 |
+| NYC weather (both sides) | cluster | -$4.08 |
+| Antalya tennis compounding | 1878–1881 | -$9.25 |
+| XRP peak 41% → loss | 2092 | -$7.05 |
+| Burned-market tag ignored | 1635 | -$3.88 |

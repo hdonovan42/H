@@ -236,6 +236,17 @@ def _is_sports_market(question: str) -> bool:
     return any(kw in q for kw in _SPORTS_KEYWORDS)
 
 
+def _is_weather_novelty_market(question: str, event_title: str = "") -> bool:
+    """Check if a market is weather/temperature/novelty — unreliable momentum."""
+    combined = (question + " " + event_title).lower()
+    _WEATHER_KEYWORDS = [
+        "temperature", "highest temp", "lowest temp", "degrees fahrenheit",
+        "degrees celsius", "snowfall", "inches of snow", "rainfall",
+        "precipitation", "wind speed", "weather",
+    ]
+    return any(kw in combined for kw in _WEATHER_KEYWORDS)
+
+
 def _should_route_to_haiku(question: str, mkt_row, vel_cfg: dict) -> bool:
     """Decide whether a momentum signal needs Haiku validation or can auto-follow.
 
@@ -397,6 +408,11 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             continue
         # Extract event_title for theme tracking in logs
         event_title = mkt_row["event_title"] if mkt_row and mkt_row["event_title"] else ""
+
+        # Weather/novelty filter: momentum signals on temperature/weather are meaningless
+        if _is_weather_novelty_market(question, event_title):
+            log.info(f"Momentum skip (weather/novelty market): {question[:50]}")
+            continue
 
         if mkt_spread > 0.10:
             log.info(f"Momentum skip (wide spread {mkt_spread:.0%}): {question[:50]}")
@@ -633,6 +649,26 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
                         continue
 
         if is_add:
+            # Add cooldown — prevent rapid-fire stacking on the same market+side
+            add_cooldown_min = vel_cfg.get("momentum_add_cooldown_minutes", 10)
+            last_add = conn.execute(
+                "SELECT opened_at FROM predictions "
+                "WHERE market_id = ? AND side = ? AND status = 'open' "
+                "ORDER BY opened_at DESC LIMIT 1",
+                (alert["market_id"], side),
+            ).fetchone()
+            if last_add and last_add["opened_at"]:
+                from datetime import datetime, timezone, timedelta
+                last_ts = datetime.fromisoformat(last_add["opened_at"].replace("Z", "+00:00"))
+                now_utc = datetime.now(timezone.utc)
+                minutes_since = (now_utc - last_ts).total_seconds() / 60
+                if minutes_since < add_cooldown_min:
+                    log.info(
+                        f"Momentum skip (add cooldown): {question[:50]} — "
+                        f"last add {minutes_since:.1f}m ago < {add_cooldown_min}m"
+                    )
+                    continue
+
             # Existing same-side position — gate on profitability, skip Haiku
             if unrealised_roi <= add_min_roi:
                 log.info(

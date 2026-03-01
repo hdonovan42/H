@@ -5,6 +5,33 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v17.1 — Add Cooldown + Weather Market Filter
+
+**Deployed**: 2026-03-01 | **Baseline**: $70.37 balance, $93.32 total value, 82.4d runway
+
+Two changes from 48h trading analysis (844 trades analysed by 4 parallel agents). Both rated 5/5 for safety — negligible risk of limiting profitable trades.
+
+**1. Per-market add cooldown (10 minutes)**
+Rapid-fire pyramid adds to the same market+side were the #1 loss vector: Tiafoe 4 adds in 3.4 min = -$29.54, XRP 4 adds in 4 min = -$16.30, cricket 4 adds in ~10 min = -$11.16. New guard queries `opened_at` of most recent open position for the same market+side; blocks if < 10 minutes. Profitable adds (e.g. Musk market) are naturally spaced and unaffected. Config: `momentum_add_cooldown_minutes: 10`.
+
+**2. Weather/novelty market filter**
+Weather markets (temperature brackets, snowfall, precipitation) consistently drain capital — Seoul: -$15.17, NYC: -$4.08 in a single 24h period. Momentum signals on temperature forecasts are meaningless. New `_is_weather_novelty_market()` function pattern-matches on question + event_title keywords. Blocks entry entirely.
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `vault/agent.py` | Add `_is_weather_novelty_market()` function; weather filter after event_title extraction; add cooldown gate in `is_add` block |
+| `config/default.yaml` | Add `momentum_add_cooldown_minutes: 10` |
+| `tasks/lessons.md` | Full 48h analysis report with 5 ranked changes |
+
+### What to watch
+- `"Momentum skip (add cooldown)"` log lines — confirms rapid-fire adds are blocked
+- `"Momentum skip (weather/novelty market)"` log lines — confirms weather markets filtered
+- Overall P&L should improve as the two biggest capital drains are eliminated
+- Watch that legitimate pyramid adds (>10 min apart) still execute normally
+
+---
+
 ## v17 — Fix Momentum Churn Bug + Dashboard 2dp Formatting
 
 **Deployed**: 2026-02-28 | **Baseline**: $96.19 balance, $111.69 total value, 107.6d runway
