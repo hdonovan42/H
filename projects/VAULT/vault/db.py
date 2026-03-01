@@ -7,7 +7,7 @@ from vault.config_loader import get_db_path
 
 log = logging.getLogger("vault.db")
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -290,6 +290,22 @@ CREATE TABLE IF NOT EXISTS smart_money_log (
     z_1h                REAL,
     confidence          REAL,
     FOREIGN KEY (cycle_id) REFERENCES cycles(id)
+);
+
+CREATE TABLE IF NOT EXISTS backtest_results (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_date       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    safeguard      TEXT NOT NULL,
+    param_value    TEXT NOT NULL,
+    lookback_days  INTEGER,
+    total_trades   INTEGER NOT NULL,
+    trades_blocked INTEGER NOT NULL,
+    wins_blocked   INTEGER NOT NULL,
+    losses_blocked INTEGER NOT NULL,
+    pnl_impact     REAL NOT NULL,
+    p_value        REAL,
+    cohens_d       REAL,
+    significant    INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -666,6 +682,32 @@ def _migrate(conn):
             "INSERT INTO meta (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             ("schema_version", "15"),
+        )
+        conn.commit()
+
+    if version < 16:
+        # v16: add backtest_results table for safeguard backtester
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS backtest_results (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_date       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                safeguard      TEXT NOT NULL,
+                param_value    TEXT NOT NULL,
+                lookback_days  INTEGER,
+                total_trades   INTEGER NOT NULL,
+                trades_blocked INTEGER NOT NULL,
+                wins_blocked   INTEGER NOT NULL,
+                losses_blocked INTEGER NOT NULL,
+                pnl_impact     REAL NOT NULL,
+                p_value        REAL,
+                cohens_d       REAL,
+                significant    INTEGER NOT NULL DEFAULT 0
+            );
+        """)
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "16"),
         )
         conn.commit()
 

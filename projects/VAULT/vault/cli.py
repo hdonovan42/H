@@ -180,6 +180,19 @@ def api(host, port):
 
 
 @cli.command()
+@click.option("--days", "-d", default=None, type=int, help="Lookback period in days (default: all history)")
+def backtest(days):
+    """Run safeguard backtester against trade history."""
+    from vault.backtester import run_backtest, format_results
+    conn = init_db()
+    try:
+        results = run_backtest(conn, lookback_days=days)
+        click.echo(format_results(results))
+    finally:
+        conn.close()
+
+
+@cli.command()
 @click.argument("key", required=False)
 @click.argument("value", required=False)
 def config(key, value):

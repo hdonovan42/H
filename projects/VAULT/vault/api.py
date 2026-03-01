@@ -692,6 +692,21 @@ def get_smart_money_summary():
         conn.close()
 
 
+# ── Backtest ──────────────────────────────────────────────────────
+
+@app.get("/api/v1/backtest/latest")
+def get_backtest_latest():
+    conn = _conn()
+    try:
+        from vault.backtester import get_latest_results
+        results = get_latest_results(conn)
+        if not results:
+            return {"error": "No backtest results yet — run 'vault backtest'"}
+        return {"results": results, "count": len(results)}
+    finally:
+        conn.close()
+
+
 def run_api(host: str = "0.0.0.0", port: int = 3200):
     """Run the FastAPI server."""
     import uvicorn

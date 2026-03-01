@@ -1258,6 +1258,16 @@ def run_cycle(conn) -> dict:
         keep_hours = cfg.get("snapshot_prune_keep_hours", 48)
         prune_old_snapshots(conn, keep_hours=keep_hours)
 
+    # Weekly safeguard backtest to track convergence toward significance
+    backtest_interval = cfg.get("backtest_interval_cycles", 10080)
+    if cycle_count > 0 and cycle_count % backtest_interval == 0:
+        try:
+            from vault.backtester import run_backtest
+            run_backtest(conn)
+            log.info("Weekly safeguard backtest completed")
+        except Exception as e:
+            log.warning(f"Backtest failed: {e}")
+
     # Build shared odds cache for exit functions (avoids redundant API/DB calls)
     from vault.polymarket import get_current_odds
     open_preds = ledger.get_open_predictions(conn)

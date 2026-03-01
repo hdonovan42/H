@@ -110,6 +110,8 @@ velocity:
 snapshot_prune_keep_hours: 48         # keep all snapshots within this window
 snapshot_prune_interval_cycles: 50    # prune every N cycles
 
+backtest_interval_cycles: 10080       # run safeguard backtester every ~7 days (at 60s intervals)
+
 # Model pricing (USD per 1M tokens) — updated for Claude 4.5/4.6
 # These are used to calculate cost from token counts
 pricing:
