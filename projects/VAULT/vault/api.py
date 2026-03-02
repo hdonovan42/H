@@ -707,6 +707,57 @@ def get_backtest_latest():
         conn.close()
 
 
+# ── Shadow Trades ────────────────────────────────────────────────
+
+@app.get("/api/v1/shadow/summary")
+def get_shadow_summary():
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT variant, "
+            "COUNT(*) as total, "
+            "SUM(CASE WHEN resolved = 1 THEN 1 ELSE 0 END) as resolved, "
+            "SUM(CASE WHEN resolved = 1 AND shadow_pnl > 0 THEN 1 ELSE 0 END) as wins, "
+            "SUM(CASE WHEN resolved = 1 AND shadow_pnl <= 0 THEN 1 ELSE 0 END) as losses, "
+            "COALESCE(SUM(shadow_pnl), 0) as total_pnl, "
+            "COALESCE(AVG(cost_basis), 0) as avg_size, "
+            "COALESCE(AVG(unrealised_roi), 0) as avg_roi_at_entry "
+            "FROM shadow_trades GROUP BY variant ORDER BY variant"
+        ).fetchall()
+        if not rows:
+            return {"variants": [], "message": "No shadow trades recorded yet"}
+        variants = []
+        for r in rows:
+            resolved = r["resolved"]
+            variants.append({
+                "variant": r["variant"],
+                "total": r["total"],
+                "resolved": resolved,
+                "wins": r["wins"],
+                "losses": r["losses"],
+                "total_pnl": round(r["total_pnl"], 4),
+                "win_rate": round(r["wins"] / resolved, 4) if resolved > 0 else None,
+                "avg_size": round(r["avg_size"], 2),
+                "avg_roi_at_entry": round(r["avg_roi_at_entry"], 4),
+            })
+        return {"variants": variants}
+    finally:
+        conn.close()
+
+
+@app.get("/api/v1/shadow/trades")
+def get_shadow_trades(limit: int = 50):
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM shadow_trades ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 def run_api(host: str = "0.0.0.0", port: int = 3200):
     """Run the FastAPI server."""
     import uvicorn

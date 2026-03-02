@@ -33,6 +33,8 @@ def resolve_predictions(conn):
                 )
                 # Backfill smart money log entries for this market
                 _resolve_smart_money_entries(conn, pred, winner, pnl)
+                # Resolve any shadow trades for this market
+                _resolve_shadow_trades(conn, pred["market_id"], winner)
             except ValueError as e:
                 log.warning(f"Failed to resolve prediction {pred['id']}: {e}")
 
@@ -107,6 +109,95 @@ def _resolve_smart_money_entries(conn, pred: dict, winner: str, actual_pnl: floa
     except Exception as e:
         log.warning(f"Failed to resolve smart money entries: {e}")
 
+
+
+def _resolve_shadow_trades(conn, market_id: str, winner: str):
+    """Resolve shadow trades when a market settles."""
+    try:
+        from datetime import datetime, timezone
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rows = conn.execute(
+            "SELECT id, side, shares, cost_basis FROM shadow_trades "
+            "WHERE market_id = ? AND resolved = 0",
+            (market_id,),
+        ).fetchall()
+        for sr in rows:
+            won = sr["side"] == winner
+            shadow_pnl = (sr["shares"] - sr["cost_basis"]) if won else -sr["cost_basis"]
+            conn.execute(
+                "UPDATE shadow_trades SET resolved=1, winner=?, shadow_pnl=?, resolved_at=? "
+                "WHERE id=?",
+                (winner, round(shadow_pnl, 4), now_iso, sr["id"]),
+            )
+        if rows:
+            conn.commit()
+            log.info(f"Resolved {len(rows)} shadow trades for {market_id}")
+    except Exception as e:
+        log.warning(f"Failed to resolve shadow trades: {e}")
+
+
+def _evaluate_shadow_variants(conn, cfg, *, cycle_id, market_id, question,
+                              side, entry_price, raw_bet, unrealised_roi,
+                              v_1h, v_6h, z_1h):
+    """Log shadow trades for each pyramid variant to A/B test reworked designs."""
+    shadow_cfg = cfg.get("shadow_pyramid", {})
+    if not shadow_cfg.get("enabled", False):
+        return
+
+    from datetime import datetime, timezone, timedelta
+    now_utc = datetime.now(timezone.utc)
+    variants = shadow_cfg.get("variants", {})
+
+    for name, params in variants.items():
+        max_adds = params.get("max_adds", 1)
+        p_mult = params.get("pyramid_mult", 1.0)
+        min_roi = params.get("min_roi", 0.15)
+        cooldown_min = params.get("cooldown_minutes", 30)
+
+        # Check max adds constraint
+        existing_count = conn.execute(
+            "SELECT COUNT(*) as cnt FROM shadow_trades "
+            "WHERE market_id = ? AND side = ? AND variant = ?",
+            (market_id, side, name),
+        ).fetchone()["cnt"]
+        if existing_count >= max_adds:
+            continue
+
+        # Check min ROI
+        if unrealised_roi < min_roi:
+            continue
+
+        # Check cooldown
+        last_shadow = conn.execute(
+            "SELECT ts FROM shadow_trades "
+            "WHERE market_id = ? AND side = ? AND variant = ? "
+            "ORDER BY ts DESC LIMIT 1",
+            (market_id, side, name),
+        ).fetchone()
+        if last_shadow and last_shadow["ts"]:
+            last_ts = datetime.fromisoformat(last_shadow["ts"].replace("Z", "+00:00"))
+            minutes_since = (now_utc - last_ts).total_seconds() / 60
+            if minutes_since < cooldown_min:
+                continue
+
+        # Compute hypothetical bet size
+        shadow_bet = round(raw_bet * p_mult, 2)
+        if shadow_bet <= 0 or entry_price <= 0:
+            continue
+        shadow_shares = round(shadow_bet / entry_price, 4)
+
+        conn.execute(
+            "INSERT INTO shadow_trades "
+            "(cycle_id, market_id, question, side, variant, entry_price, "
+            "shares, cost_basis, pyramid_mult, unrealised_roi, v_1h, v_6h, z_1h) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (cycle_id, market_id, question, side, name, entry_price,
+             shadow_shares, shadow_bet, p_mult, unrealised_roi,
+             v_1h, v_6h, z_1h),
+        )
+        conn.commit()
+        log.info(f"Shadow trade logged: {name} — {side} ${shadow_bet:.2f} "
+                 f"on '{question[:40]}' (ROI {unrealised_roi:+.1%})")
 
 
 def _run_tool_loop(conn, cycle_id, system_prompt, context, cfg) -> dict:
@@ -498,7 +589,10 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         current_exposure = exposure_by_market.get(alert["market_id"], 0)
         current_value = value_by_market.get(alert["market_id"], 0)
         unrealised_roi = (current_value - current_exposure) / current_exposure if current_exposure > 0 else 0
-        if is_oscillating or is_burned:
+        pyramid_enabled = vel_cfg.get("momentum_pyramid_enabled", True)
+        if not pyramid_enabled:
+            pyramid_mult = 1.0
+        elif is_oscillating or is_burned:
             pyramid_mult = 1.0
         elif unrealised_roi >= 0.30:
             pyramid_mult = 3.0
@@ -649,6 +743,28 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
                         continue
 
         if is_add:
+            if not pyramid_enabled:
+                # Pyramid adds disabled — evaluate shadow variants, then skip
+                _evaluate_shadow_variants(
+                    conn, cfg, cycle_id=cycle_id,
+                    market_id=alert["market_id"], question=question,
+                    side=side, entry_price=entry_price,
+                    raw_bet=raw_bet, unrealised_roi=unrealised_roi,
+                    v_1h=v_1h, v_6h=v_6h, z_1h=z_1h,
+                )
+                log.info(
+                    f"Momentum skip (pyramid disabled): {question[:50]} — "
+                    f"{side} ROI {unrealised_roi:+.1%} (shadow evaluated)"
+                )
+                _log_smart_money_event(
+                    conn, cycle_id=cycle_id, market_id=alert["market_id"],
+                    question=question,
+                    vel={"v_1h": v_1h, "v_6h": v_6h, "z_1h": z_1h, "direction": "neutral", "sharp": True},
+                    action_taken="momentum_skip",
+                    market_odds=market_odds, side=side,
+                )
+                continue
+
             # Add cooldown — prevent rapid-fire stacking on the same market+side
             add_cooldown_min = vel_cfg.get("momentum_add_cooldown_minutes", 10)
             last_add = conn.execute(

@@ -1,5 +1,22 @@
 # VAULT Trading Lessons
 
+## Pyramid Add Post-Mortem — 2 March 2026
+
+**Finding:** Pyramid adds are the sole source of negative P&L. 342 adds lost -$33.97 against +$48.56 from initial entries. Without adds, total P&L would be +$48.38 instead of +$14.41.
+
+**Root causes:**
+1. **Concentration**: Up to 16 adds to a single market. Tiafoe match (7 adds, $54) lost $29.54.
+2. **Multiplicative sizing**: Pyramid mult (3x) × velocity mult (2x) = 6x base bet.
+3. **No independent validation**: Adds used synthetic 0.8 confidence, skipping Haiku entirely.
+4. **Prediction markets mean-revert**: Unlike equities, adding at +30% ROI means buying at worse prices with less upside.
+5. **Trivial gate**: Only 2% ROI and 10-min cooldown allowed rapid stacking.
+
+**Action:** Pyramid adds disabled entirely. Shadow A/B testing system deployed with two variants (strict/relaxed) to validate any future rework before re-enabling.
+
+**Lesson:** Prediction market momentum is profitable for initial entries but anti-profitable for pyramiding. The concept of "add to winners" from equity trading does not transfer to binary outcome markets where prices converge to 0 or 1 at resolution.
+
+---
+
 ## 48h Analysis — 1 March 2026
 
 **Dataset:** 844 trades | -$1.58 net P&L | $2,453 cost basis | $93 total value (from $50 seed)

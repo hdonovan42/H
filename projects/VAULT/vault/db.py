@@ -7,7 +7,7 @@ from vault.config_loader import get_db_path
 
 log = logging.getLogger("vault.db")
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -708,6 +708,41 @@ def _migrate(conn):
             "INSERT INTO meta (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             ("schema_version", "16"),
+        )
+        conn.commit()
+
+
+    if version < 17:
+        # v17: shadow_trades table for pyramid A/B testing
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS shadow_trades (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                cycle_id        INTEGER NOT NULL,
+                market_id       TEXT NOT NULL,
+                question        TEXT,
+                side            TEXT NOT NULL,
+                variant         TEXT NOT NULL,
+                entry_price     REAL NOT NULL,
+                shares          REAL NOT NULL,
+                cost_basis      REAL NOT NULL,
+                pyramid_mult    REAL NOT NULL,
+                unrealised_roi  REAL,
+                v_1h            REAL,
+                v_6h            REAL,
+                z_1h            REAL,
+                resolved        INTEGER NOT NULL DEFAULT 0,
+                winner          TEXT,
+                shadow_pnl      REAL,
+                resolved_at     TEXT,
+                FOREIGN KEY (cycle_id) REFERENCES cycles(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_shadow_market ON shadow_trades(market_id, resolved);
+        """)
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "17"),
         )
         conn.commit()
 

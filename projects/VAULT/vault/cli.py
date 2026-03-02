@@ -180,6 +180,42 @@ def api(host, port):
 
 
 @cli.command()
+def shadow():
+    """Show shadow pyramid trade performance by variant."""
+    conn = init_db()
+    try:
+        variants = conn.execute(
+            "SELECT variant, "
+            "COUNT(*) as total, "
+            "SUM(CASE WHEN resolved = 1 THEN 1 ELSE 0 END) as resolved, "
+            "SUM(CASE WHEN resolved = 1 AND shadow_pnl > 0 THEN 1 ELSE 0 END) as wins, "
+            "SUM(CASE WHEN resolved = 1 AND shadow_pnl <= 0 THEN 1 ELSE 0 END) as losses, "
+            "COALESCE(SUM(shadow_pnl), 0) as total_pnl, "
+            "COALESCE(AVG(cost_basis), 0) as avg_size, "
+            "COALESCE(AVG(unrealised_roi), 0) as avg_roi_at_entry "
+            "FROM shadow_trades GROUP BY variant ORDER BY variant"
+        ).fetchall()
+
+        if not variants:
+            click.echo("No shadow trades recorded yet. Waiting for pyramid signals...")
+            return
+
+        click.echo("\nShadow Pyramid Trades\n")
+        for v in variants:
+            resolved = v["resolved"]
+            win_rate = (v["wins"] / resolved * 100) if resolved > 0 else 0
+            click.echo(f"  {v['variant'].upper()}")
+            click.echo(f"    Trades:     {v['total']} ({resolved} resolved)")
+            click.echo(f"    Shadow P&L: ${v['total_pnl']:+.2f}")
+            click.echo(f"    Win rate:   {win_rate:.1f}%")
+            click.echo(f"    Avg size:   ${v['avg_size']:.2f}")
+            click.echo(f"    Avg ROI:    {v['avg_roi_at_entry']:.1%} at entry")
+            click.echo()
+    finally:
+        conn.close()
+
+
+@cli.command()
 @click.option("--days", "-d", default=None, type=int, help="Lookback period in days (default: all history)")
 def backtest(days):
     """Run safeguard backtester against trade history."""

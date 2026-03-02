@@ -5,6 +5,45 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v17.2 — Kill Pyramid Adds + Shadow A/B Testing
+
+**Deployed**: 2026-03-02 | **Baseline**: $55.01 balance, $69.86 total value, 96.2d runway
+
+Comprehensive analysis of all 2,071 momentum trades revealed pyramid adds as the sole source of negative P&L:
+
+| | Pyramid Adds | Initial Entries | Sharp Move |
+|---|---|---|---|
+| Trades | 342 | 1,230 | 498 |
+| Total P&L | **-$33.97** | +$27.32 | +$21.24 |
+| Win Rate | 45.3% | 13.8% | 56.4% |
+
+Peak balance was $111.20 (2026-02-20). The $56 drawdown to $55 was caused entirely by concentration risk from pyramid adds — the Tiafoe tennis match alone (7 adds, $54 deployed) lost $29.54.
+
+**Changes:**
+1. **Pyramid adds disabled** — `momentum_pyramid_enabled: false` kills all adds. Max positions per market reduced from 5 → 1.
+2. **Shadow A/B testing** — when a pyramid add WOULD have fired, two shadow variants are evaluated and logged to `shadow_trades` table (schema v17). No real trades, no API cost.
+   - **Strict**: max 1 add, 1.0x mult, 15% ROI gate, 30m cooldown
+   - **Relaxed**: max 2 adds, 1.5x mult, 5% ROI gate, 15m cooldown
+3. **Shadow resolution** — when markets resolve, shadow trades are backfilled with P&L.
+4. **Visibility** — `vault shadow` CLI + `GET /api/v1/shadow/summary` + `GET /api/v1/shadow/trades` endpoints.
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `config/default.yaml` | `momentum_pyramid_enabled: false`, `shadow_pyramid` config block, `max_positions_per_market: 1` |
+| `vault/db.py` | Schema v17: `shadow_trades` table + index |
+| `vault/agent.py` | Gate `is_add` on config flag, `_evaluate_shadow_variants()`, `_resolve_shadow_trades()` |
+| `vault/api.py` | `GET /api/v1/shadow/summary`, `GET /api/v1/shadow/trades` |
+| `vault/cli.py` | `vault shadow` command |
+
+### What to watch
+- `"Momentum skip (pyramid disabled)"` log lines — confirms adds are blocked
+- `"Shadow trade logged: <variant>"` — shadow trades being recorded when signals fire
+- `vault shadow` — accumulate 48-72h of data, then compare variant P&L to decide on re-enabling
+- Overall P&L should improve immediately now that the -$34 capital drain is removed
+
+---
+
 ## v17.1 — Add Cooldown + Weather Market Filter
 
 **Deployed**: 2026-03-01 | **Baseline**: $70.37 balance, $93.32 total value, 82.4d runway
