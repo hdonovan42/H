@@ -627,9 +627,20 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         effective_max_positions = 1 if (is_oscillating or is_burned) else max_positions_per_market
         market_pos_count = positions_per_market.get(alert["market_id"], 0)
         if market_pos_count >= effective_max_positions:
+            # Shadow evaluate before skipping — this is the primary trigger
+            # for shadow trades (position cap blocks the old path at line 745)
+            if current_exposure > 0 and not pyramid_enabled:
+                _evaluate_shadow_variants(
+                    conn, cfg, cycle_id=cycle_id,
+                    market_id=alert["market_id"], question=question,
+                    side=side, entry_price=entry_price,
+                    raw_bet=raw_bet, unrealised_roi=unrealised_roi,
+                    v_1h=v_1h, v_6h=v_6h, z_1h=z_1h,
+                )
+            shadow_tag = " (shadow evaluated)" if current_exposure > 0 and not pyramid_enabled else ""
             log.info(
                 f"Momentum skip: {question[:50]} — {market_pos_count} positions "
-                f">= {effective_max_positions} cap"
+                f">= {effective_max_positions} cap{shadow_tag}"
             )
             continue
 

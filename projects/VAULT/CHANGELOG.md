@@ -5,6 +5,26 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v17.2.1 — Fix Shadow A/B Logging (Dead Code Bug)
+
+**Deployed**: 2026-03-03 | **Baseline**: $68.37 balance, $80.13 total value, 138d runway
+
+Shadow trades were never being logged (0 rows) because the position cap (`max_positions_per_market: 1`) at line 628 blocked all add signals with `continue` before the code reached the shadow evaluation at line 745. The shadow code was effectively dead.
+
+**Fix**: Evaluate shadow variants inside the position cap check, right before skipping. Shadow trades started logging immediately after deploy — first two rows within 30 seconds.
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `vault/agent.py` | Move `_evaluate_shadow_variants()` call into position cap block (line ~628) |
+
+### What to watch
+- `"Shadow trade logged: <variant>"` — now fires on every capped add signal
+- `"(shadow evaluated)"` tag on position-cap skip log lines
+- Accumulate 48h of data, then compare strict vs relaxed variant P&L
+
+---
+
 ## v17.2 — Kill Pyramid Adds + Shadow A/B Testing
 
 **Deployed**: 2026-03-02 | **Baseline**: $55.01 balance, $69.86 total value, 96.2d runway
