@@ -36,6 +36,12 @@ export default function StockTracker() {
   const [currency, setCurrency] = useState('USD');
   const [exchangeRate, setExchangeRate] = useState(null);
 
+  // Infinite scroll state
+  const [hasMoreHistory, setHasMoreHistory] = useState(true);
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
+  const [fullHistoryLoaded, setFullHistoryLoaded] = useState(false);
+  const sentinelRef = useRef(null);
+
   // Fetch market clock on mount, every 30 sec, and schedule exact transition fetches
   useEffect(() => {
     let openTimeout = null;
@@ -169,6 +175,66 @@ export default function StockTracker() {
     setLoading(false);
   };
 
+  // Parse Yahoo chart response into row objects
+  const parseYahooBars = (chartResult) => {
+    const timestamps = chartResult.timestamp;
+    const q = chartResult.indicators.quote[0];
+    if (!timestamps || !q) return [];
+    return timestamps.map((t, i) => ({
+      date: dayjs.unix(t).tz(EST).format('YYYY-MM-DD'),
+      open: q.open[i],
+      high: q.high[i],
+      low: q.low[i],
+      close: q.close[i],
+      volume: q.volume[i] || 0
+    })).filter(d => d.close !== null);
+  };
+
+  // Merge and dedupe historical data, sorted oldest-first
+  const mergeData = (existing, incoming) => {
+    const dateSet = new Set(existing.map(d => d.date));
+    const newRows = incoming.filter(d => !dateSet.has(d.date));
+    return [...existing, ...newRows].sort((a, b) => dayjs(a.date).unix() - dayjs(b.date).unix());
+  };
+
+  // Fetch next 6-month chunk of older history
+  const fetchMoreHistory = useCallback(async () => {
+    if (isFetchingMore || !hasMoreHistory || data.length === 0) return;
+
+    const fiveYearsAgo = dayjs().subtract(5, 'year').unix();
+    const oldestDate = dayjs(data[0].date);
+    const period2 = oldestDate.subtract(1, 'day').unix();
+    if (period2 < fiveYearsAgo) {
+      setHasMoreHistory(false);
+      return;
+    }
+    const period1 = Math.max(oldestDate.subtract(6, 'month').unix(), fiveYearsAgo);
+
+    setIsFetchingMore(true);
+    try {
+      const res = await fetch(`${WORKER_URL}/yahoo/${ticker}?interval=1d&period1=${period1}&period2=${period2}`);
+      const json = await res.json();
+      if (json?.chart?.result?.[0]) {
+        const rows = parseYahooBars(json.chart.result[0]);
+        if (rows.length === 0) {
+          setHasMoreHistory(false);
+        } else {
+          const merged = mergeData(data, rows);
+          setData(merged);
+          if (dayjs(merged[0].date).unix() <= fiveYearsAgo + 7 * 86400) {
+            setHasMoreHistory(false);
+          }
+        }
+      } else {
+        setHasMoreHistory(false);
+      }
+    } catch (err) {
+      console.error('Failed to fetch more history:', err);
+    } finally {
+      setIsFetchingMore(false);
+    }
+  }, [isFetchingMore, hasMoreHistory, data, ticker]);
+
   // Chart data fetcher - always fetches 5Y data for continuous zoom
   const fetchChartData = useCallback(async (symbol) => {
     const cacheKey = `${symbol}-5Y`;
@@ -294,6 +360,9 @@ export default function StockTracker() {
   useEffect(() => {
     setChartCache({});
     lastPriceRef.current = null;
+    setHasMoreHistory(true);
+    setIsFetchingMore(false);
+    setFullHistoryLoaded(false);
     fetchStockData(ticker, true);
   }, [ticker]);
 
@@ -651,6 +720,21 @@ export default function StockTracker() {
     fetchExchangeRate();
   }, []);
 
+  // Infinite scroll observer
+  useEffect(() => {
+    if (sortConfig.key !== 'date' || !hasMoreHistory || !sentinelRef.current) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) fetchMoreHistory();
+      },
+      { root: null, rootMargin: '0px 0px 200px 0px', threshold: 0 }
+    );
+
+    observer.observe(sentinelRef.current);
+    return () => observer.disconnect();
+  }, [hasMoreHistory, sortConfig.key, fetchMoreHistory]);
+
   // Spreadsheet data processing
   const processSpreadsheetData = useMemo(() => {
     const dataWithToday = [...data];
@@ -732,9 +816,26 @@ export default function StockTracker() {
     }
   };
 
-  const handleSort = (key) => {
+  const handleSort = useCallback(async (key) => {
+    if (key !== 'date' && !fullHistoryLoaded) {
+      setIsFetchingMore(true);
+      try {
+        const res = await fetch(`${WORKER_URL}/yahoo/${ticker}?range=5y&interval=1d`);
+        const json = await res.json();
+        if (json?.chart?.result?.[0]) {
+          const rows = parseYahooBars(json.chart.result[0]);
+          if (rows.length > 0) setData(prev => mergeData(prev, rows));
+        }
+      } catch (err) {
+        console.error('Failed to fetch full history for sort:', err);
+      } finally {
+        setIsFetchingMore(false);
+        setFullHistoryLoaded(true);
+        setHasMoreHistory(false);
+      }
+    }
     setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }));
-  };
+  }, [fullHistoryLoaded, ticker]);
 
   const handleCurrencyToggle = useCallback(() => {
     setCurrency(prev => prev === 'USD' ? 'GBP' : 'USD');
@@ -854,6 +955,18 @@ export default function StockTracker() {
                     </div>
                   );
                 })}
+                {isFetchingMore && (
+                  <div className="scroll-loading">
+                    <span className="scroll-spinner" />
+                    {sortConfig.key !== 'date' && <span style={{ marginLeft: 8 }}>Loading full history…</span>}
+                  </div>
+                )}
+                {hasMoreHistory && !isFetchingMore && sortConfig.key === 'date' && (
+                  <div ref={sentinelRef} className="scroll-sentinel" />
+                )}
+                {!hasMoreHistory && data.length > 130 && (
+                  <div className="scroll-exhausted">— end of history —</div>
+                )}
               </div>
             </div>
           </div>

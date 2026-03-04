@@ -7,7 +7,7 @@ from vault.config_loader import get_db_path
 
 log = logging.getLogger("vault.db")
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -745,6 +745,34 @@ def _migrate(conn):
             ("schema_version", "17"),
         )
         conn.commit()
+
+    if version < 18:
+        # v18: seed peak_total_value for drawdown circuit-breaker
+        # Use latest objectives snapshot (balance + positions_value) as fresh start
+        row = conn.execute(
+            "SELECT balance, COALESCE(positions_value, 0) as pv "
+            "FROM objectives ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if row:
+            peak = round(row["balance"] + row["pv"], 6)
+        else:
+            # No objectives history — fall back to current ledger balance
+            bal_row = conn.execute(
+                "SELECT balance_after FROM ledger ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            peak = round(bal_row["balance_after"], 6) if bal_row else 50.0
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("peak_total_value", str(peak)),
+        )
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "18"),
+        )
+        conn.commit()
+        log.info(f"v18 migration: seeded peak_total_value = ${peak:.2f}")
 
 
 def init_db(db_path: Path | None = None) -> sqlite3.Connection:

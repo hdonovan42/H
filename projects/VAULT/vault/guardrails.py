@@ -63,6 +63,68 @@ def check_cycle_cost(conn, cycle_id: int) -> bool:
     return False
 
 
+def check_drawdown(conn) -> tuple[bool, str]:
+    """Check if portfolio drawdown from peak exceeds circuit-breaker threshold.
+
+    Returns (triggered, detail_string). Zero API cost — uses cached odds in DB.
+    """
+    cfg = load_config()
+    cb_cfg = cfg.get("drawdown_circuit_breaker", {})
+    if not cb_cfg.get("enabled", False):
+        return False, ""
+
+    max_dd = cb_cfg.get("max_drawdown_pct", 0.25)
+
+    # Compute total value = cash + MTM open predictions
+    balance = ledger.get_balance(conn)
+    from vault.polymarket import get_current_odds
+    positions_value = 0.0
+    for pred in ledger.get_open_predictions(conn):
+        odds = get_current_odds(conn, pred["market_id"])
+        if odds:
+            cp = odds["yes_price"] if pred["side"] == "YES" else odds["no_price"]
+            positions_value += pred["shares"] * cp
+        else:
+            positions_value += pred["cost_basis"]
+    total_value = round(balance + positions_value, 6)
+
+    # Read/update peak
+    peak_str = get_meta(conn, "peak_total_value")
+    if peak_str is None:
+        # First run after migration — seed peak as current value
+        set_meta(conn, "peak_total_value", str(total_value))
+        return False, ""
+
+    peak = float(peak_str)
+
+    # New high — update peak and carry on
+    if total_value > peak:
+        set_meta(conn, "peak_total_value", str(round(total_value, 6)))
+        return False, ""
+
+    # Check drawdown
+    if peak <= 0:
+        return False, ""
+    drawdown = (peak - total_value) / peak
+
+    if drawdown >= max_dd:
+        detail = (
+            f"Circuit breaker triggered: drawdown {drawdown:.1%} "
+            f"(peak ${peak:.2f} -> current ${total_value:.2f}, "
+            f"threshold {max_dd:.0%}). VAULT auto-paused."
+        )
+        set_meta(conn, "paused", "true")
+        conn.execute(
+            "INSERT INTO events (event, detail) VALUES (?, ?)",
+            ("circuit_breaker", detail),
+        )
+        conn.commit()
+        log.warning(detail)
+        return True, detail
+
+    return False, ""
+
+
 def resurrect(conn, seed_amount: float | None = None):
     """Resurrect VAULT — reset balance, close phantom positions, start fresh."""
     cfg = load_config()
@@ -70,6 +132,7 @@ def resurrect(conn, seed_amount: float | None = None):
         seed_amount = cfg["seed_balance"]
 
     set_meta(conn, "alive", "true")
+    set_meta(conn, "peak_total_value", str(seed_amount))
 
     # Close all open predictions/positions from previous life to prevent phantom P&L
     open_count = conn.execute(

@@ -123,6 +123,10 @@ shadow_pyramid:
       min_roi: 0.05            # 5%+ ROI gate
       cooldown_minutes: 15     # 15 min cooldown
 
+drawdown_circuit_breaker:
+  enabled: true
+  max_drawdown_pct: 0.25
+
 snapshot_prune_keep_hours: 48         # keep all snapshots within this window
 snapshot_prune_interval_cycles: 50    # prune every N cycles
 

@@ -5,6 +5,37 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v18 — Portfolio Drawdown Circuit-Breaker
+
+**Deployed**: 2026-03-04 | **Baseline**: $69.97 balance, $85.07 total value, 112.7d runway
+
+VAULT had zero portfolio-level risk management — the only protection was the death condition ($0). Historical peak was $129.30, meaning a 33% drawdown happened with no alarm. A previous $56 drawdown (50% from $111 peak) went unchecked.
+
+**Changes:**
+1. **Circuit-breaker** — tracks peak total value (cash + MTM positions) in `meta` table. If drawdown from peak >= 25%, auto-pauses via existing `meta.paused` infrastructure. Manual `vault resume` required.
+2. **Check placement** — runs at top of every `run_cycle()`, before any exit sweep or entry logic. Zero API cost (uses cached odds in DB).
+3. **Peak tracking** — updated at end of every cycle after objectives snapshot. Also updated inside `check_drawdown()` when new high detected.
+4. **Resurrect reset** — `resurrect()` resets peak to seed amount (fresh start).
+5. **API visibility** — `peak_total_value` and `drawdown_pct` exposed in `/api/v1/status`.
+
+Peak seeded at $85.07 (current total value) — fresh start, not historical max. This avoids immediate trigger on deploy.
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `config/default.yaml` | `drawdown_circuit_breaker` section (enabled, 25% threshold) |
+| `vault/db.py` | Schema v18: seed `peak_total_value` from latest objectives snapshot |
+| `vault/guardrails.py` | `check_drawdown()` function + peak reset in `resurrect()` |
+| `vault/agent.py` | Circuit-breaker check at top of `run_cycle()`, peak update at bottom |
+| `vault/api.py` | `peak_total_value` and `drawdown_pct` in status response |
+
+### What to watch
+- `"Circuit breaker triggered"` event — fires if total value drops to ~$63.80 (25% of $85.07)
+- `drawdown_pct` in `/api/v1/status` — should climb gradually if losing, reset on new highs
+- After `vault resume`, peak stays at the old value (no reset) — breaker can re-trigger
+
+---
+
 ## v17.2.1 — Fix Shadow A/B Logging (Dead Code Bug)
 
 **Deployed**: 2026-03-03 | **Baseline**: $68.37 balance, $80.13 total value, 138d runway

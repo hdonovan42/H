@@ -105,6 +105,13 @@ a.earnings-link:hover { text-decoration: underline; }
   .spreadsheet-body { overflow: visible; max-height: none; }
 }
 
+/* Infinite scroll */
+.scroll-sentinel { height: 1px; width: 100%; }
+.scroll-loading { display: flex; align-items: center; justify-content: center; padding: 12px 0; color: #999; font-size: 11px; }
+.scroll-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #e8e5dc; border-top-color: #666; border-radius: 50%; animation: spin 0.7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.scroll-exhausted { text-align: center; padding: 10px 0; font-size: 11px; color: #bbb; letter-spacing: 0.05em; }
+
 /* Currency toggle button */
 .currency-toggle {
   cursor: pointer;

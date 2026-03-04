@@ -108,6 +108,12 @@ def get_status():
 
         total_value = round(balance + positions_value + predictions_value, 6)
 
+        # Drawdown from peak (circuit-breaker visibility)
+        from vault.db import get_meta
+        peak_str = get_meta(conn, "peak_total_value")
+        peak_total_value = float(peak_str) if peak_str else total_value
+        drawdown_pct = round((peak_total_value - total_value) / peak_total_value, 4) if peak_total_value > 0 else 0.0
+
         paused_row = conn.execute("SELECT value FROM meta WHERE key = 'paused'").fetchone()
 
         return {
@@ -124,6 +130,8 @@ def get_status():
             "cycle_count": cycle_count,
             "total_api_costs": round(total_api, 4),
             "total_pnl": round(total_pnl, 4),
+            "peak_total_value": peak_total_value,
+            "drawdown_pct": drawdown_pct,
             "paused": paused_row is not None and paused_row["value"] == "true",
         }
     finally:

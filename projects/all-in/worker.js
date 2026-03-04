@@ -1616,7 +1616,11 @@ export default {
         const range = url.searchParams.get('range') || '1d';
         const includePrePost = url.searchParams.get('includePrePost') || 'false';
 
-        targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${interval}&range=${range}&includePrePost=${includePrePost}`;
+        const period1 = url.searchParams.get('period1');
+        const period2 = url.searchParams.get('period2');
+        targetUrl = period1 && period2
+          ? `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${interval}&period1=${period1}&period2=${period2}&includePrePost=${includePrePost}`
+          : `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${interval}&range=${range}&includePrePost=${includePrePost}`;
 
         const shouldCache = range !== '1d';
 

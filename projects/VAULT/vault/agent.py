@@ -7,7 +7,7 @@ from vault.claude_client import call_claude
 from vault.prompts import build_system_prompt, build_momentum_prompt
 from vault.actuators import get_tool_schemas, get_actuator, ACTUATOR_MAP
 from vault import ledger
-from vault.guardrails import check_death, check_cycle_cost, check_trade_allowed
+from vault.guardrails import check_death, check_cycle_cost, check_trade_allowed, check_drawdown
 from vault.polymarket import check_resolution
 from vault.pipeline import run_pipeline
 from vault.edge_calculator import _log_smart_money_event
@@ -1377,6 +1377,20 @@ def run_cycle(conn) -> dict:
     # Resolve any settled predictions before the cycle starts
     resolve_predictions(conn)
 
+    # Portfolio drawdown circuit-breaker — before any trading logic
+    cb_triggered, cb_detail = check_drawdown(conn)
+    if cb_triggered:
+        cur = conn.execute("INSERT INTO cycles (action) VALUES (?)", ("circuit_breaker",))
+        cycle_id = cur.lastrowid
+        conn.execute(
+            "UPDATE cycles SET ts_end = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), "
+            "action = 'circuit_breaker', reasoning = ?, balance_after = ? WHERE id = ?",
+            (cb_detail[:500], ledger.get_balance(conn), cycle_id),
+        )
+        conn.commit()
+        return {"cycle_id": cycle_id, "action": "circuit_breaker",
+                "reasoning": cb_detail, "rounds": 0, "total_cost": 0}
+
     # Periodic snapshot pruning to control table growth
     prune_interval = cfg.get("snapshot_prune_interval_cycles", 50)
     cycle_count = conn.execute("SELECT COUNT(*) as c FROM cycles").fetchone()["c"]
@@ -1509,6 +1523,13 @@ def run_cycle(conn) -> dict:
         (balance_after, burn_rate, runway, total_pnl, positions_value),
     )
     conn.commit()
+
+    # Update peak total value if new high (for drawdown circuit-breaker)
+    from vault.db import get_meta, set_meta
+    total_value_now = balance_after + positions_value
+    peak_str = get_meta(conn, "peak_total_value")
+    if peak_str is None or total_value_now > float(peak_str):
+        set_meta(conn, "peak_total_value", str(round(total_value_now, 6)))
 
     log.info(
         f"Cycle {cycle_id} complete: {result.get('action')} | "
