@@ -195,7 +195,7 @@ export default function SearchEditor({ editId }) {
     }
   }
 
-  const models = [...(taxonomy?.makes?.[form.make]?.models || [])].sort((a, b) => (b.count ?? 0) - (a.count ?? 0))
+  const models = [...(taxonomy?.makes?.[form.make]?.models || [])].sort((a, b) => a.label.localeCompare(b.label))
   const selectedModel = models.find(m => m.value === form.model)
   const trims = [...(selectedModel?.trims || [])].sort((a, b) => a.label.localeCompare(b.label))
   const fmtCount = (n) => n > 0 ? ` (${n.toLocaleString('en-GB')})` : ''
