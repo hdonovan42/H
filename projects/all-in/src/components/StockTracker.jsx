@@ -11,6 +11,7 @@ export default function StockTracker() {
   const [inputTicker, setInputTicker] = useState('');
   const [data, setData] = useState([]);
   const [chartData, setChartData] = useState([]);
+  const [maxRangeData, setMaxRangeData] = useState([]);
   const [intradayData, setIntradayData] = useState([]);
   const [weeklyData, setWeeklyData] = useState([]);
   const [monthlyData, setMonthlyData] = useState([]);
@@ -235,18 +236,17 @@ export default function StockTracker() {
     }
   }, [isFetchingMore, hasMoreHistory, data, ticker]);
 
-  // Chart data fetcher - always fetches 5Y data for continuous zoom
+  // Chart data fetcher - fetches 5Y daily data for 1D–5Y zoom
   const fetchChartData = useCallback(async (symbol) => {
-    const cacheKey = `${symbol}-MAX`;
+    const cacheKey = `${symbol}-5Y`;
 
-    // Return cached max-range data if available
     if (chartCache[cacheKey]) {
       setChartData(chartCache[cacheKey]);
       return;
     }
 
     try {
-      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=max&interval=1d`);
+      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=5y&interval=1d`);
       const barsData = await barsRes.json();
 
       if (barsData?.chart?.result?.[0]) {
@@ -269,6 +269,42 @@ export default function StockTracker() {
       }
     } catch (error) {
       console.error('Error fetching chart data:', error);
+    }
+  }, [chartCache]);
+
+  // Max-range fetcher for ALL view (Yahoo forces monthly intervals)
+  const fetchMaxRangeData = useCallback(async (symbol) => {
+    const cacheKey = `${symbol}-MAX`;
+
+    if (chartCache[cacheKey]) {
+      setMaxRangeData(chartCache[cacheKey]);
+      return;
+    }
+
+    try {
+      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=max&interval=1mo`);
+      const barsData = await barsRes.json();
+
+      if (barsData?.chart?.result?.[0]) {
+        const result = barsData.chart.result[0];
+        const timestamps = result.timestamp;
+        const quote = result.indicators.quote[0];
+        if (timestamps && quote) {
+          const bars = timestamps.map((t, i) => ({
+            date: dayjs.unix(t).tz(EST).toISOString(),
+            open: quote.open[i],
+            high: quote.high[i],
+            low: quote.low[i],
+            close: quote.close[i],
+            volume: quote.volume[i] || 0
+          })).filter(b => b.close !== null);
+
+          setMaxRangeData(bars);
+          setChartCache(prev => ({ ...prev, [cacheKey]: bars }));
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching max range data:', error);
     }
   }, [chartCache]);
 
@@ -374,8 +410,11 @@ export default function StockTracker() {
   }, [clockData]);
 
   useEffect(() => {
-    if (ticker) fetchChartData(ticker);
-  }, [ticker, fetchChartData]);
+    if (ticker) {
+      fetchChartData(ticker);
+      fetchMaxRangeData(ticker);
+    }
+  }, [ticker, fetchChartData, fetchMaxRangeData]);
 
   // WebSocket connection
   useEffect(() => {
@@ -913,6 +952,7 @@ export default function StockTracker() {
           <div className="chart-wrapper">
             <StockChart
               chartData={chartData}
+              maxRangeData={maxRangeData}
               intradayData={intradayData}
               weeklyData={weeklyData}
               monthlyData={monthlyData}

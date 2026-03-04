@@ -13,7 +13,6 @@ const TIMEFRAME_DAYS = {
   '1D': 1,
   '1W': 7,
   '1M': 30,
-  '3M': 90,
   '6M': 180,
   'YTD': null, // Calculate dynamically
   '1Y': 365,
@@ -21,7 +20,7 @@ const TIMEFRAME_DAYS = {
   'ALL': Infinity
 };
 
-export default function StockChart({ chartData, intradayData, weeklyData, monthlyData, timeframe, onTimeframeChange, previousClose }) {
+export default function StockChart({ chartData, maxRangeData, intradayData, weeklyData, monthlyData, timeframe, onTimeframeChange, previousClose }) {
   const svgRef = useRef(null);
   const containerRef = useRef(null);
   const [hoverData, setHoverData] = useState(null);
@@ -120,15 +119,17 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
       if (result.length) return result;
     }
 
-    // 61D+: daily data - filter by calendar days from today (ALL = no filter)
+    // ALL: use monthly max-range data
+    if (visibleDays === Infinity && maxRangeData?.length) return maxRangeData;
+
+    // 61D+: daily data - filter by calendar days from today
     if (chartData?.length) {
-      if (visibleDays === Infinity) return chartData;
       const cutoffDate = dayjs().subtract(visibleDays, 'day').format('YYYY-MM-DD');
       return chartData.filter(d => dayjs(d.date).format('YYYY-MM-DD') >= cutoffDate);
     }
 
     return [];
-  }, [chartData, intradayData, weeklyData, monthlyData, visibleDays, sliceByTradingDays]);
+  }, [chartData, maxRangeData, intradayData, weeklyData, monthlyData, visibleDays, sliceByTradingDays]);
 
   // Early market: data spans < 2 hours, scale to 2-hour window instead of full day
   const earlyMarket = useMemo(() => {
@@ -433,7 +434,6 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
       { tf: '1D', days: 1 },
       { tf: '1W', days: 7 },
       { tf: '1M', days: 30 },
-      { tf: '3M', days: 90 },
       { tf: '6M', days: 180 },
       { tf: 'YTD', days: ytdDays },
       { tf: '1Y', days: 365 },
@@ -465,7 +465,7 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
   return (
     <div className="box chart-box" ref={containerRef} tabIndex={0} style={{ outline: 'none' }}>
       <div className="timeframe-controls">
-        {['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', '5Y', 'ALL'].map((tf, idx, arr) => (
+        {['1D', '1W', '1M', '6M', 'YTD', '1Y', '5Y', 'ALL'].map((tf, idx, arr) => (
           <span key={tf}>
             <button
               className={`timeframe-btn ${activeTimeframe === tf ? 'active' : ''}`}
