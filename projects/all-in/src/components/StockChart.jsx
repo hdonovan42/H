@@ -6,7 +6,7 @@ import { EST } from '../utils/config';
 dayjs.extend(weekOfYear);
 
 const MIN_DAYS = 1;
-const MAX_DAYS = 1825; // 5 years
+const MAX_DAYS = Infinity; // No cap — ALL shows full history
 
 // Map timeframe buttons to days
 const TIMEFRAME_DAYS = {
@@ -17,7 +17,8 @@ const TIMEFRAME_DAYS = {
   '6M': 180,
   'YTD': null, // Calculate dynamically
   '1Y': 365,
-  '5Y': 1825
+  '5Y': 1825,
+  'ALL': Infinity
 };
 
 export default function StockChart({ chartData, intradayData, weeklyData, monthlyData, timeframe, onTimeframeChange, previousClose }) {
@@ -53,7 +54,7 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
   // Sync visibleDays when timeframe button is clicked
   useEffect(() => {
     const days = timeframe === 'YTD' ? getYTDDays() : TIMEFRAME_DAYS[timeframe];
-    if (days) setVisibleDays(days);
+    if (days != null) setVisibleDays(days);
   }, [timeframe]);
 
   // Continuous wheel zoom handler with proper scroll prevention
@@ -119,8 +120,9 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
       if (result.length) return result;
     }
 
-    // 61D+: daily data - filter by calendar days from today
+    // 61D+: daily data - filter by calendar days from today (ALL = no filter)
     if (chartData?.length) {
+      if (visibleDays === Infinity) return chartData;
       const cutoffDate = dayjs().subtract(visibleDays, 'day').format('YYYY-MM-DD');
       return chartData.filter(d => dayjs(d.date).format('YYYY-MM-DD') >= cutoffDate);
     }
@@ -435,13 +437,18 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
       { tf: '6M', days: 180 },
       { tf: 'YTD', days: ytdDays },
       { tf: '1Y', days: 365 },
-      { tf: '5Y', days: 1825 }
+      { tf: '5Y', days: 1825 },
+      { tf: 'ALL', days: Infinity }
     ];
 
-    // Find closest match
+    // Exact match for ALL
+    if (visibleDays === Infinity) return 'ALL';
+
+    // Find closest match among finite thresholds
     let closest = thresholds[0];
     let minDiff = Math.abs(visibleDays - thresholds[0].days);
     for (const t of thresholds) {
+      if (t.days === Infinity) continue;
       const diff = Math.abs(visibleDays - t.days);
       if (diff < minDiff) {
         minDiff = diff;
@@ -458,7 +465,7 @@ export default function StockChart({ chartData, intradayData, weeklyData, monthl
   return (
     <div className="box chart-box" ref={containerRef} tabIndex={0} style={{ outline: 'none' }}>
       <div className="timeframe-controls">
-        {['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', '5Y'].map((tf, idx, arr) => (
+        {['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', '5Y', 'ALL'].map((tf, idx, arr) => (
           <span key={tf}>
             <button
               className={`timeframe-btn ${activeTimeframe === tf ? 'active' : ''}`}

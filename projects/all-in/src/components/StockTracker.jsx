@@ -237,16 +237,16 @@ export default function StockTracker() {
 
   // Chart data fetcher - always fetches 5Y data for continuous zoom
   const fetchChartData = useCallback(async (symbol) => {
-    const cacheKey = `${symbol}-5Y`;
+    const cacheKey = `${symbol}-MAX`;
 
-    // Return cached 5Y data if available
+    // Return cached max-range data if available
     if (chartCache[cacheKey]) {
       setChartData(chartCache[cacheKey]);
       return;
     }
 
     try {
-      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=5y&interval=1d`);
+      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=max&interval=1d`);
       const barsData = await barsRes.json();
 
       if (barsData?.chart?.result?.[0]) {
