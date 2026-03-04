@@ -168,7 +168,7 @@ export default function StockTracker() {
         }
       }
 
-      if (historicalData?.length > 0) setData(historicalData);
+      if (historicalData?.length > 0) setData(prev => prev.length > historicalData.length ? mergeData(prev, historicalData) : historicalData);
     } catch (error) {
       console.error('Error:', error);
     }
@@ -817,6 +817,7 @@ export default function StockTracker() {
   };
 
   const handleSort = useCallback(async (key) => {
+    setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }));
     if (key !== 'date' && !fullHistoryLoaded) {
       setIsFetchingMore(true);
       try {
@@ -834,7 +835,6 @@ export default function StockTracker() {
         setHasMoreHistory(false);
       }
     }
-    setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }));
   }, [fullHistoryLoaded, ticker]);
 
   const handleCurrencyToggle = useCallback(() => {
