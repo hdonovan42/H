@@ -989,7 +989,7 @@ export default function StockTracker() {
                       <div className="spreadsheet-cell">${row.high.toFixed(2)}</div>
                       <div className="spreadsheet-cell">${row.low.toFixed(2)}</div>
                       <div className={`spreadsheet-cell ${isLivePrice ? 'live-price' : ''}`}>${row.close.toFixed(2)}</div>
-                      <div className="spreadsheet-cell">{row.volume > 500000 ? (row.volume / 1000000).toFixed(0) + 'M' : '—'}</div>
+                      <div className="spreadsheet-cell">{row.volume > 500000 ? (row.volume / 1000000).toFixed(1) + 'M' : '—'}</div>
                       <div className={`spreadsheet-cell ${row.chg !== null ? (row.chg >= 0 ? 'positive' : 'negative') : ''}`}>{row.chg !== null ? `${row.chg >= 0 ? '+' : ''}${row.chg.toFixed(2)}` : '—'}</div>
                       <div className="spreadsheet-cell value-cell">{value !== null && <><span className="currency-toggle" onClick={handleCurrencyToggle} title={`Click to show in ${currency === 'USD' ? 'GBP' : 'USD'}`}>{currencySymbol}</span>{convertValue(value).toLocaleString()}{row.chg !== null && <span className={row.chg >= 0 ? 'positive' : 'negative'}> | {row.chg >= 0 ? '+' : ''}<span className="currency-toggle" onClick={handleCurrencyToggle}>{currencySymbol}</span>{convertValue(Math.round(row.chg * shares)).toLocaleString()}</span>}</>}</div>
                     </div>
