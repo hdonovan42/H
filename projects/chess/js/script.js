@@ -104,6 +104,13 @@ function initializeApp() {
   
   // Initialize empty eval graph
   drawEvalGraph();
+
+  // Check for Lichess game ID in URL parameters (?game=AbCdEfGh)
+  const urlParams = new URLSearchParams(window.location.search);
+  const gameParam = urlParams.get('game');
+  if (gameParam) {
+    fetchLichessGame(gameParam);
+  }
 }
 
 AppState.hasLoadedOnce = false;
@@ -1147,9 +1154,9 @@ function handleGraphClick(e) {
     }
   }
   
-  // Navigate to the closest move if found
+  // Navigate to the closest move if found — restore full mainline so all moves remain accessible
   if (closestMoveIndex >= 0 && closestMoveIndex <= AppState.graphMainlineMoves.length) {
-    AppState.userMoves = AppState.graphMainlineMoves.slice(0, closestMoveIndex);
+    AppState.userMoves = [...AppState.graphMainlineMoves];
     navigateToMove(closestMoveIndex);
   }
 }
@@ -1303,51 +1310,111 @@ function rebuildGameFromMoves() {
 // PGN handling
 function loadPGN() {
   const pgnText = document.getElementById('pgn-input').value.trim();
-  
+
   if (!pgnText) {
     showError('Please enter a PGN.');
     return;
   }
-  
+
+  loadPGNFromText(pgnText);
+}
+
+function loadPGNFromText(pgnText) {
+  // Strip inline comments (e.g. { [%clk 0:01:00] }) that chess.js can't parse
+  const cleanedPgn = pgnText.replace(/\{[^}]*\}/g, '').replace(/  +/g, ' ');
+
   const tempGame = new Chess();
-  if (!tempGame.load_pgn(pgnText)) {
+  if (!tempGame.load_pgn(cleanedPgn)) {
     showError('Invalid PGN format.');
     return;
   }
-  
-  // Reset and load the game (ALL EXISTING CODE UNCHANGED)
-  AppState.game.load_pgn(pgnText);
+
+  // Reset and load the game
+  AppState.game.load_pgn(cleanedPgn);
   AppState.pgnMainlineMoves = AppState.game.history();
   AppState.userMoves = [...AppState.pgnMainlineMoves];
   AppState.currentIndex = 0;
   AppState.gameLoaded = true;
-  
-  // Initialize eval history array (EXISTING CODE)
+
+  // Initialize eval history array
   AppState.evalHistory = new Array(AppState.pgnMainlineMoves.length + 1);
-  
-  // NEW: Store separate copy for graph (only addition)
+
+  // Store separate copy for graph
   AppState.graphMainlineMoves = [...AppState.pgnMainlineMoves];
   AppState.graphEvalHistory = new Array(AppState.graphMainlineMoves.length + 1);
+  AppState.graphEvalHistory[0] = 0.0; // Starting position is equal
   AppState.moveClassifications = new Array(AppState.graphMainlineMoves.length + 1);
-  
-  // Reset to starting position (ALL EXISTING CODE UNCHANGED)
+
+  // Reset to starting position
   AppState.game.reset();
   AppState.board.start();
-  
+
   updateGameStatus();
-  
-  // NOTE: analyzeGamePositions() removed - evalHistory is not used since 
-  // drawAnalysisEvalGraph uses graphEvalHistory instead
-  
+
   // Auto-analyze graph positions (uses lite engine for speed/stability)
   AppState.graphDrawn = true;
   analyzeGraphPositions();
-  
+
   if (AppState.engineEnabled) {
     updateStockfishAnalysis();
   }
   updateDisplay();
   drawEvalGraph();
+}
+
+// Fetch a game from Lichess by ID or URL and load it
+async function fetchLichessGame(gameIdOrUrl) {
+  // Extract game ID from various URL formats
+  let gameId = gameIdOrUrl.trim();
+
+  // Handle full URLs: https://lichess.org/AbCdEfGh, https://lichess.org/AbCdEfGh/black, etc.
+  const urlMatch = gameId.match(/lichess\.org\/([a-zA-Z0-9]{8})/);
+  if (urlMatch) {
+    gameId = urlMatch[1];
+  }
+
+  // Strip any trailing path segments or anchors from a bare ID
+  gameId = gameId.replace(/[/#?].*$/, '');
+
+  // Validate: Lichess game IDs are 8 alphanumeric characters
+  if (!/^[a-zA-Z0-9]{8}$/.test(gameId)) {
+    showError('Invalid Lichess game ID. Expected 8 characters (e.g. AbCdEfGh).');
+    return;
+  }
+
+  // Show loading state
+  const loadingEl = document.getElementById('stockfish-loading');
+  if (loadingEl) {
+    loadingEl.textContent = 'Fetching game from Lichess...';
+    loadingEl.style.display = 'block';
+  }
+
+  try {
+    const response = await fetch(`https://lichess.org/game/export/${gameId}?clocks=false&evals=false`, {
+      headers: { 'Accept': 'application/x-chess-pgn' }
+    });
+
+    if (!response.ok) {
+      throw new Error(response.status === 404
+        ? 'Game not found on Lichess.'
+        : `Lichess API error: ${response.status}`);
+    }
+
+    const pgn = await response.text();
+
+    // Put PGN in textarea for reference
+    document.getElementById('pgn-input').value = pgn;
+
+    // Load the game
+    loadPGNFromText(pgn);
+
+  } catch (error) {
+    showError(error.message || 'Failed to fetch game from Lichess.');
+  } finally {
+    if (loadingEl) {
+      loadingEl.style.display = 'none';
+    }
+  }
 }
 
 function analyzeGraphPositions() {
@@ -1412,7 +1479,7 @@ function analyzeGraphPositionQueued(fen, moveIndex, onComplete) {
     
     if (message === 'readyok') {
       tempStockfish.postMessage(`position fen ${fen}`);
-      tempStockfish.postMessage('go depth 10');
+      tempStockfish.postMessage('go depth 12');
     } else if (message.startsWith('bestmove')) {
       if (!completed) {
         completed = true;
@@ -1420,12 +1487,15 @@ function analyzeGraphPositionQueued(fen, moveIndex, onComplete) {
         tempStockfish.terminate();
         onComplete();
       }
-    } else if (message.startsWith('info depth 10') && message.includes('score')) {
+    } else if (message.startsWith('info depth 12') && message.includes('score')) {
       const info = parseStockfishInfoForGraph(message, fen);
       if (info) {
         let evalScore;
         if (info.mate !== undefined) {
-          evalScore = info.mate > 0 ? 10 : -10;
+          // Scale by distance: mate-in-1 = ~15, mate-in-10 = ~10.5
+          evalScore = info.mate > 0
+            ? Math.min(15, 10 + 5 / Math.abs(info.mate))
+            : Math.max(-15, -10 - 5 / Math.abs(info.mate));
         } else {
           evalScore = parseFloat(info.score);
           evalScore = Math.max(-10, Math.min(10, evalScore));
@@ -1779,11 +1849,10 @@ function handleKeyPress(event) {
 // Accuracy calculation functions
 
 // Convert eval (in pawns) to win probability (0-1)
+// Uses the Lichess formula: 50 + 50 * (2 / (1 + exp(-0.00368208 * cp)) - 1)
 function evalToWinProbability(evalScore) {
-  // Using the logistic function: 1 / (1 + 10^(-eval/4))
-  // Clamp eval to avoid extreme values
-  const clampedEval = Math.max(-10, Math.min(10, evalScore));
-  return 1 / (1 + Math.pow(10, -clampedEval / 4));
+  const cp = evalScore * 100; // convert pawns to centipawns
+  return (50 + 50 * (2 / (1 + Math.exp(-0.00368208 * cp)) - 1)) / 100;
 }
 
 // Convert centipawn loss to accuracy (0-100)
@@ -1804,14 +1873,11 @@ function calculateMoveAccuracy(evalBefore, evalAfter, isWhiteMove) {
   const winProbBefore = evalToWinProbability(playerEvalBefore);
   const winProbAfter = evalToWinProbability(playerEvalAfter);
 
-  // Win probability loss (0-1 scale)
-  const wpLoss = Math.max(0, winProbBefore - winProbAfter);
+  // Win probability loss as percentage points (0-100 scale)
+  const wpLoss = Math.max(0, winProbBefore - winProbAfter) * 100;
 
-  // Convert to accuracy (100 = perfect, 0 = worst)
-  // Using: accuracy = 100 * (1 - wpLoss)^2 for smoother curve
-  // Or use centipawn-based formula
-  const cpLoss = Math.max(0, playerEvalBefore - playerEvalAfter) * 100; // Convert to centipawns
-  return cpLossToAccuracy(cpLoss);
+  // Formula coefficients are designed for win% loss, not centipawn loss
+  return cpLossToAccuracy(wpLoss);
 }
 
 // Calculate game accuracy for both players
