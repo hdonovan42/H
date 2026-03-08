@@ -1442,8 +1442,10 @@ async function fetchLichessGame(gameIdOrUrl) {
 
     // Flip board if user played black
     const colorParam = new URLSearchParams(window.location.search).get('color');
+    console.log('[HJD] color param:', colorParam, 'orientation before flip:', AppState.board.orientation());
     if (colorParam === 'black') {
       flipBoard();
+      console.log('[HJD] flipped, orientation now:', AppState.board.orientation());
     }
 
   } catch (error) {
