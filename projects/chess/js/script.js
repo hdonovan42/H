@@ -61,9 +61,8 @@ const AppState = {
   promotionPending: false,
   promotionMove: null, // Stores the pending promotion move
   promotionCallback: null, // Callback function to execute after promotion choice
-  // New properties for interactive graph
-  graphClickAreas: [], // Store clickable areas for graph points
-  graphHoverIndex: -1,  // Currently hovered graph point (-1 = none)
+  // Chart.js eval graph
+  evalChart: null, // Chart.js instance
   graphMainlineMoves: [], // Original PGN moves for graph display only
   graphEvalHistory: [],
   moveClassifications: [], // Store classification for each move (index = move number)
@@ -84,7 +83,6 @@ const AppState = {
   graphWorker: null,             // Persistent worker for graph analysis
   hasLoadedOnce: false,          // Skip init timeout on first load
   _lastArrowKey: '',             // Arrow fingerprint for skip-redraw optimisation
-  _graphRAFPending: false,       // Throttle flag for graph hover RAF
   // Tablebase
   tablebaseCache: new Map(),     // FEN → Syzygy tablebase API result
   isTablebasePosition: false     // Whether current position uses tablebase
@@ -125,7 +123,6 @@ function initializeApp() {
     arrowsCanvas: arrowsCanvas,
     arrowsCtx: arrowsCanvas.getContext('2d'),
     evalGraph: evalGraph,
-    evalGraphCtx: evalGraph.getContext('2d'),
     stockfishLoading: document.getElementById('stockfish-loading'),
     pgnInput: document.getElementById('pgn-input'),
   };
@@ -136,8 +133,8 @@ function initializeApp() {
   // Initialize viewport scaling
   updateViewportScale();
 
-  // Initialize empty eval graph
-  drawAnalysisEvalGraph();
+  // Initialize Chart.js eval graph
+  initEvalChart();
 
   // Fetch Lichess game if ID provided (?game=AbCdEfGh&color=black)
   if (gameParam) {
@@ -1105,208 +1102,210 @@ function navigateToStart() {
   _applyNavigation();
 }
 
-// Graph interaction functions
-function handleGraphMouseMove(e) {
-  const canvas = AppState._els ? AppState._els.evalGraph : document.getElementById('analysis-eval-graph');
-  if (!canvas || AppState.graphClickAreas.length === 0) return;
-  
-  const rect = canvas.getBoundingClientRect();
-  const mouseX = e.clientX - rect.left;
-  
-  // Find the closest move based on X coordinate only (same logic as click)
-  let newHoverIndex = -1;
-  let minDistance = Infinity;
-  
-  for (let i = 0; i < AppState.graphClickAreas.length; i++) {
-    const area = AppState.graphClickAreas[i];
-    const distance = Math.abs(mouseX - area.x);
-    
-    if (distance < minDistance) {
-      minDistance = distance;
-      newHoverIndex = i;
-    }
-  }
-  
-  // Only redraw if hover state changed, throttled to animation frame
-  if (newHoverIndex !== AppState.graphHoverIndex) {
-    AppState.graphHoverIndex = newHoverIndex;
-    if (!AppState._graphRAFPending) {
-      AppState._graphRAFPending = true;
-      requestAnimationFrame(() => {
-        AppState._graphRAFPending = false;
-        drawAnalysisEvalGraph();
-      });
-    }
-  }
-}
-
-function handleGraphClick(e) {
-  const canvas = AppState._els ? AppState._els.evalGraph : document.getElementById('analysis-eval-graph');
-  if (!canvas || AppState.graphClickAreas.length === 0) return;
-  
-  const rect = canvas.getBoundingClientRect();
-  const clickX = e.clientX - rect.left;
-  
-  // Find the closest move based on X coordinate only
-  let closestMoveIndex = -1;
-  let minDistance = Infinity;
-  
-  for (let i = 0; i < AppState.graphClickAreas.length; i++) {
-    const area = AppState.graphClickAreas[i];
-    const distance = Math.abs(clickX - area.x);
-    
-    if (distance < minDistance) {
-      minDistance = distance;
-      closestMoveIndex = area.moveIndex;
-    }
-  }
-  
-  // Navigate to the closest move if found — restore full mainline so all moves remain accessible
-  if (closestMoveIndex >= 0 && closestMoveIndex <= AppState.graphMainlineMoves.length) {
-    AppState.userMoves = [...AppState.graphMainlineMoves];
-    navigateToMove(closestMoveIndex);
-  }
-}
-
-// MINIMAL CHANGE: Graph drawing uses graph data
-function drawAnalysisEvalGraph() {
-  const canvas = AppState._els ? AppState._els.evalGraph : document.getElementById('analysis-eval-graph');
+// Chart.js eval graph — initialisation
+function initEvalChart() {
+  const canvas = AppState._els.evalGraph;
   if (!canvas) return;
 
-  const ctx = AppState._els ? AppState._els.evalGraphCtx : canvas.getContext('2d');
-  const width = canvas.width;
-  const height = canvas.height;
-  
-  ctx.clearRect(0, 0, width, height);
-  
-  const margin = { top: 10, right: 15, bottom: 10, left: 15 };
-  const chartWidth = width - margin.left - margin.right;
-  const chartHeight = height - margin.top - margin.bottom;
-  
-  ctx.fillStyle = '#f8f8f8';
-  ctx.fillRect(0, 0, width, height);
-  
-  const centerY = margin.top + chartHeight / 2;
-  
-  ctx.fillStyle = '#e0e0e0';
-  ctx.fillRect(margin.left, centerY, chartWidth, chartHeight / 2);
-  
-  ctx.strokeStyle = '#888';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([3, 3]);
-  ctx.beginPath();
-  ctx.moveTo(margin.left, centerY);
-  ctx.lineTo(margin.left + chartWidth, centerY);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  
-  ctx.strokeStyle = '#333';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(margin.left, margin.top);
-  ctx.lineTo(margin.left, margin.top + chartHeight);
-  ctx.moveTo(margin.left, margin.top + chartHeight);
-  ctx.lineTo(margin.left + chartWidth, margin.top + chartHeight);
-  ctx.stroke();
-  
-  // Use graphEvalHistory for graph display
-  if (AppState.graphEvalHistory.length <= 1) {
-    AppState.graphClickAreas = [];
-    return;
-  }
-  
-  AppState.graphClickAreas = [];
-  
-  ctx.strokeStyle = '#2196F3';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  
-  let hasStarted = false;
-  const evalRange = 10;
-  
-  for (let i = 0; i < AppState.graphEvalHistory.length; i++) {
-    if (AppState.graphEvalHistory[i] !== undefined) {
-      const x = margin.left + (i / Math.max(1, AppState.graphEvalHistory.length - 1)) * chartWidth;
-      const eval_val = Math.max(-evalRange, Math.min(evalRange, AppState.graphEvalHistory[i]));
-      const y = margin.top + chartHeight - ((eval_val + evalRange) / (2 * evalRange)) * chartHeight;
-      
-      AppState.graphClickAreas.push({
-        x: x,
-        y: y,
-        radius: 8,
-        moveIndex: i
-      });
-      
-      if (!hasStarted) {
-        ctx.moveTo(x, y);
-        hasStarted = true;
-      } else {
-        ctx.lineTo(x, y);
+  // Plugin: accuracy text overlay
+  const accuracyOverlay = {
+    id: 'accuracyOverlay',
+    afterDraw(chart) {
+      if (!AppState.gameLoaded || !AppState.graphEvalHistory.some(e => e !== undefined)) return;
+      const definedEvals = AppState.graphEvalHistory.filter(e => e !== undefined).length;
+      if (!AppState.cachedAccuracy || definedEvals !== AppState.cachedAccuracyLength) {
+        AppState.cachedAccuracy = calculateGameAccuracy();
+        AppState.cachedAccuracyLength = definedEvals;
       }
+      const accuracy = AppState.cachedAccuracy;
+      const ctx = chart.ctx;
+      const area = chart.chartArea;
+      ctx.save();
+      ctx.font = 'bold 12px Arial';
+      ctx.fillStyle = '#000';
+      if (accuracy.white !== null) {
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText(`${accuracy.white}%`, area.left + 5, area.top + 3);
+      }
+      if (accuracy.black !== null) {
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(`${accuracy.black}%`, area.left + 5, area.bottom - 3);
+      }
+      ctx.restore();
     }
-  }
-  ctx.stroke();
-  
-  // Show current position indicator - works with existing logic
-  if (AppState.currentIndex < AppState.graphEvalHistory.length && 
-      AppState.graphEvalHistory[AppState.currentIndex] !== undefined) {
-    const x = margin.left + (AppState.currentIndex / Math.max(1, AppState.graphEvalHistory.length - 1)) * chartWidth;
-    const eval_val = Math.max(-evalRange, Math.min(evalRange, AppState.graphEvalHistory[AppState.currentIndex]));
-    const y = margin.top + chartHeight - ((eval_val + evalRange) / (2 * evalRange)) * chartHeight;
-    
-    ctx.fillStyle = '#FF5722';
-    ctx.beginPath();
-    ctx.arc(x, y, 3, 0, 2 * Math.PI);
-    ctx.fill();
-  }
-  
-  // Hover effect (unchanged)
-  if (AppState.graphHoverIndex >= 0 && AppState.graphHoverIndex < AppState.graphClickAreas.length) {
-    const area = AppState.graphClickAreas[AppState.graphHoverIndex];
+  };
 
-    ctx.save();
-    ctx.shadowColor = '#2196F3';
-    ctx.shadowBlur = 8;
-    ctx.fillStyle = '#2196F3';
-    ctx.beginPath();
-    ctx.arc(area.x, area.y, 5, 0, 2 * Math.PI);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  // Draw accuracy scores on graph (cached — only recompute when new evals arrive)
-  if (AppState.gameLoaded && AppState.graphEvalHistory.some(e => e !== undefined)) {
-    const definedEvals = AppState.graphEvalHistory.filter(e => e !== undefined).length;
-    if (!AppState.cachedAccuracy || definedEvals !== AppState.cachedAccuracyLength) {
-      AppState.cachedAccuracy = calculateGameAccuracy();
-      AppState.cachedAccuracyLength = definedEvals;
+  // Plugin: vertical crosshair line on hover
+  const crosshairPlugin = {
+    id: 'crosshair',
+    afterDraw(chart) {
+      const active = chart.tooltip && chart.tooltip.getActiveElements();
+      if (!active || active.length === 0) return;
+      const x = active[0].element.x;
+      const area = chart.chartArea;
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(x, area.top);
+      ctx.lineTo(x, area.bottom);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.stroke();
+      ctx.restore();
     }
-    const accuracy = AppState.cachedAccuracy;
+  };
 
-    ctx.font = 'bold 12px Arial';
-    ctx.fillStyle = '#000';
-
-    // White accuracy - top left
-    if (accuracy.white !== null) {
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.fillText(`${accuracy.white}%`, margin.left + 5, margin.top + 3);
-    }
-
-    // Black accuracy - bottom left
-    if (accuracy.black !== null) {
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'bottom';
-      ctx.fillText(`${accuracy.black}%`, margin.left + 5, height - margin.bottom - 3);
-    }
-  }
+  AppState.evalChart = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        {
+          // Main eval line with dual-colour fill
+          data: [],
+          fill: { target: { value: 0 }, above: 'rgba(255, 255, 255, 0.95)', below: 'rgba(100, 100, 100, 0.85)' },
+          borderColor: 'rgba(0, 0, 0, 0.6)',
+          borderWidth: 1.5,
+          tension: 0.3,
+          pointRadius: 0,
+          pointHoverRadius: 0,
+          pointHitRadius: 15,
+          order: 2,
+          spanGaps: true
+        },
+        {
+          // Move classification markers
+          data: [],
+          fill: false,
+          borderWidth: 0,
+          showLine: false,
+          pointRadius: 0,
+          pointHoverRadius: 5,
+          pointBackgroundColor: [],
+          pointBorderColor: [],
+          pointBorderWidth: 1,
+          order: 1
+        },
+        {
+          // Current position indicator
+          data: [],
+          fill: false,
+          borderWidth: 0,
+          showLine: false,
+          pointRadius: [],
+          pointBackgroundColor: '#FF5722',
+          pointBorderColor: '#FF5722',
+          pointBorderWidth: 0,
+          pointHoverRadius: 5,
+          order: 0
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      layout: { padding: { top: 2, right: 2, bottom: 2, left: 2 } },
+      scales: {
+        x: { display: false },
+        y: { min: -10, max: 10, display: false, grid: { display: false } }
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          enabled: true,
+          mode: 'index',
+          intersect: false,
+          filter: (item) => item.datasetIndex === 0,
+          callbacks: {
+            title: (items) => {
+              if (!items.length) return '';
+              const idx = items[0].dataIndex;
+              if (idx === 0) return 'Start';
+              const moveNum = Math.ceil(idx / 2);
+              const side = idx % 2 === 1 ? '.' : '...';
+              const san = AppState.graphMainlineMoves[idx - 1] || '';
+              return `${moveNum}${side} ${san}`;
+            },
+            label: (item) => {
+              const val = item.parsed.y;
+              if (val === undefined || val === null) return '';
+              if (Math.abs(val) > 10) {
+                const mateIn = Math.round(5 / (Math.abs(val) - 10));
+                return val > 0 ? `#${mateIn}` : `#-${mateIn}`;
+              }
+              return val > 0 ? `+${val.toFixed(1)}` : val.toFixed(1);
+            }
+          }
+        }
+      },
+      interaction: { mode: 'index', intersect: false },
+      onClick: (_event, elements) => {
+        if (elements.length > 0) {
+          const clickedIndex = elements[0].index;
+          if (clickedIndex >= 0 && clickedIndex <= AppState.graphMainlineMoves.length) {
+            AppState.userMoves = [...AppState.graphMainlineMoves];
+            navigateToMove(clickedIndex);
+          }
+        }
+      }
+    },
+    plugins: [accuracyOverlay, crosshairPlugin]
+  });
 }
 
-function handleGraphMouseLeave() {
-  if (AppState.graphHoverIndex !== -1) {
-    AppState.graphHoverIndex = -1;
-    drawAnalysisEvalGraph();
+// Update Chart.js eval graph with current data
+function drawAnalysisEvalGraph() {
+  const chart = AppState.evalChart;
+  if (!chart) return;
+
+  const evalHistory = AppState.graphEvalHistory;
+  const len = evalHistory.length;
+
+  const labels = [];
+  const evalData = [];
+  const classificationData = [];
+  const classificationColors = [];
+  const classificationBorderColors = [];
+  const classificationRadii = [];
+  const currentPosData = [];
+  const currentPosRadii = [];
+
+  for (let i = 0; i < len; i++) {
+    labels.push(i);
+    const val = evalHistory[i];
+    const evalVal = (val !== undefined) ? Math.max(-10, Math.min(10, val)) : null;
+    evalData.push(evalVal);
+
+    // Classification markers — only show non-trivial ones (inaccuracy/mistake/blunder/brilliant/great)
+    const cls = AppState.moveClassifications[i];
+    classificationData.push(evalVal);
+    if (cls && cls.symbol && cls.symbol !== '') {
+      classificationColors.push(cls.color);
+      classificationBorderColors.push('#fff');
+      classificationRadii.push(4);
+    } else {
+      classificationColors.push('transparent');
+      classificationBorderColors.push('transparent');
+      classificationRadii.push(0);
+    }
+
+    currentPosData.push(evalVal);
+    currentPosRadii.push(i === AppState.currentIndex ? 5 : 0);
   }
+
+  chart.data.labels = labels;
+  chart.data.datasets[0].data = evalData;
+  chart.data.datasets[1].data = classificationData;
+  chart.data.datasets[1].pointBackgroundColor = classificationColors;
+  chart.data.datasets[1].pointBorderColor = classificationBorderColors;
+  chart.data.datasets[1].pointRadius = classificationRadii;
+  chart.data.datasets[2].data = currentPosData;
+  chart.data.datasets[2].pointRadius = currentPosRadii;
+
+  chart.update('none');
 }
 
 function rebuildGameFromMoves() {
@@ -1640,9 +1639,7 @@ function resetBoard() {
   AppState.checkmateWinner = null;
   AppState.isInCheck = false;
 
-// Clear graph interaction state
-  AppState.graphClickAreas = [];
-  AppState.graphHoverIndex = -1;
+// Clear graph state
   AppState.graphDrawn = false;
   AppState._lastArrowKey = '';
   AppState.graphMainlineMoves = [];
@@ -1877,13 +1874,6 @@ function setupEventListeners() {
     }
   });
 
-  // Interactive evaluation graph event listeners
-  const evalGraphCanvas = document.getElementById('analysis-eval-graph');
-  if (evalGraphCanvas) {
-    evalGraphCanvas.addEventListener('mousemove', handleGraphMouseMove);
-    evalGraphCanvas.addEventListener('click', handleGraphClick);
-    evalGraphCanvas.addEventListener('mouseleave', handleGraphMouseLeave);
-  }
 }
 
 function handleKeyPress(event) {

@@ -150,13 +150,14 @@ input:checked + .toggle-slider:before {
   width: 100%;
   height: 150px;
   border-bottom: 1px solid #ccc;
+  background-color: #f8f8f8;
 }
 
-/* Eval graph in analysis container */
+/* Eval graph — Chart.js manages the canvas */
 #analysis-eval-graph {
   width: 100%;
-  height: 150px;
-  background-color: #f8f8f8;
+  height: 100%;
+  display: block;
 }
 
 /* Scrollable content area */
@@ -242,21 +243,3 @@ html {
   font-weight: bold;
 }
 
-/* Interactive evaluation graph styles */
-#analysis-eval-graph {
-  cursor: crosshair;
-}
-
-#analysis-eval-graph:hover {
-  cursor: crosshair; /* crosshair? */
-}
-
-/* Draw Graph Button Overlay */
-#draw-graph-overlay {
-  position: absolute;
-  z-index: 10;
-}
-
-#draw-graph-button {
-  font-family: Arial, sans-serif;
-}
