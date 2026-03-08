@@ -32,21 +32,23 @@ function detectUserColor() {
   if (path.endsWith('/black')) return 'black';
   if (path.endsWith('/white')) return 'white';
 
-  // Try to get logged-in username from Lichess page
-  const userLink = document.querySelector('#user_tag');
-  if (userLink) {
-    const username = userLink.textContent.trim().toLowerCase();
-    // Check player names on game page
-    const players = document.querySelectorAll('.game__meta .player .user-link');
-    for (const el of players) {
-      const name = el.textContent.trim().toLowerCase();
-      if (name === username) {
-        // Check if this player element is in the bottom (black) position
-        const isBottom = el.closest('.ruser-bottom') || el.closest('.player.color-icon.is.black');
-        return isBottom ? 'black' : null; // null = white or unknown, no flip needed
-      }
-    }
+  // Detect from Lichess board orientation — the board is always oriented
+  // with the user's colour at the bottom. The cg-wrap element has
+  // orientation-white or orientation-black as a class.
+  const cgWrap = document.querySelector('cg-wrap');
+  if (cgWrap) {
+    if (cgWrap.classList.contains('orientation-black')) return 'black';
+    if (cgWrap.classList.contains('orientation-white')) return 'white';
   }
+
+  // Fallback: check the .ruser-bottom element for colour
+  const bottomUser = document.querySelector('.ruser-bottom');
+  if (bottomUser) {
+    const isBlack = bottomUser.querySelector('.color-icon.black')
+      || bottomUser.classList.contains('black');
+    if (isBlack) return 'black';
+  }
+
   return null;
 }
 
