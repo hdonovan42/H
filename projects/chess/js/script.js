@@ -3,8 +3,9 @@
 const BOARD_SIZE = 500;
 const SQUARE_SIZE = BOARD_SIZE / 8;
 const ANALYSIS_DEBOUNCE_TIME = 200;
-const ANALYSIS_DEPTH = 22;
+const ANALYSIS_DEPTH = 18;
 const MULTI_PV_LINES = 3;
+const GRAPH_DEPTH = 18;
 
 // Accuracy calculation constants
 // Formula based on Lichess/Chess.com approach using win probability
@@ -190,6 +191,7 @@ function initializeStockfish() {
     };
     
     AppState.stockfish.postMessage('uci');
+    AppState.stockfish.postMessage('setoption name Hash value 128');
     AppState.stockfish.postMessage('setoption name MultiPV value ' + MULTI_PV_LINES);
     AppState.stockfish.postMessage('isready');
     
@@ -950,6 +952,7 @@ function switchEngine(engineKey) {
       handleStockfishMessage(event);
     };
     AppState.stockfish.postMessage('ucinewgame');
+    AppState.stockfish.postMessage('setoption name Hash value 128');
     AppState.stockfish.postMessage(`setoption name MultiPV value ${MULTI_PV_LINES}`);
     AppState.stockfish.postMessage('isready');
     AppState.stockfishReady = true;
@@ -1421,6 +1424,7 @@ function analyzeGraphPositions() {
   const worker = new Worker(ENGINES.lite.script);
   AppState.graphWorker = worker;
   let idx = 0;
+  let pendingRedraw = false;
 
   // Safety timeout for entire analysis
   const totalTimeout = setTimeout(() => {
@@ -1429,19 +1433,36 @@ function analyzeGraphPositions() {
       AppState.graphWorker = null;
     }
     AppState._graphWorkerTimeout = null;
-  }, positions.length * 5000);
+  }, positions.length * 8000);
   AppState._graphWorkerTimeout = totalTimeout;
+
+  // Batch UI updates — coalesce redraws into a single rAF
+  function scheduleRedraw() {
+    if (pendingRedraw) return;
+    pendingRedraw = true;
+    requestAnimationFrame(() => {
+      pendingRedraw = false;
+      drawAnalysisEvalGraph();
+      AppState.notationDirty = true;
+      updateAnalysisOutput();
+    });
+  }
 
   function sendNext() {
     if (idx >= positions.length) {
       clearTimeout(totalTimeout);
+      AppState._graphWorkerTimeout = null;
       try { worker.terminate(); } catch (e) {}
       if (AppState.graphWorker === worker) AppState.graphWorker = null;
+      // Final redraw to ensure everything is rendered
+      drawAnalysisEvalGraph();
+      AppState.notationDirty = true;
+      updateAnalysisOutput();
       return;
     }
-    worker.postMessage('ucinewgame');
+    // No ucinewgame per position — preserves hash table for transposition hits
     worker.postMessage(`position fen ${positions[idx].fen}`);
-    worker.postMessage('go depth 12');
+    worker.postMessage(`go depth ${GRAPH_DEPTH}`);
   }
 
   worker.onmessage = function(event) {
@@ -1451,8 +1472,8 @@ function analyzeGraphPositions() {
       sendNext();
     } else if (message.startsWith('bestmove')) {
       idx++;
-      setTimeout(sendNext, 10);
-    } else if (message.startsWith('info depth 12') && message.includes('score')) {
+      setTimeout(sendNext, 5);
+    } else if (message.startsWith(`info depth ${GRAPH_DEPTH}`) && message.includes('score')) {
       const pos = positions[idx];
       const info = parseStockfishInfoForGraph(message, pos.fen);
       if (info) {
@@ -1469,15 +1490,14 @@ function analyzeGraphPositions() {
         AppState.graphEvalHistory[pos.moveIndex] = evalScore;
         updateMoveClassifications(pos.moveIndex);
         updateIncrementalAccuracy(pos.moveIndex);
-        drawAnalysisEvalGraph();
-        AppState.notationDirty = true;
-        updateAnalysisOutput();
+        scheduleRedraw();
       }
     }
   };
 
   worker.onerror = function() {
     clearTimeout(totalTimeout);
+    AppState._graphWorkerTimeout = null;
     try { worker.terminate(); } catch (e) {}
     if (AppState.graphWorker === worker) AppState.graphWorker = null;
   };
@@ -1485,6 +1505,8 @@ function analyzeGraphPositions() {
   // Delay start to let main engine initialise first
   setTimeout(() => {
     worker.postMessage('uci');
+    worker.postMessage('setoption name Hash value 64');
+    worker.postMessage('ucinewgame');
     worker.postMessage('isready');
   }, 500);
 }
