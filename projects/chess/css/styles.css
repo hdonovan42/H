@@ -1,8 +1,18 @@
 body {
   background-color: #FFF1E5;
   margin: 0;
-  padding: 20px;
+  padding: 0;
   font-family: Arial, sans-serif;
+}
+
+/* Scale wrapper — zooms the entire UI to fit the viewport */
+#scale-wrapper {
+  --ui-scale: 1;
+  transform: scale(var(--ui-scale));
+  transform-origin: top center;
+  width: 1010px;          /* Natural width of the composition */
+  margin: 0 auto;
+  padding: 20px;
 }
 
 /* Overall layout using flex */
@@ -179,12 +189,10 @@ input:checked + .toggle-slider:before {
   margin-top: 5px;
 }
 
-body, html {
+html {
   height: 100%;
   margin: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  overflow-x: hidden; /* Prevent horizontal scrollbar during scale */
 }
 
 /*css for interactive notation*/

@@ -84,7 +84,10 @@ const AppState = {
   graphWorker: null,             // Persistent worker for graph analysis
   hasLoadedOnce: false,          // Skip init timeout on first load
   _lastArrowKey: '',             // Arrow fingerprint for skip-redraw optimisation
-  _graphRAFPending: false        // Throttle flag for graph hover RAF
+  _graphRAFPending: false,       // Throttle flag for graph hover RAF
+  // Tablebase
+  tablebaseCache: new Map(),     // FEN → Syzygy tablebase API result
+  isTablebasePosition: false     // Whether current position uses tablebase
 };
 
 // Initialize the application
@@ -129,6 +132,9 @@ function initializeApp() {
 
   // Set up event listeners
   setupEventListeners();
+
+  // Initialize viewport scaling
+  updateViewportScale();
 
   // Initialize empty eval graph
   drawAnalysisEvalGraph();
@@ -444,14 +450,46 @@ function updateStockfishAnalysis() {
 }
 
 function tryStartAnalysis() {
-  if (!AppState.stockfish || !AppState.stockfishReady || !AppState.engineEnabled) {
-    return;
-  }
-  
   if (!AppState.pendingAnalysisFen || AppState.pendingAnalysisId === null) {
     return;
   }
-  
+
+  if (!AppState.engineEnabled) return;
+
+  const fen = AppState.pendingAnalysisFen;
+  const analysisId = AppState.pendingAnalysisId;
+
+  // Tablebase path — ≤7 pieces, mathematically solved
+  if (countPieces(fen) <= 7) {
+    AppState.pendingAnalysisFen = null;
+    AppState.pendingAnalysisId = null;
+    AppState.activeAnalysisId = analysisId;
+    AppState.lastFen = fen;
+    AppState.isTablebasePosition = true;
+    AppState.isAnalysisInProgress = true;
+    AppState.multipvResults = {};
+    AppState.bestMoveInfo = null;
+
+    queryTablebase(fen).then(tb => {
+      if (AppState.activeAnalysisId !== analysisId) return;
+      if (tb) {
+        handleTablebaseResult(tb, fen);
+      } else {
+        // API failed — fall back to Stockfish
+        AppState.isTablebasePosition = false;
+        AppState.pendingAnalysisFen = fen;
+        AppState.pendingAnalysisId = analysisId;
+        tryStartAnalysis();
+      }
+    });
+    return;
+  }
+
+  AppState.isTablebasePosition = false;
+
+  // Stockfish path — needs engine ready
+  if (!AppState.stockfish || !AppState.stockfishReady) return;
+
   // If engine is busy, send stop and wait for bestmove
   if (AppState.engineBusy) {
     if (!AppState.stopRequested) {
@@ -466,21 +504,18 @@ function tryStartAnalysis() {
     }
     return; // Wait for bestmove before starting new analysis
   }
-  
+
   // Engine is free - start analysis
-  const fen = AppState.pendingAnalysisFen;
-  const analysisId = AppState.pendingAnalysisId;
-  
   // Clear pending state
   AppState.pendingAnalysisFen = null;
   AppState.pendingAnalysisId = null;
-  
+
   // Mark as active
   AppState.activeAnalysisId = analysisId;
   AppState.engineBusy = true;
   AppState.isAnalysisInProgress = true;
   AppState.lastFen = fen;
-  
+
   // Keep old eval for UI stability
   const oldEval = AppState.multipvResults[1];
   AppState.multipvResults = {};
@@ -488,7 +523,7 @@ function tryStartAnalysis() {
     AppState.multipvResults[1] = oldEval;
   }
   AppState.bestMoveInfo = null;
-  
+
   try {
     AppState.stockfish.postMessage(`position fen ${fen}`);
     AppState.stockfish.postMessage(`go depth ${ANALYSIS_DEPTH}`);
@@ -625,15 +660,24 @@ function updateEngineSection() {
     linesEl.style.display = '';
     disabledEl.style.display = 'none';
 
-    const bestMoveText = AppState.bestMoveInfo ? AppState.bestMoveInfo.bestMove : '...';
-    bestMoveEl.textContent = `Best Move: ${bestMoveText}`;
+    if (AppState.isTablebasePosition && AppState.bestMoveInfo?.tablebase) {
+      const tb1 = AppState.multipvResults[1];
+      const categoryColor = tb1 && parseFloat(tb1.score) > 0 ? '#1baca6' : tb1 && parseFloat(tb1.score) < 0 ? '#ca3431' : '#6c757d';
+      bestMoveEl.innerHTML = `<span style="background:${categoryColor};color:white;padding:2px 6px;border-radius:3px;font-size:11px;margin-right:6px;">TABLEBASE</span>Best Move: ${AppState.bestMoveInfo.bestMove}`;
+    } else {
+      const bestMoveText = AppState.bestMoveInfo ? AppState.bestMoveInfo.bestMove : '...';
+      bestMoveEl.textContent = `Best Move: ${bestMoveText}`;
+    }
 
     for (let lineNum = 1; lineNum <= MULTI_PV_LINES; lineNum++) {
       const lineDiv = container.querySelector(`#engine-line-${lineNum}`);
       const info = AppState.multipvResults[lineNum];
 
       if (info) {
-        if (info.mate !== undefined) {
+        if (info.tablebase) {
+          const tbBg = parseFloat(info.score) > 0 ? '#e8f5f4' : parseFloat(info.score) < 0 ? '#fde8e8' : '#f0f0f0';
+          lineDiv.style.cssText = `height: 54px; font-size: 13px; overflow: hidden; background-color: ${tbBg}; padding: 0 5px; border-radius: 3px;`;
+        } else if (info.mate !== undefined) {
           lineDiv.style.cssText = `height: 54px; font-size: 13px; overflow: hidden; background-color: ${info.mate > 0 ? '#d4edda' : '#f8d7da'}; padding: 0 5px; border-radius: 3px; font-weight: bold;`;
         } else {
           lineDiv.style.cssText = 'height: 54px; font-size: 13px; overflow: hidden;';
@@ -1460,8 +1504,32 @@ function analyzeGraphPositions() {
       updateAnalysisOutput();
       return;
     }
+
+    const pos = positions[idx];
+
+    // Tablebase shortcut for ≤7 piece positions
+    if (countPieces(pos.fen) <= 7) {
+      queryTablebase(pos.fen).then(tb => {
+        if (tb) {
+          const turn = pos.fen.split(' ')[1];
+          const evalScore = tablebaseCategoryToEval(tb.category, tb.dtz, turn);
+          AppState.graphEvalHistory[pos.moveIndex] = evalScore;
+          updateMoveClassifications(pos.moveIndex);
+          updateIncrementalAccuracy(pos.moveIndex);
+          scheduleRedraw();
+        }
+        idx++;
+        setTimeout(sendNext, 5);
+      }).catch(() => {
+        // Fallback: let Stockfish handle it
+        worker.postMessage(`position fen ${pos.fen}`);
+        worker.postMessage(`go depth ${GRAPH_DEPTH}`);
+      });
+      return;
+    }
+
     // No ucinewgame per position — preserves hash table for transposition hits
-    worker.postMessage(`position fen ${positions[idx].fen}`);
+    worker.postMessage(`position fen ${pos.fen}`);
     worker.postMessage(`go depth ${GRAPH_DEPTH}`);
   }
 
@@ -1791,8 +1859,9 @@ function setupEventListeners() {
   // Keyboard shortcuts
   document.addEventListener('keydown', handleKeyPress);
   
-  // Window resize
+  // Window resize — update scale + redraw canvases
   window.addEventListener('resize', debounce(() => {
+    updateViewportScale();
     if (Object.keys(AppState.multipvResults).length > 0) {
       updateBoardArrows();
     }
@@ -1990,7 +2059,119 @@ function updateMoveClassifications(moveIndex) {
   }
 }
 
+// Tablebase functions
+function countPieces(fen) {
+  const placement = fen.split(' ')[0];
+  let count = 0;
+  for (const ch of placement) {
+    if (ch !== '/' && (ch < '0' || ch > '9')) count++;
+  }
+  return count;
+}
+
+async function queryTablebase(fen) {
+  if (AppState.tablebaseCache.has(fen)) {
+    return AppState.tablebaseCache.get(fen);
+  }
+  try {
+    const response = await fetch(`https://tablebase.lichess.ovh/standard?fen=${encodeURIComponent(fen)}`);
+    if (!response.ok) return null;
+    const data = await response.json();
+    AppState.tablebaseCache.set(fen, data);
+    return data;
+  } catch (e) {
+    return null;
+  }
+}
+
+function tablebaseCategoryToEval(category, dtz, turn) {
+  // Convert tablebase category to eval from White's perspective
+  // category is from side-to-move's perspective, turn is 'w' or 'b'
+  const sign = turn === 'w' ? 1 : -1;
+  switch (category) {
+    case 'win':
+    case 'maybe-win':
+    case 'cursed-win':
+      return sign * Math.min(15, 10 + 5 / Math.max(1, Math.abs(dtz || 1)));
+    case 'loss':
+    case 'maybe-loss':
+    case 'blessed-loss':
+      return sign * Math.max(-15, -10 - 5 / Math.max(1, Math.abs(dtz || 1)));
+    case 'draw':
+    default:
+      return 0;
+  }
+}
+
+function handleTablebaseResult(tb, fen) {
+  const turn = fen.split(' ')[1];
+  const CATEGORY_LABELS = {
+    'win': 'Win', 'maybe-win': 'Win', 'cursed-win': 'Cursed Win',
+    'loss': 'Loss', 'maybe-loss': 'Loss', 'blessed-loss': 'Blessed Loss',
+    'draw': 'Draw'
+  };
+  const FLIP = {
+    'win': 'loss', 'loss': 'win',
+    'maybe-win': 'maybe-loss', 'maybe-loss': 'maybe-win',
+    'cursed-win': 'blessed-loss', 'blessed-loss': 'cursed-win',
+    'draw': 'draw'
+  };
+
+  AppState.multipvResults = {};
+  AppState.isTablebasePosition = true;
+
+  const moves = (tb.moves || []).slice(0, MULTI_PV_LINES);
+  moves.forEach((move, i) => {
+    const lineNum = i + 1;
+    // move.category is from the OPPONENT's perspective after the move — flip it
+    const forMover = FLIP[move.category] || move.category;
+    const moveEval = tablebaseCategoryToEval(forMover, move.dtz, turn);
+    const label = CATEGORY_LABELS[forMover] || forMover;
+    const dtzStr = move.dtz != null ? ` (DTZ ${Math.abs(move.dtz)})` : '';
+
+    AppState.multipvResults[lineNum] = {
+      depth: 'TB',
+      score: moveEval.toFixed(2),
+      scoreDisplay: `TB ${label}${dtzStr}`,
+      pv: move.uci,
+      multipv: lineNum,
+      mate: move.checkmate ? (turn === 'w' ? 1 : -1) : undefined,
+      tablebase: true
+    };
+  });
+
+  if (moves.length > 0) {
+    AppState.bestMoveInfo = { bestMove: moves[0].uci, ponder: null, tablebase: true };
+  }
+
+  AppState.engineBusy = false;
+  AppState.isAnalysisInProgress = false;
+
+  updateDisplay();
+
+  if (AppState.pendingAnalysisFen && AppState.pendingAnalysisId !== null) {
+    setTimeout(() => tryStartAnalysis(), 10);
+  }
+}
+
 // Utility functions
+// Viewport scaling — zoom the entire UI to fit the browser window
+const NATURAL_WIDTH = 1010; // 20px pad + 30px eval + 20px gap + 500px board + 20px gap + 400px panel + 20px pad
+
+function updateViewportScale() {
+  const wrapper = document.getElementById('scale-wrapper');
+  if (!wrapper) return;
+
+  const viewportWidth = window.innerWidth;
+  const scale = Math.min(1, viewportWidth / NATURAL_WIDTH);
+  wrapper.style.setProperty('--ui-scale', scale);
+
+  // Adjust body height so page doesn't overflow or leave a gap
+  // (transformed elements keep their original box in the DOM)
+  const naturalHeight = wrapper.scrollHeight;
+  document.body.style.height = (naturalHeight * scale) + 'px';
+}
+
 function clearCanvas(ctx, canvas) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
