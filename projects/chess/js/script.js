@@ -3,7 +3,7 @@
 const BOARD_SIZE = 500;
 const SQUARE_SIZE = BOARD_SIZE / 8;
 const ANALYSIS_DEBOUNCE_TIME = 200;
-const ANALYSIS_DEPTH = 15;
+const ANALYSIS_DEPTH = 22;
 const MULTI_PV_LINES = 3;
 
 // Accuracy calculation constants
@@ -46,7 +46,6 @@ const AppState = {
   pgnMainlineMoves: [],
   userMoves: [],
   currentIndex: 0,
-  analysisQueue: null,
   lastFen: '',
   isAnalysisInProgress: false,
   stockfishReady: false,
@@ -79,8 +78,10 @@ const AppState = {
   fenCache: [],                  // FEN per position for O(1) navigation
   cachedAccuracy: null,          // Cached { white, black } accuracy
   cachedAccuracyLength: 0,       // Eval count when accuracy was last computed
+  _accuracySums: { whiteTotal: 0, whiteCount: 0, blackTotal: 0, blackCount: 0 },
   notationDirty: true,           // Whether notation needs re-render
-  graphWorker: null              // Persistent worker for graph analysis
+  graphWorker: null,             // Persistent worker for graph analysis
+  hasLoadedOnce: false           // Skip init timeout on first load
 };
 
 // Initialize the application
@@ -110,19 +111,30 @@ function initializeApp() {
 
   AppState.board = Chessboard('myBoard', config);
 
+  // Cache frequently-accessed DOM elements
+  const arrowsCanvas = document.getElementById('arrows-overlay');
+  const evalGraph = document.getElementById('analysis-eval-graph');
+  AppState._els = {
+    evalBar: document.getElementById('eval-bar'),
+    arrowsCanvas: arrowsCanvas,
+    arrowsCtx: arrowsCanvas.getContext('2d'),
+    evalGraph: evalGraph,
+    evalGraphCtx: evalGraph.getContext('2d'),
+    stockfishLoading: document.getElementById('stockfish-loading'),
+    pgnInput: document.getElementById('pgn-input'),
+  };
+
   // Set up event listeners
   setupEventListeners();
 
   // Initialize empty eval graph
-  drawEvalGraph();
+  drawAnalysisEvalGraph();
 
   // Fetch Lichess game if ID provided (?game=AbCdEfGh&color=black)
   if (gameParam) {
     fetchLichessGame(gameParam);
   }
 }
-
-AppState.hasLoadedOnce = false;
 
 // Stockfish initialization
 function initializeStockfish() {
@@ -558,53 +570,81 @@ function updateStatusSection() {
   }
 }
 
+function _ensureEngineSectionDOM(container) {
+  if (container.querySelector('#engine-best-move')) return;
+  container.innerHTML = '';
+
+  // Best move display
+  const bestMoveDiv = document.createElement('div');
+  bestMoveDiv.id = 'engine-best-move';
+  bestMoveDiv.style.cssText = 'font-weight: bold; margin-bottom: 5px;';
+  container.appendChild(bestMoveDiv);
+
+  // MultiPV lines container
+  const linesContainer = document.createElement('div');
+  linesContainer.id = 'engine-lines';
+  linesContainer.style.cssText = 'height: 168px; overflow: hidden;';
+
+  for (let lineNum = 1; lineNum <= MULTI_PV_LINES; lineNum++) {
+    const lineDiv = document.createElement('div');
+    lineDiv.id = `engine-line-${lineNum}`;
+    lineDiv.style.cssText = 'height: 54px; font-size: 13px; overflow: hidden;';
+    linesContainer.appendChild(lineDiv);
+
+    if (lineNum < MULTI_PV_LINES) {
+      const hr = document.createElement('hr');
+      hr.style.cssText = 'border: none; border-top: 1px solid #eee; margin: 2px 0;';
+      linesContainer.appendChild(hr);
+    }
+  }
+  container.appendChild(linesContainer);
+
+  // Disabled state message
+  const disabledDiv = document.createElement('div');
+  disabledDiv.id = 'engine-disabled';
+  disabledDiv.style.cssText = 'color: #dc3545; background-color: #f8d7da; padding: 10px; border-radius: 3px; margin-bottom: 10px; display: none;';
+  disabledDiv.textContent = 'Engine is disabled. Toggle on to resume analysis.';
+  container.appendChild(disabledDiv);
+}
+
 function updateEngineSection() {
   const container = document.getElementById('ao-engine');
   if (!container) return;
-  container.innerHTML = '';
+
+  _ensureEngineSectionDOM(container);
+
+  const bestMoveEl = container.querySelector('#engine-best-move');
+  const linesEl = container.querySelector('#engine-lines');
+  const disabledEl = container.querySelector('#engine-disabled');
 
   if (AppState.engineEnabled) {
-    // Best Move
-    const bestMoveDiv = document.createElement('div');
-    const bestMoveText = AppState.bestMoveInfo ? AppState.bestMoveInfo.bestMove : '...';
-    bestMoveDiv.style.cssText = 'font-weight: bold; margin-bottom: 5px;';
-    bestMoveDiv.textContent = `Best Move: ${bestMoveText}`;
-    container.appendChild(bestMoveDiv);
+    bestMoveEl.style.display = '';
+    linesEl.style.display = '';
+    disabledEl.style.display = 'none';
 
-    // MultiPV lines
-    const linesContainer = document.createElement('div');
-    linesContainer.style.cssText = 'height: 168px; overflow: hidden;';
+    const bestMoveText = AppState.bestMoveInfo ? AppState.bestMoveInfo.bestMove : '...';
+    bestMoveEl.textContent = `Best Move: ${bestMoveText}`;
 
     for (let lineNum = 1; lineNum <= MULTI_PV_LINES; lineNum++) {
+      const lineDiv = container.querySelector(`#engine-line-${lineNum}`);
       const info = AppState.multipvResults[lineNum];
-      const lineDiv = document.createElement('div');
-      lineDiv.style.cssText = 'height: 54px; font-size: 13px; overflow: hidden;';
 
       if (info) {
         if (info.mate !== undefined) {
-          lineDiv.style.cssText += `background-color: ${info.mate > 0 ? '#d4edda' : '#f8d7da'}; padding: 0 5px; border-radius: 3px; font-weight: bold;`;
+          lineDiv.style.cssText = `height: 54px; font-size: 13px; overflow: hidden; background-color: ${info.mate > 0 ? '#d4edda' : '#f8d7da'}; padding: 0 5px; border-radius: 3px; font-weight: bold;`;
+        } else {
+          lineDiv.style.cssText = 'height: 54px; font-size: 13px; overflow: hidden;';
         }
         lineDiv.textContent = `${lineNum}. Score: ${info.scoreDisplay}\nLine: ${info.pv}`;
       } else {
-        lineDiv.style.color = '#999';
+        lineDiv.style.cssText = 'height: 54px; font-size: 13px; overflow: hidden; color: #999;';
         lineDiv.textContent = `${lineNum}. ...`;
       }
-
-      linesContainer.appendChild(lineDiv);
-
-      if (lineNum < MULTI_PV_LINES) {
-        const hr = document.createElement('hr');
-        hr.style.cssText = 'border: none; border-top: 1px solid #eee; margin: 2px 0;';
-        linesContainer.appendChild(hr);
-      }
     }
-
-    container.appendChild(linesContainer);
   } else {
-    const statusDiv = document.createElement('div');
-    statusDiv.style.cssText = 'color: #dc3545; background-color: #f8d7da; padding: 10px; border-radius: 3px; margin-bottom: 10px;';
-    statusDiv.textContent = 'Engine is disabled. Toggle on to resume analysis.';
-    container.appendChild(statusDiv);
+    bestMoveEl.style.display = 'none';
+    linesEl.style.display = 'none';
+    disabledEl.style.display = '';
   }
 }
 
@@ -695,9 +735,10 @@ function updateEvaluationBar() {
   if (!AppState.multipvResults[1]) return;
 
   const entry = AppState.multipvResults[1];
-  let effectiveEval;
+  const evalBar = AppState._els.evalBar;
+  const isFlipped = AppState.board.orientation() === 'black';
 
-  // The score is already stored from White's perspective in parseStockfishInfo
+  let effectiveEval;
   if (entry.mate !== undefined) {
     effectiveEval = (entry.mate > 0) ? 10 : -10;
   } else {
@@ -705,89 +746,61 @@ function updateEvaluationBar() {
     effectiveEval = Math.max(-10, Math.min(10, effectiveEval));
   }
 
-  // Compute the percentage of the bar that should be white.
   const whitePercentage = ((effectiveEval + 10) / 20) * 100;
 
-  const evalBar = document.getElementById('eval-bar');
-
-  // If board is flipped, reverse the gradient direction.
-  if (AppState.board.orientation() === 'black') {
-    if (whitePercentage <= 0) {
-      evalBar.style.background = "black";
-    } else if (whitePercentage >= 100) {
-      evalBar.style.background = "white";
-    } else {
-      evalBar.style.background = `linear-gradient(to bottom, white ${whitePercentage}%, black ${whitePercentage}%)`;
-    }
+  // Gradient direction depends on board orientation
+  if (whitePercentage <= 0) {
+    evalBar.style.background = 'black';
+  } else if (whitePercentage >= 100) {
+    evalBar.style.background = 'white';
   } else {
-    if (whitePercentage <= 0) {
-      evalBar.style.background = "black";
-    } else if (whitePercentage >= 100) {
-      evalBar.style.background = "white";
-    } else {
-      evalBar.style.background = `linear-gradient(to top, white ${whitePercentage}%, black ${whitePercentage}%)`;
-    }
+    const direction = isFlipped ? 'to bottom' : 'to top';
+    evalBar.style.background = `linear-gradient(${direction}, white ${whitePercentage}%, black ${whitePercentage}%)`;
   }
 
-  // --- Overlay the eval score at the bottom of the eval bar ---
-  let evalText = "";
-  if (entry.mate !== undefined) {
-    evalText = "M" + Math.abs(entry.mate);
-  } else {
-    evalText = entry.score;
-  }
-  
-  // Try to get an existing overlay element; if none exists, create one.
-  let overlay = document.getElementById('eval-overlay');
+  // Eval score overlay
+  const evalText = entry.mate !== undefined ? 'M' + Math.abs(entry.mate) : entry.score;
+
+  let overlay = AppState._els.evalOverlay;
   if (!overlay) {
     overlay = document.createElement('div');
-    overlay.id = "eval-overlay";
-    overlay.style.position = "absolute";
-    overlay.style.bottom = "0";
-    overlay.style.width = "100%";
-    overlay.style.textAlign = "center";
-    overlay.style.pointerEvents = "none";
-    overlay.style.fontFamily = "monospace";
-    overlay.style.fontSize = "10px";
+    overlay.id = 'eval-overlay';
+    overlay.style.cssText = 'position: absolute; bottom: 0; width: 100%; text-align: center; pointer-events: none; font-family: monospace; font-size: 10px;';
     evalBar.appendChild(overlay);
+    AppState._els.evalOverlay = overlay;
   }
-  // set text colour to opposite of orientation, for readability
-  let textColor;
-  
-  if (AppState.board.orientation() === 'black') {
-    // When board is flipped, gradient goes "to bottom" 
-    // Bottom of bar shows black when whitePercentage < 100
-    textColor = whitePercentage >= 100 ? "black" : "white";
-  } else {
-    // When board is normal, gradient goes "to top"
-    // Bottom of bar shows white when whitePercentage > 0
-    textColor = whitePercentage > 0 ? "black" : "white";
-  }
-  
+
+  const textColor = isFlipped
+    ? (whitePercentage >= 100 ? 'black' : 'white')
+    : (whitePercentage > 0 ? 'black' : 'white');
+
   overlay.style.color = textColor;
   overlay.textContent = evalText;
 }
 
 // Arrow drawing functions
 function updateBoardArrows() {
-  const canvas = document.getElementById('arrows-overlay');
-  const ctx = canvas.getContext('2d');
-  
+  const canvas = AppState._els.arrowsCanvas;
+  const ctx = AppState._els.arrowsCtx;
+
   // Clear canvas
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  
+
   // Don't draw if no analysis results or engine is disabled
   if (Object.keys(AppState.multipvResults).length === 0 || !AppState.engineEnabled) {
     return;
   }
-  
+
+  // Cache orientation for all arrows in this draw call
+  const isFlipped = AppState.board.orientation() === 'black';
+
   // Define drawing styles for each MultiPV index - original blue colors
   const styles = {
     1: { lineWidth: 8, alpha: 1 },
     2: { lineWidth: 5, alpha: 0.6 },
     3: { lineWidth: 3, alpha: 0.4 }
   };
-  
+
   const sortedKeys = Object.keys(AppState.multipvResults).sort((a, b) => a - b);
   sortedKeys.forEach(key => {
     const pv = AppState.multipvResults[key].pv;
@@ -799,13 +812,13 @@ function updateBoardArrows() {
     const from = move.substring(0, 2);
     const to = move.substring(2, 4);
     const style = styles[key] || { lineWidth: 4, alpha: 0.7 };
-    drawArrow(ctx, from, to, style.lineWidth, style.alpha);
+    drawArrow(ctx, from, to, style.lineWidth, style.alpha, isFlipped);
   });
 }
 
-function drawArrow(ctx, from, to, lineWidth, alpha) {
-  const startPos = getSquareCenter(from);
-  const endPos = getSquareCenter(to);
+function drawArrow(ctx, from, to, lineWidth, alpha, isFlipped) {
+  const startPos = getSquareCenter(from, isFlipped);
+  const endPos = getSquareCenter(to, isFlipped);
   
   const headLength = 16; // Length of the arrowhead (along the arrow direction)
   const dx = endPos.x - startPos.x;
@@ -851,21 +864,15 @@ function drawArrow(ctx, from, to, lineWidth, alpha) {
   ctx.fill();
 }
 
-function getSquareCenter(square) {
+function getSquareCenter(square, isFlipped) {
   const file = square.charCodeAt(0) - 'a'.charCodeAt(0);
   const rank = parseInt(square[1], 10) - 1;
-  const isFlipped = AppState.board.orientation() === 'black';
-  
+  if (isFlipped === undefined) isFlipped = AppState.board.orientation() === 'black';
+
   const x = (isFlipped ? 7 - file : file) * SQUARE_SIZE + SQUARE_SIZE / 2;
   const y = (isFlipped ? rank : 7 - rank) * SQUARE_SIZE + SQUARE_SIZE / 2;
   
   return { x, y };
-}
-
-// Evaluation graph drawing
-function drawEvalGraph() {
-  // Draw in the analysis container
-  drawAnalysisEvalGraph();
 }
 
 // Preload full engine in background
@@ -989,12 +996,6 @@ function toggleEngine() {
     AppState.currentAnalysisId++;
     AppState.isAnalysisInProgress = false;
     
-    // Clear any pending analysis timeout
-    if (AppState.analysisQueue) {
-      clearTimeout(AppState.analysisQueue);
-      AppState.analysisQueue = null;
-    }
-    
     // Clear arrows immediately
     const canvas = document.getElementById('arrows-overlay');
     if (canvas) {
@@ -1007,32 +1008,25 @@ function toggleEngine() {
 }
 
 // Navigation functions
-function navigateToPreviousMove() {
-  if (AppState.currentIndex <= 0) return;
 
-  AppState.currentIndex--;
+// Shared tail for all navigation — rebuild state, update UI, trigger analysis
+function _applyNavigation() {
   rebuildGameFromMoves();
-
-  // Update game status for the new position
   updateGameStatus();
-
-  // Update display immediately
   AppState.notationDirty = true;
   updateDisplay();
-  
-  // Update graph to show current position
-  if (AppState.gameLoaded) {
-    drawEvalGraph();
-  }
-  
-  // Update Stockfish analysis last
-  if (AppState.engineEnabled) {
-    updateStockfishAnalysis();
-  }
+  if (AppState.gameLoaded) drawAnalysisEvalGraph();
+  if (AppState.engineEnabled) updateStockfishAnalysis();
+}
+
+function navigateToPreviousMove() {
+  if (AppState.currentIndex <= 0) return;
+  AppState.currentIndex--;
+  _applyNavigation();
 }
 
 function navigateToNextMove() {
-  if (AppState.pgnMainlineMoves.length > 0 && 
+  if (AppState.pgnMainlineMoves.length > 0 &&
       AppState.currentIndex < AppState.pgnMainlineMoves.length) {
     // Follow mainline
     const mainlineMove = AppState.pgnMainlineMoves[AppState.currentIndex];
@@ -1043,75 +1037,20 @@ function navigateToNextMove() {
   } else if (AppState.currentIndex >= AppState.userMoves.length) {
     return;
   }
-  
   AppState.currentIndex++;
-  rebuildGameFromMoves();
-
-  // Update game status for the new position
-  updateGameStatus();
-
-  // Update display immediately
-  AppState.notationDirty = true;
-  updateDisplay();
-
-  // Update graph to show current position
-  if (AppState.gameLoaded) {
-    drawEvalGraph();
-  }
-
-  // Update Stockfish analysis last
-  if (AppState.engineEnabled) {
-    updateStockfishAnalysis();
-  }
+  _applyNavigation();
 }
 
 function navigateToMove(targetIndex) {
   if (targetIndex < 0 || targetIndex > AppState.userMoves.length) return;
-
   AppState.currentIndex = targetIndex;
-  rebuildGameFromMoves();
-
-  // Update game status for the new position
-  updateGameStatus();
-
-  // Update display immediately
-  AppState.notationDirty = true;
-  updateDisplay();
-
-  // Update graph to show current position
-  if (AppState.gameLoaded) {
-    drawEvalGraph();
-  }
-
-  // Update Stockfish analysis last
-  if (AppState.engineEnabled) {
-    updateStockfishAnalysis();
-  }
+  _applyNavigation();
 }
 
-// Navigate to the starting position (before any moves)
 function navigateToStart() {
   if (AppState.currentIndex === 0) return;
-
   AppState.currentIndex = 0;
-  rebuildGameFromMoves();
-
-  // Update game status for the new position
-  updateGameStatus();
-
-  // Update display immediately
-  AppState.notationDirty = true;
-  updateDisplay();
-  
-  // Update graph to show current position
-  if (AppState.gameLoaded) {
-    drawEvalGraph();
-  }
-  
-  // Update Stockfish analysis last
-  if (AppState.engineEnabled) {
-    updateStockfishAnalysis();
-  }
+  _applyNavigation();
 }
 
 // Graph interaction functions
@@ -1374,6 +1313,9 @@ function loadPGNFromText(pgnText) {
   AppState.graphEvalHistory = new Array(AppState.graphMainlineMoves.length + 1);
   AppState.graphEvalHistory[0] = 0.0; // Starting position is equal
   AppState.moveClassifications = new Array(AppState.graphMainlineMoves.length + 1);
+  AppState._accuracySums = { whiteTotal: 0, whiteCount: 0, blackTotal: 0, blackCount: 0 };
+  AppState.cachedAccuracy = null;
+  AppState.cachedAccuracyLength = 0;
   AppState.notationDirty = true;
 
   // Reset to starting position
@@ -1390,7 +1332,7 @@ function loadPGNFromText(pgnText) {
     updateStockfishAnalysis();
   }
   updateDisplay();
-  drawEvalGraph();
+  drawAnalysisEvalGraph();
 }
 
 // Fetch a game from Lichess by ID or URL and load it
@@ -1514,8 +1456,9 @@ function analyzeGraphPositions() {
         }
 
         AppState.graphEvalHistory[pos.moveIndex] = evalScore;
-        updateMoveClassifications();
-        drawEvalGraph();
+        updateMoveClassifications(pos.moveIndex);
+        updateIncrementalAccuracy(pos.moveIndex);
+        drawAnalysisEvalGraph();
         AppState.notationDirty = true;
         updateAnalysisOutput();
       }
@@ -1575,11 +1518,6 @@ function parseStockfishInfoForGraph(message, fen) {
 // Board control functions
 function resetBoard() {
   // Stop analysis
-  if (AppState.analysisQueue) {
-    clearTimeout(AppState.analysisQueue);
-    AppState.analysisQueue = null;
-  }
-  
   if (AppState.stockfish) {
     AppState.stockfish.postMessage('stop');
   }
@@ -1613,6 +1551,7 @@ function resetBoard() {
   AppState.fenCache = [];
   AppState.cachedAccuracy = null;
   AppState.cachedAccuracyLength = 0;
+  AppState._accuracySums = { whiteTotal: 0, whiteCount: 0, blackTotal: 0, blackCount: 0 };
   AppState.notationDirty = true;
   if (AppState.graphWorker) {
     try { AppState.graphWorker.terminate(); } catch (e) {}
@@ -1631,7 +1570,7 @@ function resetBoard() {
   );
   
   // Clear eval graph
-  drawEvalGraph();
+  drawAnalysisEvalGraph();
   
   // Restart analysis
   setTimeout(() => {
@@ -1812,7 +1751,7 @@ function setupEventListeners() {
     if (Object.keys(AppState.multipvResults).length > 0) {
       updateBoardArrows();
     }
-    drawEvalGraph();
+    drawAnalysisEvalGraph();
   }, 250));
   
   // Click handler for interactive notation moves
@@ -1902,44 +1841,34 @@ function calculateMoveAccuracy(evalBefore, evalAfter, isWhiteMove) {
 }
 
 // Calculate game accuracy for both players
+// Incrementally update accuracy running sums for a single move
+function updateIncrementalAccuracy(moveIndex) {
+  if (moveIndex < 1) return;
+  const evalBefore = AppState.graphEvalHistory[moveIndex - 1];
+  const evalAfter = AppState.graphEvalHistory[moveIndex];
+  if (evalBefore === undefined || evalAfter === undefined) return;
+
+  const isWhiteMove = (moveIndex % 2 === 1);
+  const accuracy = calculateMoveAccuracy(evalBefore, evalAfter, isWhiteMove);
+  const sums = AppState._accuracySums;
+
+  if (isWhiteMove) {
+    sums.whiteTotal += accuracy;
+    sums.whiteCount++;
+  } else {
+    sums.blackTotal += accuracy;
+    sums.blackCount++;
+  }
+
+  // Invalidate cache so graph picks up new values
+  AppState.cachedAccuracy = null;
+}
+
+// Calculate game accuracy from running sums (O(1))
 function calculateGameAccuracy() {
-  if (!AppState.graphEvalHistory || AppState.graphEvalHistory.length < 2) {
-    return { white: null, black: null };
-  }
-
-  const whiteAccuracies = [];
-  const blackAccuracies = [];
-
-  // graphEvalHistory[i] = eval after move i (from white's perspective)
-  // Index 0 = starting position
-  // Index 1 = after white's first move
-  // Index 2 = after black's first move
-  // etc.
-
-  for (let i = 1; i < AppState.graphEvalHistory.length; i++) {
-    const evalBefore = AppState.graphEvalHistory[i - 1];
-    const evalAfter = AppState.graphEvalHistory[i];
-
-    // Skip if either eval is undefined
-    if (evalBefore === undefined || evalAfter === undefined) continue;
-
-    const isWhiteMove = (i % 2 === 1); // Odd indices are white's moves
-    const accuracy = calculateMoveAccuracy(evalBefore, evalAfter, isWhiteMove);
-
-    if (isWhiteMove) {
-      whiteAccuracies.push(accuracy);
-    } else {
-      blackAccuracies.push(accuracy);
-    }
-  }
-
-  // Calculate average accuracy
-  const avgWhite = whiteAccuracies.length > 0
-    ? whiteAccuracies.reduce((a, b) => a + b, 0) / whiteAccuracies.length
-    : null;
-  const avgBlack = blackAccuracies.length > 0
-    ? blackAccuracies.reduce((a, b) => a + b, 0) / blackAccuracies.length
-    : null;
+  const sums = AppState._accuracySums;
+  const avgWhite = sums.whiteCount > 0 ? sums.whiteTotal / sums.whiteCount : null;
+  const avgBlack = sums.blackCount > 0 ? sums.blackTotal / sums.blackCount : null;
 
   return {
     white: avgWhite !== null ? Math.round(avgWhite * 10) / 10 : null,
@@ -1985,26 +1914,34 @@ function classifyMove(evalBefore, evalAfter, isWhiteMove) {
   return MOVE_CLASSIFICATION.BLUNDER;
 }
 
-// Update move classifications based on graph eval history
-function updateMoveClassifications() {
-  if (!AppState.graphEvalHistory || AppState.graphEvalHistory.length < 2) {
-    return;
-  }
+// Update move classification for a single move (incremental — O(1) per call)
+function updateMoveClassifications(moveIndex) {
+  if (!AppState.graphEvalHistory || AppState.graphEvalHistory.length < 2) return;
 
-  // Initialize array if needed
+  // Ensure array is correctly sized
   if (AppState.moveClassifications.length !== AppState.graphEvalHistory.length) {
     AppState.moveClassifications = new Array(AppState.graphEvalHistory.length);
   }
 
-  for (let i = 1; i < AppState.graphEvalHistory.length; i++) {
-    const evalBefore = AppState.graphEvalHistory[i - 1];
-    const evalAfter = AppState.graphEvalHistory[i];
+  // Only classify the single move that just got a new eval
+  if (moveIndex >= 1) {
+    const evalBefore = AppState.graphEvalHistory[moveIndex - 1];
+    const evalAfter = AppState.graphEvalHistory[moveIndex];
+    if (evalBefore !== undefined && evalAfter !== undefined) {
+      const isWhiteMove = (moveIndex % 2 === 1);
+      AppState.moveClassifications[moveIndex] = classifyMove(evalBefore, evalAfter, isWhiteMove);
+    }
+  }
 
-    // Skip if either eval is undefined
-    if (evalBefore === undefined || evalAfter === undefined) continue;
-
-    const isWhiteMove = (i % 2 === 1);
-    AppState.moveClassifications[i] = classifyMove(evalBefore, evalAfter, isWhiteMove);
+  // Also reclassify the next move if it exists (its "before" eval just changed)
+  const nextIndex = moveIndex + 1;
+  if (nextIndex < AppState.graphEvalHistory.length) {
+    const evalBefore = AppState.graphEvalHistory[nextIndex - 1];
+    const evalAfter = AppState.graphEvalHistory[nextIndex];
+    if (evalBefore !== undefined && evalAfter !== undefined) {
+      const isWhiteMove = (nextIndex % 2 === 1);
+      AppState.moveClassifications[nextIndex] = classifyMove(evalBefore, evalAfter, isWhiteMove);
+    }
   }
 }
 
@@ -2016,12 +1953,8 @@ function clearCanvas(ctx, canvas) {
 function debounce(func, wait) {
   let timeout;
   return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
     clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
+    timeout = setTimeout(() => func(...args), wait);
   };
 }
 
