@@ -1440,13 +1440,6 @@ async function fetchLichessGame(gameIdOrUrl) {
     // Load the game
     loadPGNFromText(pgn);
 
-    // Flip board if user played black
-    const colorParam = new URLSearchParams(window.location.search).get('color');
-    console.log('[HJD] color param:', colorParam, 'orientation before flip:', AppState.board.orientation());
-    if (colorParam === 'black') {
-      flipBoard();
-      console.log('[HJD] flipped, orientation now:', AppState.board.orientation());
-    }
 
   } catch (error) {
     showError(error.message || 'Failed to fetch game from Lichess.');
