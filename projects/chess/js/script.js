@@ -51,7 +51,6 @@ const AppState = {
   isAnalysisInProgress: false,
   stockfishReady: false,
   arrowsEnabled: true,
-  evalHistory: [], // Store evaluation for each position
   gameLoaded: false,
   engineEnabled: true, // New state for engine toggle
   selectedEngine: 'lite', // Current engine selection
@@ -1219,7 +1218,7 @@ function drawAnalysisEvalGraph() {
   ctx.lineTo(margin.left + chartWidth, margin.top + chartHeight);
   ctx.stroke();
   
-  // ONLY CHANGE: Use graphEvalHistory instead of evalHistory
+  // Use graphEvalHistory for graph display
   if (AppState.graphEvalHistory.length <= 1) {
     AppState.graphClickAreas = [];
     return;
@@ -1597,7 +1596,6 @@ function resetBoard() {
   AppState.userMoves = [];
   AppState.pgnMainlineMoves = [];
   AppState.currentIndex = 0;
-  AppState.evalHistory = [];
   AppState.gameLoaded = false;
   AppState.gameStatus = 'ongoing';
   AppState.checkmateWinner = null;
