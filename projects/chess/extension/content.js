@@ -32,14 +32,12 @@ function detectUserColor() {
   if (path.endsWith('/black')) return 'black';
   if (path.endsWith('/white')) return 'white';
 
-  // Detect from Lichess board orientation — the board is always oriented
-  // with the user's colour at the bottom. The cg-wrap element has
-  // orientation-white or orientation-black as a class.
-  const cgWrap = document.querySelector('cg-wrap');
-  if (cgWrap) {
-    if (cgWrap.classList.contains('orientation-black')) return 'black';
-    if (cgWrap.classList.contains('orientation-white')) return 'white';
-  }
+  // Search for orientation class on ANY element — covers both
+  // <cg-wrap> custom elements and <div class="cg-wrap"> variants
+  const blackOriented = document.querySelector('.orientation-black');
+  if (blackOriented) return 'black';
+  const whiteOriented = document.querySelector('.orientation-white');
+  if (whiteOriented) return 'white';
 
   // Fallback: check the .ruser-bottom element for colour
   const bottomUser = document.querySelector('.ruser-bottom');
@@ -56,15 +54,22 @@ function createButton(gameId) {
   const btn = document.createElement('a');
   btn.className = 'hjd-analyse-btn';
 
-  const color = detectUserColor();
-  let href = `${ANALYSIS_URL}?game=${gameId}`;
-  if (color === 'black') href += '&flip=1';
-
-  btn.href = href;
+  // Base href — colour detection happens at click time so the board
+  // has fully rendered (cg-wrap orientation may not exist at inject time)
+  btn.href = `${ANALYSIS_URL}?game=${gameId}`;
   btn.target = '_blank';
   btn.rel = 'noopener';
   btn.textContent = 'hjd';
   btn.title = 'Open in HJD Chess Analysis';
+
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    const color = detectUserColor();
+    let href = `${ANALYSIS_URL}?game=${gameId}`;
+    if (color === 'black') href += '&flip=1';
+    window.open(href, '_blank', 'noopener');
+  });
+
   return btn;
 }
 
