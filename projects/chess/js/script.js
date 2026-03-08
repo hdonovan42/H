@@ -110,6 +110,7 @@ function initializeApp() {
   };
 
   AppState.board = Chessboard('myBoard', config);
+  console.log('[HJD] after board init:', AppState.board.orientation());
 
   // Set up event listeners
   setupEventListeners();
@@ -120,6 +121,19 @@ function initializeApp() {
   // Fetch Lichess game if ID provided (?game=AbCdEfGh&color=black)
   if (gameParam) {
     fetchLichessGame(gameParam);
+  }
+
+  // Monitor orientation changes
+  if (colorParam === 'black') {
+    const checkInterval = setInterval(() => {
+      const o = AppState.board.orientation();
+      console.log('[HJD] orientation check:', o);
+      if (o === 'white') {
+        console.trace('[HJD] ORIENTATION RESET TO WHITE');
+        clearInterval(checkInterval);
+      }
+    }, 100);
+    setTimeout(() => clearInterval(checkInterval), 10000);
   }
 }
 
