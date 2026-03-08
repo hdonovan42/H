@@ -2156,6 +2156,9 @@ function updateViewportScale() {
   const scale = Math.min(1.2, viewportWidth / NATURAL_WIDTH);
   wrapper.style.setProperty('--ui-scale', scale);
 
+  // Shrink text 20% when scaled up to >=1x (counteracts the zoom on text)
+  wrapper.style.fontSize = scale >= 1 ? '80%' : '';
+
   // Adjust body height so page doesn't overflow or leave a gap
   // (transformed elements keep their original box in the DOM)
   const naturalHeight = wrapper.scrollHeight;
