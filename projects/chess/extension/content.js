@@ -54,20 +54,18 @@ function createButton(gameId) {
   const btn = document.createElement('a');
   btn.className = 'hjd-analyse-btn';
 
-  // Base href — colour detection happens at click time so the board
-  // has fully rendered (cg-wrap orientation may not exist at inject time)
   btn.href = `${ANALYSIS_URL}?game=${gameId}`;
   btn.target = '_blank';
   btn.rel = 'noopener';
   btn.textContent = 'hjd';
   btn.title = 'Open in HJD Chess Analysis';
 
-  btn.addEventListener('click', (e) => {
-    e.preventDefault();
+  // Update href at click time with colour param
+  btn.addEventListener('mousedown', () => {
     const color = detectUserColor();
     let href = `${ANALYSIS_URL}?game=${gameId}`;
-    if (color === 'black') href += '&flip=1';
-    window.open(href, '_blank', 'noopener');
+    if (color === 'black') href += '&color=black';
+    btn.href = href;
   });
 
   return btn;
