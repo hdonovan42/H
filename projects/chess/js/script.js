@@ -81,7 +81,9 @@ const AppState = {
   _accuracySums: { whiteTotal: 0, whiteCount: 0, blackTotal: 0, blackCount: 0 },
   notationDirty: true,           // Whether notation needs re-render
   graphWorker: null,             // Persistent worker for graph analysis
-  hasLoadedOnce: false           // Skip init timeout on first load
+  hasLoadedOnce: false,          // Skip init timeout on first load
+  _lastArrowKey: '',             // Arrow fingerprint for skip-redraw optimisation
+  _graphRAFPending: false        // Throttle flag for graph hover RAF
 };
 
 // Initialize the application
@@ -503,9 +505,8 @@ function updateDisplay() {
     updateBoardArrows();
   } else {
     // Clear arrows if disabled
-    const canvas = document.getElementById('arrows-overlay');
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const canvas = AppState._els.arrowsCanvas;
+    AppState._els.arrowsCtx.clearRect(0, 0, canvas.width, canvas.height);
   }
 }
 
@@ -782,19 +783,26 @@ function updateEvaluationBar() {
 function updateBoardArrows() {
   const canvas = AppState._els.arrowsCanvas;
   const ctx = AppState._els.arrowsCtx;
+  const isFlipped = AppState.board.orientation() === 'black';
+
+  // Compute lightweight fingerprint of current arrow state
+  const arrowKey = Object.keys(AppState.multipvResults).length === 0 || !AppState.engineEnabled
+    ? ''
+    : Object.keys(AppState.multipvResults)
+        .sort()
+        .map(k => AppState.multipvResults[k]?.pv?.split(' ')[0] || '')
+        .join(',') + (isFlipped ? ':b' : ':w');
+
+  // Skip redraw if arrows haven't changed
+  if (arrowKey === AppState._lastArrowKey) return;
+  AppState._lastArrowKey = arrowKey;
 
   // Clear canvas
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Don't draw if no analysis results or engine is disabled
-  if (Object.keys(AppState.multipvResults).length === 0 || !AppState.engineEnabled) {
-    return;
-  }
+  if (!arrowKey) return;
 
-  // Cache orientation for all arrows in this draw call
-  const isFlipped = AppState.board.orientation() === 'black';
-
-  // Define drawing styles for each MultiPV index - original blue colors
+  // Define drawing styles for each MultiPV index
   const styles = {
     1: { lineWidth: 8, alpha: 1 },
     2: { lineWidth: 5, alpha: 0.6 },
@@ -997,11 +1005,8 @@ function toggleEngine() {
     AppState.isAnalysisInProgress = false;
     
     // Clear arrows immediately
-    const canvas = document.getElementById('arrows-overlay');
-    if (canvas) {
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-    }
+    const canvas = AppState._els.arrowsCanvas;
+    AppState._els.arrowsCtx.clearRect(0, 0, canvas.width, canvas.height);
   }
   
   updateDisplay();
@@ -1055,7 +1060,7 @@ function navigateToStart() {
 
 // Graph interaction functions
 function handleGraphMouseMove(e) {
-  const canvas = document.getElementById('analysis-eval-graph');
+  const canvas = AppState._els ? AppState._els.evalGraph : document.getElementById('analysis-eval-graph');
   if (!canvas || AppState.graphClickAreas.length === 0) return;
   
   const rect = canvas.getBoundingClientRect();
@@ -1089,7 +1094,7 @@ function handleGraphMouseMove(e) {
 }
 
 function handleGraphClick(e) {
-  const canvas = document.getElementById('analysis-eval-graph');
+  const canvas = AppState._els ? AppState._els.evalGraph : document.getElementById('analysis-eval-graph');
   if (!canvas || AppState.graphClickAreas.length === 0) return;
   
   const rect = canvas.getBoundingClientRect();
@@ -1118,10 +1123,10 @@ function handleGraphClick(e) {
 
 // MINIMAL CHANGE: Graph drawing uses graph data
 function drawAnalysisEvalGraph() {
-  const canvas = document.getElementById('analysis-eval-graph');
+  const canvas = AppState._els ? AppState._els.evalGraph : document.getElementById('analysis-eval-graph');
   if (!canvas) return;
-  
-  const ctx = canvas.getContext('2d');
+
+  const ctx = AppState._els ? AppState._els.evalGraphCtx : canvas.getContext('2d');
   const width = canvas.width;
   const height = canvas.height;
   
@@ -1402,7 +1407,11 @@ function analyzeGraphPositions() {
     positions.push({ fen: tempGame.fen(), moveIndex: i + 1 });
   }
 
-  // Terminate any existing graph worker
+  // Terminate any existing graph worker and its timeout
+  if (AppState._graphWorkerTimeout) {
+    clearTimeout(AppState._graphWorkerTimeout);
+    AppState._graphWorkerTimeout = null;
+  }
   if (AppState.graphWorker) {
     try { AppState.graphWorker.terminate(); } catch (e) {}
     AppState.graphWorker = null;
@@ -1419,7 +1428,9 @@ function analyzeGraphPositions() {
       try { worker.terminate(); } catch (e) {}
       AppState.graphWorker = null;
     }
+    AppState._graphWorkerTimeout = null;
   }, positions.length * 5000);
+  AppState._graphWorkerTimeout = totalTimeout;
 
   function sendNext() {
     if (idx >= positions.length) {
@@ -1543,6 +1554,7 @@ function resetBoard() {
   AppState.graphClickAreas = [];
   AppState.graphHoverIndex = -1;
   AppState.graphDrawn = false;
+  AppState._lastArrowKey = '';
   AppState.graphMainlineMoves = [];
   AppState.graphEvalHistory = [];
   AppState.moveClassifications = [];
@@ -1563,11 +1575,8 @@ function resetBoard() {
   AppState.board.start();
   
   // Clear UI
-  document.getElementById('pgn-input').value = '';
-  clearCanvas(
-    document.getElementById('arrows-overlay').getContext('2d'),
-    document.getElementById('arrows-overlay')
-  );
+  AppState._els.pgnInput.value = '';
+  clearCanvas(AppState._els.arrowsCtx, AppState._els.arrowsCanvas);
   
   // Clear eval graph
   drawAnalysisEvalGraph();
@@ -1671,50 +1680,64 @@ function showPromotionGrid(color) {
     grid.appendChild(pieceDiv);
   });
   
+  // Click overlay (outside grid) to cancel
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) cancelPromotion();
+  });
+
+  // ESC key to cancel
+  AppState._promotionEscHandler = (e) => {
+    if (e.key === 'Escape') cancelPromotion();
+  };
+  document.addEventListener('keydown', AppState._promotionEscHandler);
+
   overlay.appendChild(grid);
   document.getElementById('board-container').appendChild(overlay);
 }
 
+function cancelPromotion() {
+  AppState.promotionPending = false;
+  AppState.promotionMove = null;
+  _removePromotionOverlay();
+  // Snap piece back to pre-move position
+  AppState.board.position(AppState.game.fen());
+}
+
+function _removePromotionOverlay() {
+  const overlay = document.getElementById('promotion-overlay');
+  if (overlay) overlay.remove();
+  if (AppState._promotionEscHandler) {
+    document.removeEventListener('keydown', AppState._promotionEscHandler);
+    AppState._promotionEscHandler = null;
+  }
+}
+
 function handlePromotionChoice(promotionPiece) {
   if (!AppState.promotionPending || !AppState.promotionMove) return;
-  
-  // Execute the promotion move
+
   const move = AppState.game.move({
     from: AppState.promotionMove.from,
     to: AppState.promotionMove.to,
     promotion: promotionPiece
   });
-  
+
   if (move) {
-    // Update move history
     AppState.userMoves = AppState.game.history();
     AppState.currentIndex = AppState.userMoves.length;
-    
-    // Update board position
     AppState.board.position(AppState.game.fen());
-    
-    // Check for game ending conditions
     updateGameStatus();
-    
-    if (AppState.engineEnabled) {
-      updateStockfishAnalysis();
-    }
+    if (AppState.engineEnabled) updateStockfishAnalysis();
     updateDisplay();
   }
-  
-  // Clean up promotion state
+
   AppState.promotionPending = false;
   AppState.promotionMove = null;
-  
-  // Remove promotion grid
-  const overlay = document.getElementById('promotion-overlay');
-  if (overlay) {
-    overlay.remove();
-  }
+  _removePromotionOverlay();
 }
 
 function flipBoard() {
   AppState.board.flip();
+  AppState._lastArrowKey = ''; // Force arrow redraw on flip
   updateDisplay();
 }
 
