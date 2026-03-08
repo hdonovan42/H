@@ -2153,7 +2153,7 @@ function updateViewportScale() {
   if (!wrapper) return;
 
   const viewportWidth = window.innerWidth;
-  const scale = Math.min(1.5, viewportWidth / NATURAL_WIDTH);
+  const scale = Math.min(1.2, viewportWidth / NATURAL_WIDTH);
   wrapper.style.setProperty('--ui-scale', scale);
 
   // Adjust body height so page doesn't overflow or leave a gap
