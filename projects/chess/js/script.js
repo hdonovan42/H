@@ -105,11 +105,12 @@ function initializeApp() {
   // Initialize empty eval graph
   drawEvalGraph();
 
-  // Check for Lichess game ID in URL parameters (?game=AbCdEfGh)
+  // Check for Lichess game ID in URL parameters (?game=AbCdEfGh&flip=1)
   const urlParams = new URLSearchParams(window.location.search);
   const gameParam = urlParams.get('game');
   if (gameParam) {
-    fetchLichessGame(gameParam);
+    const shouldFlip = urlParams.get('flip') === '1';
+    fetchLichessGame(gameParam, shouldFlip);
   }
 }
 
@@ -1363,7 +1364,7 @@ function loadPGNFromText(pgnText) {
 }
 
 // Fetch a game from Lichess by ID or URL and load it
-async function fetchLichessGame(gameIdOrUrl) {
+async function fetchLichessGame(gameIdOrUrl, shouldFlip = false) {
   // Extract game ID from various URL formats
   let gameId = gameIdOrUrl.trim();
 
@@ -1408,6 +1409,11 @@ async function fetchLichessGame(gameIdOrUrl) {
     // Load the game
     loadPGNFromText(pgn);
 
+    // Auto-flip board if user played black
+    if (shouldFlip || detectBlackFromPGN(pgn, gameId)) {
+      AppState.board.flip();
+    }
+
   } catch (error) {
     showError(error.message || 'Failed to fetch game from Lichess.');
   } finally {
@@ -1415,6 +1421,25 @@ async function fetchLichessGame(gameIdOrUrl) {
       loadingEl.style.display = 'none';
     }
   }
+}
+
+// Detect if user played black from PGN + URL hint
+function detectBlackFromPGN(pgn, gameId) {
+  // Check if the original Lichess URL had /black suffix
+  const urlParams = new URLSearchParams(window.location.search);
+  const gameParam = urlParams.get('game') || '';
+  if (gameParam.includes('/black')) return true;
+
+  // Check if the game URL in the PGN Site header ends with the game ID
+  // and the game param included a /black hint
+  const siteMatch = pgn.match(/\[Site\s+"([^"]+)"\]/);
+  if (siteMatch && siteMatch[1].includes('lichess.org')) {
+    // For Lichess games, check the Black header against known username patterns
+    // This is a fallback — the extension's flip=1 param is the primary method
+    return false;
+  }
+
+  return false;
 }
 
 function analyzeGraphPositions() {

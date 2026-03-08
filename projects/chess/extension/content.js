@@ -26,10 +26,39 @@ function isGamePage() {
   return /^[a-zA-Z0-9]{8}$/.test(firstSegment);
 }
 
+function detectUserColor() {
+  // Check URL suffix: /black means user played black
+  const path = window.location.pathname;
+  if (path.endsWith('/black')) return 'black';
+  if (path.endsWith('/white')) return 'white';
+
+  // Try to get logged-in username from Lichess page
+  const userLink = document.querySelector('#user_tag');
+  if (userLink) {
+    const username = userLink.textContent.trim().toLowerCase();
+    // Check player names on game page
+    const players = document.querySelectorAll('.game__meta .player .user-link');
+    for (const el of players) {
+      const name = el.textContent.trim().toLowerCase();
+      if (name === username) {
+        // Check if this player element is in the bottom (black) position
+        const isBottom = el.closest('.ruser-bottom') || el.closest('.player.color-icon.is.black');
+        return isBottom ? 'black' : null; // null = white or unknown, no flip needed
+      }
+    }
+  }
+  return null;
+}
+
 function createButton(gameId) {
   const btn = document.createElement('a');
   btn.className = 'hjd-analyse-btn';
-  btn.href = `${ANALYSIS_URL}?game=${gameId}`;
+
+  const color = detectUserColor();
+  let href = `${ANALYSIS_URL}?game=${gameId}`;
+  if (color === 'black') href += '&flip=1';
+
+  btn.href = href;
   btn.target = '_blank';
   btn.rel = 'noopener';
   btn.textContent = 'HJD Analysis';
