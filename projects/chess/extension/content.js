@@ -61,7 +61,7 @@ function createButton(gameId) {
   btn.href = href;
   btn.target = '_blank';
   btn.rel = 'noopener';
-  btn.textContent = 'HJD Analysis';
+  btn.textContent = 'hjd';
   btn.title = 'Open in HJD Chess Analysis';
   return btn;
 }
