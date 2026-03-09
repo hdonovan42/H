@@ -2222,7 +2222,9 @@ function updateViewportScale() {
 
 function adjustZoom(delta) {
   const current = userZoomOverride !== null ? userZoomOverride : computeAutoScale();
-  userZoomOverride = Math.round(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, current + delta)) * 100) / 100;
+  // Snap to nearest 5% step, then apply delta
+  const snapped = Math.round(current / ZOOM_STEP) * ZOOM_STEP;
+  userZoomOverride = Math.round(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, snapped + delta)) * 100) / 100;
   saveZoomPreference();
   updateViewportScale();
 }
