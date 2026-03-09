@@ -1251,13 +1251,13 @@ function initEvalChart() {
               return `${moveNum}${side} ${san}`;
             },
             label: (item) => {
-              const val = item.parsed.y;
-              if (val === undefined || val === null) return '';
-              if (Math.abs(val) > 10) {
-                const mateIn = Math.round(5 / (Math.abs(val) - 10));
-                return val > 0 ? `#${mateIn}` : `#-${mateIn}`;
+              const raw = AppState.graphEvalHistory[item.dataIndex];
+              if (raw === undefined || raw === null) return '';
+              if (Math.abs(raw) > 10) {
+                const mateIn = Math.round(5 / (Math.abs(raw) - 10));
+                return raw > 0 ? `#${mateIn}` : `#-${mateIn}`;
               }
-              return val > 0 ? `+${val.toFixed(1)}` : val.toFixed(1);
+              return raw > 0 ? `+${raw.toFixed(1)}` : raw.toFixed(1);
             }
           }
         }
@@ -1297,7 +1297,7 @@ function drawAnalysisEvalGraph() {
   for (let i = 0; i < len; i++) {
     labels.push(i);
     const val = evalHistory[i];
-    const evalVal = (val !== undefined) ? Math.max(-10, Math.min(10, val)) : null;
+    const evalVal = (val !== undefined) ? Math.max(-11, Math.min(11, val)) : null;
     evalData.push(evalVal);
 
     // Classification markers — only show blunders, brilliancies, and great moves
