@@ -222,7 +222,7 @@ input:checked + .toggle-slider:before {
 #eval-graph-container {
   position: relative;
   width: 100%;
-  height: 150px;
+  height: 156px;
   border-bottom: 1px solid #ccc;
   background-color: #f8f8f8;
 }

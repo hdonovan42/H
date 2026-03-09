@@ -1233,7 +1233,7 @@ function initEvalChart() {
       layout: { padding: { top: 6, right: 4, bottom: 6, left: 4 } },
       scales: {
         x: { display: false },
-        y: { min: -11, max: 11, display: false, grid: { display: false } }
+        y: { min: -12, max: 12, display: false, grid: { display: false } }
       },
       plugins: {
         legend: { display: false },
