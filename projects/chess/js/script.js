@@ -1279,10 +1279,11 @@ function drawAnalysisEvalGraph() {
     const evalVal = (val !== undefined) ? Math.max(-10, Math.min(10, val)) : null;
     evalData.push(evalVal);
 
-    // Classification markers — only show non-trivial ones (inaccuracy/mistake/blunder/brilliant/great)
+    // Classification markers — only show blunders, brilliancies, and great moves
     const cls = AppState.moveClassifications[i];
     classificationData.push(evalVal);
-    if (cls && cls.symbol && cls.symbol !== '') {
+    const showMarker = cls && cls.symbol && (cls.symbol === '??' || cls.symbol === '!!' || cls.symbol === '!');
+    if (showMarker) {
       classificationColors.push(cls.color);
       classificationBorderColors.push('#fff');
       classificationRadii.push(4);
