@@ -130,7 +130,9 @@ function initializeApp() {
   // Set up event listeners
   setupEventListeners();
 
-  // Initialize viewport scaling
+  // Initialize viewport scaling + settings panel
+  loadZoomPreference();
+  initSettingsPanel();
   updateViewportScale();
 
   // Initialize Chart.js eval graph
@@ -2168,20 +2170,106 @@ function handleTablebaseResult(tb, fen) {
 
 // Utility functions
 // Viewport scaling — zoom the entire UI to fit the browser window
-const NATURAL_WIDTH = 1010; // 20px pad + 30px eval + 20px gap + 500px board + 20px gap + 400px panel + 20px pad
+const NATURAL_WIDTH = 1010;
+const NATURAL_HEIGHT = 680; // Approx: 500px board + pgn controls + padding
+const ZOOM_STEP = 0.05;
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 2.0;
+
+// User zoom override — null means auto
+let userZoomOverride = null;
+
+function loadZoomPreference() {
+  try {
+    const stored = localStorage.getItem('chess-zoom');
+    if (stored !== null) userZoomOverride = parseFloat(stored);
+  } catch (e) {}
+}
+
+function saveZoomPreference() {
+  try {
+    if (userZoomOverride !== null) {
+      localStorage.setItem('chess-zoom', userZoomOverride.toString());
+    } else {
+      localStorage.removeItem('chess-zoom');
+    }
+  } catch (e) {}
+}
+
+function computeAutoScale() {
+  const w = window.innerWidth / NATURAL_WIDTH;
+  const h = window.innerHeight / NATURAL_HEIGHT;
+  return Math.min(1.5, w, h);
+}
 
 function updateViewportScale() {
   const wrapper = document.getElementById('scale-wrapper');
   if (!wrapper) return;
 
-  const viewportWidth = window.innerWidth;
-  const scale = Math.min(1, viewportWidth / NATURAL_WIDTH);
+  const scale = userZoomOverride !== null ? userZoomOverride : computeAutoScale();
   wrapper.style.setProperty('--ui-scale', scale);
 
-  // Adjust body height so page doesn't overflow or leave a gap
-  // (transformed elements keep their original box in the DOM)
+  // Update zoom display if settings panel exists
+  const zoomLabel = document.getElementById('zoom-level');
+  if (zoomLabel) {
+    zoomLabel.textContent = Math.round(scale * 100) + '%';
+  }
+
+  // Adjust body height for transformed content
   const naturalHeight = wrapper.scrollHeight;
   document.body.style.height = (naturalHeight * scale) + 'px';
+}
+
+function adjustZoom(delta) {
+  const current = userZoomOverride !== null ? userZoomOverride : computeAutoScale();
+  userZoomOverride = Math.round(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, current + delta)) * 100) / 100;
+  saveZoomPreference();
+  updateViewportScale();
+}
+
+function resetZoom() {
+  userZoomOverride = null;
+  saveZoomPreference();
+  updateViewportScale();
+}
+
+function initSettingsPanel() {
+  const btn = document.getElementById('settings-btn');
+  const controlSection = document.getElementById('engine-control');
+  if (!btn || !controlSection) return;
+
+  // Create panel
+  const panel = document.createElement('div');
+  panel.id = 'settings-panel';
+  panel.innerHTML = `
+    <label>Zoom</label>
+    <div class="zoom-controls">
+      <button id="zoom-out" title="Zoom out">−</button>
+      <span id="zoom-level">100%</span>
+      <button id="zoom-in" title="Zoom in">+</button>
+      <button id="zoom-reset" title="Reset to auto" style="font-size:11px;width:auto;padding:0 6px;">Auto</button>
+    </div>
+  `;
+  controlSection.style.position = 'relative';
+  controlSection.appendChild(panel);
+
+  // Toggle panel
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    panel.classList.toggle('open');
+  });
+
+  // Close on outside click
+  document.addEventListener('click', (e) => {
+    if (!panel.contains(e.target) && e.target !== btn) {
+      panel.classList.remove('open');
+    }
+  });
+
+  // Zoom controls
+  document.getElementById('zoom-out').addEventListener('click', () => adjustZoom(-ZOOM_STEP));
+  document.getElementById('zoom-in').addEventListener('click', () => adjustZoom(ZOOM_STEP));
+  document.getElementById('zoom-reset').addEventListener('click', () => resetZoom());
 }
 
 function clearCanvas(ctx, canvas) {
