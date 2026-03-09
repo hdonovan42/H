@@ -185,7 +185,7 @@ input:checked + .toggle-slider:before {
 }
 
 .pgn-hint {
-  font-size: 12px;
+  font-size: 0.75em;
   color: #666;
   margin-top: 5px;
 }
