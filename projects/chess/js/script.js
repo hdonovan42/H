@@ -1157,6 +1157,27 @@ function initEvalChart() {
     }
   };
 
+  // Plugin: dotted zero line at 0.00 eval
+  const zeroLinePlugin = {
+    id: 'zeroLine',
+    beforeDraw(chart) {
+      const yScale = chart.scales.y;
+      if (!yScale) return;
+      const y = yScale.getPixelForValue(0);
+      const area = chart.chartArea;
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.beginPath();
+      ctx.setLineDash([4, 4]);
+      ctx.moveTo(area.left, y);
+      ctx.lineTo(area.right, y);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+      ctx.stroke();
+      ctx.restore();
+    }
+  };
+
   AppState.evalChart = new Chart(canvas, {
     type: 'line',
     data: {
@@ -1252,7 +1273,7 @@ function initEvalChart() {
         }
       }
     },
-    plugins: [accuracyOverlay, crosshairPlugin]
+    plugins: [zeroLinePlugin, accuracyOverlay, crosshairPlugin]
   });
 }
 
