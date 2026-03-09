@@ -156,6 +156,18 @@ export async function pollSingleSearch(search, { skipNotify = false } = {}) {
       if (inserted.changes > 0) newListings.push(listing)
     }
 
+    // Prune sold/expired listings — if a stored listing no longer appears in fresh results, remove it
+    if (result.success && result.listings.length > 0) {
+      const freshIds = new Set(result.listings.map(l => l.autotrader_id))
+      const staleIds = [...existingIds].filter(id => !freshIds.has(id))
+      if (staleIds.length > 0) {
+        const placeholders = staleIds.map(() => '?').join(',')
+        const pruned = db.prepare(`DELETE FROM listings WHERE search_id = ? AND autotrader_id IN (${placeholders})`)
+          .run(search.id, ...staleIds)
+        console.log(`[Poll] Search #${search.id}: pruned ${pruned.changes} expired listing(s)`)
+      }
+    }
+
     // Update search
     db.prepare("UPDATE searches SET last_checked = datetime('now'), last_result_count = ? WHERE id = ?")
       .run(result.listings.length, search.id)
