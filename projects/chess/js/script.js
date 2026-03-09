@@ -1228,10 +1228,10 @@ function initEvalChart() {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
-      layout: { padding: { top: 2, right: 2, bottom: 2, left: 2 } },
+      layout: { padding: { top: 6, right: 4, bottom: 6, left: 4 } },
       scales: {
         x: { display: false },
-        y: { min: -10, max: 10, display: false, grid: { display: false } }
+        y: { min: -11, max: 11, display: false, grid: { display: false } }
       },
       plugins: {
         legend: { display: false },
