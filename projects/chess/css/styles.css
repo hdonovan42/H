@@ -319,8 +319,52 @@ html {
   border-bottom: 1px solid #ddd;
 }
 
-.move-link.deviation {
-  color: #d32f2f; /* SUBJECT TO CHANGE */
-  font-weight: bold;
+/* Dimmed mainline moves after branch point */
+.move-link.dimmed {
+  opacity: 0.4;
+}
+.move-link.dimmed:hover {
+  opacity: 0.8;
+}
+
+/* Sideline block — indented variation below branch point */
+.sideline-block {
+  display: block;
+  margin: 4px 0 4px 16px;
+  padding: 4px 0 4px 8px;
+  border-left: 2px solid #2196F3;
+  font-style: italic;
+}
+.sideline-prefix {
+  color: #2196F3;
+  font-style: normal;
+  margin-right: 4px;
+}
+.sideline-move {
+  font-style: italic;
+}
+.sideline-move.current {
+  background-color: #2196F3;
+  color: white;
+  font-style: italic;
+  box-shadow: 0 2px 4px rgba(33, 150, 243, 0.3);
+}
+
+/* Return to mainline button */
+.return-mainline {
+  display: inline-block;
+  cursor: pointer;
+  padding: 3px 8px;
+  margin: 6px 0;
+  background-color: #e3f2fd;
+  color: #1565c0;
+  border: 1px solid #90caf9;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 12px;
+  transition: background-color 0.2s;
+}
+.return-mainline:hover {
+  background-color: #bbdefb;
 }
 

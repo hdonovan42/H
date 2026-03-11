@@ -85,7 +85,11 @@ const AppState = {
   _lastArrowKey: '',             // Arrow fingerprint for skip-redraw optimisation
   // Tablebase
   tablebaseCache: new Map(),     // FEN → Syzygy tablebase API result
-  isTablebasePosition: false     // Whether current position uses tablebase
+  isTablebasePosition: false,    // Whether current position uses tablebase
+  // Sideline tracking
+  inSideline: false,             // Whether current position is on a sideline
+  sidelineBranchIndex: -1,       // currentIndex value at the branch point
+  sidelineMoves: []              // Moves played in the sideline (from branch point)
 };
 
 // Initialize the application
@@ -371,6 +375,36 @@ function parseStockfishInfo(message) {
   return info;
 }
 
+// Track user move — detect sideline deviation from mainline
+function _applyUserMove() {
+  const history = AppState.game.history();
+  const playedMove = history[history.length - 1];
+  const preMoveIndex = AppState.currentIndex; // position before the new move
+
+  // Check if this move matches the mainline
+  const isMainlineMove = AppState.gameLoaded &&
+    AppState.pgnMainlineMoves.length > preMoveIndex &&
+    AppState.pgnMainlineMoves[preMoveIndex] === playedMove;
+
+  if (!isMainlineMove && AppState.gameLoaded) {
+    // Deviation — create / replace sideline
+    AppState.inSideline = true;
+    AppState.sidelineBranchIndex = preMoveIndex;
+    AppState.sidelineMoves = history.slice(preMoveIndex);
+  } else if (AppState.inSideline) {
+    // Extending the sideline with another move
+    AppState.sidelineMoves = history.slice(AppState.sidelineBranchIndex);
+  }
+
+  AppState.userMoves = history;
+  AppState.currentIndex = history.length;
+  AppState.notationDirty = true;
+
+  updateGameStatus();
+  if (AppState.engineEnabled) updateStockfishAnalysis();
+  updateDisplay();
+}
+
 // Board event handlers
 function handleDragStart(source, piece, position, orientation) {
   
@@ -410,18 +444,7 @@ function handleDrop(source, target) {
   
   if (move === null) return 'snapback';
   
-  // Update move history
-  AppState.userMoves = AppState.game.history();
-  AppState.currentIndex = AppState.userMoves.length;
-  
-  // Check for game ending conditions
-  updateGameStatus();
-  
-  if (AppState.engineEnabled) {
-    updateStockfishAnalysis();
-  }
-  updateDisplay();
-  
+  _applyUserMove();
   return 'drop';
 }
 
@@ -698,24 +721,35 @@ function renderNotation() {
   const container = document.getElementById('ao-notation');
   if (!container) return;
 
+  const hasSideline = AppState.sidelineMoves.length > 0;
+  const branchIdx = AppState.sidelineBranchIndex;
+
+  // Decide which move list to iterate for the mainline
+  const mainMoves = AppState.gameLoaded ? AppState.pgnMainlineMoves : AppState.userMoves;
+
   let notationHTML = '<div style="margin-top: 20px; font-family: monospace;"><strong>Notation:</strong><br>';
 
-  for (let i = 0; i < AppState.userMoves.length; i += 2) {
-    const moveNumber = Math.floor(i / 2) + 1;
-    const whiteMove = AppState.userMoves[i];
-    const blackMove = AppState.userMoves[i + 1];
+  // "Return to mainline" button when actively in sideline
+  if (AppState.inSideline) {
+    notationHTML += '<div id="return-mainline-btn" class="return-mainline">\u21a9 Return to mainline</div>';
+  }
 
-    notationHTML += `<div class="move-pair">`;
+  let sidelineInserted = false;
+
+  for (let i = 0; i < mainMoves.length; i += 2) {
+    const moveNumber = Math.floor(i / 2) + 1;
+    const whiteMove = mainMoves[i];
+    const blackMove = mainMoves[i + 1];
+
+    notationHTML += '<div class="move-pair">';
     notationHTML += `<span class="move-number">${moveNumber}.</span> `;
 
     // White move
     const whiteMoveIndex = i + 1;
-    const isWhiteMainline = AppState.pgnMainlineMoves.length > i &&
-                          AppState.pgnMainlineMoves[i] === whiteMove;
-    const isWhiteCurrent = whiteMoveIndex === AppState.currentIndex;
-    const whiteClasses = ['move-link', 'white-move'];
-
-    if (!isWhiteMainline && AppState.gameLoaded) whiteClasses.push('deviation');
+    const whiteDimmed = hasSideline && i >= branchIdx;
+    const isWhiteCurrent = !AppState.inSideline && whiteMoveIndex === AppState.currentIndex;
+    const whiteClasses = ['move-link', 'white-move', 'mainline-move'];
+    if (whiteDimmed) whiteClasses.push('dimmed');
     if (isWhiteCurrent) whiteClasses.push('current');
 
     const whiteClassification = AppState.moveClassifications[whiteMoveIndex];
@@ -726,17 +760,15 @@ function renderNotation() {
       whiteStyle = `color: ${whiteClassification.color}; font-weight: bold;`;
     }
 
-    notationHTML += `<span class="${whiteClasses.join(' ')}" data-move-index="${whiteMoveIndex}" style="${whiteStyle}">${whiteMoveText}${!isWhiteMainline && AppState.gameLoaded ? '*' : ''}</span>`;
+    notationHTML += `<span class="${whiteClasses.join(' ')}" data-move-index="${whiteMoveIndex}" style="${whiteStyle}">${whiteMoveText}</span>`;
 
     // Black move
     if (blackMove) {
       const blackMoveIndex = i + 2;
-      const isBlackMainline = AppState.pgnMainlineMoves.length > (i + 1) &&
-                             AppState.pgnMainlineMoves[i + 1] === blackMove;
-      const isBlackCurrent = blackMoveIndex === AppState.currentIndex;
-      const blackClasses = ['move-link', 'black-move'];
-
-      if (!isBlackMainline && AppState.gameLoaded) blackClasses.push('deviation');
+      const blackDimmed = hasSideline && (i + 1) >= branchIdx;
+      const isBlackCurrent = !AppState.inSideline && blackMoveIndex === AppState.currentIndex;
+      const blackClasses = ['move-link', 'black-move', 'mainline-move'];
+      if (blackDimmed) blackClasses.push('dimmed');
       if (isBlackCurrent) blackClasses.push('current');
 
       const blackClassification = AppState.moveClassifications[blackMoveIndex];
@@ -747,21 +779,59 @@ function renderNotation() {
         blackStyle = `color: ${blackClassification.color}; font-weight: bold;`;
       }
 
-      notationHTML += ` <span class="${blackClasses.join(' ')}" data-move-index="${blackMoveIndex}" style="${blackStyle}">${blackMoveText}${!isBlackMainline && AppState.gameLoaded ? '*' : ''}</span>`;
+      notationHTML += ` <span class="${blackClasses.join(' ')}" data-move-index="${blackMoveIndex}" style="${blackStyle}">${blackMoveText}</span>`;
     }
 
-    notationHTML += `</div>`;
+    notationHTML += '</div>';
+
+    // Insert sideline block after the move pair containing the branch point
+    if (hasSideline && !sidelineInserted) {
+      const pairEnd = blackMove ? i + 2 : i + 1;
+      if (branchIdx <= pairEnd) {
+        notationHTML += renderSidelineBlock();
+        sidelineInserted = true;
+      }
+    }
   }
 
   // Game result
   if (AppState.gameStatus === 'checkmate') {
     notationHTML += AppState.checkmateWinner === 'white' ? ' <strong>1-0</strong>' : ' <strong>0-1</strong>';
   } else if (AppState.gameStatus === 'draw') {
-    notationHTML += ' <strong>½-½</strong>';
+    notationHTML += ' <strong>\u00bd-\u00bd</strong>';
   }
 
   notationHTML += '</div>';
   container.innerHTML = notationHTML;
+}
+
+function renderSidelineBlock() {
+  const moves = AppState.sidelineMoves;
+  const branchIdx = AppState.sidelineBranchIndex;
+  if (!moves.length) return '';
+
+  let html = '<div class="sideline-block"><span class="sideline-prefix">\u21b3</span>';
+
+  for (let j = 0; j < moves.length; j++) {
+    const globalHalfMove = branchIdx + j; // 0-based half-move index of this move
+    const moveNum = Math.floor(globalHalfMove / 2) + 1;
+    const isWhite = globalHalfMove % 2 === 0;
+
+    // Show move number for white moves or the very first sideline move
+    if (isWhite || j === 0) {
+      html += `<span class="move-number">${moveNum}${isWhite ? '.' : '...'}</span> `;
+    }
+
+    const sidelineMoveIndex = branchIdx + j + 1; // matches currentIndex convention
+    const isCurrent = AppState.inSideline && sidelineMoveIndex === AppState.currentIndex;
+    const classes = ['move-link', 'sideline-move'];
+    if (isCurrent) classes.push('current');
+
+    html += `<span class="${classes.join(' ')}" data-move-index="${sidelineMoveIndex}">${moves[j]}</span> `;
+  }
+
+  html += '</div>';
+  return html;
 }
 
 function updateProgressSection() {
@@ -1072,20 +1142,23 @@ function _applyNavigation() {
 
 function navigateToPreviousMove() {
   if (AppState.currentIndex <= 0) return;
+  // If navigating back to or past the branch point, return to mainline
+  if (AppState.inSideline && AppState.currentIndex <= AppState.sidelineBranchIndex + 1) {
+    AppState.inSideline = false;
+  }
   AppState.currentIndex--;
   _applyNavigation();
 }
 
 function navigateToNextMove() {
-  if (AppState.pgnMainlineMoves.length > 0 &&
+  if (AppState.inSideline) {
+    // Navigate within sideline
+    const sidelineEnd = AppState.sidelineBranchIndex + AppState.sidelineMoves.length;
+    if (AppState.currentIndex >= sidelineEnd) return;
+  } else if (AppState.pgnMainlineMoves.length > 0 &&
       AppState.currentIndex < AppState.pgnMainlineMoves.length) {
-    // Follow mainline
-    const mainlineMove = AppState.pgnMainlineMoves[AppState.currentIndex];
-    if (AppState.userMoves[AppState.currentIndex] !== mainlineMove) {
-      AppState.userMoves[AppState.currentIndex] = mainlineMove;
-      AppState.userMoves = AppState.userMoves.slice(0, AppState.currentIndex + 1);
-    }
-  } else if (AppState.currentIndex >= AppState.userMoves.length) {
+    // Follow mainline — no need to mutate userMoves
+  } else {
     return;
   }
   AppState.currentIndex++;
@@ -1093,14 +1166,24 @@ function navigateToNextMove() {
 }
 
 function navigateToMove(targetIndex) {
-  if (targetIndex < 0 || targetIndex > AppState.userMoves.length) return;
+  const maxIndex = AppState.inSideline
+    ? AppState.sidelineBranchIndex + AppState.sidelineMoves.length
+    : AppState.pgnMainlineMoves.length || AppState.userMoves.length;
+  if (targetIndex < 0 || targetIndex > maxIndex) return;
   AppState.currentIndex = targetIndex;
   _applyNavigation();
 }
 
 function navigateToStart() {
   if (AppState.currentIndex === 0) return;
+  AppState.inSideline = false;
   AppState.currentIndex = 0;
+  _applyNavigation();
+}
+
+function _returnToMainline() {
+  AppState.inSideline = false;
+  AppState.currentIndex = AppState.sidelineBranchIndex;
   _applyNavigation();
 }
 
@@ -1269,6 +1352,7 @@ function initEvalChart() {
         if (elements.length > 0) {
           const clickedIndex = elements[0].index;
           if (clickedIndex >= 0 && clickedIndex <= AppState.graphMainlineMoves.length) {
+            AppState.inSideline = false;
             AppState.userMoves = [...AppState.graphMainlineMoves];
             navigateToMove(clickedIndex);
           }
@@ -1317,7 +1401,8 @@ function drawAnalysisEvalGraph() {
     }
 
     currentPosData.push(evalVal);
-    currentPosRadii.push(i === AppState.currentIndex ? 5 : 0);
+    const markerIndex = AppState.inSideline ? AppState.sidelineBranchIndex : AppState.currentIndex;
+    currentPosRadii.push(i === markerIndex ? 5 : 0);
   }
 
   chart.data.labels = labels;
@@ -1333,7 +1418,14 @@ function drawAnalysisEvalGraph() {
 }
 
 function rebuildGameFromMoves() {
-  if (AppState.fenCache.length > 0 && AppState.currentIndex < AppState.fenCache.length) {
+  if (AppState.inSideline && AppState.currentIndex > AppState.sidelineBranchIndex) {
+    // Load mainline position at branch point from cache, then replay sideline moves
+    AppState.game.load(AppState.fenCache[AppState.sidelineBranchIndex]);
+    const sidelineDepth = AppState.currentIndex - AppState.sidelineBranchIndex;
+    for (let j = 0; j < sidelineDepth; j++) {
+      AppState.game.move(AppState.sidelineMoves[j]);
+    }
+  } else if (AppState.fenCache.length > 0 && AppState.currentIndex < AppState.fenCache.length) {
     AppState.game.load(AppState.fenCache[AppState.currentIndex]);
   } else {
     // Fallback for positions off the mainline (user-made moves)
@@ -1373,6 +1465,9 @@ function loadPGNFromText(pgnText) {
   AppState.userMoves = [...AppState.pgnMainlineMoves];
   AppState.currentIndex = 0;
   AppState.gameLoaded = true;
+  AppState.inSideline = false;
+  AppState.sidelineBranchIndex = -1;
+  AppState.sidelineMoves = [];
 
   // Build FEN cache for O(1) navigation
   AppState.fenCache = [];
@@ -1662,6 +1757,9 @@ function resetBoard() {
   AppState.gameStatus = 'ongoing';
   AppState.checkmateWinner = null;
   AppState.isInCheck = false;
+  AppState.inSideline = false;
+  AppState.sidelineBranchIndex = -1;
+  AppState.sidelineMoves = [];
 
 // Clear graph state
   AppState.graphDrawn = false;
@@ -1833,12 +1931,7 @@ function handlePromotionChoice(promotionPiece) {
   });
 
   if (move) {
-    AppState.userMoves = AppState.game.history();
-    AppState.currentIndex = AppState.userMoves.length;
-    AppState.board.position(AppState.game.fen());
-    updateGameStatus();
-    if (AppState.engineEnabled) updateStockfishAnalysis();
-    updateDisplay();
+    _applyUserMove();
   }
 
   AppState.promotionPending = false;
@@ -1889,13 +1982,27 @@ function setupEventListeners() {
     drawAnalysisEvalGraph();
   }, 250));
   
-  // Click handler for interactive notation moves
+  // Click handler for interactive notation moves + return-to-mainline
   document.getElementById('analysis-content').addEventListener('click', (e) => {
-    if (e.target.classList.contains('move-link')) {
-      const moveIndex = parseInt(e.target.dataset.moveIndex);
-      navigateToMove(moveIndex);
-      e.target.blur();
+    // Return to mainline button
+    if (e.target.closest('#return-mainline-btn')) {
+      _returnToMainline();
+      return;
     }
+
+    const link = e.target.closest('.move-link');
+    if (!link) return;
+
+    const moveIndex = parseInt(link.dataset.moveIndex);
+
+    if (link.classList.contains('sideline-move')) {
+      AppState.inSideline = true;
+    } else if (link.classList.contains('mainline-move')) {
+      AppState.inSideline = false;
+    }
+
+    navigateToMove(moveIndex);
+    link.blur();
   });
 
 }
@@ -1923,7 +2030,12 @@ function handleKeyPress(event) {
     't': () => {
     document.getElementById('engine-toggle').checked = !document.getElementById('engine-toggle').checked;
     toggleEngine();
-  }
+  },
+    'Escape': () => {
+      if (AppState.sidelineMoves.length > 0) {
+        _returnToMainline();
+      }
+    }
   };
   
   const action = keyActions[event.key] || keyActions[event.key.toLowerCase()];
