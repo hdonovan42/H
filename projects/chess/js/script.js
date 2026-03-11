@@ -376,28 +376,41 @@ function parseStockfishInfo(message) {
 }
 
 // Track user move — detect sideline deviation from mainline
+// Note: game.history() is unreliable after game.load(fen) (navigation clears it),
+// so we track the played move directly instead of slicing history.
 function _applyUserMove() {
   const history = AppState.game.history();
   const playedMove = history[history.length - 1];
   const preMoveIndex = AppState.currentIndex; // position before the new move
 
-  // Check if this move matches the mainline
-  const isMainlineMove = AppState.gameLoaded &&
-    AppState.pgnMainlineMoves.length > preMoveIndex &&
-    AppState.pgnMainlineMoves[preMoveIndex] === playedMove;
+  if (AppState.gameLoaded) {
+    const isMainlineMove = AppState.pgnMainlineMoves.length > preMoveIndex &&
+      AppState.pgnMainlineMoves[preMoveIndex] === playedMove;
 
-  if (!isMainlineMove && AppState.gameLoaded) {
-    // Deviation — create / replace sideline
-    AppState.inSideline = true;
-    AppState.sidelineBranchIndex = preMoveIndex;
-    AppState.sidelineMoves = history.slice(preMoveIndex);
-  } else if (AppState.inSideline) {
-    // Extending the sideline with another move
-    AppState.sidelineMoves = history.slice(AppState.sidelineBranchIndex);
+    if (!isMainlineMove) {
+      if (AppState.inSideline && preMoveIndex >= AppState.sidelineBranchIndex) {
+        // Extending or overwriting within current sideline
+        const depth = preMoveIndex - AppState.sidelineBranchIndex;
+        AppState.sidelineMoves = AppState.sidelineMoves.slice(0, depth);
+        AppState.sidelineMoves.push(playedMove);
+      } else {
+        // New deviation from mainline
+        AppState.inSideline = true;
+        AppState.sidelineBranchIndex = preMoveIndex;
+        AppState.sidelineMoves = [playedMove];
+      }
+    } else if (AppState.inSideline) {
+      // Extending sideline (move happens to match mainline but we're off-path)
+      const depth = preMoveIndex - AppState.sidelineBranchIndex;
+      AppState.sidelineMoves = AppState.sidelineMoves.slice(0, depth);
+      AppState.sidelineMoves.push(playedMove);
+    }
+  } else {
+    // Free analysis (no PGN) — history is reliable here
+    AppState.userMoves = history;
   }
 
-  AppState.userMoves = history;
-  AppState.currentIndex = history.length;
+  AppState.currentIndex = preMoveIndex + 1;
   AppState.notationDirty = true;
 
   updateGameStatus();
