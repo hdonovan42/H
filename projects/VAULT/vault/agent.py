@@ -1116,6 +1116,35 @@ def _days_to_resolution(end_date: str | None, default_days: float = 30.0) -> flo
         return default_days
 
 
+def _sell_prediction_auto(conn, pred: dict, our_price: float) -> float:
+    """Sell a prediction, routing through CLOB for real positions.
+
+    Used by all automated exit functions (trailing stop, stale, reversal, etc.).
+    Returns the realised P&L.
+    """
+    cfg = load_config()
+    is_simulated = cfg.get("trading", {}).get("simulated", True)
+    execution_mode = pred.get("execution_mode", "paper")
+
+    if not is_simulated and execution_mode == "real":
+        token_id = pred.get("clob_token_id")
+        if not token_id:
+            log.warning(f"Real position {pred['id']} missing clob_token_id, selling at paper price")
+        else:
+            from vault.clob_client import sell_shares
+            clob_cfg = cfg.get("trading", {}).get("clob", {})
+            slippage = clob_cfg.get("slippage_pct", 0.02)
+            min_price = max(our_price - slippage, 0.01)
+            fill = sell_shares(token_id, pred["shares"], min_price=min_price)
+            if fill.success:
+                our_price = fill.avg_price
+                log.info(f"CLOB auto-sell filled for [{pred['id']}]: {fill.shares:.4f} @ {fill.avg_price:.4f}")
+            else:
+                raise RuntimeError(f"CLOB sell failed for [{pred['id']}]: {fill.error}")
+
+    return ledger.record_prediction_sell(conn, pred["id"], our_price)
+
+
 def _exit_substandard_positions(conn, open_preds, odds_cache):
     """Exit positions that no longer meet current entry minimums.
 
@@ -1149,7 +1178,7 @@ def _exit_substandard_positions(conn, open_preds, odds_cache):
                 continue
             our_price = odds["yes_price"] if pred["side"] == "YES" else odds["no_price"]
             try:
-                pnl = ledger.record_prediction_sell(conn, pred["id"], our_price)
+                pnl = _sell_prediction_auto(conn, pred, our_price)
                 log.info(
                     f"Substandard exit: [{pred['id']}] {pred['side']} "
                     f"'{pred['question'][:40]}' — {reason} — P&L: ${pnl:+.2f}"
@@ -1196,7 +1225,7 @@ def _exit_momentum_reversal(conn, open_preds, odds_cache):
         our_price = odds["yes_price"] if pred["side"] == "YES" else odds["no_price"]
 
         try:
-            pnl = ledger.record_prediction_sell(conn, pred["id"], our_price)
+            pnl = _sell_prediction_auto(conn, pred, our_price)
             log.info(
                 f"Momentum reversal exit: [{pred['id']}] {pred['side']} "
                 f"'{pred['question'][:40]}' @ {our_price:.2%} — "
@@ -1275,7 +1304,7 @@ def _exit_stale_momentum(conn, open_preds, odds_cache):
 
         if should_exit:
             try:
-                pnl = ledger.record_prediction_sell(conn, pred["id"], our_price)
+                pnl = _sell_prediction_auto(conn, pred, our_price)
                 log.info(
                     f"Stale momentum exit: [{pred['id']}] {pred['side']} "
                     f"'{pred['question'][:40]}' @ {our_price:.2%} — {reason} — PnL: ${pnl:+.2f}"
@@ -1321,7 +1350,7 @@ def _exit_trailing_stop(conn, open_preds, odds_cache):
                 and current_roi > 0
                 and unrealised_pnl > (pred["cost_basis"] * trail_min_pnl_pct)):
             try:
-                pnl = ledger.record_prediction_sell(conn, pred["id"], our_price)
+                pnl = _sell_prediction_auto(conn, pred, our_price)
                 log.info(
                     f"Trailing stop exit: [{pred['id']}] {pred['side']} "
                     f"'{pred['question'][:40]}' — peak ROI {peak_roi:+.0%}, "
@@ -1354,7 +1383,7 @@ def _exit_opportunity_cost(conn, open_preds, odds_cache):
 
         if our_price >= 0.995 or remaining <= risk_free:
             try:
-                pnl = ledger.record_prediction_sell(conn, pred["id"], our_price)
+                pnl = _sell_prediction_auto(conn, pred, our_price)
                 log.info(
                     f"Opportunity cost exit: [{pred['id']}] {pred['side']} "
                     f"'{pred['question'][:40]}' @ {our_price:.2%} — "

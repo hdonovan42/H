@@ -16,6 +16,14 @@ agent:
 trading:
   allowed_assets: []             # crypto trading disabled — Polymarket only
   simulated: true
+  clob:
+    host: "https://clob.polymarket.com"
+    chain_id: 137
+    signature_type: 0            # 0=EOA
+    slippage_pct: 0.02           # 2% max slippage on FOK orders
+    balance_reconcile: true
+    balance_drift_warn: 0.50
+    fallback_on_failure: "skip"  # "skip" or "paper"
 
 polymarket:
   cache_ttl_seconds: 300        # 5 min cache for market data

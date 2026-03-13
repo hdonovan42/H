@@ -176,6 +176,21 @@ def get_current_odds(conn, market_id: str) -> dict | None:
     return {"yes_price": market.get("yes_price", 0), "no_price": market.get("no_price", 0)}
 
 
+def _parse_clob_token_ids(raw_value) -> list | None:
+    """Parse clobTokenIds — same string/list handling as outcomePrices."""
+    if not raw_value:
+        return None
+    if isinstance(raw_value, str):
+        try:
+            parsed = json.loads(raw_value)
+            return parsed if isinstance(parsed, list) else None
+        except json.JSONDecodeError:
+            return None
+    if isinstance(raw_value, list):
+        return raw_value
+    return None
+
+
 def _parse_market(raw: dict) -> dict | None:
     """Parse raw Gamma API market into clean dict."""
     if not raw:
@@ -215,7 +230,7 @@ def _parse_market(raw: dict) -> dict | None:
         "volume": float(raw.get("volume", 0) or 0),
         "end_date": raw.get("endDate"),
         "closed": raw.get("closed", False),
-        "clob_token_ids": raw.get("clobTokenIds"),
+        "clob_token_ids": _parse_clob_token_ids(raw.get("clobTokenIds")),
         # Enriched fields from Gamma API
         "volume_24h": float(raw.get("volume24hr", 0) or 0),
         "liquidity": float(raw.get("liquidityClob", 0) or 0),

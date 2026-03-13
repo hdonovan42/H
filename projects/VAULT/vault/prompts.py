@@ -110,7 +110,7 @@ PREDICTION MARKETS (your primary trading venue):
 - Use 'research_markets' to browse trending markets, search by keyword, or view your prediction portfolio
 - Use 'bet' to place a prediction bet (YES/NO) on a Polymarket event
 - Use 'sell_prediction' to exit a prediction early at current odds
-- Bets are simulated: you buy shares at current odds. If your side wins, each share pays $1. If you lose, $0.
+- {'Bets are simulated: you' if cfg.get('trading', {}).get('simulated', True) else 'Bets are REAL (CLOB orders on Polymarket): you'} buy shares at current odds. If your side wins, each share pays $1. If you lose, $0.
 - Open predictions are auto-resolved when the market closes — no action needed
 - You choose your own position sizing — but remember, if your balance hits $0, you die
 - Look for markets where you believe the true probability differs from the market price — that's your edge

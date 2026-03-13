@@ -7,7 +7,7 @@ from vault.config_loader import get_db_path
 
 log = logging.getLogger("vault.db")
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     resolution    TEXT,                   -- won/lost/sold
     payout        REAL,
     pnl           REAL,
+    execution_mode TEXT DEFAULT 'paper',        -- paper/real (v19)
     status        TEXT NOT NULL DEFAULT 'open'  -- open/closed
 );
 
@@ -773,6 +774,20 @@ def _migrate(conn):
         )
         conn.commit()
         log.info(f"v18 migration: seeded peak_total_value = ${peak:.2f}")
+
+    if version < 19:
+        # v19: add execution_mode to predictions for real CLOB trading
+        try:
+            conn.execute("ALTER TABLE predictions ADD COLUMN execution_mode TEXT DEFAULT 'paper'")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "19"),
+        )
+        conn.commit()
+        log.info("v19 migration: added execution_mode column to predictions")
 
 
 def init_db(db_path: Path | None = None) -> sqlite3.Connection:

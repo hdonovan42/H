@@ -94,6 +94,73 @@ class BetActuator(BaseActuator):
                 entry_reasoning_text = pe.get("reasoning")
                 break
 
+        # Determine execution mode
+        cfg = load_config()
+        is_simulated = cfg.get("trading", {}).get("simulated", True)
+
+        if not is_simulated:
+            # ── Real CLOB execution ──
+            from vault.clob_client import buy_shares, resolve_token_id
+
+            token_id = resolve_token_id(market.get("clob_token_ids"), side)
+            if not token_id:
+                return {"success": False, "error": "Market missing CLOB token IDs — cannot place real order"}
+
+            clob_cfg = cfg.get("trading", {}).get("clob", {})
+            slippage = clob_cfg.get("slippage_pct", 0.02)
+            max_price = min(odds + slippage, 0.99)
+            fill = buy_shares(token_id, amount_usd, max_price=max_price)
+
+            if not fill.success:
+                fallback = clob_cfg.get("fallback_on_failure", "skip")
+                if fallback == "skip":
+                    return {"success": False, "error": f"CLOB order failed: {fill.error}"}
+                # fallback == "paper" — fall through to paper path below
+                log.warning(f"CLOB order failed, falling back to paper: {fill.error}")
+            else:
+                # Record with real fill data
+                prediction_id = ledger.record_prediction_buy(
+                    conn,
+                    market_id=market_id,
+                    condition_id=market.get("condition_id"),
+                    question=market["question"],
+                    slug=market.get("slug"),
+                    side=side,
+                    amount_usd=fill.amount_usd,
+                    odds=fill.avg_price,
+                    clob_token_id=token_id,
+                    end_date=market.get("end_date"),
+                    cycle_id=context.get("cycle_id"),
+                    entry_edge=entry_edge,
+                    entry_confidence=entry_confidence,
+                    entry_reasoning=entry_reasoning_text or reasoning,
+                    execution_mode="real",
+                    shares_override=fill.shares,
+                )
+
+                new_balance = ledger.get_balance(conn)
+                log.info(
+                    f"BET [REAL] {side} on '{market['question'][:50]}' @ {fill.avg_price:.0%} | "
+                    f"${fill.amount_usd:.2f} for {fill.shares:.2f} shares | order {fill.order_id[:8]}"
+                )
+
+                return {
+                    "success": True,
+                    "action": "bet",
+                    "execution_mode": "real",
+                    "market_id": market_id,
+                    "question": market["question"],
+                    "side": side,
+                    "odds": fill.avg_price,
+                    "amount_usd": fill.amount_usd,
+                    "shares": fill.shares,
+                    "potential_payout": fill.shares,
+                    "prediction_id": prediction_id,
+                    "balance_after": new_balance,
+                    "order_id": fill.order_id,
+                }
+
+        # ── Paper execution (default) ──
         prediction_id = ledger.record_prediction_buy(
             conn,
             market_id=market_id,
@@ -109,6 +176,7 @@ class BetActuator(BaseActuator):
             entry_edge=entry_edge,
             entry_confidence=entry_confidence,
             entry_reasoning=entry_reasoning_text or reasoning,
+            execution_mode="paper",
         )
 
         new_balance = ledger.get_balance(conn)
@@ -119,6 +187,7 @@ class BetActuator(BaseActuator):
         return {
             "success": True,
             "action": "bet",
+            "execution_mode": "paper",
             "market_id": market_id,
             "question": market["question"],
             "side": side,

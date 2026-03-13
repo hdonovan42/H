@@ -86,6 +86,20 @@ def run_daemon(resurrect: bool = False):
     # Seed balance if first run
     ledger.seed_balance(conn)
 
+    # Verify CLOB client if real trading enabled
+    if not cfg.get("trading", {}).get("simulated", True):
+        try:
+            from vault.clob_client import _get_client, get_usdc_balance
+            _get_client()  # init + derive creds
+            usdc = get_usdc_balance()
+            log.info(f"CLOB client ready. On-chain USDC: ${usdc:.2f}")
+            print(f"CLOB client ready. On-chain USDC: ${usdc:.2f}")
+        except Exception as e:
+            log.error(f"CLOB client init failed: {e}", exc_info=True)
+            print(f"ERROR: CLOB client init failed: {e}")
+            print("Set trading.simulated: true in config.yaml or fix CLOB credentials.")
+            sys.exit(1)
+
     # Register signal handlers
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)

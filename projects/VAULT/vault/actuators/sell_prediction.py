@@ -4,6 +4,7 @@ import logging
 from vault.actuators.base import BaseActuator
 from vault import ledger
 from vault.polymarket import get_current_odds
+from vault.config_loader import load_config
 
 log = logging.getLogger("vault.actuator.sell_prediction")
 
@@ -50,6 +51,36 @@ class SellPredictionActuator(BaseActuator):
 
         current_odds = odds_data["yes_price"] if pred["side"] == "YES" else odds_data["no_price"]
 
+        # Check if this is a real position that needs CLOB execution
+        cfg = load_config()
+        is_simulated = cfg.get("trading", {}).get("simulated", True)
+        execution_mode = pred["execution_mode"] if "execution_mode" in pred.keys() else "paper"
+
+        if not is_simulated and execution_mode == "real":
+            # ── Real CLOB sell ──
+            from vault.clob_client import sell_shares
+
+            token_id = pred["clob_token_id"]
+            if not token_id:
+                return {"success": False, "error": "Real position missing clob_token_id — cannot sell via CLOB"}
+
+            clob_cfg = cfg.get("trading", {}).get("clob", {})
+            slippage = clob_cfg.get("slippage_pct", 0.02)
+            min_price = max(current_odds - slippage, 0.01)
+            fill = sell_shares(token_id, pred["shares"], min_price=min_price)
+
+            if fill.success:
+                # Use real fill price for P&L calculation
+                current_odds = fill.avg_price
+                log.info(
+                    f"CLOB SELL filled for prediction {prediction_id}: "
+                    f"{fill.shares:.4f} shares @ {fill.avg_price:.4f}"
+                )
+            else:
+                log.warning(f"CLOB sell failed for prediction {prediction_id}: {fill.error}")
+                return {"success": False, "error": f"CLOB sell failed: {fill.error}"}
+
+        # Record the sell (works for both paper and real — real just uses CLOB fill price)
         try:
             pnl = ledger.record_prediction_sell(
                 conn, prediction_id, current_odds, context.get("cycle_id")
@@ -60,14 +91,16 @@ class SellPredictionActuator(BaseActuator):
         new_balance = ledger.get_balance(conn)
         sell_value = round(pred["shares"] * current_odds, 6)
 
+        mode_tag = " [REAL]" if execution_mode == "real" else ""
         log.info(
-            f"SOLD prediction {prediction_id} '{pred['question'][:40]}' "
+            f"SOLD{mode_tag} prediction {prediction_id} '{pred['question'][:40]}' "
             f"@ {current_odds:.0%} | P&L: ${pnl:+.2f} | Reasoning: {reasoning}"
         )
 
         return {
             "success": True,
             "action": "sell_prediction",
+            "execution_mode": execution_mode,
             "prediction_id": prediction_id,
             "question": pred["question"],
             "side": pred["side"],

@@ -5,6 +5,50 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v19 — Real Polymarket CLOB Trading
+
+**Deployed**: 2026-03-13 | **Baseline**: $120.25 balance, $152.42 total value, 137.2d runway
+
+VAULT has been paper trading for 29 days with $125.65 realised P&L across 33,771 cycles. Signal generation, sizing, risk management, and exit logic are battle-tested. This adds a real CLOB execution layer via `py-clob-client`, controlled by the existing `trading.simulated` config flag. Everything else stays untouched — deployed with `simulated: true` (zero behaviour change).
+
+**Changes:**
+1. **`vault/clob_client.py`** (NEW) — CLOB wrapper: `buy_shares()` / `sell_shares()` (FOK orders), `resolve_token_id()`, `get_usdc_balance()`, `setup_allowances()`. Lazy singleton pattern.
+2. **`vault/actuators/bet.py`** — Branches on `simulated` flag: real path resolves token ID → CLOB FOK buy → records fill data. Paper path unchanged. Fallback configurable (`skip` or `paper`).
+3. **`vault/actuators/sell_prediction.py`** — Real positions sell via CLOB first, then record at fill price. Paper positions use ledger math as before.
+4. **`vault/agent.py`** — `_sell_prediction_auto()` helper routes all 5 automated exits (trailing stop, stale, reversal, substandard, opportunity cost) through CLOB for real positions.
+5. **`vault/db.py`** — Schema v19: `execution_mode TEXT DEFAULT 'paper'` column on predictions.
+6. **`vault/ledger.py`** — `record_prediction_buy()` accepts `execution_mode` + `shares_override`. `get_open_predictions()` returns `execution_mode` + `clob_token_id`.
+7. **`vault/polymarket.py`** — `_parse_clob_token_ids()` properly parses JSON string/list (same pattern as `outcomePrices`).
+8. **`vault/daemon.py`** — CLOB client startup verification when `simulated: false`. Fails fast if credentials missing.
+9. **`vault/prompts.py`** — Conditional: "Bets are REAL (CLOB orders)" vs "Bets are simulated".
+10. **`vault/cli.py`** — `vault setup-clob` command for one-time exchange allowance approval.
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `vault/clob_client.py` | NEW — CLOB wrapper (buy, sell, balance, allowances) |
+| `vault/actuators/bet.py` | Real/paper branch after validation |
+| `vault/actuators/sell_prediction.py` | CLOB sell for real positions |
+| `vault/agent.py` | `_sell_prediction_auto()` for all automated exits |
+| `vault/db.py` | Schema v19: `execution_mode` column |
+| `vault/ledger.py` | Extended `record_prediction_buy`, `get_open_predictions` |
+| `vault/polymarket.py` | `_parse_clob_token_ids()` helper |
+| `vault/daemon.py` | CLOB startup verification |
+| `vault/prompts.py` | Conditional simulated/real text |
+| `vault/cli.py` | `vault setup-clob` command |
+| `config/default.yaml` | `trading.clob` section |
+| `pyproject.toml` | `py-clob-client`, `web3` dependencies |
+| `.env.example` | CLOB credential placeholders |
+
+### What to watch
+- Schema migration to v19 applied cleanly on deploy (confirmed)
+- With `simulated: true`, all existing behaviour unchanged
+- After going live: `[REAL]` tags in bet/sell logs, fill price vs Gamma mid-price for slippage
+- `execution_mode` column in predictions table: new rows show `paper` or `real`
+- Balance drift between internal ledger and on-chain USDC
+
+---
+
 ## v18 — Portfolio Drawdown Circuit-Breaker
 
 **Deployed**: 2026-03-04 | **Baseline**: $69.97 balance, $85.07 total value, 112.7d runway

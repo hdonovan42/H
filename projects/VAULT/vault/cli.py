@@ -228,6 +228,49 @@ def backtest(days):
         conn.close()
 
 
+@cli.command("setup-clob")
+def setup_clob():
+    """One-time setup: approve USDC + CTF token allowances for Polymarket CLOB."""
+    from vault.config_loader import load_config
+    load_config()  # ensure .env is loaded
+
+    click.echo("Initialising CLOB client...")
+    try:
+        from vault.clob_client import _get_client, check_allowances, setup_allowances, get_usdc_balance
+
+        _get_client()
+        click.echo("CLOB client connected.")
+
+        # Check current state
+        usdc = get_usdc_balance()
+        click.echo(f"On-chain USDC balance: ${usdc:.2f}")
+
+        allowance_info = check_allowances()
+        click.echo(f"Current allowance: ${allowance_info.get('allowance', 0):.2f}")
+
+        if allowance_info.get("error"):
+            click.echo(f"Warning: {allowance_info['error']}")
+
+        # Set allowances
+        click.echo("\nApproving exchange contracts...")
+        result = setup_allowances()
+        if result.get("success"):
+            click.echo("Allowances approved successfully.")
+        else:
+            click.echo(f"Allowance setup failed: {result.get('error')}")
+            sys.exit(1)
+
+        # Verify
+        new_allowance = check_allowances()
+        click.echo(f"\nVerified allowance: ${new_allowance.get('allowance', 0):.2f}")
+        click.echo(f"USDC balance: ${usdc:.2f}")
+        click.echo("\nCLOB setup complete. You can now set trading.simulated: false in config.yaml.")
+
+    except Exception as e:
+        click.echo(f"Setup failed: {e}")
+        sys.exit(1)
+
+
 @cli.command()
 @click.argument("key", required=False)
 @click.argument("value", required=False)

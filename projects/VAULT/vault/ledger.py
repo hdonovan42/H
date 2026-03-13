@@ -129,17 +129,23 @@ def record_prediction_buy(conn, market_id: str, condition_id: str | None,
                           cycle_id: int | None = None,
                           entry_edge: float | None = None,
                           entry_confidence: float | None = None,
-                          entry_reasoning: str | None = None) -> int:
-    """Place a prediction bet. Deducts from balance. Returns prediction_id."""
-    # shares = amount / odds (e.g. $5 at 0.60 odds = 8.33 shares, paying out $8.33 if won)
-    shares = round(amount_usd / odds, 6)
+                          entry_reasoning: str | None = None,
+                          execution_mode: str = "paper",
+                          shares_override: float | None = None) -> int:
+    """Place a prediction bet. Deducts from balance. Returns prediction_id.
+
+    If shares_override is set (from a real CLOB fill), use it instead of amount/odds.
+    """
+    shares = round(shares_override, 6) if shares_override is not None else round(amount_usd / odds, 6)
 
     cur = conn.execute(
         "INSERT INTO predictions (market_id, condition_id, question, slug, side, shares, "
-        "entry_odds, cost_basis, clob_token_id, end_date, entry_edge, entry_confidence, entry_reasoning) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "entry_odds, cost_basis, clob_token_id, end_date, entry_edge, entry_confidence, "
+        "entry_reasoning, execution_mode) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (market_id, condition_id, question, slug, side, shares,
-         odds, amount_usd, clob_token_id, end_date, entry_edge, entry_confidence, entry_reasoning),
+         odds, amount_usd, clob_token_id, end_date, entry_edge, entry_confidence,
+         entry_reasoning, execution_mode),
     )
     prediction_id = cur.lastrowid
 
@@ -154,8 +160,9 @@ def record_prediction_buy(conn, market_id: str, condition_id: str | None,
     )
     conn.commit()
 
+    mode_tag = " [REAL]" if execution_mode == "real" else ""
     new_balance = get_balance(conn)
-    log.info(f"BET {side} '{question[:40]}' @ {odds:.0%} | ${amount_usd:.2f} for {shares:.2f} shares | Balance: ${new_balance:.2f}")
+    log.info(f"BET{mode_tag} {side} '{question[:40]}' @ {odds:.0%} | ${amount_usd:.2f} for {shares:.2f} shares | Balance: ${new_balance:.2f}")
     return prediction_id
 
 
@@ -236,7 +243,7 @@ def get_open_predictions(conn) -> list[dict]:
     rows = conn.execute(
         "SELECT id, market_id, question, slug, side, shares, entry_odds, "
         "cost_basis, end_date, opened_at, entry_edge, entry_confidence, entry_reasoning, "
-        "peak_roi "
+        "peak_roi, execution_mode, clob_token_id "
         "FROM predictions WHERE status = 'open'"
     ).fetchall()
     return [dict(r) for r in rows]
