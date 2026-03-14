@@ -15,24 +15,20 @@ export function useVaultData() {
   const [costs, setCosts] = useState(null);
   const [positions, setPositions] = useState(null);
   const [events, setEvents] = useState([]);
-  const [memories, setMemories] = useState([]);
   const [predictions, setPredictions] = useState(null);
-  const [calibration, setCalibration] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     try {
-      const [s, bh, cy, co, po, ev, me, pr, ca] = await Promise.all([
+      const [s, bh, cy, co, po, ev, pr] = await Promise.all([
         fetchJSON('/api/v1/status'),
         fetchJSON('/api/v1/balance/history?limit=2000'),
         fetchJSON('/api/v1/cycles?limit=50'),
         fetchJSON('/api/v1/costs'),
         fetchJSON('/api/v1/positions'),
         fetchJSON('/api/v1/events?limit=50'),
-        fetchJSON('/api/v1/memories?limit=30'),
         fetchJSON('/api/v1/predictions'),
-        fetchJSON('/api/v1/calibration').catch(() => null),
       ]);
       setStatus(s);
       setBalanceHistory(bh);
@@ -40,9 +36,7 @@ export function useVaultData() {
       setCosts(co);
       setPositions(po);
       setEvents(ev);
-      setMemories(me);
       setPredictions(pr);
-      setCalibration(ca);
       setError(null);
     } catch (err) {
       setError(err.message);
@@ -57,5 +51,5 @@ export function useVaultData() {
     return () => clearInterval(id);
   }, [refresh]);
 
-  return { status, balanceHistory, cycles, costs, positions, events, memories, predictions, calibration, error, loading, refresh };
+  return { status, balanceHistory, cycles, costs, positions, events, predictions, error, loading, refresh };
 }

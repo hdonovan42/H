@@ -6,7 +6,6 @@ import CycleLog from './components/CycleLog';
 import CostBreakdown from './components/CostBreakdown';
 import BetsPanel from './components/BetsPanel';
 import EventTimeline from './components/EventTimeline';
-import PipelineView from './components/PipelineView';
 import SmartMoneyPanel from './components/SmartMoneyPanel';
 
 function useHash() {
@@ -71,35 +70,9 @@ function LogPage({ cycles, costs, events }) {
   );
 }
 
-function MemoryPage({ memories }) {
-  return (
-    <div className="page">
-      <div className="card">
-        <div className="card-title">Agent Strategy Memories</div>
-        {(!memories || memories.length === 0) ? (
-          <div className="empty">No strategy memories recorded yet</div>
-        ) : (
-          <div>
-            {memories.map((m) => (
-              <div key={m.id} className="memory-item">
-                <span className={`memory-category ${m.category}`}>{m.category}</span>
-                <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>
-                  rel: {m.relevance?.toFixed(1)}
-                </span>
-                <div className="memory-content">{m.content}</div>
-                <div className="memory-meta">{m.ts?.slice(0, 16).replace('T', ' ')}</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export default function App() {
   const hash = useHash();
-  const { status, balanceHistory, cycles, costs, positions, events, memories, predictions, calibration, error, loading } = useVaultData();
+  const { status, balanceHistory, cycles, costs, positions, events, predictions, error, loading } = useVaultData();
 
   const alive = status?.alive ?? true;
 
@@ -107,25 +80,17 @@ export default function App() {
 
   const navItems = [
     { hash: '#/', label: 'Home' },
-    { hash: '#/pipeline', label: 'Pipeline' },
     { hash: '#/smart-money', label: 'Smart $' },
     { hash: '#/log', label: 'Log' },
-    { hash: '#/memory', label: 'Memory' },
   ];
 
   let page;
   switch (hash) {
-    case '#/pipeline':
-      page = <PipelineView calibration={calibration} />;
-      break;
     case '#/smart-money':
       page = <SmartMoneyPanel />;
       break;
     case '#/log':
       page = <LogPage cycles={cycles} costs={costs} events={events} />;
-      break;
-    case '#/memory':
-      page = <MemoryPage memories={memories} />;
       break;
     default:
       page = (

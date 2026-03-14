@@ -5,6 +5,21 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v19.1 — Dashboard Cleanup
+
+**Deployed**: 2026-03-14 | **Baseline**: $51.29 balance, 7 cycles
+
+Removed vestigial Pipeline and Memory pages from the dashboard. Pipeline showed the old Opus intelligence/sentinel/tweet pipeline (disabled since v13.5 momentum-only switch). Memory showed agent strategy memories from the `write_memory` actuator (also unused). Nav is now Home | Smart $ | Log. Also stops polling 2 dead API endpoints (`/memories`, `/calibration`) every 10s.
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `dashboard/src/App.jsx` | Removed PipelineView import, MemoryPage component, nav items, routes |
+| `dashboard/src/components/PipelineView.jsx` | Deleted |
+| `dashboard/src/hooks/useVaultData.js` | Removed memories + calibration fetches |
+
+---
+
 ## v19 — Real Polymarket CLOB Trading
 
 **Deployed**: 2026-03-13 | **Baseline**: $120.25 balance, $152.42 total value, 137.2d runway
