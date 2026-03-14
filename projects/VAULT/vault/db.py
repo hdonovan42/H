@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     resolution    TEXT,                   -- won/lost/sold
     payout        REAL,
     pnl           REAL,
+    peak_roi      REAL DEFAULT 0,               -- trailing stop high-water mark (v12)
     execution_mode TEXT DEFAULT 'paper',        -- paper/real (v19)
     status        TEXT NOT NULL DEFAULT 'open'  -- open/closed
 );
@@ -173,7 +174,14 @@ CREATE TABLE IF NOT EXISTS musk_markets (
     volume      REAL,
     end_date    TEXT,
     first_seen  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    last_seen   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    last_seen   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    description TEXT,                           -- (v13)
+    volume_24h  REAL,                           -- (v13)
+    liquidity   REAL,                           -- (v13)
+    spread      REAL,                           -- (v13)
+    competitive REAL,                           -- (v13)
+    game_start_time TEXT,                       -- (v13)
+    event_title TEXT                            -- (v13)
 );
 
 CREATE TABLE IF NOT EXISTS odds_snapshots (

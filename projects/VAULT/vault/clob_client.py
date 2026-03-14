@@ -186,14 +186,20 @@ def sell_shares(token_id: str, shares: float, min_price: float = 0.01) -> FillRe
 
 
 def get_usdc_balance() -> float:
-    """Check on-chain USDC balance for the funder address."""
+    """Check on-chain USDC (collateral) balance."""
+    from py_clob_client.clob_types import BalanceAllowanceParams, AssetType
+
     try:
         client = _get_client()
-        # py-clob-client exposes balance check
-        balance = client.get_balance_allowance()
-        # balance_allowance returns {"balance": "...", "allowance": "..."}
-        if isinstance(balance, dict):
-            return float(balance.get("balance", 0)) / 1e6  # USDC has 6 decimals
+        cfg = load_config()
+        sig_type = cfg.get("trading", {}).get("clob", {}).get("signature_type", 0)
+        params = BalanceAllowanceParams(
+            asset_type=AssetType.COLLATERAL,
+            signature_type=sig_type,
+        )
+        result = client.get_balance_allowance(params)
+        if isinstance(result, dict):
+            return float(result.get("balance", 0)) / 1e6  # USDC has 6 decimals
         return 0.0
     except Exception as e:
         log.warning(f"Failed to check USDC balance: {e}")
@@ -201,14 +207,22 @@ def get_usdc_balance() -> float:
 
 
 def check_allowances() -> dict:
-    """Check exchange contract allowances."""
+    """Check exchange contract allowances for collateral (USDC)."""
+    from py_clob_client.clob_types import BalanceAllowanceParams, AssetType
+
     try:
         client = _get_client()
-        bal = client.get_balance_allowance()
-        if isinstance(bal, dict):
+        cfg = load_config()
+        sig_type = cfg.get("trading", {}).get("clob", {}).get("signature_type", 0)
+        params = BalanceAllowanceParams(
+            asset_type=AssetType.COLLATERAL,
+            signature_type=sig_type,
+        )
+        result = client.get_balance_allowance(params)
+        if isinstance(result, dict):
             return {
-                "balance": float(bal.get("balance", 0)) / 1e6,
-                "allowance": float(bal.get("allowance", 0)) / 1e6,
+                "balance": float(result.get("balance", 0)) / 1e6,
+                "allowance": float(result.get("allowance", 0)) / 1e6,
             }
         return {"balance": 0.0, "allowance": 0.0}
     except Exception as e:
@@ -219,17 +233,28 @@ def check_allowances() -> dict:
 def setup_allowances():
     """One-time approval for USDC + CTF token exchange contracts.
 
-    Uses py-clob-client's built-in approval methods.
+    Uses py-clob-client's update_balance_allowance to set max approvals.
     """
+    from py_clob_client.clob_types import BalanceAllowanceParams, AssetType
+
     client = _get_client()
+    cfg = load_config()
+    sig_type = cfg.get("trading", {}).get("clob", {}).get("signature_type", 0)
 
     log.info("Setting up exchange allowances...")
 
-    # py-clob-client handles the approval transactions internally
-    # set_allowances approves USDC and conditional tokens for the exchange
     try:
-        client.set_allowances()
-        log.info("Exchange allowances approved successfully")
+        # Approve collateral (USDC)
+        client.update_balance_allowance(BalanceAllowanceParams(
+            asset_type=AssetType.COLLATERAL,
+            signature_type=sig_type,
+        ))
+        log.info("Collateral (USDC) allowance approved")
+
+        # Conditional token approvals happen per-token when trading
+        # (ERC1155 requires a specific token_id, not a blanket approval)
+        log.info("Conditional token approvals will be handled per-market at trade time")
+
         return {"success": True}
     except Exception as e:
         log.error(f"Failed to set allowances: {e}", exc_info=True)
