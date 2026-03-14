@@ -1944,6 +1944,7 @@ function handlePromotionChoice(promotionPiece) {
   });
 
   if (move) {
+    AppState.board.position(AppState.game.fen());
     _applyUserMove();
   }
 
