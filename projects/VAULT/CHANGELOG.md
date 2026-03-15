@@ -5,6 +5,23 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v19.4 — Dashboard Simplification
+
+**Deployed**: 2026-03-15 | **Baseline**: $51.20 balance, 599d runway
+
+Stripped dashboard down to essentials. Removed Smart Money page (hypothesis testing for velocity signals — no data in fresh restart), CostBreakdown component, and associated API polling. Log page restructured: events (max 6) at top, full cycle log below in a fixed-height scrollable container. Nav: Home | Log.
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `dashboard/src/App.jsx` | Removed SmartMoney import/route/nav, removed CostBreakdown from Log page, restructured LogPage layout |
+| `dashboard/src/components/SmartMoneyPanel.jsx` | Deleted |
+| `dashboard/src/components/CostBreakdown.jsx` | Deleted |
+| `dashboard/src/components/EventTimeline.jsx` | Capped to 6 items |
+| `dashboard/src/hooks/useVaultData.js` | Removed `/costs` fetch |
+
+---
+
 ## v19.3 — USDC Deposit Auto-Detection & CLOB Order Fix
 
 **Deployed**: 2026-03-15 | **Baseline**: $51.21 balance, on-chain USDC $0.00
