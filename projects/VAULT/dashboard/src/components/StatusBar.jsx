@@ -61,8 +61,8 @@ export default function StatusBar({ status }) {
 
       <div className="stat">
         <div className="stat-label">ARR</div>
-        <div className={`stat-value ${alive_days > 0 ? ((total_value - 50) / 50 / alive_days * 365 >= 0 ? 'green' : 'red') : ''}`}>
-          {alive_days > 0 ? `${(total_value - 50) / 50 / alive_days * 365 * 100 >= 0 ? '+' : ''}${Math.round((total_value - 50) / 50 / alive_days * 365 * 100)}%` : 'N/A'}
+        <div className={`stat-value ${total_pnl === 0 ? '' : alive_days >= 1 ? ((total_value - 50) / 50 / alive_days * 365 >= 0 ? 'green' : 'red') : ''}`}>
+          {total_pnl === 0 ? '0%' : alive_days >= 1 ? `${(total_value - 50) / 50 / alive_days * 365 * 100 >= 0 ? '+' : ''}${Math.round((total_value - 50) / 50 / alive_days * 365 * 100)}%` : 'N/A'}
         </div>
         <div className="stat-sub">annualised return</div>
       </div>

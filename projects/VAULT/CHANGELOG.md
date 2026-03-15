@@ -5,6 +5,19 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v19.2 — ARR Display Fix
+
+**Deployed**: 2026-03-15 | **Baseline**: $51.23 balance, 848d runway
+
+ARR stat was showing +8998% because it extrapolated a tiny balance difference over 0.1 alive days. Two fixes: if trading P&L is exactly $0, show `0%` immediately. Otherwise require ≥1 day of data before annualising.
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `dashboard/src/components/StatusBar.jsx` | Zero-return special case, ≥1 day threshold |
+
+---
+
 ## v19.1 — Dashboard Cleanup
 
 **Deployed**: 2026-03-14 | **Baseline**: $51.29 balance, 7 cycles
