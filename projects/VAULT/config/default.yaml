@@ -3,6 +3,8 @@
 
 seed_balance: 50.00
 
+polygon_rpc_url: "https://polygon-bor-rpc.publicnode.com"
+
 daemon:
   interval_seconds: 60         # 1 minute between cycles (auto-hold makes idle cycles free)
   pid_file: vault.pid
@@ -24,6 +26,7 @@ trading:
     balance_reconcile: true
     balance_drift_warn: 0.50
     fallback_on_failure: "skip"  # "skip" or "paper"
+    reconcile_interval_cycles: 10  # check for deposits every 10 cycles
 
 polymarket:
   cache_ttl_seconds: 300        # 5 min cache for market data

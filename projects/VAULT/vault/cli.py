@@ -243,7 +243,7 @@ def setup_clob():
 
         # Check current state
         usdc = get_usdc_balance()
-        click.echo(f"On-chain USDC balance: ${usdc:.2f}")
+        click.echo(f"On-chain USDC balance: ${usdc:.2f}" if usdc is not None else "On-chain USDC balance: unavailable")
 
         allowance_info = check_allowances()
         click.echo(f"Current allowance: ${allowance_info.get('allowance', 0):.2f}")

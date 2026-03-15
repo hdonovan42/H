@@ -9,6 +9,19 @@ from vault.config_loader import load_config
 log = logging.getLogger("vault.clob")
 
 _client = None
+_w3 = None
+
+# Polygon USDC.e (bridged USDC on Polygon PoS)
+POLYGON_USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+ERC20_BALANCE_ABI = [
+    {
+        "constant": True,
+        "inputs": [{"name": "_owner", "type": "address"}],
+        "name": "balanceOf",
+        "outputs": [{"name": "balance", "type": "uint256"}],
+        "type": "function",
+    }
+]
 
 
 @dataclass
@@ -71,16 +84,17 @@ def resolve_token_id(clob_token_ids: list | None, side: str) -> str | None:
 def buy_shares(token_id: str, amount_usd: float, max_price: float = 0.99) -> FillResult:
     """Place a FOK market buy order. Returns FillResult with fill data."""
     from py_clob_client.order_builder.constants import BUY
+    from py_clob_client.clob_types import MarketOrderArgs
 
     try:
         client = _get_client()
 
-        order_args = {
-            "token_id": token_id,
-            "amount": amount_usd,
-            "side": BUY,
-            "price": max_price,
-        }
+        order_args = MarketOrderArgs(
+            token_id=token_id,
+            amount=amount_usd,
+            side=BUY,
+            price=max_price,
+        )
 
         signed_order = client.create_market_order(order_args)
         resp = client.post_order(signed_order, "FOK")
@@ -130,16 +144,17 @@ def buy_shares(token_id: str, amount_usd: float, max_price: float = 0.99) -> Fil
 def sell_shares(token_id: str, shares: float, min_price: float = 0.01) -> FillResult:
     """Place a FOK market sell order. Returns FillResult with fill data."""
     from py_clob_client.order_builder.constants import SELL
+    from py_clob_client.clob_types import MarketOrderArgs
 
     try:
         client = _get_client()
 
-        order_args = {
-            "token_id": token_id,
-            "amount": shares,
-            "side": SELL,
-            "price": min_price,
-        }
+        order_args = MarketOrderArgs(
+            token_id=token_id,
+            amount=shares,
+            side=SELL,
+            price=min_price,
+        )
 
         signed_order = client.create_market_order(order_args)
         resp = client.post_order(signed_order, "FOK")
@@ -185,25 +200,36 @@ def sell_shares(token_id: str, shares: float, min_price: float = 0.01) -> FillRe
         return FillResult(success=False, error=str(e))
 
 
-def get_usdc_balance() -> float:
-    """Check on-chain USDC (collateral) balance."""
-    from py_clob_client.clob_types import BalanceAllowanceParams, AssetType
+def get_usdc_balance() -> float | None:
+    """Check on-chain USDC balance via direct web3 ERC20 balanceOf call.
+
+    Returns None on failure (not 0.0) so callers can distinguish RPC
+    failure from an empty wallet.
+    """
+    global _w3
+    from web3 import Web3
 
     try:
-        client = _get_client()
         cfg = load_config()
-        sig_type = cfg.get("trading", {}).get("clob", {}).get("signature_type", 0)
-        params = BalanceAllowanceParams(
-            asset_type=AssetType.COLLATERAL,
-            signature_type=sig_type,
+        rpc_url = cfg.get("polygon_rpc_url", "https://polygon-rpc.com")
+
+        if _w3 is None:
+            _w3 = Web3(Web3.HTTPProvider(rpc_url))
+
+        wallet = os.environ.get("POLYMARKET_FUNDER_ADDRESS")
+        if not wallet:
+            log.warning("POLYMARKET_FUNDER_ADDRESS not set — cannot check on-chain balance")
+            return None
+
+        contract = _w3.eth.contract(
+            address=Web3.to_checksum_address(POLYGON_USDC_ADDRESS),
+            abi=ERC20_BALANCE_ABI,
         )
-        result = client.get_balance_allowance(params)
-        if isinstance(result, dict):
-            return float(result.get("balance", 0)) / 1e6  # USDC has 6 decimals
-        return 0.0
+        raw = contract.functions.balanceOf(Web3.to_checksum_address(wallet)).call()
+        return round(raw / 1e6, 6)  # USDC has 6 decimals
     except Exception as e:
         log.warning(f"Failed to check USDC balance: {e}")
-        return 0.0
+        return None
 
 
 def check_allowances() -> dict:

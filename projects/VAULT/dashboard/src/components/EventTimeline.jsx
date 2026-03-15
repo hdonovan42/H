@@ -18,8 +18,8 @@ export default function EventTimeline({ events }) {
   return (
     <div className="card">
       <div className="card-title">Events</div>
-      <ul className="event-list">
-        {events.map((e) => (
+      <ul className="event-list" style={{ maxHeight: 'none', overflow: 'visible' }}>
+        {events.slice(0, 6).map((e) => (
           <li key={e.id} className="event-item">
             <span className={`event-type ${e.event}`}>{e.event}</span>
             <span className="event-detail">{e.detail}</span>

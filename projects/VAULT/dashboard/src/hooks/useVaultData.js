@@ -12,7 +12,6 @@ export function useVaultData() {
   const [status, setStatus] = useState(null);
   const [balanceHistory, setBalanceHistory] = useState([]);
   const [cycles, setCycles] = useState([]);
-  const [costs, setCosts] = useState(null);
   const [positions, setPositions] = useState(null);
   const [events, setEvents] = useState([]);
   const [predictions, setPredictions] = useState(null);
@@ -21,11 +20,10 @@ export function useVaultData() {
 
   const refresh = useCallback(async () => {
     try {
-      const [s, bh, cy, co, po, ev, pr] = await Promise.all([
+      const [s, bh, cy, po, ev, pr] = await Promise.all([
         fetchJSON('/api/v1/status'),
         fetchJSON('/api/v1/balance/history?limit=2000'),
         fetchJSON('/api/v1/cycles?limit=50'),
-        fetchJSON('/api/v1/costs'),
         fetchJSON('/api/v1/positions'),
         fetchJSON('/api/v1/events?limit=50'),
         fetchJSON('/api/v1/predictions'),
@@ -33,7 +31,6 @@ export function useVaultData() {
       setStatus(s);
       setBalanceHistory(bh);
       setCycles(cy);
-      setCosts(co);
       setPositions(po);
       setEvents(ev);
       setPredictions(pr);
@@ -51,5 +48,5 @@ export function useVaultData() {
     return () => clearInterval(id);
   }, [refresh]);
 
-  return { status, balanceHistory, cycles, costs, positions, events, predictions, error, loading, refresh };
+  return { status, balanceHistory, cycles, positions, events, predictions, error, loading, refresh };
 }

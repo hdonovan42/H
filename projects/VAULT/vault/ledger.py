@@ -238,6 +238,47 @@ def record_prediction_sell(conn, prediction_id: int, current_odds: float,
     return pnl
 
 
+def compute_expected_onchain(conn) -> float:
+    """Compute expected on-chain USDC from DB state.
+
+    expected = SUM(seed + deposits) - SUM(cost_basis for real predictions)
+               + SUM(payout for closed real predictions)
+
+    API costs don't touch the wallet (paid to Anthropic separately).
+    Paper trades don't touch the wallet. Only execution_mode='real' moves USDC.
+    """
+    deposits = conn.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE entry_type IN ('seed', 'deposit')"
+    ).fetchone()[0]
+    real_costs = conn.execute(
+        "SELECT COALESCE(SUM(cost_basis), 0) FROM predictions WHERE execution_mode = 'real'"
+    ).fetchone()[0]
+    real_payouts = conn.execute(
+        "SELECT COALESCE(SUM(payout), 0) FROM predictions "
+        "WHERE execution_mode = 'real' AND status = 'closed' AND payout IS NOT NULL"
+    ).fetchone()[0]
+    return round(deposits - real_costs + real_payouts, 6)
+
+
+def record_deposit(conn, amount: float) -> float:
+    """Record an auto-detected on-chain deposit. Returns new balance."""
+    conn.execute(
+        "INSERT INTO ledger (entry_type, amount, description, balance_after) "
+        "VALUES (?, ?, ?, "
+        "ROUND((SELECT balance_after FROM ledger ORDER BY id DESC LIMIT 1) + ?, 6))",
+        ("deposit", amount, f"Auto-detected on-chain deposit: ${amount:.2f}", amount),
+    )
+    conn.execute(
+        "INSERT INTO events (event, detail) VALUES (?, ?)",
+        ("deposit", f"Auto-detected on-chain deposit: ${amount:.2f}"),
+    )
+    conn.commit()
+
+    new_balance = get_balance(conn)
+    log.info(f"Deposit detected: ${amount:.2f} | New balance: ${new_balance:.2f}")
+    return new_balance
+
+
 def get_open_predictions(conn) -> list[dict]:
     """Get all open predictions."""
     rows = conn.execute(

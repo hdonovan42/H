@@ -3,10 +3,9 @@ import { useVaultData } from './hooks/useVaultData';
 import StatusBar from './components/StatusBar';
 import BalanceChart from './components/BalanceChart';
 import CycleLog from './components/CycleLog';
-import CostBreakdown from './components/CostBreakdown';
 import BetsPanel from './components/BetsPanel';
 import EventTimeline from './components/EventTimeline';
-import SmartMoneyPanel from './components/SmartMoneyPanel';
+
 
 function useHash() {
   const [hash, setHash] = useState(window.location.hash || '#/');
@@ -31,15 +30,16 @@ function DashboardPage({ status, balanceHistory, cycles, positions, predictions 
   );
 }
 
-function LogPage({ cycles, costs, events }) {
+function LogPage({ cycles, events }) {
   return (
     <div className="page">
-      <div className="card">
+      <EventTimeline events={events} />
+      <div className="card" style={{ marginTop: '16px' }}>
         <div className="card-title">Full Cycle Log</div>
         {(!cycles || cycles.length === 0) ? (
           <div className="empty">No cycles recorded yet</div>
         ) : (
-          <ul className="cycle-list">
+          <ul className="log-list" style={{ maxHeight: '600px', overflowY: 'auto' }}>
             {cycles.map((c) => (
               <li key={c.id} className="cycle-item">
                 <span className={`action-badge ${c.action || 'wait'}`}>
@@ -62,17 +62,13 @@ function LogPage({ cycles, costs, events }) {
           </ul>
         )}
       </div>
-      <div className="grid" style={{ marginTop: '16px' }}>
-        <CostBreakdown costs={costs} />
-        <EventTimeline events={events} />
-      </div>
     </div>
   );
 }
 
 export default function App() {
   const hash = useHash();
-  const { status, balanceHistory, cycles, costs, positions, events, predictions, error, loading } = useVaultData();
+  const { status, balanceHistory, cycles, positions, events, predictions, error, loading } = useVaultData();
 
   const alive = status?.alive ?? true;
 
@@ -80,17 +76,13 @@ export default function App() {
 
   const navItems = [
     { hash: '#/', label: 'Home' },
-    { hash: '#/smart-money', label: 'Smart $' },
     { hash: '#/log', label: 'Log' },
   ];
 
   let page;
   switch (hash) {
-    case '#/smart-money':
-      page = <SmartMoneyPanel />;
-      break;
     case '#/log':
-      page = <LogPage cycles={cycles} costs={costs} events={events} />;
+      page = <LogPage cycles={cycles} events={events} />;
       break;
     default:
       page = (

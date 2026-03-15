@@ -18,6 +18,31 @@ log = logging.getLogger("vault.daemon")
 _shutdown_requested = False
 
 
+def _reconcile_balance(conn, cfg):
+    """Check on-chain USDC vs expected from DB. Auto-record deposits."""
+    from vault.clob_client import get_usdc_balance
+
+    actual = get_usdc_balance()
+    if actual is None:
+        log.warning("Balance reconciliation skipped — RPC call failed")
+        return
+
+    expected = ledger.compute_expected_onchain(conn)
+    diff = round(actual - expected, 6)
+    tolerance = cfg.get("trading", {}).get("clob", {}).get("balance_drift_warn", 0.50)
+
+    if diff > tolerance:
+        ledger.record_deposit(conn, diff)
+        log.info(f"Deposit detected: ${diff:.2f} (on-chain ${actual:.2f}, expected ${expected:.2f})")
+    elif diff < -tolerance:
+        log.warning(
+            f"Negative balance drift: ${diff:.2f} (on-chain ${actual:.2f}, expected ${expected:.2f}) "
+            "— possible withdrawal or settlement lag, not auto-adjusting"
+        )
+    else:
+        log.debug(f"Balance reconciliation OK: drift ${diff:.2f} within tolerance")
+
+
 def _handle_signal(signum, frame):
     global _shutdown_requested
     name = signal.Signals(signum).name
@@ -92,8 +117,12 @@ def run_daemon(resurrect: bool = False):
             from vault.clob_client import _get_client, get_usdc_balance
             _get_client()  # init + derive creds
             usdc = get_usdc_balance()
-            log.info(f"CLOB client ready. On-chain USDC: ${usdc:.2f}")
-            print(f"CLOB client ready. On-chain USDC: ${usdc:.2f}")
+            if usdc is not None:
+                log.info(f"CLOB client ready. On-chain USDC: ${usdc:.2f}")
+                print(f"CLOB client ready. On-chain USDC: ${usdc:.2f}")
+            else:
+                log.warning("CLOB client ready but could not fetch on-chain balance")
+                print("CLOB client ready (on-chain balance unavailable)")
         except Exception as e:
             log.error(f"CLOB client init failed: {e}", exc_info=True)
             print(f"ERROR: CLOB client init failed: {e}")
@@ -161,6 +190,17 @@ def run_daemon(resurrect: bool = False):
                     ("error", f"Cycle error: {str(e)[:500]}"),
                 )
                 conn.commit()
+
+            # Balance reconciliation — detect on-chain deposits (real trading only)
+            is_simulated = cfg.get("trading", {}).get("simulated", True)
+            if not is_simulated:
+                cycle_count = conn.execute("SELECT COUNT(*) as c FROM cycles").fetchone()["c"]
+                reconcile_interval = cfg.get("trading", {}).get("clob", {}).get("reconcile_interval_cycles", 10)
+                if cycle_count % reconcile_interval == 0:
+                    try:
+                        _reconcile_balance(conn, cfg)
+                    except Exception as e:
+                        log.warning(f"Balance reconciliation failed: {e}")
 
             # Sleep in 1-second increments (responsive to signals)
             for _ in range(interval):

@@ -5,6 +5,28 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v19.3 — USDC Deposit Auto-Detection & CLOB Order Fix
+
+**Deployed**: 2026-03-15 | **Baseline**: $51.21 balance, on-chain USDC $0.00
+
+Two changes: (1) Auto-detect USDC deposits to the Polymarket wallet so the internal ledger stays in sync — computes expected on-chain balance from DB state, records the difference as a deposit when it exceeds tolerance. Runs every 10 cycles in real trading mode. (2) Fixed `buy_shares()`/`sell_shares()` passing a plain dict instead of `MarketOrderArgs` dataclass to `create_market_order()`, which caused `'dict' object has no attribute 'token_id'` on every real order attempt.
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `config/default.yaml` | Added `polygon_rpc_url` (publicnode), `reconcile_interval_cycles: 10` |
+| `vault/clob_client.py` | Replaced `get_usdc_balance()` with web3 ERC20 `balanceOf` call (returns `None` on failure); fixed `buy_shares`/`sell_shares` to use `MarketOrderArgs` dataclass |
+| `vault/ledger.py` | Added `compute_expected_onchain()` + `record_deposit()` |
+| `vault/daemon.py` | Added `_reconcile_balance()`, wired into main loop every N cycles; handled `None` from `get_usdc_balance()` |
+| `vault/cli.py` | Handled `None` from `get_usdc_balance()` in `setup-clob` |
+
+### What to watch
+- Daemon logs for "Deposit detected" after sending USDC to the proxy wallet
+- Negative drift warnings (possible settlement lag or withdrawal)
+- RPC reliability — publicnode.com is the current provider, may need fallback
+
+---
+
 ## v19.2 — ARR Display Fix
 
 **Deployed**: 2026-03-15 | **Baseline**: $51.23 balance, 848d runway
