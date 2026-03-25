@@ -578,22 +578,27 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
       </svg>
 
       {/* Previous close price label (HTML to avoid SVG text squashing) */}
-      {visibleDays <= 1 && previousClose && minPrice && maxPrice && priceRange > 0 && (
-        <span
-          style={{
-            position: 'absolute',
-            right: '12px',
-            top: `${((260 - ((previousClose - minPrice) / priceRange) * 240) / 300) * 100}%`,
-            fontSize: '11px',
-            fontFamily: 'IBM Plex Mono',
-            color: '#333',
-            pointerEvents: 'none',
-            whiteSpace: 'nowrap'
-          }}
-        >
-          ${previousClose.toFixed(2)}
-        </span>
-      )}
+      {visibleDays <= 1 && previousClose && minPrice && maxPrice && priceRange > 0 && (() => {
+        const linePct = ((260 - ((previousClose - minPrice) / priceRange) * 240) / 300) * 100;
+        const lineHigh = linePct < 50;
+        return (
+          <span
+            style={{
+              position: 'absolute',
+              right: '12px',
+              top: `${linePct}%`,
+              transform: lineHigh ? 'translateY(2px)' : 'translateY(calc(-100% - 2px))',
+              fontSize: '11px',
+              fontFamily: 'IBM Plex Mono',
+              color: '#333',
+              pointerEvents: 'none',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            ${previousClose.toFixed(2)}
+          </span>
+        );
+      })()}
 
       {/* X-axis labels */}
       {xLabels.map((item, idx) => (
