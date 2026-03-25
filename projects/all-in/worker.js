@@ -157,35 +157,50 @@ async function collectGoogleNews(env) {
 
     let match;
     let count = 0;
+    let parseAttempts = 0;
 
     while ((match = itemRegex.exec(xml)) !== null && count < 15) {
-      const itemXml = match[1];
+      parseAttempts++;
+      try {
+        const itemXml = match[1];
 
-      const titleMatch = itemXml.match(titleRegex);
-      const linkMatch = itemXml.match(linkRegex);
-      const pubDateMatch = itemXml.match(pubDateRegex);
-      const sourceMatch = itemXml.match(sourceRegex);
+        const titleMatch = itemXml.match(titleRegex);
+        const linkMatch = itemXml.match(linkRegex);
+        const pubDateMatch = itemXml.match(pubDateRegex);
+        const sourceMatch = itemXml.match(sourceRegex);
+        // Also try description for summary
+        const descMatch = itemXml.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>|<description>(.*?)<\/description>/);
 
-      const title = titleMatch ? (titleMatch[1] || titleMatch[2]) : '';
-      const link = linkMatch ? linkMatch[1] : '';
-      const pubDate = pubDateMatch ? pubDateMatch[1] : '';
-      const source = sourceMatch ? sourceMatch[1] : 'Google News';
+        const title = titleMatch ? (titleMatch[1] || titleMatch[2]) : '';
+        const link = linkMatch ? linkMatch[1] : '';
+        const pubDate = pubDateMatch ? pubDateMatch[1] : '';
+        const source = sourceMatch ? sourceMatch[1] : 'Google News';
+        const summary = descMatch ? (descMatch[1] || descMatch[2] || '') : '';
 
-      if (!link || await isUrlSeen(env, link)) continue;
+        if (!link || await isUrlSeen(env, link)) continue;
 
-      items.push({
-        id: `google-${await hashUrl(link)}`,
-        source: source,
-        title: title,
-        url: link,
-        publishedAt: pubDate ? new Date(pubDate).toISOString() : new Date().toISOString(),
-        summary: '',
-        category: 'news',
-        ticker: 'TSLA',
-      });
+        items.push({
+          id: `google-${await hashUrl(link)}`,
+          source: source,
+          title: title,
+          url: link,
+          publishedAt: pubDate ? new Date(pubDate).toISOString() : new Date().toISOString(),
+          summary,
+          category: 'news',
+          ticker: 'TSLA',
+        });
 
-      await markUrlSeen(env, link);
-      count++;
+        await markUrlSeen(env, link);
+        count++;
+      } catch (itemError) {
+        console.warn('Failed to parse Google News item:', itemError.message);
+        continue;
+      }
+    }
+
+    // Health check: if we found XML items but parsed zero, the format may have changed
+    if (parseAttempts > 0 && items.length === 0) {
+      console.warn(`Google News: ${parseAttempts} items found in XML but 0 parsed — RSS format may have changed`);
     }
   } catch (error) {
     console.error('Google News collector error:', error);
@@ -200,11 +215,14 @@ async function collectGoogleNews(env) {
 async function getStoredNews(env, ticker = 'TSLA') {
   const key = `news:${ticker}`;
   const stored = await env.NEWS_STORE.get(key);
-  if (!stored) return [];
+  if (!stored) return { items: [], lastCollected: null };
   try {
-    return JSON.parse(stored);
+    const parsed = JSON.parse(stored);
+    // Support both old format (array) and new format (object with metadata)
+    if (Array.isArray(parsed)) return { items: parsed, lastCollected: null };
+    return { items: parsed.items || [], lastCollected: parsed.lastCollected || null };
   } catch {
-    return [];
+    return { items: [], lastCollected: null };
   }
 }
 
@@ -212,20 +230,34 @@ async function storeNews(env, items, ticker = 'TSLA') {
   if (!items || items.length === 0) return { added: 0, total: 0 };
 
   const key = `news:${ticker}`;
-  const existing = await getStoredNews(env, ticker);
 
-  const existingIds = new Set(existing.map(n => n.id));
-  const newItems = items.filter(n => !existingIds.has(n.id));
+  // Simple lock to prevent concurrent read-modify-write races
+  const lockKey = `news:${ticker}:lock`;
+  const locked = await env.NEWS_STORE.get(lockKey);
+  if (locked) return { added: 0, total: 0, skipped: 'locked' };
+  await env.NEWS_STORE.put(lockKey, '1', { expirationTtl: 30 });
 
-  const combined = [...newItems, ...existing]
-    .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt))
-    .slice(0, 500); // Increased from 200 to hold more SEC filings
+  try {
+    const { items: existing } = await getStoredNews(env, ticker);
 
-  await env.NEWS_STORE.put(key, JSON.stringify(combined), {
-    expirationTtl: 60 * 60 * 24 * 7,
-  });
+    const existingIds = new Set(existing.map(n => n.id));
+    const newItems = items.filter(n => !existingIds.has(n.id));
 
-  return { added: newItems.length, total: combined.length };
+    const combined = [...newItems, ...existing]
+      .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt))
+      .slice(0, 500);
+
+    await env.NEWS_STORE.put(key, JSON.stringify({
+      items: combined,
+      lastCollected: new Date().toISOString(),
+    }), {
+      expirationTtl: 60 * 60 * 24 * 7,
+    });
+
+    return { added: newItems.length, total: combined.length };
+  } finally {
+    await env.NEWS_STORE.delete(lockKey);
+  }
 }
 
 // ============================================================
@@ -269,8 +301,35 @@ async function runNewsCollection(env) {
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
+
+// Auth check for mutation endpoints
+function requireAuth(request, env) {
+  if (!env.ADMIN_SECRET) return true; // No secret configured = allow (dev mode)
+  const auth = request.headers.get('Authorization');
+  return auth === `Bearer ${env.ADMIN_SECRET}`;
+}
+
+// Unified proxy helper: always CORS, forwards upstream status, 15s timeout
+async function proxyFetch(targetUrl, headers = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(targetUrl, { headers, signal: controller.signal });
+    clearTimeout(timer);
+    return new Response(response.body, {
+      status: response.status,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  } catch (e) {
+    clearTimeout(timer);
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: e.name === 'AbortError' ? 504 : 502,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+}
 
 // ============================================================
 // MAIN WORKER EXPORT
@@ -412,7 +471,7 @@ export default {
 
       // GET /news/TSLA - Retrieve stored news
       if (path === '/news/TSLA' || path === '/news/TSLA/') {
-        const allNews = await getStoredNews(env, 'TSLA');
+        const { items: allNews, lastCollected } = await getStoredNews(env, 'TSLA');
 
         // Sort by date (newest first)
         allNews.sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
@@ -436,14 +495,20 @@ export default {
           ticker: 'TSLA',
           count: results.length,
           totalStored: allNews.length,
+          lastCollected,
           news: results,
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      // GET /news/update - Trigger news collection
+      // GET /news/update - Trigger news collection (auth required)
       if (path === '/news/update' || path === '/news/update/') {
+        if (!requireAuth(request, env)) {
+          return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+            status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
         const result = await runNewsCollection(env);
 
         return new Response(JSON.stringify({
@@ -455,8 +520,13 @@ export default {
         });
       }
 
-      // GET /news/reset - Clear news cache
+      // GET /news/reset - Clear news cache (auth required)
       if (path === '/news/reset' || path === '/news/reset/') {
+        if (!requireAuth(request, env)) {
+          return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+            status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
         await env.NEWS_STORE.delete('news:TSLA');
 
         return new Response(JSON.stringify({
@@ -471,10 +541,52 @@ export default {
       // FINNHUB ROUTES
       // ============================================================
 
-      // GET /finnhub/ws-url - WebSocket URL with token
+      // GET /finnhub/ws - WebSocket proxy (key never exposed to client)
+      if (path === '/finnhub/ws' || path === '/finnhub/ws/') {
+        if (request.headers.get('Upgrade') !== 'websocket') {
+          return new Response('Expected WebSocket upgrade', { status: 426, headers: corsHeaders });
+        }
+
+        // Connect to upstream Finnhub WebSocket
+        const finnhubResp = await fetch(`wss://ws.finnhub.io?token=${FINNHUB_KEY}`, {
+          headers: { 'Upgrade': 'websocket' },
+        });
+        const upstream = finnhubResp.webSocket;
+        if (!upstream) {
+          return new Response('Failed to connect to Finnhub', { status: 502, headers: corsHeaders });
+        }
+
+        // Create client-facing WebSocket pair
+        const [client, server] = Object.values(new WebSocketPair());
+
+        // Accept both sides
+        upstream.accept();
+        server.accept();
+
+        // Relay: upstream → client
+        upstream.addEventListener('message', event => {
+          try { server.send(event.data); } catch (e) { /* client disconnected */ }
+        });
+        upstream.addEventListener('close', () => {
+          try { server.close(); } catch (e) {}
+        });
+
+        // Relay: client → upstream
+        server.addEventListener('message', event => {
+          try { upstream.send(event.data); } catch (e) { /* upstream disconnected */ }
+        });
+        server.addEventListener('close', () => {
+          try { upstream.close(); } catch (e) {}
+        });
+
+        return new Response(null, { status: 101, webSocket: client });
+      }
+
+      // Legacy endpoint — kept for backwards compatibility but no longer exposes key
       if (path === '/finnhub/ws-url' || path === '/finnhub/ws-url/') {
+        const workerHost = url.hostname;
         return new Response(JSON.stringify({
-          url: `wss://ws.finnhub.io?token=${FINNHUB_KEY}`,
+          url: `wss://${workerHost}/finnhub/ws`,
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
         });
@@ -489,13 +601,18 @@ export default {
 
         if (!response) {
           targetUrl = `https://finnhub.io/api/v1/stock/metric?symbol=${symbol}&metric=all&token=${FINNHUB_KEY}`;
-          response = await fetch(targetUrl);
+          const upstream = await fetch(targetUrl);
 
-          if (response.ok) {
-            response = new Response(response.body, {
+          if (upstream.ok) {
+            response = new Response(upstream.body, {
               headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' },
             });
             ctx.waitUntil(cache.put(cacheKey, response.clone()));
+          } else {
+            response = new Response(upstream.body, {
+              status: upstream.status,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
           }
         }
         return response;
@@ -509,13 +626,18 @@ export default {
 
         if (!response) {
           targetUrl = `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_KEY}`;
-          response = await fetch(targetUrl);
+          const upstream = await fetch(targetUrl);
 
-          if (response.ok) {
-            response = new Response(response.body, {
+          if (upstream.ok) {
+            response = new Response(upstream.body, {
               headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=15' },
             });
             ctx.waitUntil(cache.put(request, response.clone()));
+          } else {
+            response = new Response(upstream.body, {
+              status: upstream.status,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
           }
         }
         return response;
@@ -529,13 +651,18 @@ export default {
 
         if (!response) {
           targetUrl = `https://finnhub.io/api/v1/stock/earnings?symbol=${symbol}&token=${FINNHUB_KEY}`;
-          response = await fetch(targetUrl);
+          const upstream = await fetch(targetUrl);
 
-          if (response.ok) {
-            response = new Response(response.body, {
+          if (upstream.ok) {
+            response = new Response(upstream.body, {
               headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' },
             });
             ctx.waitUntil(cache.put(request, response.clone()));
+          } else {
+            response = new Response(upstream.body, {
+              status: upstream.status,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
           }
         }
         return response;
@@ -549,13 +676,18 @@ export default {
 
         if (!response) {
           targetUrl = `https://finnhub.io/api/v1/stock/revenue-estimate?symbol=${symbol}&freq=quarterly&token=${FINNHUB_KEY}`;
-          response = await fetch(targetUrl);
+          const upstream = await fetch(targetUrl);
 
-          if (response.ok) {
-            response = new Response(response.body, {
+          if (upstream.ok) {
+            response = new Response(upstream.body, {
               headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' },
             });
             ctx.waitUntil(cache.put(request, response.clone()));
+          } else {
+            response = new Response(upstream.body, {
+              status: upstream.status,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
           }
         }
         return response;
@@ -568,23 +700,13 @@ export default {
       // GET /fmp/shares-float/:symbol
       if (path.startsWith('/fmp/shares-float/')) {
         const symbol = path.split('/')[3];
-        targetUrl = `https://financialmodelingprep.com/stable/shares-float?symbol=${symbol}&apikey=${FMP_KEY}`;
-
-        const response = await fetch(targetUrl);
-        return new Response(response.body, {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        return proxyFetch(`https://financialmodelingprep.com/stable/shares-float?symbol=${symbol}&apikey=${FMP_KEY}`);
       }
 
       // GET /fmp/analyst-estimates/:symbol - EPS & Revenue estimates
       if (path.startsWith('/fmp/analyst-estimates/')) {
         const symbol = path.split('/')[3];
-        targetUrl = `https://financialmodelingprep.com/stable/analyst-estimates?symbol=${symbol}&period=quarter&limit=5&apikey=${FMP_KEY}`;
-
-        const response = await fetch(targetUrl);
-        return new Response(response.body, {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        return proxyFetch(`https://financialmodelingprep.com/stable/analyst-estimates?symbol=${symbol}&period=quarter&limit=5&apikey=${FMP_KEY}`);
       }
 
       // GET /fmp/earnings-surprises/:symbol - Actual earnings results
@@ -606,39 +728,61 @@ export default {
         let response = await cache.match(cacheKey);
 
         if (!response) {
-          // Fetch market cap per stock: shares outstanding (FMP) × price (Yahoo)
+          // Fetch SPY ETF holdings for S&P 500 weights + market cap per stock in parallel
+          const [holdingsResp, gspcResp, ...stockResults] = await Promise.all([
+            fetch(`https://financialmodelingprep.com/api/v3/etf-holder/SPY?apikey=${FMP_KEY}`),
+            fetch('https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=1d', { headers: yahooHeaders }),
+            ...requestedSymbols.map(async (symbol) => {
+              const [floatResp, chartResp] = await Promise.all([
+                fetch(`https://financialmodelingprep.com/stable/shares-float?symbol=${symbol}&apikey=${FMP_KEY}`),
+                fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1d`, { headers: yahooHeaders }),
+              ]);
+              const floatData = floatResp.ok ? await floatResp.json() : [];
+              const chartData = chartResp.ok ? await chartResp.json() : {};
+              const shares = floatData[0]?.outstandingShares;
+              const price = chartData.chart?.result?.[0]?.meta?.regularMarketPrice;
+              return { symbol, shares, price };
+            })
+          ]);
+
+          // Build weight map from SPY ETF holdings (v3 endpoint: asset + weightPercentage)
+          const holdings = holdingsResp.ok ? await holdingsResp.json() : [];
+          const weightMap = {};
+          for (const h of holdings) {
+            const sym = h.asset || h.symbol;
+            const wt = h.weightPercentage ?? h.weight;
+            if (sym && wt != null) weightMap[sym] = wt;
+          }
+
+          // S&P 500 index level for reference
+          const gspcData = gspcResp.ok ? await gspcResp.json() : {};
+          const indexLevel = gspcData.chart?.result?.[0]?.meta?.regularMarketPrice || null;
+
+          // Build stocks data with market cap and direct weight lookup
           const stocks = {};
-          await Promise.all(requestedSymbols.map(async (symbol) => {
-            const [floatResp, chartResp] = await Promise.all([
-              fetch(`https://financialmodelingprep.com/stable/shares-float?symbol=${symbol}&apikey=${FMP_KEY}`),
-              fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1d`, { headers: yahooHeaders }),
-            ]);
-            const floatData = floatResp.ok ? await floatResp.json() : [];
-            const chartData = chartResp.ok ? await chartResp.json() : {};
-            const shares = floatData[0]?.outstandingShares;
-            const price = chartData.chart?.result?.[0]?.meta?.regularMarketPrice;
+          for (const { symbol, shares, price } of stockResults) {
             if (shares && price) {
               stocks[symbol] = { price, marketCap: shares * price };
             }
-          }));
+          }
 
-          // S&P 500 total market cap = index level × divisor
-          // Divisor derived: $62T total / 6928 index = ~8.95B (Feb 2026)
-          const gspcResp = await fetch(
-            'https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=1d',
-            { headers: yahooHeaders }
-          );
-          const gspcData = gspcResp.ok ? await gspcResp.json() : {};
-          const indexLevel = gspcData.chart?.result?.[0]?.meta?.regularMarketPrice || 6000;
-          const SP500_DIVISOR = 8_950_000_000;
-          const total = indexLevel * SP500_DIVISOR;
+          const hasHoldings = Object.keys(weightMap).length > 0;
 
-          const result = { total, indexLevel, stocks: {} };
+          // Estimate S&P 500 total market cap from index level if SPY holdings unavailable
+          // Divisor = total market cap / index level. Updated from live market data:
+          // ~$55.2T total / 6592 index ≈ 8.37B (validated Mar 2026)
+          const SP500_DIVISOR = 8_370_000_000;
+          const sp500Total = indexLevel ? indexLevel * SP500_DIVISOR : null;
+
+          const result = { stocks: {}, indexLevel, source: hasHoldings ? 'spy-holdings' : 'index-derived' };
+          if (sp500Total) result.sp500TotalEst = sp500Total;
           for (const [sym, data] of Object.entries(stocks)) {
+            const spyWeight = weightMap[sym];
+            const derivedWeight = sp500Total ? (data.marketCap / sp500Total) * 100 : null;
             result.stocks[sym] = {
               price: data.price,
               marketCap: data.marketCap,
-              weight: (data.marketCap / total) * 100,
+              weight: spyWeight ?? derivedWeight,
             };
           }
 
@@ -1351,52 +1495,46 @@ export default {
         }
 
         if (mode === 'race') {
-          // Return first successful result
+          // True race: return first successful result immediately
           try {
-            const results = await Promise.all(sources);
-            const successful = results.filter(r => !r.error && r.data);
-
-            if (successful.length === 0) {
-              return new Response(JSON.stringify({
-                error: 'All sources failed',
-                details: results.map(r => ({ source: r.source, error: r.error }))
-              }), {
-                status: 500,
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-              });
-            }
-
-            // Get first result
-            const first = successful[0];
+            const first = await Promise.any(
+              sources.map(s => s.then(r => {
+                if (r.error || !r.data) throw r;
+                return r;
+              }))
+            );
             const normalized = normalizeEarningsData(first);
 
-            // Store merged results in background if we have EARNINGS_STORE
-            if (env.EARNINGS_STORE && successful.length > 1) {
-              ctx.waitUntil((async () => {
-                const merged = mergeEarningsResults(successful);
-                if (merged.data.quarter) {
-                  const key = `earnings:${symbol}:${merged.data.quarter}`;
-                  const record = {
-                    ticker: symbol,
-                    ...merged.data,
-                    confidence: merged.confidence,
-                    discrepancies: merged.discrepancies,
-                    lastUpdated: new Date().toISOString()
-                  };
-                  await env.EARNINGS_STORE.put(key, JSON.stringify(record), {
-                    expirationTtl: 60 * 60 * 24 * 365
-                  });
-                  // Update latest pointer
-                  await env.EARNINGS_STORE.put(`earnings:${symbol}:latest`, key);
-                  // Update history index
-                  const historyKey = `earnings:${symbol}:history`;
-                  const history = await env.EARNINGS_STORE.get(historyKey, { type: 'json' }) || [];
-                  if (!history.includes(merged.data.quarter)) {
-                    history.unshift(merged.data.quarter);
-                    await env.EARNINGS_STORE.put(historyKey, JSON.stringify(history.slice(0, 20)));
+            // Background: let remaining sources complete and merge into KV
+            if (env.EARNINGS_STORE) {
+              ctx.waitUntil(Promise.allSettled(sources).then(async (settled) => {
+                const successful = settled
+                  .filter(s => s.status === 'fulfilled' && s.value.data && !s.value.error)
+                  .map(s => s.value);
+                if (successful.length > 1) {
+                  const merged = mergeEarningsResults(successful);
+                  if (merged.data.quarter) {
+                    const key = `earnings:${symbol}:${merged.data.quarter}`;
+                    const record = {
+                      ticker: symbol,
+                      ...merged.data,
+                      confidence: merged.confidence,
+                      discrepancies: merged.discrepancies,
+                      lastUpdated: new Date().toISOString()
+                    };
+                    await env.EARNINGS_STORE.put(key, JSON.stringify(record), {
+                      expirationTtl: 60 * 60 * 24 * 365
+                    });
+                    await env.EARNINGS_STORE.put(`earnings:${symbol}:latest`, key);
+                    const historyKey = `earnings:${symbol}:history`;
+                    const history = await env.EARNINGS_STORE.get(historyKey, { type: 'json' }) || [];
+                    if (!history.includes(merged.data.quarter)) {
+                      history.unshift(merged.data.quarter);
+                      await env.EARNINGS_STORE.put(historyKey, JSON.stringify(history.slice(0, 20)));
+                    }
                   }
                 }
-              })());
+              }));
             }
 
             return new Response(JSON.stringify({
@@ -1404,14 +1542,14 @@ export default {
               winner: first.source,
               data: normalized,
               confidence: 'single',
-              pendingSources: results.filter(r => r.source !== first.source).map(r => r.source),
-              allResults: successful.length
             }), {
               headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
             });
 
           } catch (error) {
-            return new Response(JSON.stringify({ error: error.message }), {
+            // AggregateError = all sources failed
+            const details = error.errors?.map(e => ({ source: e?.source, error: e?.error || e?.message })) || [];
+            return new Response(JSON.stringify({ error: 'All sources failed', details }), {
               status: 500,
               headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
@@ -1471,8 +1609,13 @@ export default {
         }
       }
 
-      // POST /earnings/manual/:symbol - Manually push earnings data to KV
+      // POST /earnings/manual/:symbol - Manually push earnings data to KV (auth required)
       if (request.method === 'POST' && path.startsWith('/earnings/manual/')) {
+        if (!requireAuth(request, env)) {
+          return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+            status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
         const symbol = path.split('/')[3];
         if (!env.EARNINGS_STORE) {
           return new Response(JSON.stringify({ error: 'EARNINGS_STORE KV not configured' }), {
@@ -1601,12 +1744,7 @@ export default {
       // GET /yahoo-quote/:symbol - Extended hours prices
       if (path.startsWith('/yahoo-quote/')) {
         const symbol = path.split('/')[2];
-        targetUrl = `https://query1.finance.yahoo.com/v6/finance/quote?symbols=${symbol}`;
-
-        const response = await fetch(targetUrl, { headers: yahooHeaders });
-        return new Response(response.body, {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        return proxyFetch(`https://query1.finance.yahoo.com/v6/finance/quote?symbols=${symbol}`, yahooHeaders);
       }
 
       // GET /yahoo/:symbol - Chart data
@@ -1639,11 +1777,13 @@ export default {
             }
           }
           return new Response(response.body, {
+            status: response.status,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         } else {
           const response = await fetch(targetUrl, { headers: yahooHeaders });
           return new Response(response.body, {
+            status: response.status,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
@@ -1657,33 +1797,18 @@ export default {
       if (path.startsWith('/trades/')) {
         const symbol = path.split('/').filter(p => p)[1];
         const feed = url.searchParams.get('feed') || 'sip';
-        targetUrl = `https://data.alpaca.markets/v2/stocks/${symbol}/trades/latest?feed=${feed}`;
-
-        const response = await fetch(targetUrl, { headers: alpacaHeaders });
-        return new Response(response.body, {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        return proxyFetch(`https://data.alpaca.markets/v2/stocks/${symbol}/trades/latest?feed=${feed}`, alpacaHeaders);
       }
 
       // GET /bars/:symbol - Historical bars
       if (path.startsWith('/bars/')) {
         const symbol = path.split('/').filter(p => p)[1];
-        targetUrl = `https://data.alpaca.markets/v2/stocks/${symbol}/bars${url.search}`;
-
-        const response = await fetch(targetUrl, { headers: alpacaHeaders });
-        return new Response(response.body, {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        return proxyFetch(`https://data.alpaca.markets/v2/stocks/${symbol}/bars${url.search}`, alpacaHeaders);
       }
 
       // GET /clock - Market status
       if (path === '/clock' || path === '/clock/') {
-        targetUrl = 'https://paper-api.alpaca.markets/v2/clock';
-
-        const response = await fetch(targetUrl, { headers: alpacaHeaders });
-        return new Response(response.body, {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        return proxyFetch('https://paper-api.alpaca.markets/v2/clock', alpacaHeaders);
       }
 
       // ============================================================

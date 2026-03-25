@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import StockChart from './StockChart';
 import { WORKER_URL, EST, EARNINGS_DATE } from '../utils/config';
 import { dayjs, getMarketState, getTodayEST, MarketState } from '../utils/marketState';
-import { getCachedData, setCachedData } from '../utils/cache';
+import { getCachedData, setCachedData, clearCaches } from '../utils/cache';
 import { fetchPriceData, fetchMarketClock } from '../utils/api';
 import '../styles/stock-tracker.css';
 
@@ -28,11 +28,13 @@ export default function StockTracker() {
   const [chartCache, setChartCache] = useState({});
   const [currentMarketState, setCurrentMarketState] = useState(getMarketState());
   const [clockData, setClockData] = useState(null);
+  const [clockLoaded, setClockLoaded] = useState(false);
 
   const lastPriceRef = useRef(null);
   const wsRef = useRef(null);
   const isConnectingRef = useRef(false);
   const clockDataRef = useRef(null);
+  const fetchAbortRef = useRef(null);
   const [wsAvailable, setWsAvailable] = useState(true);
   const [currency, setCurrency] = useState('USD');
   const [exchangeRate, setExchangeRate] = useState(null);
@@ -78,6 +80,7 @@ export default function StockTracker() {
       if (clock) {
         clockDataRef.current = clock;
         setClockData(clock);
+        setClockLoaded(true);
         scheduleTransitionFetch(clock);
       }
     };
@@ -109,11 +112,13 @@ export default function StockTracker() {
 
   // Main data fetcher
   const fetchStockData = async (symbol, showLoading = false) => {
+    const signal = fetchAbortRef.current?.signal;
     if (showLoading) setLoading(true);
     const marketState = getMarketState(clockDataRef.current);
 
     try {
       const { data: priceData } = await fetchPriceData(symbol, clockDataRef.current);
+      if (signal?.aborted) return;
 
       if (priceData) {
         setCompanyName(priceData.shortName || symbol);
@@ -121,7 +126,7 @@ export default function StockTracker() {
 
       let historicalData = getCachedData(symbol);
       if (!historicalData) {
-        const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=6mo&interval=1d`);
+        const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=6mo&interval=1d`, { signal });
         const barsData = await barsRes.json();
         if (barsData?.chart?.result?.[0]) {
           const result = barsData.chart.result[0];
@@ -171,6 +176,7 @@ export default function StockTracker() {
 
       if (historicalData?.length > 0) setData(prev => prev.length > historicalData.length ? mergeData(prev, historicalData) : historicalData);
     } catch (error) {
+      if (error.name === 'AbortError') return;
       console.error('Error:', error);
     }
     setLoading(false);
@@ -192,10 +198,13 @@ export default function StockTracker() {
   };
 
   // Merge and dedupe historical data, sorted oldest-first
+  // Incoming data takes priority for matching dates (picks up Yahoo corrections)
   const mergeData = (existing, incoming) => {
-    const dateSet = new Set(existing.map(d => d.date));
-    const newRows = incoming.filter(d => !dateSet.has(d.date));
-    return [...existing, ...newRows].sort((a, b) => dayjs(a.date).unix() - dayjs(b.date).unix());
+    const incomingMap = new Map(incoming.map(d => [d.date, d]));
+    const merged = existing.map(d => incomingMap.get(d.date) || d);
+    const existingDates = new Set(existing.map(d => d.date));
+    const newRows = incoming.filter(d => !existingDates.has(d.date));
+    return [...merged, ...newRows].sort((a, b) => dayjs(a.date).unix() - dayjs(b.date).unix());
   };
 
   // Fetch next 6-month chunk of older history
@@ -238,6 +247,7 @@ export default function StockTracker() {
 
   // Chart data fetcher - fetches 5Y daily data for 1D–5Y zoom
   const fetchChartData = useCallback(async (symbol) => {
+    const signal = fetchAbortRef.current?.signal;
     const cacheKey = `${symbol}-5Y`;
 
     if (chartCache[cacheKey]) {
@@ -246,7 +256,7 @@ export default function StockTracker() {
     }
 
     try {
-      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=5y&interval=1d`);
+      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=5y&interval=1d`, { signal });
       const barsData = await barsRes.json();
 
       if (barsData?.chart?.result?.[0]) {
@@ -268,12 +278,14 @@ export default function StockTracker() {
         }
       }
     } catch (error) {
+      if (error.name === 'AbortError') return;
       console.error('Error fetching chart data:', error);
     }
   }, [chartCache]);
 
   // Max-range fetcher for ALL view (Yahoo forces monthly intervals)
   const fetchMaxRangeData = useCallback(async (symbol) => {
+    const signal = fetchAbortRef.current?.signal;
     const cacheKey = `${symbol}-MAX`;
 
     if (chartCache[cacheKey]) {
@@ -282,7 +294,7 @@ export default function StockTracker() {
     }
 
     try {
-      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=max&interval=1mo`);
+      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=max&interval=1mo`, { signal });
       const barsData = await barsRes.json();
 
       if (barsData?.chart?.result?.[0]) {
@@ -304,14 +316,16 @@ export default function StockTracker() {
         }
       }
     } catch (error) {
+      if (error.name === 'AbortError') return;
       console.error('Error fetching max range data:', error);
     }
   }, [chartCache]);
 
   // Intraday data fetcher for 1D view (1-min intervals)
   const fetchIntradayData = useCallback(async (symbol) => {
+    const signal = fetchAbortRef.current?.signal;
     try {
-      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=1m`);
+      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=1m`, { signal });
       const barsData = await barsRes.json();
 
       if (barsData?.chart?.result?.[0]) {
@@ -332,14 +346,16 @@ export default function StockTracker() {
         }
       }
     } catch (error) {
+      if (error.name === 'AbortError') return;
       console.error('Error fetching intraday data:', error);
     }
   }, []);
 
   // Weekly data fetcher for 1W view (15-min intervals)
   const fetchWeeklyData = useCallback(async (symbol) => {
+    const signal = fetchAbortRef.current?.signal;
     try {
-      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=5d&interval=15m`);
+      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=5d&interval=15m`, { signal });
       const barsData = await barsRes.json();
 
       if (barsData?.chart?.result?.[0]) {
@@ -360,14 +376,16 @@ export default function StockTracker() {
         }
       }
     } catch (error) {
+      if (error.name === 'AbortError') return;
       console.error('Error fetching weekly data:', error);
     }
   }, []);
 
   // Monthly data fetcher for 6D-60D view (1-hour intervals)
   const fetchMonthlyData = useCallback(async (symbol) => {
+    const signal = fetchAbortRef.current?.signal;
     try {
-      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=60d&interval=1h`);
+      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=60d&interval=1h`, { signal });
       const barsData = await barsRes.json();
 
       if (barsData?.chart?.result?.[0]) {
@@ -388,17 +406,28 @@ export default function StockTracker() {
         }
       }
     } catch (error) {
+      if (error.name === 'AbortError') return;
       console.error('Error fetching monthly data:', error);
     }
   }, []);
 
   // Initial load and ticker changes
   useEffect(() => {
+    if (fetchAbortRef.current) fetchAbortRef.current.abort();
+    fetchAbortRef.current = new AbortController();
+    clearCaches(ticker);
     setChartCache({});
     lastPriceRef.current = null;
     setHasMoreHistory(true);
     setIsFetchingMore(false);
     setFullHistoryLoaded(false);
+    setData([]);
+    setChartData([]);
+    setMaxRangeData([]);
+    setIntradayData([]);
+    setWeeklyData([]);
+    setMonthlyData([]);
+    setQuote(null);
     fetchStockData(ticker, true);
   }, [ticker]);
 
@@ -513,7 +542,9 @@ export default function StockTracker() {
           try {
             const msg = JSON.parse(event.data);
             if (msg.type === 'trade' && msg.data?.length > 0) {
-              const newPrice = msg.data[msg.data.length - 1]?.p;
+              const lastTrade = msg.data[msg.data.length - 1];
+              if (lastTrade?.s && lastTrade.s !== ticker) return;
+              const newPrice = lastTrade?.p;
               if (newPrice == null) return;
               if (lastPriceRef.current === newPrice) return;
               const oldPrice = lastPriceRef.current;
@@ -693,7 +724,7 @@ export default function StockTracker() {
     };
 
     pollExtendedHours();
-    const interval = setInterval(pollExtendedHours, 5000);
+    const interval = setInterval(pollExtendedHours, 30000);
 
     return () => {
       console.log('Extended hours polling stopped');
@@ -781,7 +812,7 @@ export default function StockTracker() {
     // Show today's row only when regular trading has occurred/is occurring today
     const regularHoursToday = currentMarketState.isRegularHours ||
       currentMarketState.state === MarketState.POST_MARKET;
-    const shouldProcessTodayRow = regularHoursToday;
+    const shouldProcessTodayRow = clockLoaded && regularHoursToday;
 
     const toDateStr = (d) => d ? dayjs(d).format('YYYY-MM-DD') : null;
     const historicalDataHasToday = toDateStr(data[data.length - 1]?.date) === todayEST;
@@ -792,36 +823,37 @@ export default function StockTracker() {
         if (todayIndex !== -1) {
           dataWithToday[todayIndex] = {
             ...dataWithToday[todayIndex],
-            open: quote.o || dataWithToday[todayIndex].open,
-            high: quote.h || dataWithToday[todayIndex].high,
-            low: quote.l || dataWithToday[todayIndex].low,
+            open: quote.o ?? dataWithToday[todayIndex].open,
+            high: quote.h ?? dataWithToday[todayIndex].high,
+            low: quote.l ?? dataWithToday[todayIndex].low,
             close: quote.c,
             volume: quote.volume || dataWithToday[todayIndex].volume,
-            isToday: currentMarketState.isRegularHours
           };
         }
       } else {
         dataWithToday.push({
           date: todayEST,
-          open: quote.o || quote.c,
-          high: quote.h || quote.c,
-          low: quote.l || quote.c,
+          open: quote.o ?? quote.c,
+          high: quote.h ?? quote.c,
+          low: quote.l ?? quote.c,
           close: quote.c,
           volume: quote.volume || 0,
-          isToday: currentMarketState.isRegularHours
         });
       }
     }
 
-    const cleanedData = dataWithToday.filter(d => !(d.isToday && toDateStr(d.date) !== todayEST));
+    // Deduplicate by date — last occurrence wins (quote-enriched row overrides stale historical)
+    const seen = new Map();
+    for (const row of dataWithToday) seen.set(toDateStr(row.date), row);
+    const deduped = [...seen.values()].sort((a, b) => dayjs(a.date).unix() - dayjs(b.date).unix());
 
-    const dataWithChange = cleanedData.map((row, index) => ({
+    const dataWithChange = deduped.map((row, index) => ({
       ...row,
-      chg: index === 0 ? null : row.close - cleanedData[index - 1].close
+      chg: index === 0 ? null : row.close - deduped[index - 1].close
     }));
 
     return dataWithChange;
-  }, [data, quote, currentMarketState]);
+  }, [data, quote, currentMarketState, clockLoaded]);
 
   const sortedData = useMemo(() => {
     return [...processSpreadsheetData].sort((a, b) => {
@@ -858,15 +890,17 @@ export default function StockTracker() {
   const handleSort = useCallback(async (key) => {
     setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }));
     if (key !== 'date' && !fullHistoryLoaded) {
+      const signal = fetchAbortRef.current?.signal;
       setIsFetchingMore(true);
       try {
-        const res = await fetch(`${WORKER_URL}/yahoo/${ticker}?range=5y&interval=1d`);
+        const res = await fetch(`${WORKER_URL}/yahoo/${ticker}?range=5y&interval=1d`, { signal });
         const json = await res.json();
         if (json?.chart?.result?.[0]) {
           const rows = parseYahooBars(json.chart.result[0]);
           if (rows.length > 0) setData(prev => mergeData(prev, rows));
         }
       } catch (err) {
+        if (err.name === 'AbortError') return;
         console.error('Failed to fetch full history for sort:', err);
       } finally {
         setIsFetchingMore(false);
@@ -980,7 +1014,7 @@ export default function StockTracker() {
                 {sortedData.map((row) => {
                   const shares = parseInt(sharesCount) || 0;
                   const value = shares > 0 ? Math.round(shares * row.close) : null;
-                  const isLivePrice = row.isToday && currentMarketState.isRegularHours;
+                  const isLivePrice = row.date === getTodayEST() && currentMarketState.isRegularHours;
 
                   return (
                     <div key={row.date} className="spreadsheet-row">

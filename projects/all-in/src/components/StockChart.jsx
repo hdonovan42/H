@@ -140,18 +140,20 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
   }, [visibleDays, visibleData]);
 
   // Calculate chart paths and candles from visible data
-  const { minPrice, maxPrice, priceRange, yLabels, linePath, areaPath, candles } = useMemo(() => {
-    if (!visibleData?.length) return { minPrice: 0, maxPrice: 100, priceRange: 100, yLabels: [], linePath: '', areaPath: '', candles: [] };
-
-    // Filter out any data points with null/undefined values
-    const validData = visibleData.filter(d =>
+  // Filter out data points with null/undefined values — shared between chart rendering and hover
+  const validData = useMemo(() => {
+    if (!visibleData?.length) return [];
+    return visibleData.filter(d =>
       d.low != null && d.high != null && d.close != null && d.open != null &&
       isFinite(d.low) && isFinite(d.high) && isFinite(d.close) && isFinite(d.open)
     );
+  }, [visibleData]);
+
+  const { minPrice, maxPrice, priceRange, yLabels, linePath, areaPath, candles } = useMemo(() => {
     if (validData.length < 2) return { minPrice: 0, maxPrice: 100, priceRange: 100, yLabels: [], linePath: '', areaPath: '', candles: [] };
 
-    let min = Math.min(...validData.map(d => d.low));
-    let max = Math.max(...validData.map(d => d.high));
+    let min = validData.reduce((m, d) => Math.min(m, d.low), Infinity);
+    let max = validData.reduce((m, d) => Math.max(m, d.high), -Infinity);
     // Include previous close in 1D range so the reference line is always visible
     if (visibleDays <= 1 && previousClose) {
       min = Math.min(min, previousClose);
@@ -162,10 +164,16 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
     const roundTo = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000].find(s => s >= rawRange / 30) || 1;
     const bottom = Math.ceil(min / roundTo) * roundTo;
     const top = Math.floor(max / roundTo) * roundTo;
-    const gap = (top - bottom) / 3;
-    const mid1 = bottom + Math.round(gap / roundTo) * roundTo;
-    const mid2 = bottom + Math.round(gap * 2 / roundTo) * roundTo;
-    const labelValues = [bottom, mid1, mid2, top];
+    let labelValues;
+    if (top > bottom) {
+      const gap = (top - bottom) / 3;
+      const mid1 = bottom + Math.round(gap / roundTo) * roundTo;
+      const mid2 = bottom + Math.round(gap * 2 / roundTo) * roundTo;
+      labelValues = [bottom, mid1, mid2, top];
+    } else {
+      // Range too small for rounding — use raw values
+      labelValues = [min, min + rawRange / 3, min + rawRange * 2 / 3, max];
+    }
     // Expand chart range to fit labels with small padding
     min = Math.min(min, bottom) - rawRange * 0.01;
     max = Math.max(max, top) + rawRange * 0.01;
@@ -219,7 +227,7 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
     }));
 
     return { minPrice: min, maxPrice: max, priceRange: range, yLabels: computedLabels, linePath: line, areaPath: area, candles: candleData };
-  }, [visibleData, visibleDays, earlyMarket, previousClose]);
+  }, [validData, visibleDays, earlyMarket, previousClose]);
 
   // Determine chart color based on price movement
   let isChartPositive = true;
@@ -235,7 +243,7 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
 
   // Mouse move handler for hover data
   const handleMouseMove = useCallback((e) => {
-    if (!visibleData?.length || !svgRef.current) return;
+    if (!validData?.length || !svgRef.current) return;
 
     const svgRect = svgRef.current.getBoundingClientRect();
     const scaleX = 800 / svgRect.width;
@@ -249,7 +257,7 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
       const mouseTimeHours = 9.5 + ((mouseX - 50) / 720) * span;
       let nearestIndex = 0, nearestDiff = Infinity;
 
-      visibleData.forEach((d, i) => {
+      validData.forEach((d, i) => {
         const estTime = dayjs(d.date).tz(EST);
         const timeInHours = estTime.hour() + estTime.minute() / 60;
         const diff = Math.abs(timeInHours - mouseTimeHours);
@@ -257,31 +265,29 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
       });
 
       index = nearestIndex;
-      const point = visibleData[index];
+      const point = validData[index];
       if (!point) return;
       const estTime = dayjs(point.date).tz(EST);
       const timeInHours = Math.max(9.5, Math.min(16, estTime.hour() + estTime.minute() / 60));
       dataX = 50 + ((timeInHours - 9.5) / span) * 720;
     } else {
-      // Longer periods: find by position
+      // Longer periods: find by position (aligned with chart rendering)
       const ratio = (mouseX - 50) / 720;
-      const dataLength = visibleData.length - 1 || 1;
-      index = Math.min(Math.max(0, Math.round(ratio * dataLength)), visibleData.length - 1);
+      const dataLength = validData.length - 1 || 1;
+      index = Math.min(Math.max(0, Math.round(ratio * dataLength)), validData.length - 1);
       dataX = 50 + (index / dataLength) * 720;
     }
 
-    if (index >= 0 && index < visibleData.length) {
-      const point = visibleData[index];
-      if (point?.close != null) {
-        const yPos = 260 - ((point.close - minPrice) / (priceRange || 1)) * 240;
-        setHoverData({ dataX, y: yPos, data: point });
-      }
+    if (index >= 0 && index < validData.length) {
+      const point = validData[index];
+      const yPos = 260 - ((point.close - minPrice) / (priceRange || 1)) * 240;
+      setHoverData({ dataX, y: yPos, data: point });
     }
-  }, [visibleData, visibleDays, earlyMarket, minPrice, priceRange]);
+  }, [validData, visibleDays, earlyMarket, minPrice, priceRange]);
 
   // Mouse down handler for drag selection
   const handleMouseDown = useCallback((e) => {
-    if (!visibleData?.length || !svgRef.current) return;
+    if (!validData?.length || !svgRef.current) return;
 
     const svgRect = svgRef.current.getBoundingClientRect();
     const scaleX = 800 / svgRect.width;
@@ -293,33 +299,31 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
       const span = earlyMarket ? 2 : 6.5;
       const mouseTimeHours = 9.5 + ((mouseX - 50) / 720) * span;
       let nearestIndex = 0, nearestDiff = Infinity;
-      visibleData.forEach((d, i) => {
+      validData.forEach((d, i) => {
         const estTime = dayjs(d.date).tz(EST);
         const timeInHours = estTime.hour() + estTime.minute() / 60;
         const diff = Math.abs(timeInHours - mouseTimeHours);
         if (diff < nearestDiff) { nearestDiff = diff; nearestIndex = i; }
       });
       index = nearestIndex;
-      const point = visibleData[index];
+      const point = validData[index];
       if (!point) return;
       const estTime = dayjs(point.date).tz(EST);
       const timeInHours = Math.max(9.5, Math.min(16, estTime.hour() + estTime.minute() / 60));
       dataX = 50 + ((timeInHours - 9.5) / span) * 720;
     } else {
       const ratio = (mouseX - 50) / 720;
-      const dataLength = visibleData.length - 1 || 1;
-      index = Math.min(Math.max(0, Math.round(ratio * dataLength)), visibleData.length - 1);
+      const dataLength = validData.length - 1 || 1;
+      index = Math.min(Math.max(0, Math.round(ratio * dataLength)), validData.length - 1);
       dataX = 50 + (index / dataLength) * 720;
     }
 
-    if (index >= 0 && index < visibleData.length) {
-      const point = visibleData[index];
-      if (point?.close != null) {
-        const yPos = 260 - ((point.close - minPrice) / (priceRange || 1)) * 240;
-        setDragStart({ dataX, y: yPos, data: point });
-      }
+    if (index >= 0 && index < validData.length) {
+      const point = validData[index];
+      const yPos = 260 - ((point.close - minPrice) / (priceRange || 1)) * 240;
+      setDragStart({ dataX, y: yPos, data: point });
     }
-  }, [visibleData, visibleDays, earlyMarket, minPrice, priceRange]);
+  }, [validData, visibleDays, earlyMarket, minPrice, priceRange]);
 
   // Mouse up handler to clear drag selection
   const handleMouseUp = useCallback(() => {
@@ -329,14 +333,13 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
   // Y-axis labels are pre-computed in the chart memo above
 
   // Dynamic X-axis labels based on visible range
-  const getXAxisLabels = () => {
+  const xLabels = useMemo(() => {
     if (!visibleData?.length) return [];
     try {
 
     let allLabels = [];
 
     if (visibleDays <= 1 && earlyMarket) {
-      // Early market: show half-hour labels across the 2-hour window (9:30–11:30)
       const labels = ['9:30','10:00','10:30','11:00','11:30'];
       allLabels = labels.map(label => {
         const [h, m] = label.split(':').map(Number);
@@ -344,7 +347,6 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
         return { label, x: 50 + ((timeInHours - 9.5) / 2) * 720 };
       });
     } else if (visibleDays <= 1) {
-      // Intraday: show hours from 9:30 to 16:00
       allLabels = ['10:00','11:00','12:00','13:00','14:00','15:00','16:00'].map((label, idx, arr) => {
         const hour = parseInt(label.split(':')[0]);
         let x = 50 + ((hour - 9.5) / 6.5) * 720;
@@ -353,7 +355,6 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
         return { label, x };
       });
     } else if (visibleDays <= 7) {
-      // Week or less: show day names
       const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
       const seen = new Set();
       visibleData.forEach((d, i) => {
@@ -366,7 +367,6 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
         });
       });
     } else if (visibleDays <= 60) {
-      // Up to 2 months: show week markers or specific dates
       const seen = new Set();
       visibleData.forEach((d, i) => {
         const dt = dayjs(d.date);
@@ -378,13 +378,11 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
           x: 50 + (i / (visibleData.length - 1 || 1)) * 720
         });
       });
-      // Limit to ~6 labels
       if (allLabels.length > 6) {
         const step = Math.ceil(allLabels.length / 6);
         allLabels = allLabels.filter((_, i) => i % step === 0);
       }
     } else if (visibleDays <= 365) {
-      // Up to 1 year: show months
       const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       const seen = new Set();
       visibleData.forEach((d, i) => {
@@ -397,13 +395,11 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
           x: 50 + (i / (visibleData.length - 1 || 1)) * 720
         });
       });
-      // Cap labels: max 12 (1Y/late-Dec YTD), scales down for shorter ranges
       const maxLabels = Math.min(12, Math.ceil(visibleDays / 30));
       if (allLabels.length > maxLabels) {
         allLabels = allLabels.slice(allLabels.length - maxLabels);
       }
     } else {
-      // Multi-year: show years
       const seen = new Set();
       visibleData.forEach((d, i) => {
         const year = dayjs(d.date).year();
@@ -416,16 +412,12 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
       });
     }
 
-    // Return with x coordinates for SVG positioning
     return allLabels;
     } catch (e) {
       console.error('Error generating X-axis labels:', e);
       return [];
     }
-  };
-
-  // yLabels computed in chart memo above
-  const xLabels = getXAxisLabels();
+  }, [visibleData, visibleDays, earlyMarket]);
 
   // Determine which timeframe button is "active" (closest match)
   const getActiveTimeframe = () => {
@@ -639,7 +631,7 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
                 const startPrice = dragStart.data.close;
                 const currentPrice = hoverData.data.close;
                 const absReturn = currentPrice - startPrice;
-                const pctReturn = (absReturn / startPrice) * 100;
+                const pctReturn = startPrice ? (absReturn / startPrice) * 100 : 0;
                 const isPositive = absReturn >= 0;
                 const color = isPositive ? '#137333' : '#a50e0e';
                 const sign = isPositive ? '+' : '';

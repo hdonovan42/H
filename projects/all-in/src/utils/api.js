@@ -39,7 +39,7 @@ export const fetchSharesOutstanding = async (symbol) => {
   if (cached) {
     try {
       const { data, timestamp } = JSON.parse(cached);
-      if (Date.now() - timestamp < 24 * 60 * 60 * 1000) {
+      if (Date.now() - timestamp < 4 * 60 * 60 * 1000) {
         return data;
       }
     } catch (e) {
@@ -54,8 +54,8 @@ export const fetchSharesOutstanding = async (symbol) => {
       fetchWithTimeout(`${WORKER_URL}/finnhub/metric/${symbol}`)
     ]);
 
-    const floatData = await floatRes.json();
-    const finnhubData = await finnhubRes.json();
+    const floatData = floatRes.ok ? await floatRes.json() : [];
+    const finnhubData = finnhubRes.ok ? await finnhubRes.json() : {};
 
     if (!floatData?.[0]?.outstandingShares) return null;
 
@@ -64,7 +64,7 @@ export const fetchSharesOutstanding = async (symbol) => {
       forwardPE: finnhubData?.metric?.forwardPE || null
     };
 
-    localStorage.setItem(cacheKey, JSON.stringify({ data: result, timestamp: Date.now() }));
+    try { localStorage.setItem(cacheKey, JSON.stringify({ data: result, timestamp: Date.now() })); } catch (e) { /* storage full */ }
 
     return result;
   } catch (e) {
@@ -74,62 +74,67 @@ export const fetchSharesOutstanding = async (symbol) => {
 };
 
 export const fetchYahooQuote = async (symbol) => {
-  const response = await fetchWithTimeout(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=1m&includePrePost=true`);
-  const data = await response.json();
+  try {
+    const response = await fetchWithTimeout(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=1m&includePrePost=true`);
+    if (!response.ok) return null;
+    const data = await response.json();
 
-  if (!data?.chart?.result?.[0]) return null;
+    if (!data?.chart?.result?.[0]) return null;
 
-  const result = data.chart.result[0];
-  const meta = result.meta;
-  const quote = result.indicators.quote[0];
-  const timestamps = result.timestamp || [];
-  const closes = quote.close || [];
+    const result = data.chart.result[0];
+    const meta = result.meta;
+    const quote = result.indicators.quote[0];
+    const timestamps = result.timestamp || [];
+    const closes = quote.close || [];
 
-  const dayHigh = meta.regularMarketDayHigh || quote.high?.[0] || meta.regularMarketPrice;
-  const dayLow = meta.regularMarketDayLow || quote.low?.[0] || meta.regularMarketPrice;
-  const dayOpen = meta.regularMarketOpen || quote.open?.[0] || meta.previousClose;
+    const dayHigh = meta.regularMarketDayHigh || quote.high?.[0] || meta.regularMarketPrice;
+    const dayLow = meta.regularMarketDayLow || quote.low?.[0] || meta.regularMarketPrice;
+    const dayOpen = meta.regularMarketOpen || quote.open?.[0] || meta.previousClose;
 
-  let preMarketPrice = null;
-  let postMarketPrice = null;
+    let preMarketPrice = null;
+    let postMarketPrice = null;
 
-  if (timestamps.length > 0 && closes.length > 0) {
-    const lastTimestamp = timestamps[timestamps.length - 1];
-    const lastClose = closes[closes.length - 1];
+    if (timestamps.length > 0 && closes.length > 0) {
+      const lastTimestamp = timestamps[timestamps.length - 1];
+      const lastClose = closes[closes.length - 1];
 
-    const lastTime = dayjs.unix(lastTimestamp).tz(EST);
-    const hour = lastTime.hour();
-    const minute = lastTime.minute();
-    const timeInMinutes = hour * 60 + minute;
+      const lastTime = dayjs.unix(lastTimestamp).tz(EST);
+      const hour = lastTime.hour();
+      const minute = lastTime.minute();
+      const timeInMinutes = hour * 60 + minute;
 
-    const PRE_MARKET_START = 4 * 60;
-    const MARKET_OPEN = 9 * 60 + 30;
-    const MARKET_CLOSE = 16 * 60;
-    const POST_MARKET_END = 20 * 60;
+      const PRE_MARKET_START = 4 * 60;
+      const MARKET_OPEN = 9 * 60 + 30;
+      const MARKET_CLOSE = 16 * 60;
+      const POST_MARKET_END = 20 * 60;
 
-    if (timeInMinutes >= PRE_MARKET_START && timeInMinutes < MARKET_OPEN) {
-      preMarketPrice = lastClose;
-    } else if (timeInMinutes >= MARKET_CLOSE) {
-      // Capture any price after market close as post-market (including at/after 8pm)
-      postMarketPrice = lastClose;
+      if (timeInMinutes >= PRE_MARKET_START && timeInMinutes < MARKET_OPEN) {
+        preMarketPrice = lastClose;
+      } else if (timeInMinutes >= MARKET_CLOSE && timeInMinutes < POST_MARKET_END) {
+        postMarketPrice = lastClose;
+      }
     }
-  }
 
-  return {
-    regularMarketPrice: meta.regularMarketPrice,
-    previousClose: meta.previousClose,
-    open: dayOpen,
-    high: dayHigh,
-    low: dayLow,
-    volume: meta.regularMarketVolume || quote.volume?.[0] || 0,
-    shortName: meta.shortName || meta.symbol,
-    preMarketPrice,
-    postMarketPrice,
-    tradingDay: timestamps.length > 0
-      ? dayjs.unix(timestamps[timestamps.length - 1]).tz(EST).format('YYYY-MM-DD')
-      : null,
-    fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh,
-    fiftyTwoWeekLow: meta.fiftyTwoWeekLow
-  };
+    return {
+      regularMarketPrice: meta.regularMarketPrice,
+      previousClose: meta.previousClose,
+      open: dayOpen,
+      high: dayHigh,
+      low: dayLow,
+      volume: meta.regularMarketVolume || quote.volume?.[0] || 0,
+      shortName: meta.shortName || meta.symbol,
+      preMarketPrice,
+      postMarketPrice,
+      tradingDay: timestamps.length > 0
+        ? dayjs.unix(timestamps[timestamps.length - 1]).tz(EST).format('YYYY-MM-DD')
+        : null,
+      fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh,
+      fiftyTwoWeekLow: meta.fiftyTwoWeekLow
+    };
+  } catch (e) {
+    console.warn('fetchYahooQuote failed:', e.message);
+    return null;
+  }
 };
 
 export const fetchMarketOpenData = async (symbol) => {

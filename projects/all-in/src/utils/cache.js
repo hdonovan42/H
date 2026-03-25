@@ -16,5 +16,15 @@ export const getCachedData = (symbol) => {
 };
 
 export const setCachedData = (symbol, data) => {
-  localStorage.setItem(`stock_${symbol}`, JSON.stringify({ data, timestamp: Date.now() }));
+  try {
+    localStorage.setItem(`stock_${symbol}`, JSON.stringify({ data, timestamp: Date.now() }));
+  } catch (e) {
+    console.warn('Cache write failed (storage full?):', symbol);
+  }
+};
+
+// Clear all caches for a symbol (historical data + shares outstanding)
+export const clearCaches = (symbol) => {
+  localStorage.removeItem(`stock_${symbol}`);
+  localStorage.removeItem(`shares_${symbol}`);
 };

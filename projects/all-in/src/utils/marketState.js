@@ -66,11 +66,10 @@ export const getMarketState = (clockData = null) => {
   const { isOpen, nextOpen, nextClose } = clockData;
 
   // Determine if today is a holiday:
-  // It's a weekday, during normal market hours, but API says market is closed
-  const isHoliday = !local.isWeekend &&
-    local.timeInMinutes >= MARKET_OPEN &&
-    local.timeInMinutes < MARKET_CLOSE &&
-    !isOpen;
+  // It's a weekday, market not open, and next open is not today
+  const todayStr = now.format('YYYY-MM-DD');
+  const nextOpenStr = nextOpen ? dayjs(nextOpen).tz(EST).format('YYYY-MM-DD') : null;
+  const isHoliday = !local.isWeekend && !isOpen && nextOpenStr !== todayStr;
 
   let state;
 
