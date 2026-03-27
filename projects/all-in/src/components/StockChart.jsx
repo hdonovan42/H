@@ -220,10 +220,10 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
       };
     });
 
-    // Compute label positions using final chart range
+    // Compute label positions in SVG coordinates
     const computedLabels = labelValues.map(p => ({
       label: `$${Number.isInteger(p) ? p : p.toFixed(2)}`,
-      top: ((260 - ((p - min) / range) * 240) / 300) * 100
+      y: calcY(p)
     }));
 
     return { minPrice: min, maxPrice: max, priceRange: range, yLabels: computedLabels, linePath: line, areaPath: area, candles: candleData };
@@ -474,24 +474,8 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
         ))}
       </div>
 
-      {/* Chart area wrapper — all overlays positioned relative to this */}
+      {/* Chart area wrapper — hover tooltip positioned relative to this */}
       <div style={{ position: 'relative', width: '100%', aspectRatio: '800 / 300' }}>
-      {/* Y-axis labels */}
-      {yLabels.map((item, idx) => (
-        <div key={idx} style={{
-          position: 'absolute',
-          left: '8px',
-          top: `${item.top}%`,
-          transform: 'translateY(-50%)',
-          fontSize: '11px',
-          color: '#80868b',
-          fontFamily: 'IBM Plex Mono',
-          pointerEvents: 'none'
-        }}>
-          {item.label}
-        </div>
-      ))}
-
       <svg
         ref={svgRef}
         viewBox="0 0 800 300"
@@ -514,17 +498,15 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
 
         {/* Previous close reference line for 1D view */}
         {visibleDays <= 1 && previousClose && minPrice && maxPrice && priceRange > 0 && (
-          <g>
-            <line
-              x1="50"
-              y1={260 - ((previousClose - minPrice) / priceRange) * 240}
-              x2="770"
-              y2={260 - ((previousClose - minPrice) / priceRange) * 240}
-              stroke="#333"
-              strokeWidth="1"
-              strokeDasharray="8 6"
-            />
-          </g>
+          <line
+            x1="50"
+            y1={260 - ((previousClose - minPrice) / priceRange) * 240}
+            x2="770"
+            y2={260 - ((previousClose - minPrice) / priceRange) * 240}
+            stroke="#333"
+            strokeWidth="1"
+            strokeDasharray="8 6"
+          />
         )}
 
         {chartType === 'line' ? (
@@ -577,52 +559,30 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
           </g>
         )}
 
+        {/* Nested SVG for text — preserves aspect ratio so text isn't squashed */}
+        <svg viewBox="0 0 800 300" preserveAspectRatio="xMidYMid meet">
+          {/* Y-axis labels */}
+          {yLabels.map((item, idx) => (
+            <text key={idx} x="8" y={item.y} dominantBaseline="central" fill="#80868b" fontSize="11" fontFamily="IBM Plex Mono" pointerEvents="none">{item.label}</text>
+          ))}
+
+          {/* X-axis labels */}
+          {xLabels.map((item, idx) => (
+            <text key={idx} x={item.x} y="295" textAnchor="middle" fill="#80868b" fontSize="11" fontFamily="IBM Plex Mono" pointerEvents="none">{item.label}</text>
+          ))}
+
+          {/* Previous close price label */}
+          {visibleDays <= 1 && previousClose && minPrice && maxPrice && priceRange > 0 && (() => {
+            const lineY = 260 - ((previousClose - minPrice) / priceRange) * 240;
+            const labelBelow = lineY < 150;
+            return (
+              <text x="772" y={labelBelow ? lineY + 14 : lineY - 6} textAnchor="end" fill="#333" fontSize="11" fontFamily="IBM Plex Mono" pointerEvents="none">${previousClose.toFixed(2)}</text>
+            );
+          })()}
+        </svg>
       </svg>
 
-      {/* Previous close price label (HTML to avoid SVG text squashing) */}
-      {visibleDays <= 1 && previousClose && minPrice && maxPrice && priceRange > 0 && (() => {
-        const linePct = ((260 - ((previousClose - minPrice) / priceRange) * 240) / 300) * 100;
-        const lineHigh = linePct < 50;
-        return (
-          <span
-            style={{
-              position: 'absolute',
-              right: '12px',
-              top: `${linePct}%`,
-              transform: lineHigh ? 'translateY(2px)' : 'translateY(calc(-100% - 2px))',
-              fontSize: '11px',
-              fontFamily: 'IBM Plex Mono',
-              color: '#333',
-              pointerEvents: 'none',
-              whiteSpace: 'nowrap'
-            }}
-          >
-            ${previousClose.toFixed(2)}
-          </span>
-        );
-      })()}
-
-      {/* X-axis labels */}
-      {xLabels.map((item, idx) => (
-        <span
-          key={idx}
-          style={{
-            position: 'absolute',
-            left: `${(item.x / 800) * 100}%`,
-            bottom: '4%',
-            transform: 'translateX(-50%)',
-            fontSize: '11px',
-            color: '#80868b',
-            fontFamily: 'IBM Plex Mono',
-            pointerEvents: 'none',
-            whiteSpace: 'nowrap',
-            display: 'inline-block'
-          }}
-        >
-          {item.label}
-        </span>
-      ))}
-
+      {/* Hover tooltip — HTML for rich styling (background, shadow, border-radius) */}
       {hoverData && (
         <div style={{
           position: 'absolute',
