@@ -475,7 +475,7 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
       </div>
 
       {/* Chart area wrapper — all overlays positioned relative to this */}
-      <div style={{ position: 'relative', flex: 1 }}>
+      <div style={{ position: 'relative', width: '100%', aspectRatio: '800 / 300' }}>
       {/* Y-axis labels */}
       {yLabels.map((item, idx) => (
         <div key={idx} style={{
