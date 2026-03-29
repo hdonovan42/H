@@ -887,8 +887,14 @@ function updateEvaluationBar() {
     evalBar.style.background = `linear-gradient(${direction}, white ${whitePercentage}%, black ${whitePercentage}%)`;
   }
 
-  // Eval score overlay
-  const evalText = entry.mate !== undefined ? 'M' + Math.abs(entry.mate) : entry.score;
+  // Eval score overlay — clamp centipawn display to ±10.00 (matches bar visual)
+  let evalText;
+  if (entry.mate !== undefined) {
+    evalText = 'M' + Math.abs(entry.mate);
+  } else {
+    const raw = parseFloat(entry.score);
+    evalText = Math.max(-10, Math.min(10, raw)).toFixed(2);
+  }
 
   let overlay = AppState._els.evalOverlay;
   if (!overlay) {
