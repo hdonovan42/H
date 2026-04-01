@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Costco UK Michelin Tyre Stock Checker
+Costco UK Michelin Tyre Stock Checker + Vehicle Report
 
-Looks up a vehicle by registration plate, finds all Michelin tyres
-available at Costco UK with prices and stock levels.
+Looks up a vehicle by registration plate, shows a free vehicle report
+(DVLA + MOT history), then finds Michelin tyres at Costco UK.
 """
 
 import re
@@ -11,6 +11,8 @@ import sys
 import requests
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from vehicle_check import fetch_vehicle_report, print_vehicle_report
 
 BASE = "https://www.costco.co.uk/rest/v2/uk"
 HEADERS = {
@@ -155,6 +157,9 @@ def deduplicate(products: list[dict]) -> list[dict]:
     return sorted(results, key=lambda x: x["price_val"])
 
 
+## ── Tyre Results Display ──────────────────────────────────────────
+
+
 def print_table(rows: list[dict], vehicle: dict, size_str: str):
     """Print results as a formatted table."""
     if not rows:
@@ -205,6 +210,11 @@ def run_search():
     print(f"  Vehicle: {year} {make} {model} {version}".rstrip())
     if engine:
         print(f"  Engine: {engine}L")
+
+    # Vehicle history report (free government APIs)
+    print(f"\n  Fetching vehicle history...")
+    dvla, mot = fetch_vehicle_report(plate)
+    print_vehicle_report(dvla, mot)
 
     # 2. Show tyre size options
     sizes = data.get("tireSize", [])
@@ -273,9 +283,9 @@ def run_search():
 
 
 def main():
-    print("\n  ╔══════════════════════════════════════════╗")
-    print("  ║  Costco UK — Michelin Tyre Stock Checker ║")
-    print("  ╚══════════════════════════════════════════╝")
+    print("\n  ╔═════════════════════════════════════════════════╗")
+    print("  ║  UK Vehicle Check + Costco Michelin Tyre Prices ║")
+    print("  ╚═════════════════════════════════════════════════╝")
 
     while True:
         print()
