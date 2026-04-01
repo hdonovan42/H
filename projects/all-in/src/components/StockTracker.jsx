@@ -413,6 +413,7 @@ export default function StockTracker() {
 
   // Initial load and ticker changes
   useEffect(() => {
+    document.title = ticker;
     if (fetchAbortRef.current) fetchAbortRef.current.abort();
     fetchAbortRef.current = new AbortController();
     clearCaches(ticker);
