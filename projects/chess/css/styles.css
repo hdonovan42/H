@@ -24,6 +24,21 @@ body {
   margin-bottom: 10px; /* Reduced from default to close gap */
 }
 
+/* Board + material score column */
+.board-column {
+  display: flex;
+  flex-direction: column;
+}
+
+#material-score {
+  font-family: monospace;
+  font-size: 13px;
+  height: 18px;
+  line-height: 18px;
+  color: #222;
+  padding-top: 2px;
+}
+
 /* Board container: relative for canvas overlay positioning */
 #board-container {
   position: relative;

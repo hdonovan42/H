@@ -570,7 +570,25 @@ function tryStartAnalysis() {
 }
 
 // Display update functions
+function updateMaterialScore() {
+  const el = document.getElementById('material-score');
+  if (!el) return;
+  const fen = AppState.game.fen();
+  const placement = fen.split(' ')[0];
+  const values = { q: 9, r: 5, b: 3, n: 3, p: 1 };
+  let score = 0;
+  for (const ch of placement) {
+    const lower = ch.toLowerCase();
+    if (values[lower]) score += ch === lower ? -values[lower] : values[lower];
+  }
+  const oriented = AppState.board.orientation() === 'black' ? -score : score;
+  if (oriented > 0) el.textContent = '+' + oriented;
+  else if (oriented < 0) el.textContent = '\u2212' + Math.abs(oriented);
+  else el.textContent = '';
+}
+
 function updateDisplay() {
+  updateMaterialScore();
   updateAnalysisOutput();
   updateEvaluationBar();
   if (AppState.arrowsEnabled && AppState.engineEnabled) {
