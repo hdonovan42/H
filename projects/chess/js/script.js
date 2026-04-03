@@ -1518,7 +1518,7 @@ function loadPGNFromText(pgnText) {
   // Store separate copy for graph
   AppState.graphMainlineMoves = [...AppState.pgnMainlineMoves];
   AppState.graphEvalHistory = new Array(AppState.graphMainlineMoves.length + 1);
-  AppState.graphEvalHistory[0] = 0.0; // Starting position is equal
+  AppState.graphEvalHistory[0] = 0.15; // Lichess Cp(15) starting advantage for white
   AppState.moveClassifications = new Array(AppState.graphMainlineMoves.length + 1);
   AppState._accuracySums = { whiteTotal: 0, whiteCount: 0, blackTotal: 0, blackCount: 0 };
   AppState.cachedAccuracy = null;
@@ -2097,8 +2097,8 @@ function evalToWinProbability(evalScore) {
 function cpLossToAccuracy(cpLoss) {
   // Formula: a * exp(b * cpLoss) + c, clamped to 0-100
   const { a, b, c } = ACCURACY_COEFFICIENTS;
-  const accuracy = a * Math.exp(b * cpLoss) + c;
-  return Math.max(0, Math.min(100, accuracy));
+  const raw = a * Math.exp(b * cpLoss) + c;
+  return Math.max(0, Math.min(100, raw + 1));
 }
 
 // Calculate accuracy for a single move based on win probability change
@@ -2118,39 +2118,91 @@ function calculateMoveAccuracy(evalBefore, evalAfter, isWhiteMove) {
   return cpLossToAccuracy(wpLoss);
 }
 
-// Calculate game accuracy for both players
-// Incrementally update accuracy running sums for a single move
+// Invalidate cached accuracy when new eval data arrives
 function updateIncrementalAccuracy(moveIndex) {
-  if (moveIndex < 1) return;
-  const evalBefore = AppState.graphEvalHistory[moveIndex - 1];
-  const evalAfter = AppState.graphEvalHistory[moveIndex];
-  if (evalBefore === undefined || evalAfter === undefined) return;
-
-  const isWhiteMove = (moveIndex % 2 === 1);
-  const accuracy = calculateMoveAccuracy(evalBefore, evalAfter, isWhiteMove);
-  const sums = AppState._accuracySums;
-
-  if (isWhiteMove) {
-    sums.whiteTotal += accuracy;
-    sums.whiteCount++;
-  } else {
-    sums.blackTotal += accuracy;
-    sums.blackCount++;
-  }
-
-  // Invalidate cache so graph picks up new values
   AppState.cachedAccuracy = null;
 }
 
-// Calculate game accuracy from running sums (O(1))
+// Lichess volatility-weighted + harmonic mean aggregation
+function computeWeightedAccuracy(winPcts, accuracies) {
+  const n = accuracies.length;
+  if (n === 0) return 0;
+
+  const windowSize = Math.max(2, Math.min(8, Math.floor(n / 10)));
+
+  // Not enough moves for even one window — fall back to simple average
+  if (n < windowSize) {
+    return accuracies.reduce((a, b) => a + b, 0) / n;
+  }
+
+  let weightedSum = 0;
+  let weightTotal = 0;
+  let harmonicSum = 0;
+  let harmonicCount = 0;
+
+  for (let start = 0; start <= n - windowSize; start++) {
+    const windowWinPcts = winPcts.slice(start, start + windowSize);
+    const mean = windowWinPcts.reduce((a, b) => a + b, 0) / windowSize;
+    const variance = windowWinPcts.reduce((a, b) => a + (b - mean) ** 2, 0) / windowSize;
+    const stdDev = Math.sqrt(variance);
+
+    const weight = Math.max(0.5, Math.min(12.0, stdDev));
+
+    const windowAccuracies = accuracies.slice(start, start + windowSize);
+    const windowAvg = windowAccuracies.reduce((a, b) => a + b, 0) / windowSize;
+
+    weightedSum += windowAvg * weight;
+    weightTotal += weight;
+
+    if (windowAvg > 0) {
+      harmonicSum += 1 / windowAvg;
+      harmonicCount++;
+    }
+  }
+
+  const volatilityWeightedMean = weightedSum / weightTotal;
+  const harmonicMean = harmonicCount > 0 ? harmonicCount / harmonicSum : volatilityWeightedMean;
+
+  return (volatilityWeightedMean + harmonicMean) / 2;
+}
+
+// Calculate game accuracy using full eval history (Lichess algorithm)
 function calculateGameAccuracy() {
-  const sums = AppState._accuracySums;
-  const avgWhite = sums.whiteCount > 0 ? sums.whiteTotal / sums.whiteCount : null;
-  const avgBlack = sums.blackCount > 0 ? sums.blackTotal / sums.blackCount : null;
+  const evalHistory = AppState.graphEvalHistory;
+  if (!evalHistory || evalHistory.length < 2) return { white: null, black: null };
+
+  const whiteWinPcts = [];
+  const whiteAccuracies = [];
+  const blackWinPcts = [];
+  const blackAccuracies = [];
+
+  for (let i = 1; i < evalHistory.length; i++) {
+    const evalBefore = evalHistory[i - 1];
+    const evalAfter = evalHistory[i];
+    if (evalBefore === undefined || evalAfter === undefined) continue;
+
+    const isWhiteMove = (i % 2 === 1);
+    const accuracy = calculateMoveAccuracy(evalBefore, evalAfter, isWhiteMove);
+
+    const playerEval = isWhiteMove ? evalBefore : -evalBefore;
+    const winPct = evalToWinProbability(playerEval) * 100;
+
+    if (isWhiteMove) {
+      whiteWinPcts.push(winPct);
+      whiteAccuracies.push(accuracy);
+    } else {
+      blackWinPcts.push(winPct);
+      blackAccuracies.push(accuracy);
+    }
+  }
 
   return {
-    white: avgWhite !== null ? Math.round(avgWhite * 10) / 10 : null,
-    black: avgBlack !== null ? Math.round(avgBlack * 10) / 10 : null
+    white: whiteAccuracies.length > 0
+      ? Math.round(computeWeightedAccuracy(whiteWinPcts, whiteAccuracies) * 10) / 10
+      : null,
+    black: blackAccuracies.length > 0
+      ? Math.round(computeWeightedAccuracy(blackWinPcts, blackAccuracies) * 10) / 10
+      : null
   };
 }
 
