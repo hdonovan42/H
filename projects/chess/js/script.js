@@ -5,7 +5,7 @@ const SQUARE_SIZE = BOARD_SIZE / 8;
 const ANALYSIS_DEBOUNCE_TIME = 200;
 const ANALYSIS_DEPTH = 18;
 const MULTI_PV_LINES = 3;
-const GRAPH_DEPTH = 18;
+const GRAPH_DEPTH = 22;
 
 // Accuracy calculation constants
 // Formula based on Lichess/Chess.com approach using win probability
@@ -1620,7 +1620,7 @@ function analyzeGraphPositions() {
   }
 
   // Create a single persistent worker — reuse for all positions
-  const worker = new Worker(ENGINES.lite.script);
+  const worker = new Worker(ENGINES.full.script);
   AppState.graphWorker = worker;
   let idx = 0;
   let pendingRedraw = false;
@@ -1662,6 +1662,23 @@ function analyzeGraphPositions() {
 
     const pos = positions[idx];
 
+    // Forced move shortcut — only 1 legal move, carry forward previous eval
+    if (pos.moveIndex > 0) {
+      const tempCheck = new Chess(pos.fen);
+      if (tempCheck.moves().length <= 1) {
+        const prevEval = AppState.graphEvalHistory[pos.moveIndex - 1];
+        if (prevEval !== undefined) {
+          AppState.graphEvalHistory[pos.moveIndex] = prevEval;
+          updateMoveClassifications(pos.moveIndex);
+          updateIncrementalAccuracy(pos.moveIndex);
+          scheduleRedraw();
+          idx++;
+          setTimeout(sendNext, 5);
+          return;
+        }
+      }
+    }
+
     // Tablebase shortcut for ≤7 piece positions
     if (countPieces(pos.fen) <= 7) {
       queryTablebase(pos.fen).then(tb => {
@@ -1677,15 +1694,24 @@ function analyzeGraphPositions() {
         setTimeout(sendNext, 5);
       }).catch(() => {
         // Fallback: let Stockfish handle it
+        const depth = pos.targetDepth || GRAPH_DEPTH;
         worker.postMessage(`position fen ${pos.fen}`);
-        worker.postMessage(`go depth ${GRAPH_DEPTH}`);
+        worker.postMessage(`go depth ${depth}`);
       });
       return;
     }
 
-    // No ucinewgame per position — preserves hash table for transposition hits
+    // Reduced depth for decided positions (eval ±5+) — sigmoid is flat, deep analysis is wasted
+    if (pos.moveIndex > 0) {
+      const prevEval = AppState.graphEvalHistory[pos.moveIndex - 1];
+      if (prevEval !== undefined && Math.abs(prevEval) >= 5) {
+        pos.targetDepth = 16;
+      }
+    }
+
+    const depth = pos.targetDepth || GRAPH_DEPTH;
     worker.postMessage(`position fen ${pos.fen}`);
-    worker.postMessage(`go depth ${GRAPH_DEPTH}`);
+    worker.postMessage(`go depth ${depth}`);
   }
 
   worker.onmessage = function(event) {
@@ -1696,8 +1722,10 @@ function analyzeGraphPositions() {
     } else if (message.startsWith('bestmove')) {
       idx++;
       setTimeout(sendNext, 5);
-    } else if (message.startsWith(`info depth ${GRAPH_DEPTH}`) && message.includes('score')) {
+    } else if (message.startsWith('info depth') && message.includes('score')) {
       const pos = positions[idx];
+      const targetDepth = pos.targetDepth || GRAPH_DEPTH;
+      if (!message.startsWith(`info depth ${targetDepth} `)) return;
       const info = parseStockfishInfoForGraph(message, pos.fen);
       if (info) {
         let evalScore;
@@ -1728,7 +1756,7 @@ function analyzeGraphPositions() {
   // Delay start to let main engine initialise first
   setTimeout(() => {
     worker.postMessage('uci');
-    worker.postMessage('setoption name Hash value 64');
+    worker.postMessage('setoption name Hash value 256');
     worker.postMessage('ucinewgame');
     worker.postMessage('isready');
   }, 500);
