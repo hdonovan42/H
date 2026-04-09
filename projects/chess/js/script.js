@@ -81,6 +81,7 @@ const AppState = {
   _accuracySums: { whiteTotal: 0, whiteCount: 0, blackTotal: 0, blackCount: 0 },
   notationDirty: true,           // Whether notation needs re-render
   graphWorker: null,             // Persistent worker for graph analysis
+  _fullEnginePreloading: false,  // True while preloadFullEngine() worker is loading
   hasLoadedOnce: false,          // Skip init timeout on first load
   _lastArrowKey: '',             // Arrow fingerprint for skip-redraw optimisation
   // Tablebase
@@ -234,7 +235,8 @@ function updateGameStatus() {
   // Also check if we're at the end of a loaded PGN with a result
   else if (AppState.gameLoaded && AppState.currentIndex >= AppState.pgnMainlineMoves.length) {
     // Try to get the PGN result from the original PGN text
-    const pgnText = document.getElementById('pgn-input').value.trim();
+    const pgnEl = document.getElementById('pgn-input');
+    const pgnText = (pgnEl.dataset.pgn || pgnEl.value).trim();
     if (pgnText) {
       // Look for game result at the end of PGN
       if (pgnText.includes('1-0')) {
@@ -1037,7 +1039,9 @@ function getSquareCenter(square, isFlipped) {
 
 // Preload full engine in background
 function preloadFullEngine() {
-  if (AppState.preloadedFullEngine) return; // Already preloading/preloaded
+  if (AppState.preloadedFullEngine || AppState._fullEnginePreloading) return;
+
+  AppState._fullEnginePreloading = true;
 
   try {
     const worker = new Worker(ENGINES.full.script);
@@ -1047,18 +1051,20 @@ function preloadFullEngine() {
         console.log('Full Stockfish engine preloaded and ready');
         worker.postMessage('isready');
       } else if (e.data === 'readyok') {
-        // Engine is fully initialized and ready
+        AppState._fullEnginePreloading = false;
         AppState.preloadedFullEngine = worker;
       }
     };
 
     worker.onerror = function(error) {
       console.error('Error preloading full engine:', error);
+      AppState._fullEnginePreloading = false;
     };
 
     worker.postMessage('uci');
   } catch (error) {
     console.error('Failed to preload full engine:', error);
+    AppState._fullEnginePreloading = false;
   }
 }
 
@@ -1476,7 +1482,8 @@ function rebuildGameFromMoves() {
 
 // PGN handling
 function loadPGN() {
-  const pgnText = document.getElementById('pgn-input').value.trim();
+  const el = document.getElementById('pgn-input');
+  const pgnText = (el.dataset.pgn || el.value).trim();
 
   if (!pgnText) {
     showError('Please enter a PGN.');
@@ -1582,8 +1589,12 @@ async function fetchLichessGame(gameIdOrUrl) {
 
     const pgn = await response.text();
 
-    // Put PGN in textarea for reference
-    document.getElementById('pgn-input').value = pgn;
+    // Store full PGN and show preview
+    const pgnEl = document.getElementById('pgn-input');
+    pgnEl.dataset.pgn = pgn;
+    const firstLine = pgn.split('\n').find(l => l.trim() && !l.startsWith('[')) || pgn.substring(0, 60);
+    pgnEl.value = firstLine.substring(0, 60);
+    document.getElementById('pgn-copy').style.display = '';
 
     // Load the game
     loadPGNFromText(pgn);
@@ -1619,8 +1630,59 @@ function analyzeGraphPositions() {
     AppState.graphWorker = null;
   }
 
-  // Create a single persistent worker — reuse for all positions
-  const worker = new Worker(ENGINES.full.script);
+  // Promise-based worker factory: creates a worker, sends UCI init, resolves on readyok
+  function createGraphWorker(engineKey) {
+    return new Promise((resolve, reject) => {
+      let worker;
+      try {
+        worker = new Worker(ENGINES[engineKey].script);
+      } catch (err) {
+        return reject(err);
+      }
+
+      const readyTimeout = setTimeout(() => {
+        try { worker.terminate(); } catch (e) {}
+        reject(new Error(`${ENGINES[engineKey].name} graph worker timed out (no readyok within 15s)`));
+      }, 15000);
+
+      worker.onmessage = function(e) {
+        const msg = typeof e.data === 'string' ? e.data : e.data.data;
+        if (msg === 'readyok') {
+          clearTimeout(readyTimeout);
+          resolve(worker);
+        }
+      };
+
+      worker.onerror = function(err) {
+        clearTimeout(readyTimeout);
+        try { worker.terminate(); } catch (e) {}
+        reject(err);
+      };
+
+      worker.postMessage('uci');
+      worker.postMessage('setoption name Hash value 128');
+      worker.postMessage('ucinewgame');
+      worker.postMessage('isready');
+    });
+  }
+
+  // Fallback chain: skip full engine if another is already preloading (avoid duplicate 67MB loads)
+  const tryEngine = AppState._fullEnginePreloading
+    ? createGraphWorker('lite')
+    : createGraphWorker('full').catch(fullErr => {
+        console.warn('Full engine failed for graph, falling back to lite:', fullErr);
+        return createGraphWorker('lite');
+      });
+
+  tryEngine.then(worker => {
+    startGraphAnalysis(worker, positions);
+  }).catch(err => {
+    console.error('All engines failed for graph analysis:', err);
+    showError('Graph analysis failed. Please refresh the page and try again.');
+  });
+}
+
+function startGraphAnalysis(worker, positions) {
   AppState.graphWorker = worker;
   let idx = 0;
   let pendingRedraw = false;
@@ -1628,6 +1690,7 @@ function analyzeGraphPositions() {
   // Safety timeout for entire analysis
   const totalTimeout = setTimeout(() => {
     if (AppState.graphWorker === worker) {
+      console.warn('Graph analysis timed out');
       try { worker.terminate(); } catch (e) {}
       AppState.graphWorker = null;
     }
@@ -1746,20 +1809,16 @@ function analyzeGraphPositions() {
     }
   };
 
-  worker.onerror = function() {
+  worker.onerror = function(err) {
+    console.warn('Graph worker error during analysis:', err);
     clearTimeout(totalTimeout);
     AppState._graphWorkerTimeout = null;
     try { worker.terminate(); } catch (e) {}
     if (AppState.graphWorker === worker) AppState.graphWorker = null;
   };
 
-  // Delay start to let main engine initialise first
-  setTimeout(() => {
-    worker.postMessage('uci');
-    worker.postMessage('setoption name Hash value 256');
-    worker.postMessage('ucinewgame');
-    worker.postMessage('isready');
-  }, 500);
+  // Worker already initialised (readyok received) — start analysing
+  sendNext();
 }
 
 function parseStockfishInfoForGraph(message, fen) {
@@ -1850,6 +1909,8 @@ function resetBoard() {
   
   // Clear UI
   AppState._els.pgnInput.value = '';
+  AppState._els.pgnInput.dataset.pgn = '';
+  document.getElementById('pgn-copy').style.display = 'none';
   clearCanvas(AppState._els.arrowsCtx, AppState._els.arrowsCanvas);
   
   // Clear eval graph
@@ -2026,13 +2087,41 @@ function setupEventListeners() {
     e.target.blur();
   });
   
-  // PGN input enter key
-  document.getElementById('pgn-input').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+  // PGN input — paste auto-loads, Enter as fallback
+  const pgnEl = document.getElementById('pgn-input');
+
+  pgnEl.addEventListener('paste', (e) => {
+    e.preventDefault();
+    const text = (e.clipboardData || window.clipboardData).getData('text').trim();
+    if (!text) return;
+    pgnEl.dataset.pgn = text;
+    const firstLine = text.split('\n').find(l => l.trim() && !l.startsWith('[')) || text.substring(0, 60);
+    pgnEl.value = firstLine.substring(0, 60);
+    document.getElementById('pgn-copy').style.display = '';
+    pgnEl.blur();
+    loadPGN();
+  });
+
+  pgnEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
       e.preventDefault();
       loadPGN();
-      // Remove focus from textarea after loading PGN
       e.target.blur();
+      return;
+    }
+    // Allow paste (Ctrl/Cmd+V) and select-all, block all other typing
+    if (!(e.ctrlKey || e.metaKey)) e.preventDefault();
+  });
+
+  document.getElementById('pgn-copy').addEventListener('click', () => {
+    const pgn = pgnEl.dataset.pgn || pgnEl.value;
+    if (pgn) {
+      navigator.clipboard.writeText(pgn);
+      const btn = document.getElementById('pgn-copy');
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+      setTimeout(() => {
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+      }, 1500);
     }
   });
   

@@ -63,7 +63,12 @@
 
     <!-- PGN controls and board reset -->
     <div id="pgn-controls">
-      <textarea id="pgn-input" placeholder="Paste PGN here and press Enter..." rows="4" cols="50"></textarea>
+      <div class="pgn-bar">
+        <input type="text" id="pgn-input" placeholder="Paste PGN or Lichess URL">
+        <button id="pgn-copy" title="Copy PGN" style="display:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+      </div>
       <div class="pgn-hint">Arrow keys to navigate &bull; F to flip &bull; R to reset</div>
     </div>
 
