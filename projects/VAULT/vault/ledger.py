@@ -241,23 +241,260 @@ def record_prediction_sell(conn, prediction_id: int, current_odds: float,
 def compute_expected_onchain(conn) -> float:
     """Compute expected on-chain USDC from DB state.
 
-    expected = SUM(seed + deposits) - SUM(cost_basis for real predictions)
-               + SUM(payout for closed real predictions)
+    Anchored on the most recent `go_live_reset` entry. Before go-live, returns 0
+    (no real money expected to exist on-chain). After go-live:
 
-    API costs don't touch the wallet (paid to Anthropic separately).
-    Paper trades don't touch the wallet. Only execution_mode='real' moves USDC.
+        expected = anchor_balance
+                 + deposits recorded after anchor
+                 - cost_basis of all real predictions (pending/open/closed/reconciling)
+                 + payouts from closed real predictions
+
+    `cancelled` rows are excluded because they never actually moved USDC.
     """
-    deposits = conn.execute(
-        "SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE entry_type IN ('seed', 'deposit')"
+    anchor_row = conn.execute(
+        "SELECT id, balance_after FROM ledger "
+        "WHERE entry_type = 'go_live_reset' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+
+    if anchor_row is None:
+        # Never gone live → no on-chain money expected
+        return 0.0
+
+    anchor_id = anchor_row["id"]
+    anchor_balance = anchor_row["balance_after"]
+
+    deposits_after = conn.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE entry_type = 'deposit' AND id > ?",
+        (anchor_id,),
     ).fetchone()[0]
     real_costs = conn.execute(
-        "SELECT COALESCE(SUM(cost_basis), 0) FROM predictions WHERE execution_mode = 'real'"
+        "SELECT COALESCE(SUM(cost_basis), 0) FROM predictions "
+        "WHERE execution_mode = 'real' AND status IN ('pending', 'open', 'reconciling', 'closed')"
     ).fetchone()[0]
     real_payouts = conn.execute(
         "SELECT COALESCE(SUM(payout), 0) FROM predictions "
         "WHERE execution_mode = 'real' AND status = 'closed' AND payout IS NOT NULL"
     ).fetchone()[0]
-    return round(deposits - real_costs + real_payouts, 6)
+    return round(anchor_balance + deposits_after - real_costs + real_payouts, 6)
+
+
+def record_prediction_pending(conn, *, market_id: str, condition_id: str | None,
+                              question: str, slug: str | None, side: str,
+                              amount_usd: float, odds: float,
+                              clob_token_id: str,
+                              end_date: str | None = None,
+                              cycle_id: int | None = None,
+                              entry_edge: float | None = None,
+                              entry_confidence: float | None = None,
+                              entry_reasoning: str | None = None,
+                              clob_attempt_id: str) -> int:
+    """Record a real-mode bet as `pending` BEFORE placing the CLOB order.
+
+    This is the first step of the two-phase commit introduced after the 15 March
+    incident. The row is inserted with:
+        status = 'pending', execution_mode = 'real', pending_since = now,
+        cost_basis = amount_usd (the anticipated cost),
+        shares = amount_usd / odds (the anticipated shares at mid).
+
+    NO ledger entry is written here — USDC has not yet left the wallet. The
+    ledger debit happens atomically in `record_prediction_confirm()` after the
+    CLOB fill is verified on-chain.
+
+    Returns the prediction_id — caller must pass it to confirm() or cancel().
+    """
+    shares = round(amount_usd / odds, 6) if odds > 0 else 0.0
+
+    cur = conn.execute(
+        "INSERT INTO predictions "
+        "(market_id, condition_id, question, slug, side, shares, entry_odds, cost_basis, "
+        " clob_token_id, end_date, entry_edge, entry_confidence, entry_reasoning, "
+        " execution_mode, status, pending_since, clob_attempt_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'real', 'pending', "
+        "strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?)",
+        (market_id, condition_id, question, slug, side, shares, odds, amount_usd,
+         clob_token_id, end_date, entry_edge, entry_confidence, entry_reasoning,
+         clob_attempt_id),
+    )
+    conn.commit()
+    prediction_id = cur.lastrowid
+    log.info(
+        f"BET PENDING [REAL] {side} '{question[:40]}' @ {odds:.0%} | ${amount_usd:.2f} "
+        f"(pred #{prediction_id}, attempt {clob_attempt_id[:8]})"
+    )
+    return prediction_id
+
+
+def record_prediction_confirm(conn, prediction_id: int, *, fill_amount_usd: float,
+                              fill_shares: float, fill_odds: float,
+                              fill_verified: bool = False) -> float:
+    """Transition a pending real prediction to `open` and atomically debit the ledger.
+
+    Single transaction: UPDATE prediction status + INSERT ledger entry. If either
+    fails, both roll back. This is the fix for the class of bugs where CLOB
+    filled but the DB never recorded it.
+
+    Returns the new ledger balance. Raises ValueError if the prediction isn't pending.
+    """
+    pred = conn.execute(
+        "SELECT id, question, side, status, execution_mode FROM predictions WHERE id = ?",
+        (prediction_id,),
+    ).fetchone()
+    if pred is None:
+        raise ValueError(f"Prediction {prediction_id} not found")
+    if pred["status"] != "pending":
+        raise ValueError(
+            f"Prediction {prediction_id} has status '{pred['status']}', not 'pending' — "
+            f"refusing to confirm (possible double-confirm or stale write)"
+        )
+    if pred["execution_mode"] != "real":
+        raise ValueError(f"Prediction {prediction_id} is not real mode — use record_prediction_buy")
+
+    verified_ts = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')" if fill_verified else "NULL"
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            f"UPDATE predictions SET status = 'open', "
+            f"shares = ?, entry_odds = ?, cost_basis = ?, "
+            f"fill_verified_at = {verified_ts} "
+            f"WHERE id = ?",
+            (fill_shares, fill_odds, fill_amount_usd, prediction_id),
+        )
+        conn.execute(
+            "INSERT INTO ledger (entry_type, amount, description, reference_id, balance_after) "
+            "VALUES (?, ?, ?, ?, "
+            "ROUND((SELECT balance_after FROM ledger ORDER BY id DESC LIMIT 1) - ?, 6))",
+            ("prediction_buy", -fill_amount_usd,
+             f"BET [REAL] {pred['side']} '{pred['question'][:60]}' @ {fill_odds:.0%} (${fill_amount_usd:.2f})",
+             prediction_id, fill_amount_usd),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    new_balance = get_balance(conn)
+    log.info(
+        f"BET CONFIRMED [REAL] pred #{prediction_id} '{pred['question'][:40]}' "
+        f"@ {fill_odds:.0%} | ${fill_amount_usd:.2f} for {fill_shares:.2f} shares | "
+        f"Balance: ${new_balance:.2f}{' (on-chain verified)' if fill_verified else ''}"
+    )
+    return new_balance
+
+
+def record_prediction_cancel(conn, prediction_id: int, reason: str) -> None:
+    """Transition a pending prediction to `cancelled`. No ledger entry — USDC never moved."""
+    pred = conn.execute(
+        "SELECT id, question, status FROM predictions WHERE id = ?",
+        (prediction_id,),
+    ).fetchone()
+    if pred is None:
+        raise ValueError(f"Prediction {prediction_id} not found")
+    if pred["status"] != "pending":
+        raise ValueError(
+            f"Prediction {prediction_id} has status '{pred['status']}' — "
+            f"can only cancel pending rows"
+        )
+
+    conn.execute(
+        "UPDATE predictions SET status = 'cancelled', closed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), "
+        "resolution = 'cancelled', payout = 0, pnl = 0, "
+        "entry_reasoning = COALESCE(entry_reasoning, '') || ' | CANCELLED: ' || ? "
+        "WHERE id = ?",
+        (reason, prediction_id),
+    )
+    conn.commit()
+    log.info(f"BET CANCELLED pred #{prediction_id} '{pred['question'][:40]}': {reason}")
+
+
+def record_prediction_reconciling(conn, prediction_id: int, reason: str) -> None:
+    """Flag a pending prediction as needing reconciliation (orphan sweep will handle)."""
+    conn.execute(
+        "UPDATE predictions SET status = 'reconciling', "
+        "entry_reasoning = COALESCE(entry_reasoning, '') || ' | RECONCILING: ' || ? "
+        "WHERE id = ?",
+        (reason, prediction_id),
+    )
+    conn.execute(
+        "INSERT INTO events (event, detail) VALUES (?, ?)",
+        ("reconciling", f"Pred #{prediction_id}: {reason}"),
+    )
+    conn.commit()
+    log.critical(f"BET RECONCILING pred #{prediction_id}: {reason}")
+
+
+def get_pending_predictions(conn) -> list[dict]:
+    """Return all real-mode predictions stuck in 'pending' status."""
+    rows = conn.execute(
+        "SELECT id, market_id, question, side, shares, entry_odds, cost_basis, "
+        "clob_token_id, pending_since, clob_attempt_id "
+        "FROM predictions WHERE status = 'pending' AND execution_mode = 'real' "
+        "ORDER BY pending_since ASC"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def has_pending_predictions(conn) -> bool:
+    """True if any real-mode prediction is currently in 'pending' status."""
+    row = conn.execute(
+        "SELECT COUNT(*) FROM predictions WHERE status = 'pending' AND execution_mode = 'real'"
+    ).fetchone()
+    return int(row[0]) > 0
+
+
+def go_live_reset(conn, onchain_usdc: float) -> float:
+    """Transition VAULT to real-money mode.
+
+    1. Asserts no open real predictions exist (would invalidate accounting).
+    2. Writes a `go_live_reset` ledger entry that snaps the balance to the on-chain USDC amount.
+       The `amount` is the delta needed to move from paper balance to on-chain reality.
+    3. Writes a `go_live` event for audit trail.
+    4. Initialises on-chain anchor meta keys.
+
+    Returns new balance (== onchain_usdc). Raises RuntimeError on violation.
+    """
+    open_real = conn.execute(
+        "SELECT COUNT(*) FROM predictions "
+        "WHERE execution_mode = 'real' AND status IN ('pending', 'open', 'reconciling')"
+    ).fetchone()[0]
+    if open_real > 0:
+        raise RuntimeError(
+            f"Cannot go live: {open_real} open real predictions from a previous life. "
+            f"Resolve or reconcile them first, or resurrect the DB."
+        )
+
+    current = get_balance(conn)
+    delta = round(onchain_usdc - current, 6)
+
+    conn.execute(
+        "INSERT INTO ledger (entry_type, amount, description, balance_after) VALUES (?, ?, ?, ?)",
+        ("go_live_reset", delta,
+         f"Go-live: paper ${current:.2f} -> on-chain ${onchain_usdc:.2f}",
+         round(onchain_usdc, 6)),
+    )
+    conn.execute(
+        "INSERT INTO events (event, detail) VALUES (?, ?)",
+        ("go_live", f"Real mode enabled. On-chain USDC snapshot: ${onchain_usdc:.2f}"),
+    )
+    from vault.db import set_meta
+    set_meta(conn, "last_go_live_at", "now")  # triggers db to use sqlite 'now'; stored as ISO by set_meta? Let's check.
+    # Safer: use explicit timestamp string.
+    import datetime as _dt
+    set_meta(conn, "last_go_live_at", _dt.datetime.now(_dt.timezone.utc).isoformat())
+    conn.commit()
+
+    log.critical(
+        f"GO LIVE: paper balance ${current:.2f} -> real balance ${onchain_usdc:.2f} "
+        f"(delta ${delta:+.2f})"
+    )
+    return onchain_usdc
+
+
+def is_live(conn) -> bool:
+    """True if the ledger has ever been reset to real-money mode via go_live."""
+    row = conn.execute(
+        "SELECT 1 FROM ledger WHERE entry_type = 'go_live_reset' LIMIT 1"
+    ).fetchone()
+    return row is not None
 
 
 def record_deposit(conn, amount: float) -> float:

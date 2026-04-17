@@ -11,3 +11,6 @@ build/
 .venv/
 dashboard/node_modules/
 dashboard/dist/
+exports/
+.pytest_cache/
+tests/__pycache__/

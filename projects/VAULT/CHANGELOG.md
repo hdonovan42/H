@@ -5,6 +5,50 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v20 — Real-Money Safeguards (post-15-Mar-2026 incident)
+
+**Baseline (local, pre-deploy)**: daemon paused, $2.00 balance, 1070 cycles, tests 37/37 green.
+
+Full post-mortem of the 15 March 2026 $50 loss in [`tasks/lessons.md`](./tasks/lessons.md). Summary: paper ledger was carried forward as real money on mode flip; the divergence check silently passed when Polygon RPC was unavailable; CLOB fills weren't atomically recorded, so orders that succeeded on-chain were orphaned in the DB. This release replaces the mode transition with an explicit CLI gate, adds multi-provider RPC fallback with hard-fail semantics, and refactors bet recording into a two-phase pending→confirm/cancel flow that rolls back atomically on any failure between CLOB and the ledger.
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `vault/db.py` | Schema v20: prediction statuses extend to pending/open/reconciling/closed/cancelled; new columns `pending_since`, `clob_attempt_id`, `fill_verified_at`; index `idx_predictions_status_mode` |
+| `vault/ledger.py` | New: `record_prediction_pending`, `record_prediction_confirm` (atomic UPDATE+INSERT in `BEGIN IMMEDIATE`), `record_prediction_cancel`, `record_prediction_reconciling`, `has_pending_predictions`, `get_pending_predictions`, `go_live_reset`, `is_live`. `compute_expected_onchain` rewritten to anchor on the latest `go_live_reset` entry |
+| `vault/clob_client.py` | Multi-provider RPC fallback via `rpc_fallback` config list; `_get_usdc_balance_raw()` and `get_ctf_balance()` return `None` on all-providers-failed (no more silent 0); stealth-fill paths updated to log "STEALTH CHECK BLIND" when RPC down instead of assuming |
+| `vault/guardrails.py` | `check_balance_divergence()` now counts consecutive RPC failures in meta; auto-pauses after `rpc_failure_pause_threshold` (default 3). The 15-Mar bug lived here |
+| `vault/daemon.py` | Startup HARD GATES in real mode: refuse if no `go_live` event in ledger; refuse if RPC can't verify on-chain; refuse if drift > tolerance. New `_orphan_sweep()` runs at startup AND whenever a pending row exists; reconciles against on-chain CTF balances |
+| `vault/actuators/bet.py` | Real path completely rewritten as two-phase commit. Added real-mode position cap (`max_bet_pct_onchain`, default 10%). Added pre-trade RPC requirement (refuse if None). Added post-trade CTF verification before ledger confirm. Added go-live precondition check |
+| `vault/cli.py` | New `vault verify-live` (7-gate pre-flight checker). New `vault go-live` (explicit CLI that snaps paper balance to on-chain USDC and writes `go_live_reset` ledger entry) |
+| `vault/api.py` | `/api/v1/status` exposes `live`, `expected_onchain`, `pending_predictions`, `reconciling_predictions`, `rpc_failures_consecutive`. New `/api/v1/reconciliation` endpoint powers the dashboard panel |
+| `dashboard/src/components/ReconciliationPanel.jsx` | New panel: internal vs on-chain balance, drift, tolerance, pending/reconciling rows. Only renders when `status.live` is true |
+| `dashboard/src/App.jsx` | Mounts ReconciliationPanel above BalanceChart when live |
+| `config/default.yaml` | New keys: `orphan_sweep_interval_cycles`, `pending_timeout_seconds`, `rpc_failure_pause_threshold`, `max_bet_pct_onchain`, `verify_ctf_on_confirm`, `rpc_fallback` (list). Tightened defaults: `balance_divergence_tolerance` 1.00→0.50, `dry_run_startup_cycles` 0→20 |
+| `tests/` (new) | 37 tests across `conftest.py`, `test_ledger_golive.py`, `test_bet_atomicity.py`, `test_rpc_failure.py`, `test_bet_actuator_e2e.py`. Regression test `test_regression_15_march_scenario` recreates the incident conditions and asserts the new code halts correctly |
+| `tasks/lessons.md` | Appended the $50 loss post-mortem: timeline, root causes (paper-phantom, RPC silent pass, non-atomic record), ten "never again" rules enforced by code |
+| `tasks/go-live-real-money.md` | Rewritten as v2: pre-flight gates, test requirements, fresh-wallet hygiene, monitoring checklist, red flags with HALT criteria |
+
+### What to watch post-deploy
+- `vault verify-live` exits 0 before any real-mode restart (7 gates must all pass)
+- `/api/v1/reconciliation` returns `status: "ok"` with `drift` inside tolerance
+- No `status='pending'` prediction older than `pending_timeout_seconds` (300s default)
+- No `status='reconciling'` predictions (means orphan sweep found a mismatch)
+- `rpc_failures_consecutive` stays at 0; if it climbs, check `trading.clob.rpc_fallback`
+- New regression test `test_regression_15_march_scenario` remains green on every CI run
+
+### Go-live procedure (post-this-release)
+See `tasks/go-live-real-money.md`. Summary:
+1. `pytest tests/` — all green
+2. `vault verify-live` — all 7 gates PASS
+3. Deposit USDC to fresh wallet
+4. `vault go-live` (snaps ledger to on-chain)
+5. `config.yaml → simulated: false`
+6. `vault start` (refuses to start without #4)
+7. Monitor `/api/v1/reconciliation` for 48h before trusting
+
+---
+
 ## v19.4 — Dashboard Simplification
 
 **Deployed**: 2026-03-15 | **Baseline**: $51.20 balance, 599d runway

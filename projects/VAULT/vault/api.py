@@ -116,6 +116,21 @@ def get_status():
 
         paused_row = conn.execute("SELECT value FROM meta WHERE key = 'paused'").fetchone()
 
+        # Real-mode reconciliation snapshot (post-15-Mar-2026 safeguards)
+        is_live_flag = ledger.is_live(conn)
+        expected_onchain = ledger.compute_expected_onchain(conn) if is_live_flag else None
+        pending_count = conn.execute(
+            "SELECT COUNT(*) FROM predictions WHERE status = 'pending' AND execution_mode = 'real'"
+        ).fetchone()[0]
+        reconciling_count = conn.execute(
+            "SELECT COUNT(*) FROM predictions WHERE status = 'reconciling' AND execution_mode = 'real'"
+        ).fetchone()[0]
+        rpc_fails_str = get_meta(conn, "rpc_failures_consecutive") or "0"
+        try:
+            rpc_fails = int(rpc_fails_str)
+        except ValueError:
+            rpc_fails = 0
+
         return {
             "alive": alive,
             "daemon_running": pid is not None,
@@ -133,6 +148,72 @@ def get_status():
             "peak_total_value": peak_total_value,
             "drawdown_pct": drawdown_pct,
             "paused": paused_row is not None and paused_row["value"] == "true",
+            "live": is_live_flag,
+            "expected_onchain": expected_onchain,
+            "pending_predictions": pending_count,
+            "reconciling_predictions": reconciling_count,
+            "rpc_failures_consecutive": rpc_fails,
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/api/v1/reconciliation")
+def get_reconciliation():
+    """Live vs ledger reconciliation snapshot. Powers the dashboard safety panel."""
+    conn = _conn()
+    try:
+        is_live_flag = ledger.is_live(conn)
+        expected = ledger.compute_expected_onchain(conn) if is_live_flag else 0.0
+
+        # Attempt on-chain read (may be slow; do it here so status stays snappy)
+        onchain_usdc = None
+        try:
+            from vault.clob_client import get_usdc_balance
+            onchain_usdc = get_usdc_balance()
+        except Exception as e:
+            log.warning(f"Reconciliation endpoint: RPC failed ({e})")
+
+        drift = None
+        if onchain_usdc is not None and is_live_flag:
+            drift = round(onchain_usdc - expected, 6)
+
+        from vault.config_loader import load_config
+        cfg = load_config()
+        tol = cfg.get("trading", {}).get("clob", {}).get("balance_divergence_tolerance", 0.50)
+
+        pending = conn.execute(
+            "SELECT id, question, side, shares, cost_basis, pending_since, clob_attempt_id "
+            "FROM predictions WHERE status = 'pending' AND execution_mode = 'real' "
+            "ORDER BY pending_since ASC"
+        ).fetchall()
+        reconciling = conn.execute(
+            "SELECT id, question, side, shares, cost_basis, entry_reasoning "
+            "FROM predictions WHERE status = 'reconciling' AND execution_mode = 'real' "
+            "ORDER BY id ASC"
+        ).fetchall()
+
+        status = "ok"
+        if not is_live_flag:
+            status = "not-live"
+        elif onchain_usdc is None:
+            status = "rpc-down"
+        elif drift is not None and drift < -tol:
+            status = "negative-drift"
+        elif pending or reconciling:
+            status = "pending"
+        elif drift is not None and drift > tol:
+            status = "positive-drift"
+
+        return {
+            "status": status,
+            "is_live": is_live_flag,
+            "expected_onchain": round(expected, 6) if is_live_flag else None,
+            "actual_onchain": round(onchain_usdc, 6) if onchain_usdc is not None else None,
+            "drift": drift,
+            "tolerance": tol,
+            "pending": [dict(r) for r in pending],
+            "reconciling": [dict(r) for r in reconciling],
         }
     finally:
         conn.close()

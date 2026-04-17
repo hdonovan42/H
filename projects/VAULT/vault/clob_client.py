@@ -9,10 +9,13 @@ from vault.config_loader import load_config
 log = logging.getLogger("vault.clob")
 
 _client = None
-_w3 = None
+# Ordered list of (url, web3_instance_or_None). Populated lazily; rotated on failure.
+_w3_providers: list = []
 
-# Polygon USDC.e (bridged USDC on Polygon PoS)
+# Polygon USDC.e (bridged USDC on Polygon PoS) — Polymarket's collateral token
 POLYGON_USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+# Polymarket CTF (Conditional Token Framework) on Polygon — ERC1155
+CTF_CONTRACT = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
 ERC20_BALANCE_ABI = [
     {
         "constant": True,
@@ -56,18 +59,128 @@ def _get_client():
     chain_id = clob_cfg.get("chain_id", 137)
     signature_type = clob_cfg.get("signature_type", 0)
 
-    _client = ClobClient(
-        host,
-        key=pk,
-        chain_id=chain_id,
-        signature_type=signature_type,
-        funder=funder,
-    )
+    kwargs = dict(host=host, key=pk, chain_id=chain_id, signature_type=signature_type)
+    if funder:
+        kwargs["funder"] = funder
+    _client = ClobClient(**kwargs)
 
     # Derive or load API credentials
     _client.set_api_creds(_client.create_or_derive_api_creds())
     log.info("CLOB client initialised")
     return _client
+
+
+def _get_rpc_urls() -> list[str]:
+    """Return ordered RPC URL list: config fallback list, or single legacy URL."""
+    cfg = load_config()
+    fallback = cfg.get("trading", {}).get("clob", {}).get("rpc_fallback")
+    if isinstance(fallback, list) and fallback:
+        return [str(u) for u in fallback if u]
+    legacy = cfg.get("polygon_rpc_url")
+    if legacy:
+        return [legacy]
+    return ["https://polygon-bor-rpc.publicnode.com"]
+
+
+def _ensure_providers():
+    """Build Web3 instances for each configured RPC URL on first use."""
+    global _w3_providers
+    if _w3_providers:
+        return
+    from web3 import Web3
+    _w3_providers = [(url, Web3(Web3.HTTPProvider(url, request_kwargs={"timeout": 10}))) for url in _get_rpc_urls()]
+
+
+def _call_with_rpc_fallback(fn, *, label: str):
+    """Invoke `fn(w3)` against each RPC provider in order until one succeeds.
+
+    Raises the last exception if every provider fails. Rotates the successful
+    provider to the head of the list so subsequent calls prefer it.
+    """
+    global _w3_providers
+    _ensure_providers()
+    last_err = None
+    for i, (url, w3) in enumerate(list(_w3_providers)):
+        try:
+            result = fn(w3)
+            # Promote this provider to the front so future calls skip dead ones.
+            if i > 0:
+                _w3_providers = [(url, w3)] + [p for p in _w3_providers if p[0] != url]
+            return result
+        except Exception as e:
+            last_err = e
+            log.warning(f"{label}: RPC provider {url} failed ({e}); trying next")
+            continue
+    raise RuntimeError(f"{label}: all RPC providers failed ({last_err})")
+
+
+def _get_usdc_balance_raw() -> int | None:
+    """Get on-chain USDC.e balance in raw units (6 decimals).
+
+    Returns integer raw-units on success, or None if ALL RPC providers fail.
+    A return of 0 means the wallet genuinely has zero USDC.
+    """
+    from web3 import Web3
+    from eth_account import Account
+
+    pk = os.environ.get("POLYMARKET_PRIVATE_KEY")
+    if not pk:
+        return None
+    try:
+        wallet = Account.from_key(pk).address
+    except Exception as e:
+        log.error(f"Failed to derive wallet address: {e}")
+        return None
+
+    def _call(w3):
+        contract = w3.eth.contract(
+            address=Web3.to_checksum_address(POLYGON_USDC_ADDRESS),
+            abi=ERC20_BALANCE_ABI,
+        )
+        return int(contract.functions.balanceOf(Web3.to_checksum_address(wallet)).call())
+
+    try:
+        return _call_with_rpc_fallback(_call, label="USDC balance")
+    except Exception as e:
+        log.warning(f"Failed to check on-chain USDC balance: {e}")
+        return None
+
+
+def get_ctf_balance(token_id: str) -> float | None:
+    """Check on-chain ERC1155 balance for a specific conditional token.
+
+    Returns shares held (6-decimal scaled), or None on failure (all providers down).
+    """
+    from web3 import Web3
+    from eth_account import Account
+
+    pk = os.environ.get("POLYMARKET_PRIVATE_KEY")
+    if not pk:
+        return None
+    try:
+        wallet = Account.from_key(pk).address
+    except Exception as e:
+        log.error(f"Failed to derive wallet address: {e}")
+        return None
+
+    abi = [{
+        "constant": True,
+        "inputs": [{"name": "account", "type": "address"}, {"name": "id", "type": "uint256"}],
+        "name": "balanceOf",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "type": "function",
+    }]
+
+    def _call(w3):
+        contract = w3.eth.contract(address=Web3.to_checksum_address(CTF_CONTRACT), abi=abi)
+        return int(contract.functions.balanceOf(Web3.to_checksum_address(wallet), int(token_id)).call())
+
+    try:
+        raw = _call_with_rpc_fallback(_call, label=f"CTF balance {str(token_id)[:12]}")
+        return round(raw / 1e6, 6)
+    except Exception as e:
+        log.warning(f"Failed to check CTF balance for {str(token_id)[:12]}: {e}")
+        return None
 
 
 def resolve_token_id(clob_token_ids: list | None, side: str) -> str | None:
@@ -81,10 +194,32 @@ def resolve_token_id(clob_token_ids: list | None, side: str) -> str | None:
     return str(token_id) if token_id else None
 
 
+def get_best_ask(token_id: str) -> float | None:
+    """Check the CLOB orderbook for the best (lowest) ask price via raw HTTP."""
+    import httpx
+    try:
+        resp = httpx.get(f"https://clob.polymarket.com/book?token_id={token_id}", timeout=10)
+        book = resp.json()
+        asks = book.get("asks", [])
+        if not asks:
+            return None
+        return min(float(a["price"]) for a in asks)
+    except Exception as e:
+        log.warning(f"Failed to check orderbook: {e}")
+        return None
+
+
 def buy_shares(token_id: str, amount_usd: float, max_price: float = 0.99) -> FillResult:
-    """Place a FOK market buy order. Returns FillResult with fill data."""
+    """Place a FOK market buy order. Returns FillResult with fill data.
+
+    CRITICAL: Snapshots on-chain USDC balance before and after to detect
+    stealth fills where post_order throws but the order actually executed.
+    """
     from py_clob_client.order_builder.constants import BUY
     from py_clob_client.clob_types import MarketOrderArgs
+
+    # Snapshot USDC balance BEFORE order
+    usdc_before = _get_usdc_balance_raw()
 
     try:
         client = _get_client()
@@ -117,6 +252,30 @@ def buy_shares(token_id: str, amount_usd: float, max_price: float = 0.99) -> Fil
             total_cost += trade_shares * trade_price
 
         if total_shares <= 0:
+            # Double-check on-chain — the order may have filled despite empty trades
+            usdc_after = _get_usdc_balance_raw()
+            if usdc_before is not None and usdc_after is not None:
+                spent = (usdc_before - usdc_after) / 1e6
+                if spent > 0.01:
+                    log.error(
+                        f"STEALTH FILL DETECTED: response said no trades but ${spent:.2f} USDC "
+                        f"left the wallet. Order {order_id[:8]} actually executed."
+                    )
+                    return FillResult(
+                        success=True,
+                        order_id=order_id,
+                        side="BUY",
+                        token_id=token_id,
+                        amount_usd=round(spent, 6),
+                        shares=round(spent / max_price, 6),  # Estimate
+                        avg_price=max_price,
+                    )
+            elif usdc_before is None or usdc_after is None:
+                log.critical(
+                    f"STEALTH CHECK BLIND: CLOB reported no trades for order {order_id[:8]} "
+                    f"and RPC balance unavailable (before={usdc_before}, after={usdc_after}). "
+                    f"Cannot verify — returning failure; reconciliation sweep will handle."
+                )
             return FillResult(success=False, error="Order accepted but no fills (FOK rejected)")
 
         avg_price = total_cost / total_shares if total_shares > 0 else 0.0
@@ -137,14 +296,46 @@ def buy_shares(token_id: str, amount_usd: float, max_price: float = 0.99) -> Fil
         )
 
     except Exception as e:
+        # CRITICAL: Check if USDC actually left the wallet despite the exception.
+        # py-clob-client can throw after the order already executed on-chain.
+        usdc_after = _get_usdc_balance_raw()
+        if usdc_before is not None and usdc_after is not None:
+            spent = (usdc_before - usdc_after) / 1e6
+            if spent > 0.01:
+                log.error(
+                    f"STEALTH FILL DETECTED: post_order threw '{e}' but ${spent:.2f} USDC "
+                    f"left the wallet. Treating as successful fill."
+                )
+                return FillResult(
+                    success=True,
+                    order_id="stealth-fill",
+                    side="BUY",
+                    token_id=token_id,
+                    amount_usd=round(spent, 6),
+                    shares=round(spent / max_price, 6),
+                    avg_price=max_price,
+                )
+        else:
+            log.critical(
+                f"STEALTH CHECK BLIND: post_order threw '{e}' and RPC balance unavailable "
+                f"(before={usdc_before}, after={usdc_after}). Position MAY be on-chain without a record; "
+                f"reconciliation sweep will handle."
+            )
         log.error(f"CLOB buy error: {e}", exc_info=True)
         return FillResult(success=False, error=str(e))
 
 
 def sell_shares(token_id: str, shares: float, min_price: float = 0.01) -> FillResult:
-    """Place a FOK market sell order. Returns FillResult with fill data."""
+    """Place a FOK market sell order. Returns FillResult with fill data.
+
+    CRITICAL: Snapshots on-chain USDC balance before and after to detect
+    stealth fills where post_order throws but the order actually executed.
+    """
     from py_clob_client.order_builder.constants import SELL
     from py_clob_client.clob_types import MarketOrderArgs
+
+    # Snapshot USDC balance BEFORE order
+    usdc_before = _get_usdc_balance_raw()
 
     try:
         client = _get_client()
@@ -176,6 +367,28 @@ def sell_shares(token_id: str, shares: float, min_price: float = 0.01) -> FillRe
             total_value += trade_shares * trade_price
 
         if total_shares <= 0:
+            usdc_after = _get_usdc_balance_raw()
+            if usdc_before is not None and usdc_after is not None:
+                received = (usdc_after - usdc_before) / 1e6
+                if received > 0.01:
+                    log.error(
+                        f"STEALTH FILL DETECTED: response said no trades but ${received:.2f} USDC "
+                        f"arrived. Order {order_id[:8]} actually executed."
+                    )
+                    return FillResult(
+                        success=True,
+                        order_id=order_id,
+                        side="SELL",
+                        token_id=token_id,
+                        amount_usd=round(received, 6),
+                        shares=round(shares, 6),
+                        avg_price=round(received / shares, 6) if shares > 0 else 0,
+                    )
+            else:
+                log.critical(
+                    f"STEALTH CHECK BLIND on sell: CLOB reported no trades for order {order_id[:8]} "
+                    f"and RPC unavailable. Reconciliation sweep will handle."
+                )
             return FillResult(success=False, error="Sell order accepted but no fills (FOK rejected)")
 
         avg_price = total_value / total_shares if total_shares > 0 else 0.0
@@ -196,40 +409,42 @@ def sell_shares(token_id: str, shares: float, min_price: float = 0.01) -> FillRe
         )
 
     except Exception as e:
+        usdc_after = _get_usdc_balance_raw()
+        if usdc_before is not None and usdc_after is not None:
+            received = (usdc_after - usdc_before) / 1e6
+            if received > 0.01:
+                log.error(
+                    f"STEALTH FILL DETECTED: post_order threw '{e}' but ${received:.2f} USDC "
+                    f"arrived. Treating as successful sell."
+                )
+                return FillResult(
+                    success=True,
+                    order_id="stealth-fill",
+                    side="SELL",
+                    token_id=token_id,
+                    amount_usd=round(received, 6),
+                    shares=round(shares, 6),
+                    avg_price=round(received / shares, 6) if shares > 0 else 0,
+                )
+        else:
+            log.critical(
+                f"STEALTH CHECK BLIND on sell: post_order threw '{e}' and RPC unavailable. "
+                f"Reconciliation sweep will handle."
+            )
         log.error(f"CLOB sell error: {e}", exc_info=True)
         return FillResult(success=False, error=str(e))
 
 
 def get_usdc_balance() -> float | None:
-    """Check on-chain USDC balance via direct web3 ERC20 balanceOf call.
+    """Check on-chain USDC.e balance. Returns None if all RPC providers fail.
 
-    Returns None on failure (not 0.0) so callers can distinguish RPC
-    failure from an empty wallet.
+    A return of 0.0 means the wallet is genuinely empty. Never confuse the two:
+    callers treating None as "zero" is how the 15 March incident happened.
     """
-    global _w3
-    from web3 import Web3
-
-    try:
-        cfg = load_config()
-        rpc_url = cfg.get("polygon_rpc_url", "https://polygon-rpc.com")
-
-        if _w3 is None:
-            _w3 = Web3(Web3.HTTPProvider(rpc_url))
-
-        wallet = os.environ.get("POLYMARKET_FUNDER_ADDRESS")
-        if not wallet:
-            log.warning("POLYMARKET_FUNDER_ADDRESS not set — cannot check on-chain balance")
-            return None
-
-        contract = _w3.eth.contract(
-            address=Web3.to_checksum_address(POLYGON_USDC_ADDRESS),
-            abi=ERC20_BALANCE_ABI,
-        )
-        raw = contract.functions.balanceOf(Web3.to_checksum_address(wallet)).call()
-        return round(raw / 1e6, 6)  # USDC has 6 decimals
-    except Exception as e:
-        log.warning(f"Failed to check USDC balance: {e}")
+    raw = _get_usdc_balance_raw()
+    if raw is None:
         return None
+    return round(raw / 1e6, 6)
 
 
 def check_allowances() -> dict:
@@ -257,10 +472,7 @@ def check_allowances() -> dict:
 
 
 def setup_allowances():
-    """One-time approval for USDC + CTF token exchange contracts.
-
-    Uses py-clob-client's update_balance_allowance to set max approvals.
-    """
+    """One-time approval for USDC + CTF token exchange contracts."""
     from py_clob_client.clob_types import BalanceAllowanceParams, AssetType
 
     client = _get_client()
@@ -270,17 +482,11 @@ def setup_allowances():
     log.info("Setting up exchange allowances...")
 
     try:
-        # Approve collateral (USDC)
         client.update_balance_allowance(BalanceAllowanceParams(
             asset_type=AssetType.COLLATERAL,
             signature_type=sig_type,
         ))
         log.info("Collateral (USDC) allowance approved")
-
-        # Conditional token approvals happen per-token when trading
-        # (ERC1155 requires a specific token_id, not a blanket approval)
-        log.info("Conditional token approvals will be handled per-market at trade time")
-
         return {"success": True}
     except Exception as e:
         log.error(f"Failed to set allowances: {e}", exc_info=True)

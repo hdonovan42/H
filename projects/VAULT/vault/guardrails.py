@@ -125,6 +125,71 @@ def check_drawdown(conn) -> tuple[bool, str]:
     return False, ""
 
 
+def check_balance_divergence(conn, tolerance: float = 1.0,
+                             rpc_failure_threshold: int = 3) -> tuple[bool, str]:
+    """Compare internal ledger to on-chain USDC. Auto-pauses on divergence OR repeated RPC failure.
+
+    15 March 2026 incident: the old version returned (False, "RPC unavailable") on None,
+    letting the daemon trade blind for hours while the wallet was actually empty. Now:
+    consecutive RPC failures are counted in meta, and after `rpc_failure_threshold`
+    the daemon is paused — a daemon that cannot verify on-chain state must not trade.
+
+    Returns (diverged, detail).
+    """
+    from vault.clob_client import get_usdc_balance
+
+    onchain = get_usdc_balance()
+    if onchain is None:
+        fails_str = get_meta(conn, "rpc_failures_consecutive") or "0"
+        try:
+            fails = int(fails_str)
+        except ValueError:
+            fails = 0
+        fails += 1
+        set_meta(conn, "rpc_failures_consecutive", str(fails))
+        if fails >= rpc_failure_threshold:
+            detail = (
+                f"RPC unavailable for {fails} consecutive checks (threshold {rpc_failure_threshold}). "
+                f"Cannot verify on-chain state — auto-pausing. Check Polygon RPC providers."
+            )
+            set_meta(conn, "paused", "true")
+            conn.execute(
+                "INSERT INTO events (event, detail) VALUES (?, ?)",
+                ("rpc_unavailable_pause", detail),
+            )
+            conn.commit()
+            log.critical(detail)
+            return True, detail
+        return False, f"RPC unavailable (fail {fails}/{rpc_failure_threshold})"
+
+    # Reset failure counter on any successful RPC read
+    set_meta(conn, "rpc_failures_consecutive", "0")
+
+    expected = ledger.compute_expected_onchain(conn)
+    drift = round(onchain - expected, 6)
+
+    if drift < -tolerance:
+        # Negative drift = money missing from wallet. Pause immediately.
+        detail = (
+            f"Balance divergence: on-chain ${onchain:.2f} vs expected ${expected:.2f} "
+            f"(drift ${drift:+.2f}, tolerance ${tolerance:.2f}). Auto-pausing."
+        )
+        set_meta(conn, "paused", "true")
+        conn.execute(
+            "INSERT INTO events (event, detail) VALUES (?, ?)",
+            ("balance_divergence", detail),
+        )
+        conn.commit()
+        log.critical(detail)
+        return True, detail
+
+    if drift > tolerance:
+        # Positive drift = deposit detected. Log but don't pause.
+        log.info(f"Positive balance drift: ${drift:+.2f} (likely deposit, will be reconciled)")
+
+    return False, f"OK (drift ${drift:+.2f})"
+
+
 def resurrect(conn, seed_amount: float | None = None):
     """Resurrect VAULT — reset balance, close phantom positions, start fresh."""
     cfg = load_config()

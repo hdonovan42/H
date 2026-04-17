@@ -7,7 +7,7 @@ from vault.config_loader import get_db_path
 
 log = logging.getLogger("vault.db")
 
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -133,7 +133,10 @@ CREATE TABLE IF NOT EXISTS predictions (
     pnl           REAL,
     peak_roi      REAL DEFAULT 0,               -- trailing stop high-water mark (v12)
     execution_mode TEXT DEFAULT 'paper',        -- paper/real (v19)
-    status        TEXT NOT NULL DEFAULT 'open'  -- open/closed
+    status        TEXT NOT NULL DEFAULT 'open', -- pending/open/reconciling/closed/cancelled (v20)
+    pending_since TEXT,                         -- when status='pending' was set (v20)
+    clob_attempt_id TEXT,                       -- dedupe key for CLOB retries (v20)
+    fill_verified_at TEXT                       -- when post-trade CTF balance was confirmed (v20)
 );
 
 -- ── Pipeline tables (v3) ──────────────────────────────────────
@@ -796,6 +799,33 @@ def _migrate(conn):
         )
         conn.commit()
         log.info("v19 migration: added execution_mode column to predictions")
+
+    if version < 20:
+        # v20: safeguards for real-money trading (post-15-Mar-2026 incident).
+        # New prediction statuses: 'pending' (order placed, not confirmed),
+        # 'reconciling' (orphan detected, needs manual review), 'cancelled' (never filled).
+        # 'open' and 'closed' unchanged.
+        # Track pending_since for orphan sweep timeout, and clob_attempt_id to dedupe retries.
+        for col, coltype in (
+            ("pending_since", "TEXT"),
+            ("clob_attempt_id", "TEXT"),
+            ("fill_verified_at", "TEXT"),
+        ):
+            try:
+                conn.execute(f"ALTER TABLE predictions ADD COLUMN {col} {coltype}")
+            except sqlite3.OperationalError:
+                pass
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_predictions_status_mode ON predictions(status, execution_mode)")
+        except sqlite3.OperationalError:
+            pass
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "20"),
+        )
+        conn.commit()
+        log.info("v20 migration: added pending_since/clob_attempt_id/fill_verified_at + index")
 
 
 def init_db(db_path: Path | None = None) -> sqlite3.Connection:

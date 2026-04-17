@@ -18,6 +18,116 @@ log = logging.getLogger("vault.daemon")
 _shutdown_requested = False
 
 
+def _orphan_sweep(conn, cfg) -> dict:
+    """Resolve stuck 'pending' and 'reconciling' predictions against on-chain state.
+
+    For each: compare DB's clob_token_id against on-chain CTF balance.
+      - pending ≥ timeout + shares on-chain → confirm (using cost_basis as debit)
+      - pending ≥ timeout + no on-chain shares → cancel (USDC never moved)
+      - reconciling + shares on-chain → confirm
+      - reconciling + no on-chain shares → cancel
+
+    Pending rows younger than the timeout are left alone (CLOB may still be in flight).
+    Returns a summary dict for logging.
+    """
+    from vault.clob_client import get_ctf_balance, get_usdc_balance
+    import datetime as dt
+
+    clob_cfg = cfg.get("trading", {}).get("clob", {})
+    timeout_sec = clob_cfg.get("pending_timeout_seconds", 300)
+
+    pending = ledger.get_pending_predictions(conn)
+    reconciling = conn.execute(
+        "SELECT id, market_id, question, side, shares, entry_odds, cost_basis, clob_token_id, pending_since "
+        "FROM predictions WHERE status = 'reconciling' AND execution_mode = 'real' ORDER BY id ASC"
+    ).fetchall()
+    reconciling = [dict(r) for r in reconciling]
+
+    confirmed = 0
+    cancelled = 0
+    skipped = 0
+    manual = 0
+    now = dt.datetime.now(dt.timezone.utc)
+
+    for pred in pending + reconciling:
+        # For pending rows, respect the timeout — CLOB might still be working
+        if pred in pending and pred.get("pending_since"):
+            try:
+                since = dt.datetime.fromisoformat(pred["pending_since"].replace("Z", "+00:00"))
+                age = (now - since).total_seconds()
+                if age < timeout_sec:
+                    skipped += 1
+                    continue
+            except Exception:
+                pass  # unparseable timestamp → treat as old, reconcile
+
+        token_id = pred.get("clob_token_id")
+        if not token_id:
+            log.warning(f"Pred #{pred['id']} has no clob_token_id; cannot reconcile — leaving in status")
+            manual += 1
+            continue
+
+        ctf_shares = get_ctf_balance(token_id)
+        if ctf_shares is None:
+            log.warning(f"Orphan sweep: RPC unavailable for token {str(token_id)[:12]} (pred #{pred['id']}) — will retry")
+            skipped += 1
+            continue
+
+        expected_shares = pred["shares"]
+        if ctf_shares >= expected_shares * 0.99:
+            # On-chain has (at least) the shares we expected. Confirm the bet.
+            try:
+                ledger.record_prediction_confirm(
+                    conn, pred["id"],
+                    fill_amount_usd=pred["cost_basis"],
+                    fill_shares=expected_shares,
+                    fill_odds=pred["entry_odds"],
+                    fill_verified=True,
+                )
+                confirmed += 1
+                log.info(
+                    f"Orphan sweep: confirmed pred #{pred['id']} "
+                    f"({expected_shares:.2f} shares @ {pred['entry_odds']:.0%})"
+                )
+            except ValueError as e:
+                # Already transitioned out of pending — race with cycle
+                log.debug(f"Pred #{pred['id']} already confirmed: {e}")
+                skipped += 1
+        elif ctf_shares < 0.01:
+            # No shares on-chain; USDC clearly didn't move. Safe to cancel.
+            try:
+                ledger.record_prediction_cancel(
+                    conn, pred["id"],
+                    f"Orphan sweep: no on-chain shares (CTF={ctf_shares:.4f}) after timeout"
+                )
+                cancelled += 1
+            except ValueError:
+                # Was in reconciling, not pending — just clean up
+                conn.execute(
+                    "UPDATE predictions SET status = 'cancelled', closed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), "
+                    "resolution = 'cancelled', payout = 0, pnl = 0 WHERE id = ?",
+                    (pred["id"],),
+                )
+                conn.commit()
+                cancelled += 1
+        else:
+            # Ambiguous: some shares on-chain but less than expected (partial fill? extra position?)
+            # Refuse to auto-reconcile; flag for manual review and pause the daemon.
+            log.critical(
+                f"Pred #{pred['id']}: partial on-chain match (expected {expected_shares:.4f}, "
+                f"got {ctf_shares:.4f}). Cannot auto-reconcile. Pausing daemon."
+            )
+            set_meta(conn, "paused", "true")
+            conn.execute(
+                "INSERT INTO events (event, detail) VALUES (?, ?)",
+                ("orphan_manual", f"Pred #{pred['id']}: partial match {ctf_shares:.4f}/{expected_shares:.4f}"),
+            )
+            conn.commit()
+            manual += 1
+
+    return {"confirmed": confirmed, "cancelled": cancelled, "skipped": skipped, "manual": manual}
+
+
 def _reconcile_balance(conn, cfg):
     """Check on-chain USDC vs expected from DB. Auto-record deposits."""
     from vault.clob_client import get_usdc_balance
@@ -113,21 +223,63 @@ def run_daemon(resurrect: bool = False):
 
     # Verify CLOB client if real trading enabled
     if not cfg.get("trading", {}).get("simulated", True):
+        # HARD GATE 1: ledger must have gone through `vault go-live` to reach real mode
+        if not ledger.is_live(conn):
+            print("ERROR: config has `simulated: false` but the ledger has never been through `vault go-live`.")
+            print("This is the safeguard added after the 15 March 2026 incident.")
+            print("Either set `simulated: true` or run `vault go-live` first.")
+            log.critical("Daemon startup blocked: real mode requested but no go_live event in ledger.")
+            sys.exit(1)
+
         try:
             from vault.clob_client import _get_client, get_usdc_balance
             _get_client()  # init + derive creds
             usdc = get_usdc_balance()
-            if usdc is not None:
-                log.info(f"CLOB client ready. On-chain USDC: ${usdc:.2f}")
-                print(f"CLOB client ready. On-chain USDC: ${usdc:.2f}")
-            else:
-                log.warning("CLOB client ready but could not fetch on-chain balance")
-                print("CLOB client ready (on-chain balance unavailable)")
+            if usdc is None:
+                # HARD GATE 2: must verify on-chain state before accepting real trades
+                print("ERROR: CLOB client initialised but on-chain USDC balance unavailable — all RPC providers failed.")
+                print("Fix RPC config in `trading.clob.rpc_fallback` and retry.")
+                log.critical("Daemon startup blocked: real mode with no on-chain verification.")
+                sys.exit(1)
+            log.info(f"CLOB client ready. On-chain USDC: ${usdc:.2f}")
+            print(f"CLOB client ready. On-chain USDC: ${usdc:.2f}")
+
+            # HARD GATE 3: on-chain matches expected
+            expected = ledger.compute_expected_onchain(conn)
+            tol = cfg.get("trading", {}).get("clob", {}).get("balance_divergence_tolerance", 0.50)
+            drift = round(usdc - expected, 6)
+            if drift < -tol:
+                print(f"ERROR: on-chain USDC ${usdc:.2f} < expected ${expected:.2f} (drift ${drift:+.2f}, tolerance ${tol:.2f}).")
+                print("Ledger and wallet are out of sync. Investigate before resuming.")
+                log.critical(f"Daemon startup blocked: negative drift ${drift:+.2f} exceeds tolerance.")
+                sys.exit(1)
+            log.info(f"Real mode verified: expected ${expected:.2f}, on-chain ${usdc:.2f}, drift ${drift:+.2f}")
+        except SystemExit:
+            raise
         except Exception as e:
             log.error(f"CLOB client init failed: {e}", exc_info=True)
             print(f"ERROR: CLOB client init failed: {e}")
             print("Set trading.simulated: true in config.yaml or fix CLOB credentials.")
             sys.exit(1)
+
+        # HARD GATE 4: orphan sweep at startup — no stale pending rows surviving a restart
+        try:
+            reconciled = _orphan_sweep(conn, cfg)
+            if reconciled:
+                log.info(f"Startup orphan sweep: {reconciled}")
+        except Exception as e:
+            log.error(f"Startup orphan sweep failed: {e}", exc_info=True)
+            print(f"ERROR: orphan sweep failed: {e}")
+            sys.exit(1)
+
+    # Guard 6: Set dry-run counter on startup (real trading only)
+    if not cfg.get("trading", {}).get("simulated", True):
+        dry_run_cycles = cfg.get("trading", {}).get("clob", {}).get("dry_run_startup_cycles", 5)
+        if dry_run_cycles > 0:
+            set_meta(conn, "dry_run_remaining", str(dry_run_cycles))
+            conn.commit()
+            log.info(f"DRY-RUN MODE: first {dry_run_cycles} cycles will log-only (no real orders)")
+            print(f"DRY-RUN MODE: first {dry_run_cycles} cycles will log-only (no real orders)")
 
     # Register signal handlers
     signal.signal(signal.SIGTERM, _handle_signal)
@@ -168,6 +320,23 @@ def run_daemon(resurrect: bool = False):
                     time.sleep(1)
                 continue
 
+            # Guard 5: Cycle-level balance assertion (real trading only)
+            is_simulated = cfg.get("trading", {}).get("simulated", True)
+            if not is_simulated:
+                from vault.guardrails import check_balance_divergence
+                tolerance = cfg.get("trading", {}).get("clob", {}).get("balance_divergence_tolerance", 1.0)
+                try:
+                    diverged, detail = check_balance_divergence(conn, tolerance)
+                    if diverged:
+                        log.critical(f"BALANCE DIVERGENCE: {detail}")
+                        for _ in range(interval):
+                            if _shutdown_requested:
+                                break
+                            time.sleep(1)
+                        continue
+                except Exception as e:
+                    log.warning(f"Balance divergence check failed: {e}")
+
             # Run cycle with timeout (shared connection with check_same_thread=False)
             try:
                 with ThreadPoolExecutor(max_workers=1) as executor:
@@ -191,16 +360,33 @@ def run_daemon(resurrect: bool = False):
                 )
                 conn.commit()
 
-            # Balance reconciliation — detect on-chain deposits (real trading only)
+            # Balance reconciliation + orphan sweep (real trading only)
             is_simulated = cfg.get("trading", {}).get("simulated", True)
             if not is_simulated:
                 cycle_count = conn.execute("SELECT COUNT(*) as c FROM cycles").fetchone()["c"]
-                reconcile_interval = cfg.get("trading", {}).get("clob", {}).get("reconcile_interval_cycles", 10)
+                clob_cfg = cfg.get("trading", {}).get("clob", {})
+                reconcile_interval = clob_cfg.get("reconcile_interval_cycles", 10)
+                orphan_interval = clob_cfg.get("orphan_sweep_interval_cycles", 30)
+
                 if cycle_count % reconcile_interval == 0:
                     try:
                         _reconcile_balance(conn, cfg)
                     except Exception as e:
                         log.warning(f"Balance reconciliation failed: {e}")
+
+                # Orphan sweep: run every N cycles OR whenever a pending prediction exists
+                # (pending = highest-priority state; don't wait for the timer)
+                needs_sweep = (
+                    cycle_count % orphan_interval == 0
+                    or ledger.has_pending_predictions(conn)
+                )
+                if needs_sweep:
+                    try:
+                        summary = _orphan_sweep(conn, cfg)
+                        if summary.get("confirmed") or summary.get("cancelled") or summary.get("manual"):
+                            log.info(f"Orphan sweep: {summary}")
+                    except Exception as e:
+                        log.error(f"Orphan sweep failed: {e}", exc_info=True)
 
             # Sleep in 1-second increments (responsive to signals)
             for _ in range(interval):

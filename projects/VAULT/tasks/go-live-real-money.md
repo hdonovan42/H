@@ -1,33 +1,47 @@
-# VAULT: Go Live — Real Money Checklist
+# VAULT: Go Live — Real Money Checklist (v2)
 
-Status: IN PROGRESS
-Date started: 2026-03-13
+Status: **BLOCKED** — safeguards in flight after 15 Mar $50 loss.
+Date started: 2026-03-13 (v1). Revised: 2026-04-17 (v2 post-incident).
+
+See [lessons.md](./lessons.md) for the full post-mortem of the 15 March loss. This checklist is the "never again" operational procedure derived from it.
 
 ---
 
-## Step 1: Code Deployment [DONE]
+## Pre-flight: ALL boxes must be ticked before flipping `simulated: false`
 
-- [x] CLOB execution layer implemented (v19)
-- [x] Deployed to VPS with `simulated: true`
-- [x] Schema v19 migration applied (execution_mode column)
-- [x] Daemon healthy: $120.25 balance, 152.42 total value, 137.2d runway
-- [x] Commit: `a29d204`
+### Code gates (automated — `vault verify-live` must exit 0)
+- [ ] CLOB client signs a dummy message successfully
+- [ ] On-chain USDC balance fetched via at least one RPC provider
+- [ ] CTF + collateral allowances set (`check_allowances` returns non-zero)
+- [ ] Zero open predictions with `execution_mode='real'` from a previous life (or each is verifiable on-chain)
+- [ ] `compute_expected_onchain()` equals `get_usdc_balance()` within $0.50
+- [ ] Multi-provider RPC fallback list has ≥ 2 working providers
+- [ ] Daemon NOT currently running
 
-## Step 2: Fund Polymarket Account [BLOCKED — exchange KYC]
+### Tests (all must pass)
+- [ ] `pytest projects/VAULT/tests/` returns 0 failures
+- [ ] Key integration tests green: `test_bet_atomicity`, `test_rpc_failure`, `test_ledger_reset_on_golive`
 
-### 2a. Exchange setup
-- [ ] Coinbase account created
-- [ ] KYC verification complete
-- [ ] Deposit ~£42 GBP via faster payments (free)
-- [ ] Buy $50 USDC
+### Wallet hygiene
+- [ ] **Fresh Polymarket wallet** (not the one used in the March incident)
+- [ ] Private key stored in VPS `.env`, file mode 600
+- [ ] Funder address matches wallet — spot-checked in `vault setup-clob` output
+- [ ] Allowances set on the fresh wallet (`vault setup-clob` run once)
 
-### 2b. Transfer to Polymarket
-- [ ] Open Helsinki proxy (see below)
-- [ ] Sign in to Polymarket
-- [ ] Go to Deposit → copy your Polymarket wallet address
-- [ ] On Coinbase: Withdraw USDC → paste address → select **Polygon network** (NOT Ethereum)
-- [ ] Wait for confirmation (~2 min on Polygon)
-- [ ] Verify USDC balance appears in Polymarket
+### Procedural
+- [ ] `tasks/lessons.md` reviewed in current session
+- [ ] No unrelated work-in-progress in `projects/VAULT/` git (`git status` clean)
+- [ ] Deploy happened within last 24h (ensures no stale code)
+- [ ] Dashboard reachable and showing correct reconciliation state (`/api/v1/status` includes balance drift)
+
+---
+
+## Step 1 — Fund the fresh wallet
+
+### Exchange setup
+- [ ] Coinbase account funded
+- [ ] Withdraw $50 USDC on **Polygon** network (NOT Ethereum — different gas, different bridge)
+- [ ] Confirm arrival on Polygon via Polymarket UI (Helsinki proxy needed from UK)
 
 ### Helsinki proxy (for Polymarket access)
 ```bash
@@ -37,121 +51,92 @@ ssh -D 0.0.0.0:1080 -N -p 8443 hq@89.167.4.126
 # PowerShell — launch Edge through proxy
 & "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --proxy-server="socks5://127.0.0.1:1080"
 ```
-If Windows can't find the SSH key:
-```powershell
-Copy-Item "\\wsl$\Ubuntu\home\hdonovan\.ssh\id_ed25519" ~\.ssh\id_ed25519
-```
-
-## Step 3: Extract Wallet Credentials [WAITING on Step 2]
-
-You need two values from Polymarket:
-
-### Private key
-- Polymarket uses an embedded wallet (Magic/Privy) — you may not be able to directly export the private key
-- **Option A**: If Polymarket shows "Export wallet" in settings, use that
-- **Option B**: If you connected an external wallet (MetaMask, Rabby), export from there: Settings → Security → Reveal private key
-- **Option C**: Create a fresh wallet in MetaMask, export its private key, then connect that wallet to Polymarket and deposit USDC to it
-
-The safest approach is **Option C** — a dedicated wallet just for VAULT:
-1. Install MetaMask browser extension (in the Helsinki proxy Edge session)
-2. Create new wallet → write down seed phrase
-3. Switch network to Polygon
-4. Export private key: Account details → Show private key
-5. Connect this wallet to Polymarket
-6. Deposit USDC into this wallet (from Coinbase or via Polymarket bridge)
-
-### Funder address
-- This is simply the wallet's public address (0x...)
-- Visible in MetaMask or Polymarket profile
-
-## Step 4: Add Credentials to VPS [WAITING on Step 3]
-
-```bash
-ssh hq@89.167.4.126
-
-# Add to .env (replace with actual values)
-echo 'POLYMARKET_PRIVATE_KEY=0x_your_private_key_here' >> /home/hq/vault/.env
-echo 'POLYMARKET_FUNDER_ADDRESS=0x_your_wallet_address_here' >> /home/hq/vault/.env
-
-# Verify
-cat /home/hq/vault/.env
-```
-
-## Step 5: Approve Exchange Allowances [WAITING on Step 4]
-
-One-time setup — approves USDC + conditional token spending for Polymarket's exchange contracts.
-
-```bash
-ssh hq@89.167.4.126 "cd /home/hq/vault && .venv/bin/vault setup-clob"
-```
-
-Expected output:
-- CLOB client connected
-- On-chain USDC balance: $50.00
-- Allowances approved successfully
-
-## Step 6: Go Live [WAITING on Step 5]
-
-```bash
-ssh hq@89.167.4.126
-
-# Edit config
-nano /home/hq/vault/config.yaml
-
-# Change:
-#   trading:
-#     simulated: false
-
-# Restart daemon
-cd /home/hq/vault && .venv/bin/vault stop && .venv/bin/vault start
-```
-
-Startup should log: `CLOB client ready. On-chain USDC: $50.00`
-
-## Step 7: Monitor First 24h
-
-```bash
-# Watch logs for [REAL] tags
-ssh hq@89.167.4.126 "cd /home/hq/vault && .venv/bin/vault logs -n 10"
-
-# Check predictions table for execution_mode
-ssh hq@89.167.4.126 "cd /home/hq/vault && sqlite3 vault.db \"SELECT id, question, execution_mode, clob_token_id FROM predictions ORDER BY id DESC LIMIT 10\""
-
-# Compare internal balance vs on-chain
-ssh hq@89.167.4.126 "cd /home/hq/vault && .venv/bin/vault status"
-```
-
-### What to watch
-- `[REAL]` tags in bet/sell log lines
-- `execution_mode = 'real'` on new predictions
-- Fill price vs Gamma API mid-price (slippage gauge)
-- Balance drift between internal ledger and on-chain USDC
-- Any `CLOB order failed` warnings — check fallback behaviour
-
-### Emergency rollback
-If anything goes wrong:
-```bash
-ssh hq@89.167.4.126
-# Edit config.yaml → simulated: true
-cd /home/hq/vault && .venv/bin/vault stop && .venv/bin/vault start
-```
-Paper and real positions coexist — existing real positions will continue to be tracked, new ones will be paper.
 
 ---
 
-## Config Reference
+## Step 2 — Go live (code-gated)
 
-VPS `.env` needs:
-```
-POLYMARKET_PRIVATE_KEY=0x...
-POLYMARKET_FUNDER_ADDRESS=0x...
+```bash
+ssh hq@89.167.4.126
+cd /home/hq/vault
+
+# 1. Verify every pre-flight gate passes
+.venv/bin/vault verify-live
+# Must print: "✓ ALL CHECKS PASSED" and exit 0.
+# If any red line, STOP. Fix the underlying issue. Re-run.
+
+# 2. Execute go-live (zeros paper ledger, seeds with on-chain USDC)
+.venv/bin/vault go-live
+# You will be prompted to confirm the on-chain USDC amount.
+# The command writes a `go_live` event to the DB — this is what `start` looks for.
+
+# 3. Flip config
+nano config.yaml     # set trading.simulated: false
+
+# 4. Start daemon
+.venv/bin/vault stop      # if running
+.venv/bin/vault start     # fresh start — refuses to run in real mode without a go_live event
 ```
 
-VPS `config.yaml` for go-live:
+Startup log must show:
+- `CLOB client ready. On-chain USDC: $XX.XX`
+- `DRY-RUN MODE: first 20 cycles will log-only (no real orders)` (raised from 5 post-incident)
+- `Real mode verified: go_live event XXXX, balance $XX.XX`
+
+---
+
+## Step 3 — Monitor first 48h
+
+```bash
+# Watch logs for [REAL] tags and any CRITICAL lines
+ssh hq@89.167.4.126 "journalctl -u vault-daemon -f | grep -E 'REAL|CRITICAL|divergence|orphan|pause'"
+
+# Check predictions table for pending/reconciling rows
+ssh hq@89.167.4.126 "cd /home/hq/vault && sqlite3 vault.db 'SELECT status, execution_mode, COUNT(*) FROM predictions GROUP BY status, execution_mode'"
+
+# Dashboard "Balance Reconciliation" panel should show drift ≤ $0.50
+```
+
+### Red flags — HALT immediately
+- Any `status='pending'` prediction older than 10 minutes
+- Any `status='reconciling'` prediction (means orphan sweep found on-chain position without matching DB row)
+- `Negative balance drift` WARNING with `not auto-adjusting` — should never appear post-fix
+- `Balance divergence check failed: RPC unavailable` more than 3x in a row
+- Any `CLOB order failed: invalid signature` — allowance or private-key issue, not a retry scenario
+
+### Emergency rollback
+```bash
+ssh hq@89.167.4.126 "cd /home/hq/vault && .venv/bin/vault pause"
+# Investigate. Do NOT resume until root cause identified.
+# If the pause was triggered by divergence, DO NOT manually resume —
+# the code paused for a reason, and manual override voids the safety.
+```
+
+---
+
+## Config Reference (real-mode)
+
+VPS `.env`:
+```
+POLYMARKET_PRIVATE_KEY=0x...     # fresh wallet
+POLYMARKET_FUNDER_ADDRESS=0x...  # matches private key
+```
+
+VPS `config.yaml`:
 ```yaml
 trading:
   simulated: false
   clob:
-    slippage_pct: 0.02         # 2% max slippage
-    fallback_on_failure: skip  # "skip" = reject trade, "paper" = fall back to paper
+    slippage_pct: 0.02
+    fallback_on_failure: skip
+    dry_run_startup_cycles: 20             # raised from 5 after March incident
+    balance_divergence_tolerance: 0.50     # tightened from 1.00
+    reconcile_interval_cycles: 10
+    orphan_sweep_interval_cycles: 30
+    max_bet_pct_onchain: 0.10              # max 10% of on-chain USDC per bet
+    rpc_fallback:
+      - "https://polygon-bor-rpc.publicnode.com"
+      - "https://polygon.drpc.org"
+      - "https://polygon-rpc.com"
+    rpc_failure_pause_threshold: 3         # auto-pause after N consecutive None returns
 ```

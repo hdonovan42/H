@@ -1,5 +1,41 @@
 # VAULT Trading Lessons
 
+## $50 Real-Money Loss Post-Mortem — 15 March 2026
+
+**TL;DR.** First real-money run lost the full $50 seed. Two compounding bugs: (a) flipping `simulated: false` preserved the $51.29 paper-ledger balance as if it were real money, and (b) `check_balance_divergence()` silently passed whenever the Polygon RPC was unavailable, so the daemon kept trading blind for hours. A third, older bug — `buy_shares()` passing a plain dict instead of `MarketOrderArgs` — made the first few hours of orders visibly fail; once that was fixed in v19.3, orders started succeeding on-chain. Some orders (count unknown — DB was wiped on 17 March) were not recorded in `predictions` because the CLOB order → DB write was not atomic: on exception between the two, the on-chain position orphans and the daemon has no idea it holds shares. Those orphans resolved without exits being placed and the $50 drained to zero.
+
+### Timeline (UTC)
+- **15 Mar 00:38** — `simulated: false` flipped; daemon restarted. Internal paper ledger: $51.29. On-chain USDC: $0. Wallet used was Opus 4.6's Polymarket wallet.
+- **15 Mar 00:38–00:40** — RPC calls fail: `polygon-rpc.com` returns 401, `polygon.llamarpc.com` DNS failure, Ankr demands API key. `get_usdc_balance()` returns `None`; code treats this as "carry on."
+- **15 Mar 00:52** — First `Negative balance drift: -$51.29` WARNING. No auto-pause — `check_balance_divergence()` short-circuits when `onchain is None`.
+- **15 Mar 01:13–~06:00** — Dozens of `POST /order` calls. All return `400 invalid signature` (the `MarketOrderArgs` dict bug, pre-v19.3). No fills, but also no halt.
+- **15 Mar 00:41 (commit) → later same day (deploy)** — v19.3 (`e9a7678`) fixes the dict bug AND adds USDC deposit auto-detect (`_reconcile_balance`). Both changes bundled.
+- **15 Mar (exact time lost)** — Real $50 deposited. Orders start succeeding. Some bets land on-chain; at least some are not recorded in `predictions` (exception path in `bet.py` between CLOB success and `record_prediction_buy` — no rollback, no pre-record).
+- **15–17 Mar** — Unrecorded positions resolve without exits, cash drains to ~$2.67.
+- **17 Mar 17:04** — DB wiped and re-seeded at $2.67. Lost bet records cannot be recovered from journalctl beyond order POST attempts.
+
+### Root causes (ordered by blast radius)
+1. **Paper→real transition preserves phantom balance.** Paper P&L accumulated over 29 days was inherited as real spendable balance on mode flip. There is no "reset ledger to match on-chain" step. (PRIMARY CAUSE of the $50 loss — even if every other bug had been absent, the daemon would still have tried to spend $51.29 of imaginary money.)
+2. **RPC-unavailable silently passes divergence check.** `check_balance_divergence()` returns `(False, "RPC unavailable")` when `get_usdc_balance()` is `None`. Daemon treats as "OK to trade." A daemon that cannot verify on-chain state must not trade.
+3. **Single RPC provider, no fallback.** One `polygon_rpc_url` config value. Any 401, DNS failure, or rate-limit blinds the whole system.
+4. **CLOB order → DB write is not atomic.** `bet.py` places the order, then writes to DB. On exception between them, the on-chain position orphans. No rollback, no pre-recording, no reconciliation sweep.
+5. **Stale paper balance accepted by bet gate.** `check_trade_allowed()` compares amount to ledger balance. In real mode, this must ALSO compare to on-chain USDC, not just the internal ledger.
+6. **Shared wallet for paper and real.** The same wallet Opus 4.6 created was used for the first real run — no clean handover, no separate production wallet.
+
+### Never-again rules (enforced by code, not discipline)
+1. Going to real mode is a **deliberate CLI action** (`vault go-live`), not a config flip. It zeros the paper ledger, snapshots on-chain USDC, seeds with the real balance, and writes a `go_live` event.
+2. `vault start` in real mode **refuses to start** if the ledger has no `go_live` event or if on-chain verification fails.
+3. Balance divergence check treats **repeated RPC failure as divergence** — auto-pause after N consecutive `None` returns.
+4. RPC has a **multi-provider fallback list**; each provider retried once before giving up.
+5. **Pre-record pending bet BEFORE the CLOB call.** Row inserted as `status='pending'`. On CLOB success → `status='open'` + ledger entry in same transaction. On exception → row stays `pending` and reconciliation sweep decides fate next cycle.
+6. **Post-trade CTF balance verification.** After CLOB reports success, confirm shares arrived on-chain. If not, auto-pause.
+7. **Orphan-position sweep** runs at startup and every N cycles: scan on-chain CTF balances for known token_ids, flag any mismatch vs DB.
+8. **Real-mode position cap**: max single bet = `min(config_max, on_chain_usdc * 0.10)`. A bug can never nuke more than 10% in one shot.
+9. **Fresh wallet for each major re-arm.** The `vault go-live` command accepts a wallet address and refuses to re-use one associated with a previous `go_live` event that ended in loss.
+10. **Reinjection checklist.** `vault verify-live` exits non-zero unless: CLOB client signs a dummy message, USDC balance fetched via fallback RPCs, allowances set, no open real predictions from a prior life, `compute_expected_onchain()` matches `get_usdc_balance()` ± tolerance.
+
+---
+
 ## Pyramid Add Post-Mortem — 2 March 2026
 
 **Finding:** Pyramid adds are the sole source of negative P&L. 342 adds lost -$33.97 against +$48.56 from initial entries. Without adds, total P&L would be +$48.38 instead of +$14.41.

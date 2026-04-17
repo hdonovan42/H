@@ -228,25 +228,20 @@ html, body {
 /* ── Cycle Log ───────────────────────────────────────────────── */
 
 .cycle-log-card {
+  max-height: 500px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
 .cycle-list-wrapper {
-  position: relative;
   flex: 1;
   min-height: 0;
+  overflow-y: auto;
 }
 
 .cycle-list {
   list-style: none;
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  overflow-y: auto;
 }
 
 .cycle-item {

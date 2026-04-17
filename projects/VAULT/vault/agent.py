@@ -457,6 +457,22 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             log.info(f"Momentum skip (noisy market type): {question[:50]}")
             continue
 
+        # Guard 3: Failed-market cooldown — skip markets that recently failed on CLOB
+        from vault.db import get_meta as _get_meta
+        _failed_ts_str = _get_meta(conn, f"failed_market:{alert['market_id']}")
+        if _failed_ts_str:
+            from datetime import datetime, timezone
+            try:
+                _failed_ts = datetime.fromisoformat(_failed_ts_str)
+                _cooldown_min = vel_cfg.get("failed_market_cooldown_minutes", 10)
+                _elapsed = (datetime.now(timezone.utc) - _failed_ts).total_seconds() / 60
+                if _elapsed < _cooldown_min:
+                    log.info(f"Momentum skip (failed-market cooldown): {question[:50]} — "
+                             f"CLOB failed {_elapsed:.1f}m ago, cooldown {_cooldown_min}m")
+                    continue
+            except (ValueError, TypeError):
+                pass
+
         # Fetch LIVE odds (alert's market_odds may be stale from musk_markets table)
         live_odds = get_current_odds(conn, alert["market_id"])
         if not live_odds:
@@ -1087,6 +1103,11 @@ def _execute_momentum_bets(conn, cycle_id: int, momentum_items: list[dict],
             f"{best['question'][:50]} (v={best.get('v_1h', 0):+.0%}/1h)"
         )
     else:
+        # Guard 3: Record failed-market cooldown to prevent re-entry loop
+        from vault.db import set_meta as _set_meta
+        from datetime import datetime, timezone
+        _set_meta(conn, f"failed_market:{market_id}", datetime.now(timezone.utc).isoformat())
+        conn.commit()
         result["action"] = "hold"
         result["reasoning"] = f"momentum bet failed: {exec_result.get('error', 'unknown')}"
         log.warning(f"Momentum bet failed: {exec_result.get('error')}")

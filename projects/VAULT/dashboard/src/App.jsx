@@ -5,6 +5,7 @@ import BalanceChart from './components/BalanceChart';
 import CycleLog from './components/CycleLog';
 import BetsPanel from './components/BetsPanel';
 import EventTimeline from './components/EventTimeline';
+import ReconciliationPanel from './components/ReconciliationPanel';
 
 
 function useHash() {
@@ -21,10 +22,16 @@ function DashboardPage({ status, balanceHistory, cycles, positions, predictions 
   return (
     <div className="page">
       <StatusBar status={status} />
+      {status?.live && <ReconciliationPanel />}
       <BalanceChart data={balanceHistory} />
-      <div className="grid" style={{ marginTop: '16px' }}>
+      <div className="grid" style={{ marginTop: '16px', gridTemplateRows: '500px' }}>
         <CycleLog cycles={cycles} />
-        <BetsPanel positions={positions} predictions={predictions} />
+        <div className="card" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div className="card-title">Positions</div>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+            <BetsPanel positions={positions} predictions={predictions} />
+          </div>
+        </div>
       </div>
     </div>
   );

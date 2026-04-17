@@ -128,9 +128,7 @@ export default function BetsPanel({ positions, predictions }) {
   const hasData = hasOpen || hasClosed || legacyCount > 0;
 
   return (
-    <div className="card">
-      <div className="card-title">Positions</div>
-
+    <div>
       <SourceSummary bySource={bySource} />
 
       {!hasData && <div className="empty">No bets yet</div>}

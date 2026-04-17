@@ -21,12 +21,23 @@ trading:
   clob:
     host: "https://clob.polymarket.com"
     chain_id: 137
-    signature_type: 0            # 0=EOA
+    signature_type: 0            # 0=EOA (direct wallet, no proxy)
     slippage_pct: 0.02           # 2% max slippage on FOK orders
     balance_reconcile: true
     balance_drift_warn: 0.50
     fallback_on_failure: "skip"  # "skip" or "paper"
-    reconcile_interval_cycles: 10  # check for deposits every 10 cycles
+    reconcile_interval_cycles: 10       # check for deposits every 10 cycles
+    orphan_sweep_interval_cycles: 30    # check for stuck pending/reconciling every 30 cycles
+    pending_timeout_seconds: 300        # pending rows older than this are reconciled by orphan sweep
+    dry_run_startup_cycles: 20          # first N cycles log-only (raised from 5 after 15-Mar incident)
+    balance_divergence_tolerance: 0.50  # auto-pause if ledger vs on-chain drift > $0.50 (tightened from $1.00)
+    rpc_failure_pause_threshold: 3      # auto-pause after N consecutive None returns from RPC
+    max_bet_pct_onchain: 0.10           # max 10% of on-chain USDC per bet (real mode hard cap)
+    verify_ctf_on_confirm: true         # verify on-chain shares after CLOB success before ledger debit
+    rpc_fallback:                        # ordered fallback list; first working provider wins
+      - "https://polygon-bor-rpc.publicnode.com"
+      - "https://polygon.drpc.org"
+      - "https://polygon-rpc.com"
 
 polymarket:
   cache_ttl_seconds: 300        # 5 min cache for market data
@@ -99,6 +110,7 @@ velocity:
   momentum_min_velocity_1h_sports: 0.05  # lower floor for sports/esports (filtered by O/U/draw already)
   momentum_flip_window_hours: 4.0      # look-back for detecting both-side trades
   momentum_flip_cooldown_hours: 1.0    # block re-entry for 1h after multi-flip detected
+  failed_market_cooldown_minutes: 10   # skip markets that failed CLOB execution recently
   side_switch_min_velocity_1h: 0.15    # 15% — side-switches need stronger signal than normal entries
   # Oscillation detector (Mode B dampener)
   oscillation_lookback_hours: 2.0         # window for counting reversals

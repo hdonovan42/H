@@ -228,6 +228,189 @@ def backtest(days):
         conn.close()
 
 
+@cli.command("verify-live")
+def verify_live():
+    """Pre-flight: check every gate needed to safely enter real-money trading.
+
+    Exits 0 only if ALL gates pass. Exit 1 on any failure. This is the last line of
+    defence before `vault go-live` and `simulated: false`.
+    """
+    from vault.config_loader import load_config
+    from vault import ledger as _ledger
+    cfg = load_config()
+    conn = init_db()
+
+    checks = []  # list of (ok: bool, label: str, detail: str)
+
+    # 1. CLOB client init + derive creds
+    try:
+        from vault.clob_client import _get_client, get_usdc_balance, check_allowances
+        _get_client()
+        checks.append((True, "CLOB client init", "creds derived"))
+    except Exception as e:
+        checks.append((False, "CLOB client init", str(e)))
+
+    # 2. On-chain USDC balance via RPC fallback
+    try:
+        from vault.clob_client import get_usdc_balance, _get_rpc_urls
+        usdc = get_usdc_balance()
+        rpc_urls = _get_rpc_urls()
+        if usdc is None:
+            checks.append((False, "On-chain USDC", f"all {len(rpc_urls)} RPC providers failed"))
+        else:
+            checks.append((True, "On-chain USDC", f"${usdc:.2f} via {len(rpc_urls)} fallback providers"))
+    except Exception as e:
+        checks.append((False, "On-chain USDC", str(e)))
+        usdc = None
+
+    # 3. Allowances set
+    try:
+        from vault.clob_client import check_allowances
+        al = check_allowances()
+        allowance = al.get("allowance", 0)
+        if allowance > 0:
+            checks.append((True, "Allowances", f"${allowance:.2f} collateral approved"))
+        else:
+            checks.append((False, "Allowances", "zero or unavailable — run `vault setup-clob`"))
+    except Exception as e:
+        checks.append((False, "Allowances", str(e)))
+
+    # 4. No leftover open real predictions from a previous life
+    stale = conn.execute(
+        "SELECT COUNT(*) FROM predictions "
+        "WHERE execution_mode = 'real' AND status IN ('pending', 'open', 'reconciling')"
+    ).fetchone()[0]
+    if stale == 0:
+        checks.append((True, "No stale real predictions", "0 pending/open/reconciling rows"))
+    else:
+        checks.append((False, "No stale real predictions", f"{stale} row(s) need resolution before go-live"))
+
+    # 5. compute_expected_onchain vs on-chain USDC (only meaningful if already live)
+    if _ledger.is_live(conn):
+        expected = _ledger.compute_expected_onchain(conn)
+        if usdc is None:
+            checks.append((False, "Ledger vs on-chain", "cannot verify (RPC unavailable)"))
+        else:
+            drift = round(usdc - expected, 6)
+            tol = cfg.get("trading", {}).get("clob", {}).get("balance_divergence_tolerance", 0.50)
+            if abs(drift) <= tol:
+                checks.append((True, "Ledger vs on-chain", f"drift ${drift:+.2f} within ${tol:.2f} tolerance"))
+            else:
+                checks.append((False, "Ledger vs on-chain", f"drift ${drift:+.2f} exceeds ${tol:.2f}"))
+    else:
+        checks.append((True, "Ledger not yet live", "go-live will snap paper balance to on-chain (expected)"))
+
+    # 6. Daemon not currently running
+    pid = read_pid()
+    if pid is None:
+        checks.append((True, "Daemon not running", "safe to modify state"))
+    else:
+        checks.append((False, "Daemon not running", f"PID {pid} running — stop it first"))
+
+    # 7. RPC fallback list has ≥ 2 entries
+    try:
+        from vault.clob_client import _get_rpc_urls
+        urls = _get_rpc_urls()
+        if len(urls) >= 2:
+            checks.append((True, "RPC fallback list", f"{len(urls)} providers configured"))
+        else:
+            checks.append((False, "RPC fallback list", f"only {len(urls)} provider(s) — need ≥ 2"))
+    except Exception as e:
+        checks.append((False, "RPC fallback list", str(e)))
+
+    # Render result
+    click.echo()
+    click.echo("VAULT go-live pre-flight checks:")
+    click.echo()
+    max_label = max(len(c[1]) for c in checks)
+    for ok, label, detail in checks:
+        mark = "PASS" if ok else "FAIL"
+        click.echo(f"  [{mark}] {label:<{max_label}}  {detail}")
+    click.echo()
+
+    all_ok = all(c[0] for c in checks)
+    if all_ok:
+        click.echo("✓ ALL CHECKS PASSED — you may run `vault go-live`.")
+        conn.close()
+        sys.exit(0)
+    else:
+        click.echo("✗ ONE OR MORE CHECKS FAILED — do not proceed.")
+        conn.close()
+        sys.exit(1)
+
+
+@cli.command("go-live")
+@click.option("--yes", is_flag=True, help="Skip interactive confirmation")
+def go_live(yes):
+    """Zero the paper ledger and seed with on-chain USDC. Required before real trading.
+
+    This command exists to prevent the 15 March 2026 incident: the daemon used to
+    inherit the paper-trading balance as if it were real money. Now the transition
+    is an explicit, audited step.
+    """
+    from vault.config_loader import load_config
+    from vault import ledger as _ledger
+    from vault.clob_client import get_usdc_balance, _get_client
+    cfg = load_config()
+    conn = init_db()
+
+    if cfg.get("trading", {}).get("simulated", True):
+        click.echo("ERROR: config has `simulated: true`. Set `simulated: false` first and try again.")
+        click.echo("(go-live prepares the ledger for real trading; running it while still in sim mode makes no sense.)")
+        conn.close()
+        sys.exit(1)
+
+    # Must not already be live — don't silently re-reset an existing real session
+    if _ledger.is_live(conn):
+        click.echo("WARNING: ledger already contains a `go_live_reset` entry.")
+        click.echo("Going live again requires an explicit resurrection. Use `vault start --resurrect` if you want a fresh start.")
+        conn.close()
+        sys.exit(1)
+
+    # Fetch on-chain balance
+    try:
+        _get_client()
+    except Exception as e:
+        click.echo(f"ERROR: CLOB client init failed: {e}")
+        conn.close()
+        sys.exit(1)
+
+    usdc = get_usdc_balance()
+    if usdc is None:
+        click.echo("ERROR: on-chain USDC unavailable — all RPC providers failed.")
+        click.echo("Fix `trading.clob.rpc_fallback` and retry.")
+        conn.close()
+        sys.exit(1)
+
+    paper_balance = _ledger.get_balance(conn)
+    delta = round(usdc - paper_balance, 6)
+
+    click.echo()
+    click.echo(f"  Paper ledger balance:    ${paper_balance:.2f}")
+    click.echo(f"  On-chain USDC:           ${usdc:.2f}")
+    click.echo(f"  Reset delta:             ${delta:+.2f}")
+    click.echo()
+    click.echo("This will write a `go_live_reset` entry and mark the ledger as LIVE.")
+    click.echo("All subsequent real-mode bets will debit USDC from this new anchor.")
+
+    if not yes:
+        if not click.confirm("Proceed?"):
+            click.echo("Aborted.")
+            conn.close()
+            sys.exit(1)
+
+    try:
+        _ledger.go_live_reset(conn, usdc)
+    except Exception as e:
+        click.echo(f"ERROR: go-live failed: {e}")
+        conn.close()
+        sys.exit(1)
+
+    click.echo(f"✓ VAULT is LIVE. Balance snapped to ${usdc:.2f} on-chain.")
+    click.echo("Start the daemon: `vault start`")
+    conn.close()
+
+
 @cli.command("setup-clob")
 def setup_clob():
     """One-time setup: approve USDC + CTF token allowances for Polymarket CLOB."""
