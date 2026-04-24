@@ -38,10 +38,22 @@ See [lessons.md](./lessons.md) for the full post-mortem of the 15 March loss. Th
 
 ## Step 1 — Fund the fresh wallet
 
+### Principle: the deposit size IS the cap
+
+The config has `max_bet_pct_onchain: 1.0` (disabled) by default. Rather than a percentage
+cap that trades upside for safety, we use the deposit amount itself as the blast-radius
+limit. For the first reinjection after the 15 March loss, **deposit $10** — if everything
+goes wrong that's the ceiling on the loss. Scale up only after 48h of clean operation.
+
 ### Exchange setup
 - [ ] Coinbase account funded
-- [ ] Withdraw $50 USDC on **Polygon** network (NOT Ethereum — different gas, different bridge)
+- [ ] Withdraw **$10 USDC** on **Polygon** network (NOT Ethereum — different gas, different bridge)
 - [ ] Confirm arrival on Polygon via Polymarket UI (Helsinki proxy needed from UK)
+
+### Scaling up (after first 48h)
+If the $10 test run is clean (no `reconciling` rows, drift stays within tolerance, bets
+resolve as expected), top up to the target amount. Redo `vault verify-live` each time —
+deposits auto-detect but the sanity check is cheap.
 
 ### Helsinki proxy (for Polymarket access)
 ```bash

@@ -173,15 +173,37 @@ def test_rpc_unavailable_blocks_bet(live_db, real_mode_config):
     assert "RPC" in result["error"] or "unavailable" in result["error"].lower()
 
 
-def test_onchain_cap_blocks_oversized_bet(live_db, real_mode_config):
-    """max_bet_pct_onchain (10%) blocks bets larger than that slice of on-chain USDC."""
-    # $50 on-chain, 10% cap = $5.00. Try to bet $10.
-    with _patch_market(), \
-         patch("vault.clob_client.get_usdc_balance", return_value=50.0):
-        result = BetActuator().execute(live_db, _bet_params(amount_usd=10.0), {"cycle_id": 1})
+def test_onchain_cap_blocks_oversized_bet_when_enabled(live_db):
+    """When `max_bet_pct_onchain` is explicitly set < 1.0, the cap is enforced.
 
-    assert result["success"] is False
-    assert "Real-mode cap" in result["error"]
+    The default is 1.0 (disabled) — preferred safety pattern is to size the real
+    deposit small rather than rely on a percentage cap. This test verifies the
+    feature still works for users who want it.
+    """
+    from vault import config_loader
+    root = config_loader._find_project_root()
+    override = root / "config.yaml"
+    preexisting = override.exists()
+    original = override.read_text() if preexisting else None
+    override.write_text(
+        "trading:\n"
+        "  simulated: false\n"
+        "  clob:\n"
+        "    max_bet_pct_onchain: 0.10\n"
+    )
+    config_loader._config_cache = None
+    try:
+        with _patch_market(), \
+             patch("vault.clob_client.get_usdc_balance", return_value=50.0):
+            result = BetActuator().execute(live_db, _bet_params(amount_usd=10.0), {"cycle_id": 1})
+        assert result["success"] is False
+        assert "Real-mode cap" in result["error"]
+    finally:
+        if preexisting:
+            override.write_text(original)
+        else:
+            override.unlink()
+        config_loader._config_cache = None
 
 
 def test_existing_onchain_position_blocks_entry(live_db, real_mode_config):
