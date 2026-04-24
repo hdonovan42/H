@@ -447,28 +447,69 @@ def get_usdc_balance() -> float | None:
     return round(raw / 1e6, 6)
 
 
-def check_allowances() -> dict:
-    """Check exchange contract allowances for collateral (USDC)."""
-    from py_clob_client.clob_types import BalanceAllowanceParams, AssetType
+CTF_EXCHANGE_ADDRESS = "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+NEG_RISK_EXCHANGE_ADDRESS = "0xC5d563A36AE78145C45a50134d48A1215220f80a"
+
+
+def check_onchain_allowance() -> dict:
+    """Query USDC allowance directly on-chain for the Polymarket exchange contracts.
+
+    Ground-truth check — `py-clob-client.get_balance_allowance()` has proven
+    unreliable (reports 0 when on-chain allowance is actually MAX), so we read
+    from the USDC contract directly using the multi-provider RPC fallback.
+    """
+    from web3 import Web3
+    from eth_account import Account
+
+    pk = os.environ.get("POLYMARKET_PRIVATE_KEY")
+    if not pk:
+        return {"balance": None, "allowance": None, "error": "no private key"}
+    try:
+        wallet = Account.from_key(pk).address
+    except Exception as e:
+        return {"balance": None, "allowance": None, "error": f"derive wallet failed: {e}"}
+
+    ERC20_ALLOWANCE_ABI = ERC20_BALANCE_ABI + [{
+        "constant": True,
+        "inputs": [{"name": "owner", "type": "address"}, {"name": "spender", "type": "address"}],
+        "name": "allowance",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "type": "function",
+    }]
+
+    def _call(w3):
+        contract = w3.eth.contract(
+            address=Web3.to_checksum_address(POLYGON_USDC_ADDRESS),
+            abi=ERC20_ALLOWANCE_ABI,
+        )
+        wallet_cs = Web3.to_checksum_address(wallet)
+        bal = int(contract.functions.balanceOf(wallet_cs).call())
+        ctf_al = int(contract.functions.allowance(wallet_cs, Web3.to_checksum_address(CTF_EXCHANGE_ADDRESS)).call())
+        neg_al = int(contract.functions.allowance(wallet_cs, Web3.to_checksum_address(NEG_RISK_EXCHANGE_ADDRESS)).call())
+        return bal, ctf_al, neg_al
 
     try:
-        client = _get_client()
-        cfg = load_config()
-        sig_type = cfg.get("trading", {}).get("clob", {}).get("signature_type", 0)
-        params = BalanceAllowanceParams(
-            asset_type=AssetType.COLLATERAL,
-            signature_type=sig_type,
-        )
-        result = client.get_balance_allowance(params)
-        if isinstance(result, dict):
-            return {
-                "balance": float(result.get("balance", 0)) / 1e6,
-                "allowance": float(result.get("allowance", 0)) / 1e6,
-            }
-        return {"balance": 0.0, "allowance": 0.0}
+        bal, ctf_al, neg_al = _call_with_rpc_fallback(_call, label="allowance check")
     except Exception as e:
-        log.warning(f"Failed to check allowances: {e}")
-        return {"balance": 0.0, "allowance": 0.0, "error": str(e)}
+        return {"balance": None, "allowance": None, "error": str(e)}
+
+    return {
+        "balance": round(bal / 1e6, 6),
+        "ctf_exchange_allowance": round(ctf_al / 1e6, 6),
+        "neg_risk_exchange_allowance": round(neg_al / 1e6, 6),
+        # `allowance` = min of the two, because both must be set to trade all market types
+        "allowance": round(min(ctf_al, neg_al) / 1e6, 6),
+    }
+
+
+def check_allowances() -> dict:
+    """Check exchange contract allowances. Uses on-chain reads (authoritative).
+
+    The CLOB API wrapper (`client.get_balance_allowance`) has been observed to
+    report 0 when the actual on-chain allowance is MAX. This helper now bypasses
+    that and reads the ERC20 contract directly.
+    """
+    return check_onchain_allowance()
 
 
 def setup_allowances():
