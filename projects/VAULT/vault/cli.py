@@ -354,11 +354,14 @@ def go_live(yes):
     cfg = load_config()
     conn = init_db()
 
+    # Note: we deliberately do NOT require `simulated: false` here.
+    # The recommended deploy flow is: deploy with simulated=true (so the daemon doesn't
+    # crash-loop waiting for a go_live event that doesn't exist), then run `vault go-live`
+    # while daemon is still in paper mode, THEN flip simulated=false and restart.
     if cfg.get("trading", {}).get("simulated", True):
-        click.echo("ERROR: config has `simulated: true`. Set `simulated: false` first and try again.")
-        click.echo("(go-live prepares the ledger for real trading; running it while still in sim mode makes no sense.)")
-        conn.close()
-        sys.exit(1)
+        click.echo("Note: `simulated: true` in config.yaml. This is the recommended sequence —")
+        click.echo("run go-live now, then flip `simulated: false` and restart the daemon.")
+        click.echo()
 
     # Must not already be live — don't silently re-reset an existing real session
     if _ledger.is_live(conn):
