@@ -128,10 +128,68 @@ def _orphan_sweep(conn, cfg) -> dict:
     return {"confirmed": confirmed, "cancelled": cancelled, "skipped": skipped, "manual": manual}
 
 
+def _auto_swap_native_usdc(conn, cfg) -> bool:
+    """If native USDC is sitting in the wallet (from a Coinbase-style deposit),
+    swap it to USDC.e so Polymarket can use it. No-op if nothing to swap.
+
+    Returns True if a swap was performed. Safe to call every reconcile cycle —
+    the balance check is cheap, and a swap only fires above the min threshold.
+    """
+    clob_cfg = cfg.get("trading", {}).get("clob", {})
+    if not clob_cfg.get("auto_swap_native_usdc", True):
+        return False
+
+    from vault.clob_client import get_native_usdc_balance, swap_native_to_bridged_usdc
+
+    native_bal = get_native_usdc_balance()
+    if native_bal is None:
+        log.debug("Auto-swap: native USDC balance unavailable (RPC)")
+        return False
+
+    min_swap = clob_cfg.get("min_native_swap_usd", 1.00)
+    if native_bal < min_swap:
+        return False
+
+    slippage_bps = clob_cfg.get("native_swap_slippage_bps", 50)
+    log.info(f"Auto-swap: native USDC ${native_bal:.4f} >= ${min_swap:.2f} threshold; swapping")
+
+    result = swap_native_to_bridged_usdc(native_bal, slippage_bps=slippage_bps)
+    if result.get("success"):
+        detail = (
+            f"Swapped ${result['amount_in']:.4f} native USDC -> ${result['amount_out']:.4f} USDC.e "
+            f"(tx {result['tx_hash'][:10]}, gas {result.get('gas_cost_matic', 0):.6f} MATIC)"
+        )
+        log.info(f"Auto-swap OK: {detail}")
+        conn.execute(
+            "INSERT INTO events (event, detail) VALUES (?, ?)",
+            ("auto_swap", detail),
+        )
+        conn.commit()
+        return True
+    else:
+        log.error(f"Auto-swap FAILED: {result.get('error')}")
+        conn.execute(
+            "INSERT INTO events (event, detail) VALUES (?, ?)",
+            ("auto_swap_failed", f"${native_bal:.4f} stuck as native USDC — {result.get('error', 'unknown')}"),
+        )
+        conn.commit()
+        return False
+
+
 def _reconcile_balance(conn, cfg):
-    """Check on-chain USDC vs expected from DB. Auto-record deposits."""
+    """Check on-chain USDC vs expected from DB. Auto-record deposits.
+
+    Before reconciling USDC.e, auto-swap any native USDC sitting in the wallet
+    (Coinbase deposits arrive as native; Polymarket needs USDC.e). The swap
+    debits native USDC and credits USDC.e, which the subsequent drift check
+    then records as a deposit.
+    """
     from vault.clob_client import get_usdc_balance
 
+    # Step 1: convert any native USDC to USDC.e (blocking, on-chain)
+    _auto_swap_native_usdc(conn, cfg)
+
+    # Step 2: regular USDC.e reconciliation
     actual = get_usdc_balance()
     if actual is None:
         log.warning("Balance reconciliation skipped — RPC call failed")

@@ -34,6 +34,9 @@ trading:
     rpc_failure_pause_threshold: 3      # auto-pause after N consecutive None returns from RPC
     max_bet_pct_onchain: 1.0            # disabled by default — use a small deposit ($10) as the real cap instead.
                                         # set to 0.10 (or similar) if you want a hard on-chain blast-radius limit.
+    auto_swap_native_usdc: true         # convert Coinbase-style native USDC -> USDC.e automatically
+    min_native_swap_usd: 1.00           # don't swap amounts below this (avoid burning gas on dust)
+    native_swap_slippage_bps: 50        # 0.5% max slippage on the auto-swap (stable-to-stable, usually <0.01% actual)
     verify_ctf_on_confirm: true         # verify on-chain shares after CLOB success before ledger debit
     rpc_fallback:                        # ordered fallback list; first working provider wins
       - "https://polygon-bor-rpc.publicnode.com"

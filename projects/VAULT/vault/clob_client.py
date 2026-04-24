@@ -14,8 +14,14 @@ _w3_providers: list = []
 
 # Polygon USDC.e (bridged USDC on Polygon PoS) — Polymarket's collateral token
 POLYGON_USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+# Native Circle USDC on Polygon — what Coinbase sends by default
+POLYGON_NATIVE_USDC_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
 # Polymarket CTF (Conditional Token Framework) on Polygon — ERC1155
 CTF_CONTRACT = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+# Uniswap v3 SwapRouter + Factory on Polygon — used for auto-swapping native→USDC.e
+UNISWAP_V3_ROUTER = "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+UNISWAP_V3_FACTORY = "0x1F98431c8aD98523631AE4a59f267346ea31F984"
+UNISWAP_V3_FEE_TIER = 100  # 0.01% — the stable-to-stable pool for USDC/USDC.e
 ERC20_BALANCE_ABI = [
     {
         "constant": True,
@@ -500,6 +506,186 @@ def check_onchain_allowance() -> dict:
         # `allowance` = min of the two, because both must be set to trade all market types
         "allowance": round(min(ctf_al, neg_al) / 1e6, 6),
     }
+
+
+def get_native_usdc_balance() -> float | None:
+    """Get on-chain balance of Circle's native Polygon USDC (what Coinbase sends).
+
+    Returns None if all RPC providers fail, 0.0 if genuinely empty.
+    """
+    from web3 import Web3
+    from eth_account import Account
+
+    pk = os.environ.get("POLYMARKET_PRIVATE_KEY")
+    if not pk:
+        return None
+    try:
+        wallet = Account.from_key(pk).address
+    except Exception:
+        return None
+
+    def _call(w3):
+        contract = w3.eth.contract(
+            address=Web3.to_checksum_address(POLYGON_NATIVE_USDC_ADDRESS),
+            abi=ERC20_BALANCE_ABI,
+        )
+        return int(contract.functions.balanceOf(Web3.to_checksum_address(wallet)).call())
+
+    try:
+        raw = _call_with_rpc_fallback(_call, label="native USDC balance")
+        return round(raw / 1e6, 6)
+    except Exception as e:
+        log.warning(f"Failed to check native USDC balance: {e}")
+        return None
+
+
+def swap_native_to_bridged_usdc(amount_usdc: float, slippage_bps: int = 50) -> dict:
+    """Swap native USDC → USDC.e via Uniswap v3 (fee-tier 100, stable-to-stable pool).
+
+    Used by the auto-swap reconciliation step — when Coinbase-style native USDC
+    arrives in the wallet, this converts it to the bridged USDC.e form that
+    Polymarket's CLOB requires.
+
+    Idempotent on approval: checks current allowance and only approves if insufficient.
+    Returns a dict: {'success', 'amount_in', 'amount_out', 'tx_hash', 'gas_cost_matic', 'error'}.
+
+    `slippage_bps` is basis points (50 = 0.5% max slippage). For stable-to-stable
+    on a deep pool, actual slippage is typically <0.01%; the 0.5% default is headroom.
+    """
+    import time
+    from web3 import Web3
+    from eth_account import Account
+
+    pk = os.environ.get("POLYMARKET_PRIVATE_KEY")
+    if not pk:
+        return {"success": False, "error": "POLYMARKET_PRIVATE_KEY not set"}
+
+    try:
+        acct = Account.from_key(pk)
+    except Exception as e:
+        return {"success": False, "error": f"derive wallet failed: {e}"}
+    addr = acct.address
+
+    # Safety: need MATIC for gas (minimum ~$0.01 of gas needed for approve + swap)
+    def _matic_balance(w3):
+        return int(w3.eth.get_balance(Web3.to_checksum_address(addr)))
+    try:
+        matic_wei = _call_with_rpc_fallback(_matic_balance, label="MATIC balance")
+    except Exception as e:
+        return {"success": False, "error": f"RPC unavailable for MATIC check: {e}"}
+    if matic_wei < int(0.01 * 1e18):
+        return {"success": False, "error": f"insufficient MATIC for gas ({matic_wei/1e18:.4f}, need >= 0.01)"}
+
+    amount_in_raw = int(round(amount_usdc * 1e6))
+    min_out_raw = int(amount_in_raw * (10_000 - slippage_bps) / 10_000)
+
+    # ABIs (minimal)
+    erc20_abi = [
+        {"constant": True, "inputs": [{"name":"owner","type":"address"}], "name":"balanceOf", "outputs":[{"name":"","type":"uint256"}], "type":"function"},
+        {"constant": True, "inputs": [{"name":"owner","type":"address"},{"name":"spender","type":"address"}], "name":"allowance", "outputs":[{"name":"","type":"uint256"}], "type":"function"},
+        {"inputs":[{"name":"spender","type":"address"},{"name":"value","type":"uint256"}], "name":"approve", "outputs":[{"name":"","type":"bool"}], "stateMutability":"nonpayable", "type":"function"},
+    ]
+    router_abi = [{"inputs":[{"components":[
+        {"name":"tokenIn","type":"address"}, {"name":"tokenOut","type":"address"},
+        {"name":"fee","type":"uint24"}, {"name":"recipient","type":"address"},
+        {"name":"deadline","type":"uint256"}, {"name":"amountIn","type":"uint256"},
+        {"name":"amountOutMinimum","type":"uint256"}, {"name":"sqrtPriceLimitX96","type":"uint160"},
+    ],"name":"params","type":"tuple"}], "name":"exactInputSingle",
+        "outputs":[{"name":"amountOut","type":"uint256"}], "stateMutability":"payable", "type":"function"}]
+
+    # Use a single provider for TX sends (the multi-provider fallback is only for reads;
+    # for signed txs we pin to the first working provider to avoid nonce confusion across nodes).
+    _ensure_providers()
+    if not _w3_providers:
+        return {"success": False, "error": "no RPC providers configured"}
+
+    for rpc_url, w3 in _w3_providers:
+        try:
+            # Quick liveness check
+            w3.eth.block_number
+        except Exception as e:
+            log.warning(f"swap: RPC {rpc_url} dead ({e}); trying next")
+            continue
+
+        native = w3.eth.contract(address=Web3.to_checksum_address(POLYGON_NATIVE_USDC_ADDRESS), abi=erc20_abi)
+        bridged = w3.eth.contract(address=Web3.to_checksum_address(POLYGON_USDC_ADDRESS), abi=erc20_abi)
+        router = w3.eth.contract(address=Web3.to_checksum_address(UNISWAP_V3_ROUTER), abi=router_abi)
+
+        # Sanity: balance must cover amount_in
+        bal_native = native.functions.balanceOf(Web3.to_checksum_address(addr)).call()
+        if bal_native < amount_in_raw:
+            return {"success": False, "error": f"insufficient native USDC: have ${bal_native/1e6:.4f}, need ${amount_usdc:.4f}"}
+
+        try:
+            bridged_before = bridged.functions.balanceOf(Web3.to_checksum_address(addr)).call()
+            matic_before = matic_wei
+
+            # Approve if needed
+            allowance = native.functions.allowance(Web3.to_checksum_address(addr), Web3.to_checksum_address(UNISWAP_V3_ROUTER)).call()
+            if allowance < amount_in_raw:
+                log.info(f"Auto-swap: approving Uniswap router (current allowance {allowance/1e6:.2f})")
+                gas_price = int(w3.eth.gas_price * 1.2)
+                approve_tx = native.functions.approve(
+                    Web3.to_checksum_address(UNISWAP_V3_ROUTER), 2**256 - 1
+                ).build_transaction({
+                    "from": Web3.to_checksum_address(addr),
+                    "nonce": w3.eth.get_transaction_count(Web3.to_checksum_address(addr)),
+                    "gasPrice": gas_price,
+                    "gas": 100_000,
+                })
+                signed = acct.sign_transaction(approve_tx)
+                h = w3.eth.send_raw_transaction(signed.raw_transaction)
+                r = w3.eth.wait_for_transaction_receipt(h, timeout=120)
+                if r.status != 1:
+                    return {"success": False, "error": f"approve tx reverted (0x{h.hex()})"}
+                log.info(f"Auto-swap: approval confirmed (0x{h.hex()[:10]})")
+                # Brief settle so the next node's nonce tracker catches up
+                time.sleep(2)
+
+            # Swap
+            deadline = int(time.time()) + 300
+            gas_price = int(w3.eth.gas_price * 1.2)
+            params = (
+                Web3.to_checksum_address(POLYGON_NATIVE_USDC_ADDRESS),
+                Web3.to_checksum_address(POLYGON_USDC_ADDRESS),
+                UNISWAP_V3_FEE_TIER,
+                Web3.to_checksum_address(addr),
+                deadline,
+                amount_in_raw,
+                min_out_raw,
+                0,
+            )
+            swap_tx = router.functions.exactInputSingle(params).build_transaction({
+                "from": Web3.to_checksum_address(addr),
+                "nonce": w3.eth.get_transaction_count(Web3.to_checksum_address(addr)),
+                "gasPrice": gas_price,
+                "gas": 250_000,
+                "value": 0,
+            })
+            signed = acct.sign_transaction(swap_tx)
+            h = w3.eth.send_raw_transaction(signed.raw_transaction)
+            log.info(f"Auto-swap: swap tx 0x{h.hex()[:10]}")
+            r = w3.eth.wait_for_transaction_receipt(h, timeout=180)
+            if r.status != 1:
+                return {"success": False, "error": f"swap tx reverted (0x{h.hex()})"}
+
+            bridged_after = bridged.functions.balanceOf(Web3.to_checksum_address(addr)).call()
+            matic_after = w3.eth.get_balance(Web3.to_checksum_address(addr))
+            amount_out = (bridged_after - bridged_before) / 1e6
+            gas_cost = (matic_before - matic_after) / 1e18
+
+            return {
+                "success": True,
+                "amount_in": amount_usdc,
+                "amount_out": round(amount_out, 6),
+                "tx_hash": "0x" + h.hex(),
+                "gas_cost_matic": round(gas_cost, 6),
+            }
+        except Exception as e:
+            log.error(f"swap via {rpc_url} failed: {e}")
+            continue
+
+    return {"success": False, "error": "all RPC providers failed for swap"}
 
 
 def check_allowances() -> dict:
