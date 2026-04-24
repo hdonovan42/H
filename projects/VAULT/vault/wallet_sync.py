@@ -38,6 +38,14 @@ INTERNAL_ADDRESSES = {
     "0xd9abecb39a5885d1e531ed3599adfed620e2fc8a": "Uniswap v3 USDC/USDC.e Pool (fee=500)",
 }
 
+# Labels for non-internal but recognisable counterparties. These DO show in the
+# cashflow log (not filtered), just with a friendly name instead of a raw hex addr.
+EXTERNAL_LABELS = {
+    # CCTP mints emit Transfer(from=0x0, to=wallet). The zero address is the
+    # canonical ERC20 "mint" sender — mark it as a bridge-in so the log reads cleanly.
+    "0x0000000000000000000000000000000000000000": "Bridge mint (CCTP)",
+}
+
 # Transfer(address,address,uint256) event topic
 TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
@@ -57,8 +65,9 @@ def _topic_to_addr(topic: str) -> str:
 
 
 def _label_counterparty(addr: str) -> str:
-    """Return the known human label for `addr`, or the raw address (lowercased) if unknown."""
-    return INTERNAL_ADDRESSES.get(addr.lower(), addr.lower())
+    """Return a known human label for `addr` (internal or external), else the raw lowercased hex."""
+    a = addr.lower()
+    return INTERNAL_ADDRESSES.get(a) or EXTERNAL_LABELS.get(a) or a
 
 
 def _is_internal(addr: str) -> bool:
