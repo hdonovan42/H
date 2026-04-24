@@ -97,7 +97,7 @@ export default function CashflowPanel() {
                   <tr key={it.id} style={{ borderTop: '1px solid var(--border, rgba(255,255,255,0.06))' }}>
                     <td style={{ padding: '6px 8px', color: 'var(--text-dim, #8b949e)' }}>{fmtDate(it.ts)}</td>
                     <td style={{ padding: '6px 8px', color: colour, fontWeight: 600 }}>
-                      {isDeposit ? 'IN' : 'OUT'}
+                      {isDeposit ? 'deposit' : 'withdrawal'}
                     </td>
                     <td style={{ padding: '6px 8px', textAlign: 'right', color: colour }}>
                       {isDeposit ? '+' : '−'}{fmt(it.amount_usd)}
