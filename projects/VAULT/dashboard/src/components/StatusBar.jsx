@@ -30,14 +30,20 @@ export default function StatusBar({ status }) {
         </div>
         <div className="stat-sub">
           {positions_value > 0
-            ? `$${balance.toFixed(2)} cash + $${positions_value.toFixed(2)} positions`
-            : 'of $50.00 seed'}
+            ? `cash + mark-to-market`
+            : 'cash only (no open positions)'}
         </div>
       </div>
 
       <div className="stat">
-        <div className="stat-label">Trading P&L</div>
-        <div className={`stat-value ${total_pnl >= 0 ? 'green' : 'red'}`}>
+        <div className="stat-label">Cash</div>
+        <div className="stat-value">${balance.toFixed(2)}</div>
+        <div className="stat-sub">available to bet</div>
+      </div>
+
+      <div className="stat">
+        <div className="stat-label">P/L</div>
+        <div className={`stat-value ${total_pnl > 0 ? 'green' : total_pnl < 0 ? 'red' : ''}`}>
           {total_pnl >= 0 ? '+' : ''}{formatCost(total_pnl)}
         </div>
         <div className="stat-sub">realised</div>
@@ -45,7 +51,7 @@ export default function StatusBar({ status }) {
 
       <div className="stat">
         <div className="stat-label">Runway</div>
-        <div className={`stat-value ${runway_days != null && runway_days < 30 ? 'amber' : runway_days != null && runway_days < 7 ? 'red' : ''}`}>
+        <div className={`stat-value ${runway_days != null && runway_days < 7 ? 'red' : runway_days != null && runway_days < 30 ? 'amber' : ''}`}>
           {runway_days != null ? `${runway_days} days` : 'N/A'}
         </div>
         <div className="stat-sub">until death</div>
@@ -60,17 +66,9 @@ export default function StatusBar({ status }) {
       </div>
 
       <div className="stat">
-        <div className="stat-label">ARR</div>
-        <div className={`stat-value ${total_pnl === 0 ? '' : alive_days >= 1 ? ((total_value - 50) / 50 / alive_days * 365 >= 0 ? 'green' : 'red') : ''}`}>
-          {total_pnl === 0 ? '0%' : alive_days >= 1 ? `${(total_value - 50) / 50 / alive_days * 365 * 100 >= 0 ? '+' : ''}${Math.round((total_value - 50) / 50 / alive_days * 365 * 100)}%` : 'N/A'}
-        </div>
-        <div className="stat-sub">annualised return</div>
-      </div>
-
-      <div className="stat">
-        <div className="stat-label">Cycles</div>
-        <div className="stat-value">{cycle_count}</div>
-        <div className="stat-sub">{alive_days > 0 ? `${alive_days} days alive` : ''}{paused ? ' (paused)' : ''}</div>
+        <div className="stat-label">Time Alive</div>
+        <div className="stat-value">{alive_days != null ? `${alive_days}d` : 'N/A'}</div>
+        <div className="stat-sub">{cycle_count} cycles{paused ? ' (paused)' : ''}</div>
       </div>
     </div>
   );
