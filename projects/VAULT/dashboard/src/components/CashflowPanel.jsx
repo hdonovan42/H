@@ -85,7 +85,6 @@ export default function CashflowPanel() {
                 <th style={{ padding: '6px 8px', fontWeight: 400, textTransform: 'uppercase', fontSize: 10, textAlign: 'right' }}>Amount</th>
                 <th style={{ padding: '6px 8px', fontWeight: 400, textTransform: 'uppercase', fontSize: 10 }}>Token</th>
                 <th style={{ padding: '6px 8px', fontWeight: 400, textTransform: 'uppercase', fontSize: 10 }}>Counterparty</th>
-                <th style={{ padding: '6px 8px', fontWeight: 400, textTransform: 'uppercase', fontSize: 10 }}>Tx</th>
               </tr>
             </thead>
             <tbody>
@@ -107,17 +106,6 @@ export default function CashflowPanel() {
                       {it.counterparty.startsWith('0x')
                         ? truncAddr(it.counterparty)
                         : it.counterparty}
-                    </td>
-                    <td style={{ padding: '6px 8px' }}>
-                      {url ? (
-                        <a href={url} target="_blank" rel="noreferrer noopener"
-                           style={{ color: 'var(--accent, #58a6ff)', textDecoration: 'none' }}
-                           title={it.tx_hash}>
-                          {truncTx(it.tx_hash)} ↗
-                        </a>
-                      ) : (
-                        <span style={{ color: 'var(--text-dim, #8b949e)' }}>{truncTx(it.tx_hash)}</span>
-                      )}
                     </td>
                   </tr>
                 );
