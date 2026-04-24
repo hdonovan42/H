@@ -309,21 +309,26 @@ def reset_and_seed(conn, seed_amount: float | None = None) -> float:
         "last_go_live_at",
     ]
 
+    # Foreign keys reference cycles/predictions/etc; disable them during wipe
+    # so the order of deletes doesn't matter. PRAGMA must be set outside a tx.
+    conn.execute("PRAGMA foreign_keys = OFF")
     try:
         conn.execute("BEGIN IMMEDIATE")
         for tbl in tables_to_wipe:
             try:
                 conn.execute(f"DELETE FROM {tbl}")
-            except Exception:
-                pass  # table may not exist in this schema version
-        # Reset autoincrement counters so IDs start from 1
+            except Exception as e:
+                # Some tables may not exist in this schema version — that's fine.
+                # Anything else we want to see loudly, not swallow.
+                if "no such table" not in str(e).lower():
+                    log.warning(f"Reset: DELETE FROM {tbl} failed: {e}")
+        # Reset autoincrement counters so IDs start from 1 again
         try:
             conn.execute("DELETE FROM sqlite_sequence")
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning(f"Reset: DELETE FROM sqlite_sequence failed: {e}")
         for k in meta_keys_to_clear:
             conn.execute("DELETE FROM meta WHERE key = ?", (k,))
-        # Ensure alive = true
         conn.execute(
             "INSERT INTO meta (key, value) VALUES ('alive', 'true') "
             "ON CONFLICT(key) DO UPDATE SET value = 'true'"
@@ -331,7 +336,9 @@ def reset_and_seed(conn, seed_amount: float | None = None) -> float:
         conn.commit()
     except Exception:
         conn.rollback()
+        conn.execute("PRAGMA foreign_keys = ON")
         raise
+    conn.execute("PRAGMA foreign_keys = ON")
 
     # Seed the fresh ledger:
     # 1. Initial deposit of seed_amount (the initial on-chain balance)

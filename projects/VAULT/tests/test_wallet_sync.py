@@ -82,6 +82,33 @@ def test_reset_wipes_cycles_and_predictions(seeded_db, mock_onchain):
     assert "test" not in events
 
 
+def test_reset_wipes_cycles_despite_foreign_key_references(seeded_db, mock_onchain):
+    """Regression: pipeline_runs.cycle_id FK into cycles.id made DELETE FROM cycles fail
+    silently under PRAGMA foreign_keys=ON. The fix disables FKs during wipe; this test
+    guards against the silent-failure pattern returning.
+    """
+    # Insert a parent cycle plus a child that references it
+    cur = seeded_db.execute("INSERT INTO cycles (ts_start) VALUES ('2026-01-01T00:00:00Z')")
+    cycle_id = cur.lastrowid
+    seeded_db.execute(
+        "INSERT INTO pipeline_runs (cycle_id, ts) VALUES (?, '2026-01-01T00:00:00Z')",
+        (cycle_id,),
+    )
+    seeded_db.commit()
+    assert seeded_db.execute("SELECT COUNT(*) FROM cycles").fetchone()[0] == 1
+    assert seeded_db.execute("SELECT COUNT(*) FROM pipeline_runs").fetchone()[0] == 1
+
+    reset_and_seed(seeded_db, seed_amount=12.67)
+
+    assert seeded_db.execute("SELECT COUNT(*) FROM cycles").fetchone()[0] == 0, \
+        "cycles survived the reset — FK constraint blocked the DELETE silently"
+    assert seeded_db.execute("SELECT COUNT(*) FROM pipeline_runs").fetchone()[0] == 0
+
+    # And foreign keys should be re-enabled post-reset
+    fk_enabled = seeded_db.execute("PRAGMA foreign_keys").fetchone()[0]
+    assert fk_enabled == 1, "Reset must leave foreign_keys enabled"
+
+
 def test_reset_preserves_schema_version(seeded_db, mock_onchain):
     """Reset must NOT wipe the schema_version or alive meta keys."""
     from vault.db import SCHEMA_VERSION
