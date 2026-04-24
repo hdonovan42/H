@@ -414,6 +414,78 @@ def go_live(yes):
     conn.close()
 
 
+@cli.command("reset-accounting")
+@click.option("--yes", is_flag=True, help="Skip interactive confirmation")
+def reset_accounting(yes):
+    """DESTRUCTIVE: wipe all transactional history, re-seed from current on-chain balance.
+
+    Clears cycles, events, predictions, ledger, api_calls, and all pipeline data.
+    Keeps schema + alive flag. Inserts a fresh deposit entry equal to the current
+    on-chain USDC.e balance as the starting point for accounting. The wallet sync
+    scanner's high-water mark is reset to the current block, so only new transfers
+    are tracked.
+
+    USE WITH CARE: backs up nothing. Run `cp vault.db vault.db.bak-$(date +%s)` first.
+    """
+    from vault.config_loader import load_config
+    from vault.wallet_sync import reset_and_seed
+    from vault.clob_client import get_usdc_balance, _get_client
+    load_config()
+
+    pid = read_pid()
+    if pid is not None:
+        click.echo(f"ERROR: daemon is running (PID {pid}). Stop it first: `vault stop`.")
+        sys.exit(1)
+
+    try:
+        _get_client()
+    except Exception as e:
+        click.echo(f"ERROR: CLOB client init failed: {e}")
+        sys.exit(1)
+
+    usdc = get_usdc_balance()
+    if usdc is None:
+        click.echo("ERROR: on-chain USDC unavailable — all RPC providers failed.")
+        sys.exit(1)
+
+    conn = init_db()
+    try:
+        count_cycles = conn.execute("SELECT COUNT(*) FROM cycles").fetchone()[0]
+        count_ledger = conn.execute("SELECT COUNT(*) FROM ledger").fetchone()[0]
+        count_predictions = conn.execute("SELECT COUNT(*) FROM predictions").fetchone()[0]
+
+        click.echo()
+        click.echo("Accounting reset:")
+        click.echo(f"  Cycles to wipe:       {count_cycles}")
+        click.echo(f"  Ledger entries wiped: {count_ledger}")
+        click.echo(f"  Predictions wiped:    {count_predictions}")
+        click.echo(f"  On-chain USDC.e:      ${usdc:.4f}  (will be the new seed deposit)")
+        click.echo()
+        click.echo("This is IRREVERSIBLE. Back up vault.db first if you want history preserved.")
+
+        if not yes:
+            if not click.confirm("Proceed?"):
+                click.echo("Aborted.")
+                sys.exit(1)
+
+        seeded = reset_and_seed(conn, seed_amount=usdc)
+        click.echo(f"✓ Reset complete. Fresh balance: ${seeded:.4f}. Run `vault start` to resume.")
+    finally:
+        conn.close()
+
+
+@cli.command("wallet-sync")
+def wallet_sync_cmd():
+    """Manually run the wallet transaction sync (picks up any missed deposits/withdrawals)."""
+    from vault.wallet_sync import sync_wallet_transactions
+    conn = init_db()
+    try:
+        summary = sync_wallet_transactions(conn)
+        click.echo(f"Wallet sync: {summary}")
+    finally:
+        conn.close()
+
+
 @cli.command("setup-clob")
 def setup_clob():
     """One-time setup: approve USDC + CTF token allowances for Polymarket CLOB."""

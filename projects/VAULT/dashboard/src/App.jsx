@@ -6,6 +6,7 @@ import CycleLog from './components/CycleLog';
 import BetsPanel from './components/BetsPanel';
 import EventTimeline from './components/EventTimeline';
 import ReconciliationPanel from './components/ReconciliationPanel';
+import CashflowPanel from './components/CashflowPanel';
 
 
 function useHash() {
@@ -40,7 +41,10 @@ function DashboardPage({ status, balanceHistory, cycles, positions, predictions 
 function LogPage({ cycles, events }) {
   return (
     <div className="page">
-      <EventTimeline events={events} />
+      <CashflowPanel />
+      <div style={{ marginTop: '16px' }}>
+        <EventTimeline events={events} />
+      </div>
       <div className="card" style={{ marginTop: '16px' }}>
         <div className="card-title">Full Cycle Log</div>
         {(!cycles || cycles.length === 0) ? (

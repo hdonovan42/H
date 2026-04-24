@@ -158,6 +158,33 @@ def get_status():
         conn.close()
 
 
+@app.get("/api/v1/wallet-transactions")
+def get_wallet_transactions(limit: int = Query(100, ge=1, le=1000)):
+    """External cashflow log — deposits and withdrawals detected from on-chain transfers."""
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT id, tx_hash, block_number, ts, direction, amount_usd, token, counterparty, notes "
+            "FROM wallet_transactions ORDER BY ts DESC, id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        items = [dict(r) for r in rows]
+        deposits = [x for x in items if x["direction"] == "deposit"]
+        withdrawals = [x for x in items if x["direction"] == "withdrawal"]
+        return {
+            "items": items,
+            "total_deposits_usd": round(sum(x["amount_usd"] for x in deposits), 6),
+            "total_withdrawals_usd": round(sum(x["amount_usd"] for x in withdrawals), 6),
+            "net_deposits_usd": round(
+                sum(x["amount_usd"] for x in deposits) - sum(x["amount_usd"] for x in withdrawals), 6
+            ),
+            "count_deposits": len(deposits),
+            "count_withdrawals": len(withdrawals),
+        }
+    finally:
+        conn.close()
+
+
 @app.get("/api/v1/reconciliation")
 def get_reconciliation():
     """Live vs ledger reconciliation snapshot. Powers the dashboard safety panel."""

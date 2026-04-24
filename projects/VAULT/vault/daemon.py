@@ -189,7 +189,16 @@ def _reconcile_balance(conn, cfg):
     # Step 1: convert any native USDC to USDC.e (blocking, on-chain)
     _auto_swap_native_usdc(conn, cfg)
 
-    # Step 2: regular USDC.e reconciliation
+    # Step 2: detect external deposits/withdrawals via Transfer-event scan
+    try:
+        from vault.wallet_sync import sync_wallet_transactions
+        summary = sync_wallet_transactions(conn)
+        if summary.get("deposits") or summary.get("withdrawals"):
+            log.info(f"Wallet sync: {summary}")
+    except Exception as e:
+        log.error(f"Wallet sync failed: {e}", exc_info=True)
+
+    # Step 3: regular USDC.e drift reconciliation (catches anything the sync missed)
     actual = get_usdc_balance()
     if actual is None:
         log.warning("Balance reconciliation skipped — RPC call failed")

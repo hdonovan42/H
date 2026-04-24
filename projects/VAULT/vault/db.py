@@ -7,7 +7,7 @@ from vault.config_loader import get_db_path
 
 log = logging.getLogger("vault.db")
 
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -138,6 +138,24 @@ CREATE TABLE IF NOT EXISTS predictions (
     clob_attempt_id TEXT,                       -- dedupe key for CLOB retries (v20)
     fill_verified_at TEXT                       -- when post-trade CTF balance was confirmed (v20)
 );
+
+-- ── Wallet-level cashflow (v21) ────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS wallet_transactions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    tx_hash         TEXT NOT NULL UNIQUE,
+    block_number    INTEGER NOT NULL,
+    ts              TEXT NOT NULL,
+    direction       TEXT NOT NULL CHECK (direction IN ('deposit','withdrawal')),
+    amount_usd      REAL NOT NULL,
+    token           TEXT NOT NULL,
+    counterparty    TEXT NOT NULL,
+    notes           TEXT,
+    ledger_id       INTEGER,
+    FOREIGN KEY (ledger_id) REFERENCES ledger(id)
+);
+CREATE INDEX IF NOT EXISTS idx_wallet_tx_ts ON wallet_transactions(ts DESC);
+CREATE INDEX IF NOT EXISTS idx_wallet_tx_direction ON wallet_transactions(direction);
 
 -- ── Pipeline tables (v3) ──────────────────────────────────────
 
@@ -826,6 +844,37 @@ def _migrate(conn):
         )
         conn.commit()
         log.info("v20 migration: added pending_since/clob_attempt_id/fill_verified_at + index")
+
+    if version < 21:
+        # v21: wallet-level cashflow tracking. Rows appended by the wallet sync
+        # loop when on-chain Transfer events to/from our wallet are detected with
+        # a non-internal counterparty (i.e. not Polymarket exchanges or our own
+        # DEX). `direction` is 'deposit' (external -> wallet) or 'withdrawal'
+        # (wallet -> external).
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS wallet_transactions (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                tx_hash         TEXT NOT NULL UNIQUE,
+                block_number    INTEGER NOT NULL,
+                ts              TEXT NOT NULL,
+                direction       TEXT NOT NULL CHECK (direction IN ('deposit','withdrawal')),
+                amount_usd      REAL NOT NULL,
+                token           TEXT NOT NULL,
+                counterparty    TEXT NOT NULL,
+                notes           TEXT,
+                ledger_id       INTEGER,
+                FOREIGN KEY (ledger_id) REFERENCES ledger(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_wallet_tx_ts ON wallet_transactions(ts DESC);
+            CREATE INDEX IF NOT EXISTS idx_wallet_tx_direction ON wallet_transactions(direction);
+        """)
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "21"),
+        )
+        conn.commit()
+        log.info("v21 migration: added wallet_transactions table for cashflow tracking")
 
 
 def init_db(db_path: Path | None = None) -> sqlite3.Connection:

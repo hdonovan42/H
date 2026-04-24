@@ -263,8 +263,11 @@ def compute_expected_onchain(conn) -> float:
     anchor_id = anchor_row["id"]
     anchor_balance = anchor_row["balance_after"]
 
+    # Deposit amounts are positive; withdrawal amounts are stored negative.
+    # Summing both in one query yields the net external cashflow since anchor.
     deposits_after = conn.execute(
-        "SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE entry_type = 'deposit' AND id > ?",
+        "SELECT COALESCE(SUM(amount), 0) FROM ledger "
+        "WHERE entry_type IN ('deposit', 'withdrawal') AND id > ?",
         (anchor_id,),
     ).fetchone()[0]
     real_costs = conn.execute(
