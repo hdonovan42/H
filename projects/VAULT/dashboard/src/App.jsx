@@ -23,7 +23,6 @@ function DashboardPage({ status, balanceHistory, cycles, positions, predictions 
   return (
     <div className="page">
       <StatusBar status={status} />
-      {status?.live && <ReconciliationPanel />}
       <BalanceChart data={balanceHistory} />
       <div className="grid" style={{ marginTop: '16px', gridTemplateRows: '500px' }}>
         <CycleLog cycles={cycles} />
@@ -34,6 +33,11 @@ function DashboardPage({ status, balanceHistory, cycles, positions, predictions 
           </div>
         </div>
       </div>
+      {status?.live && (
+        <div style={{ marginTop: '16px' }}>
+          <ReconciliationPanel />
+        </div>
+      )}
     </div>
   );
 }

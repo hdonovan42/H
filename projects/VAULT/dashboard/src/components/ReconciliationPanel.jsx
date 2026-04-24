@@ -51,7 +51,7 @@ export default function ReconciliationPanel() {
   const fmtSigned = (v) => v == null ? '—' : `${v >= 0 ? '+' : ''}$${Number(v).toFixed(2)}`;
 
   return (
-    <div className="card" style={{ padding: '12px 16px', borderLeft: `3px solid ${colour}` }}>
+    <div className="card" style={{ padding: '12px 16px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
         <div className="card-title" style={{ margin: 0 }}>Balance Reconciliation</div>
         <div style={{ fontSize: 11, fontWeight: 700, color: colour, letterSpacing: '0.06em' }}>{label}</div>
