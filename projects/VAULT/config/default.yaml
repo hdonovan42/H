@@ -34,6 +34,7 @@ trading:
     rpc_failure_pause_threshold: 3      # auto-pause after N consecutive None returns from RPC
     max_bet_pct_onchain: 1.0            # disabled by default — use a small deposit ($10) as the real cap instead.
                                         # set to 0.10 (or similar) if you want a hard on-chain blast-radius limit.
+    min_order_usd: 1.00                 # Polymarket CLOB hard floor for marketable orders
     auto_swap_native_usdc: true         # convert Coinbase-style native USDC -> USDC.e automatically
     min_native_swap_usd: 1.00           # don't swap amounts below this (avoid burning gas on dust)
     native_swap_slippage_bps: 50        # 0.5% max slippage on the auto-swap (stable-to-stable, usually <0.01% actual)
@@ -87,8 +88,8 @@ velocity:
   momentum_enabled: true
   momentum_model: claude-haiku-4-5-20251001
   momentum_follow_confidence: 0.6   # Haiku must be this confident to follow
-  momentum_base_bet_pct: 0.025      # 2.5% of total value (~$2.10 at $84)
-  momentum_max_bet_pct: 0.10        # 10% of total value (~$8.40 at $84)
+  momentum_base_bet_pct: 0.05       # 5% of total value (~$1.00 at $20 — above CLOB $1 min)
+  momentum_max_bet_pct: 0.10        # 10% of total value (~$2.00 at $20)
   momentum_vel_scale_20: 1.5        # 1.5x at |v_1h| >= 20%
   momentum_vel_scale_40: 2.0        # 2x at |v_1h| >= 40%
   momentum_pyramid_enabled: false     # DISABLED — pyramid adds killed, shadow mode active

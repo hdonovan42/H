@@ -639,6 +639,21 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             )
             continue
 
+        # CLOB hard minimum: Polymarket rejects marketable BUY orders below $1.
+        # In real mode, skip here — don't waste a CLOB call that definitely fails,
+        # which would also trigger the failed-market cooldown and lock the market
+        # out for 10 minutes on a local sizing issue.
+        is_simulated = cfg.get("trading", {}).get("simulated", True)
+        if not is_simulated:
+            min_order_usd = cfg.get("trading", {}).get("clob", {}).get("min_order_usd", 1.00)
+            if bet_size < min_order_usd:
+                log.info(
+                    f"Momentum skip (below CLOB min): {question[:50]} — "
+                    f"sized ${bet_size:.2f} < ${min_order_usd:.2f} CLOB minimum "
+                    f"(raise momentum_base_bet_pct or top up balance)"
+                )
+                continue
+
         # Per-market position count cap (oscillation dampener overrides to 1)
         effective_max_positions = 1 if (is_oscillating or is_burned) else max_positions_per_market
         market_pos_count = positions_per_market.get(alert["market_id"], 0)
