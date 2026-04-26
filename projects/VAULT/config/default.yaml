@@ -29,7 +29,7 @@ trading:
     reconcile_interval_cycles: 10       # check for deposits every 10 cycles
     orphan_sweep_interval_cycles: 30    # check for stuck pending/reconciling every 30 cycles
     pending_timeout_seconds: 300        # pending rows older than this are reconciled by orphan sweep
-    dry_run_startup_cycles: 5           # first N cycles log-only; 5 is enough to verify startup integrity
+    dry_run_startup_cycles: 0           # disabled — v20 atomicity validated against live CLOB. Re-enable to >0 if re-arming after material code changes.
     balance_divergence_tolerance: 0.50  # auto-pause if ledger vs on-chain drift > $0.50 (tightened from $1.00)
     rpc_failure_pause_threshold: 3      # auto-pause after N consecutive None returns from RPC
     max_bet_pct_onchain: 1.0            # disabled by default — use a small deposit ($10) as the real cap instead.

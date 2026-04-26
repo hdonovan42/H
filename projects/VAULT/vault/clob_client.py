@@ -216,7 +216,13 @@ def get_best_ask(token_id: str) -> float | None:
 
 
 def buy_shares(token_id: str, amount_usd: float, max_price: float = 0.99) -> FillResult:
-    """Place a FOK market buy order. Returns FillResult with fill data.
+    """Place a FAK (immediate-or-cancel) market buy order. Returns FillResult.
+
+    Switched from FOK to FAK because thin Polymarket markets often can't fully
+    absorb a $1-$2 order all-or-nothing. FAK fills what's immediately available
+    at price <= max_price and cancels the rest — a partial fill is still useful
+    momentum exposure. The two-phase commit in `record_prediction_confirm()`
+    handles partial fills correctly (records actual cost_basis and shares).
 
     CRITICAL: Snapshots on-chain USDC balance before and after to detect
     stealth fills where post_order throws but the order actually executed.
@@ -238,7 +244,7 @@ def buy_shares(token_id: str, amount_usd: float, max_price: float = 0.99) -> Fil
         )
 
         signed_order = client.create_market_order(order_args)
-        resp = client.post_order(signed_order, "FOK")
+        resp = client.post_order(signed_order, "FAK")
 
         if not resp or not resp.get("success"):
             error_msg = resp.get("errorMsg", "Unknown CLOB error") if resp else "No response from CLOB"
@@ -354,7 +360,7 @@ def sell_shares(token_id: str, shares: float, min_price: float = 0.01) -> FillRe
         )
 
         signed_order = client.create_market_order(order_args)
-        resp = client.post_order(signed_order, "FOK")
+        resp = client.post_order(signed_order, "FAK")
 
         if not resp or not resp.get("success"):
             error_msg = resp.get("errorMsg", "Unknown CLOB error") if resp else "No response from CLOB"

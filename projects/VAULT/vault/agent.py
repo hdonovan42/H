@@ -1118,10 +1118,16 @@ def _execute_momentum_bets(conn, cycle_id: int, momentum_items: list[dict],
             f"{best['question'][:50]} (v={best.get('v_1h', 0):+.0%}/1h)"
         )
     else:
-        # Guard 3: Record failed-market cooldown to prevent re-entry loop
-        from vault.db import set_meta as _set_meta
-        from datetime import datetime, timezone
-        _set_meta(conn, f"failed_market:{market_id}", datetime.now(timezone.utc).isoformat())
+        # Guard 3: Record failed-market cooldown to prevent re-entry loop.
+        # Skip for dry-run rejections — those aren't real failures, they're a
+        # deliberate startup safety gate. Marking the market failed for 10 min
+        # would lose a real opportunity once dry-run completes.
+        err_msg = exec_result.get('error', '') or ''
+        is_dry_run_skip = 'Dry-run mode' in err_msg
+        if not is_dry_run_skip:
+            from vault.db import set_meta as _set_meta
+            from datetime import datetime, timezone
+            _set_meta(conn, f"failed_market:{market_id}", datetime.now(timezone.utc).isoformat())
         conn.commit()
         result["action"] = "hold"
         result["reasoning"] = f"momentum bet failed: {exec_result.get('error', 'unknown')}"
