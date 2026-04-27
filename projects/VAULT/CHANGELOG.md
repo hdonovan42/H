@@ -5,6 +5,50 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v20.1 — Stealth-fill detection via on-chain CTF poll (post-25-Apr-2026 Pereira incident)
+
+**Baseline**: daemon back online after 36-hour crash loop, $18.34 cash + 2.29 Pereira YES shares (~$2.29) = $20.63 total value, 61/61 tests green.
+
+### What happened
+On 25 April 2026, daemon attempted a $1.48 momentum bet on "Will Deportivo Pereira win on 2026-04-25?" (pred #11, YES @ 0.585). Polymarket's CLOB returned `success=true, trades=[]` — the existing logic interpreted this as "FOK rejected" and cancelled the prediction. **But 2.29 CTF shares were actually minted on-chain.** The CLOB response was lying (or settlement lagged the response by more than the existing 2-second stealth-check window).
+
+The v20 drift safeguard caught it within 60 seconds (on-chain USDC $18.52 vs expected $20.00, drift $-1.48 = exactly the bet amount) and auto-paused. The daemon then crash-looped on the startup drift check for ~36 hours until the user investigated.
+
+Pereira won the next day. The 2.29 YES shares are worth ~$2.29 on redemption — net win $0.81. v20's safeguards prevented loss but the gap they exposed needed closing.
+
+### Root cause
+`buy_shares` checked on-chain USDC delta immediately after `post_order` returned. Polymarket settlement is async and can lag the response by several seconds. Snapshotting too early showed zero USDC delta → fell through to "no fills" → cancelled prediction → orphan.
+
+### Fix (scalpel — `vault/clob_client.py` `buy_shares`)
+1. Snapshot CTF balance for the specific token_id BEFORE the order (alongside USDC).
+2. When the response reports no fills, **poll CTF balance every 2s for 10s**. CTF mint = unambiguous on-chain proof of fill, regardless of what the CLOB API claims.
+3. If CTF increased: return success with on-chain share count + actual USDC delta as cost.
+4. If CTF check is RPC-blind: return new `UNVERIFIED:` error so the bet actuator marks the prediction `reconciling` (not cancelled). Orphan sweep then handles it.
+5. If USDC moved without matching CTF mint: also `UNVERIFIED` — manual investigation required.
+
+The fix avoids the "cancel and forget" path entirely whenever there's any uncertainty.
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `vault/clob_client.py` | `buy_shares`: snapshot `ctf_before` alongside `usdc_before`. Replace immediate USDC-only stealth check with 10s CTF poll loop. New `UNVERIFIED:` error states for RPC-blind or USDC-moved-without-CTF cases. Misleading "FOK rejected" error strings updated to reflect FAK behavior. |
+| `vault/actuators/bet.py` | When `fill.error` starts with `UNVERIFIED`, mark prediction `reconciling` instead of `cancelled`. Existing post-fail CTF check retained as belt-and-braces. |
+| `tests/test_clob_stealth_fill.py` (new) | 4 unit tests covering: Pereira regression (CLOB lies, CTF shows shares → success); genuine no-fill (CTF + USDC unchanged → cancelled); RPC blind during CTF poll → UNVERIFIED; USDC moved without CTF mint → UNVERIFIED. |
+
+### Deploy notes — what to watch
+- Drift is currently $-0.0007 (rounding only) after retroactive ledger correction.
+- Pred #11 status now `open` with on-chain truth: 2.28753 shares, $1.48 cost, $0.647 avg fill (vs $0.585 limit — partial fill at the worse price the CLOB would settle).
+- Guard 4 (existing on-chain position check) blocks any duplicate Pereira bet.
+- Pereira market closed → CLOB orderbook empty → daemon cannot exit pred #11 via CLOB. Manual on-chain redemption required (separate task).
+- Sell path (`sell_shares`) has the same class of bug. Not patched in this release — should be mirrored in a follow-up.
+
+### Trades since (live, real money)
+| Pred | Market | Side | Size | Status | Notes |
+|------|--------|------|------|--------|-------|
+| #11 | Will Deportivo Pereira win on 2026-04-25? | YES | $1.48 | `open` (recovered orphan) | 2.29 shares on-chain, market resolved YES, awaiting redemption |
+
+---
+
 ## v20 — Real-Money Safeguards (post-15-Mar-2026 incident)
 
 **Baseline (local, pre-deploy)**: daemon paused, $2.00 balance, 1070 cycles, tests 37/37 green.

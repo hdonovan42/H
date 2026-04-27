@@ -224,14 +224,19 @@ def buy_shares(token_id: str, amount_usd: float, max_price: float = 0.99) -> Fil
     momentum exposure. The two-phase commit in `record_prediction_confirm()`
     handles partial fills correctly (records actual cost_basis and shares).
 
-    CRITICAL: Snapshots on-chain USDC balance before and after to detect
-    stealth fills where post_order throws but the order actually executed.
+    CRITICAL: Snapshots both USDC.e and CTF (per-token) balances before the
+    order. After the order, if the CLOB response reports no fills we re-check
+    the CTF balance — a CTF increase is unambiguous proof the order executed,
+    even when post_order succeeds with empty trades or throws after settlement.
     """
     from py_clob_client.order_builder.constants import BUY
     from py_clob_client.clob_types import MarketOrderArgs
 
-    # Snapshot USDC balance BEFORE order
+    # Snapshot balances BEFORE order — both USDC and per-token CTF.
+    # CTF is the authoritative fill signal (CLOB has been observed to return
+    # success=true,trades=[] while still settling shares on-chain).
     usdc_before = _get_usdc_balance_raw()
+    ctf_before = get_ctf_balance(token_id)
 
     try:
         client = _get_client()
@@ -264,31 +269,86 @@ def buy_shares(token_id: str, amount_usd: float, max_price: float = 0.99) -> Fil
             total_cost += trade_shares * trade_price
 
         if total_shares <= 0:
-            # Double-check on-chain — the order may have filled despite empty trades
+            # CLOB reported no fills. The Apr 2026 incident showed this response
+            # can lie: CLOB returned success=true,trades=[] while 2.29 CTF shares
+            # had actually been minted to the wallet on-chain. Poll CTF balance
+            # for ~10s — Polymarket settlement is async and can lag the response
+            # by several seconds. Any CTF increase = real fill, regardless of
+            # what the CLOB response said.
+            import time as _time
+            ctf_after = ctf_before
+            ctf_delta = 0.0
+            for _attempt in range(5):  # 0,2,4,6,8s — covers async settlement window
+                _time.sleep(2)
+                probe = get_ctf_balance(token_id)
+                if probe is not None and ctf_before is not None:
+                    ctf_after = probe
+                    ctf_delta = probe - ctf_before
+                    if ctf_delta > 0.01:
+                        break  # confirmed fill, stop polling
+
             usdc_after = _get_usdc_balance_raw()
-            if usdc_before is not None and usdc_after is not None:
-                spent = (usdc_before - usdc_after) / 1e6
-                if spent > 0.01:
-                    log.error(
-                        f"STEALTH FILL DETECTED: response said no trades but ${spent:.2f} USDC "
-                        f"left the wallet. Order {order_id[:8]} actually executed."
-                    )
-                    return FillResult(
-                        success=True,
-                        order_id=order_id,
-                        side="BUY",
-                        token_id=token_id,
-                        amount_usd=round(spent, 6),
-                        shares=round(spent / max_price, 6),  # Estimate
-                        avg_price=max_price,
-                    )
-            elif usdc_before is None or usdc_after is None:
-                log.critical(
-                    f"STEALTH CHECK BLIND: CLOB reported no trades for order {order_id[:8]} "
-                    f"and RPC balance unavailable (before={usdc_before}, after={usdc_after}). "
-                    f"Cannot verify — returning failure; reconciliation sweep will handle."
+            spent = (
+                (usdc_before - usdc_after) / 1e6
+                if (usdc_before is not None and usdc_after is not None)
+                else None
+            )
+
+            if ctf_delta > 0.01:
+                # CTF increased → order filled. Use the on-chain delta as the
+                # source of truth for share count. Cost is the USDC we actually
+                # spent (if RPC told us); fall back to ctf_delta * max_price.
+                if spent is not None and spent > 0.01:
+                    actual_cost = spent
+                    avg_price = spent / ctf_delta
+                else:
+                    actual_cost = round(ctf_delta * max_price, 6)
+                    avg_price = max_price
+                log.error(
+                    f"STEALTH FILL DETECTED: CLOB said no trades but CTF balance "
+                    f"increased by {ctf_delta:.4f} shares (USDC delta ${spent if spent is not None else '?'}). "
+                    f"Order {order_id[:8]} actually executed."
                 )
-            return FillResult(success=False, error="Order accepted but no fills (FOK rejected)")
+                return FillResult(
+                    success=True,
+                    order_id=order_id,
+                    side="BUY",
+                    token_id=token_id,
+                    amount_usd=round(actual_cost, 6),
+                    shares=round(ctf_delta, 6),
+                    avg_price=round(avg_price, 6),
+                )
+
+            if ctf_before is None or ctf_after is None:
+                # CTF RPC was blind for the whole window — cannot prove no-fill.
+                # Refuse to declare cancellation; surface as reconciling-grade
+                # failure so the orphan sweep takes another look.
+                log.critical(
+                    f"STEALTH CHECK BLIND on CTF: CLOB reported no trades for order {order_id[:8]} "
+                    f"and CTF balance unavailable (before={ctf_before}, after={ctf_after}). "
+                    f"Treating as reconciliation pending — orphan sweep will resolve."
+                )
+                return FillResult(
+                    success=False,
+                    error="UNVERIFIED: CLOB reported no fills but on-chain CTF check unavailable",
+                )
+
+            if spent is not None and spent > 0.01:
+                # USDC moved but CTF did not — money left the wallet without
+                # producing shares for this token. Treat as serious anomaly,
+                # do NOT silently cancel.
+                log.critical(
+                    f"ANOMALY: order {order_id[:8]} reported no fills, CTF balance "
+                    f"unchanged, but ${spent:.2f} USDC left the wallet. "
+                    f"Refusing to cancel — manual investigation required."
+                )
+                return FillResult(
+                    success=False,
+                    error=f"UNVERIFIED: USDC moved ${spent:.2f} without matching CTF mint",
+                )
+
+            # CTF unchanged AND USDC unchanged → genuine no-fill.
+            return FillResult(success=False, error="FAK order accepted but no immediate liquidity at limit")
 
         avg_price = total_cost / total_shares if total_shares > 0 else 0.0
 
@@ -338,7 +398,7 @@ def buy_shares(token_id: str, amount_usd: float, max_price: float = 0.99) -> Fil
 
 
 def sell_shares(token_id: str, shares: float, min_price: float = 0.01) -> FillResult:
-    """Place a FOK market sell order. Returns FillResult with fill data.
+    """Place a FAK market sell order. Returns FillResult with fill data.
 
     CRITICAL: Snapshots on-chain USDC balance before and after to detect
     stealth fills where post_order throws but the order actually executed.
@@ -401,7 +461,7 @@ def sell_shares(token_id: str, shares: float, min_price: float = 0.01) -> FillRe
                     f"STEALTH CHECK BLIND on sell: CLOB reported no trades for order {order_id[:8]} "
                     f"and RPC unavailable. Reconciliation sweep will handle."
                 )
-            return FillResult(success=False, error="Sell order accepted but no fills (FOK rejected)")
+            return FillResult(success=False, error="FAK sell accepted but no immediate liquidity at limit")
 
         avg_price = total_value / total_shares if total_shares > 0 else 0.0
 

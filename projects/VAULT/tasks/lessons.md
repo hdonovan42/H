@@ -1,5 +1,32 @@
 # VAULT Trading Lessons
 
+## Pereira Stealth Fill — 25 April 2026 (the v20 safeguards working as designed)
+
+**TL;DR.** First real-money bet under v20 (pred #11, Pereira YES @ 0.585, $1.48). CLOB returned `success=true, trades=[]` so the existing logic cancelled the prediction. **2.29 CTF shares were minted on-chain anyway.** v20's drift safeguard caught the $1.48 mismatch within 60 seconds and crash-looped the daemon to halt further trading. Pereira won — the orphan was worth ~$2.29, net win $0.81 — but the lesson holds whatever the outcome.
+
+**Same pattern, opposite result.** The 15 March $50 loss had the same shape: order fills on-chain, ledger doesn't know, position orphans. There v20 didn't exist yet so the divergence wasn't caught. Here v20 caught it. The remaining gap was that we still LET the orphan happen — the safety net only triggered after the fact.
+
+**Root cause.** `buy_shares` snapshotted USDC immediately after `post_order` returned. Polymarket settlement is async; by the time we re-read USDC the response had already returned but the chain hadn't settled. So spent ≈ 0 → "no fills" path → `cancel`. The 1-second `time.sleep` in the bet actuator's post-fail CTF check was also too short to catch settlement.
+
+**Fix (v20.1).** In `buy_shares`, when CLOB reports no fills:
+1. Poll CTF `balanceOf(wallet, token_id)` every 2s for 10s.
+2. Any CTF increase = fill, regardless of CLOB response. Return success with on-chain share count + actual USDC delta.
+3. If CTF check is RPC-blind, or USDC moved without CTF mint: return new `UNVERIFIED:` error → bet actuator marks `reconciling` (NOT `cancelled`) → orphan sweep handles it.
+
+CTF balance is the source of truth. The CLOB response can lie, the USDC snapshot can race settlement, but `balanceOf(wallet, token_id)` cannot.
+
+**Rules added (never again):**
+
+11. **Cancellation requires positive proof.** A failure response from any external system (CLOB, RPC, anything) is NOT proof of "did not happen." Before transitioning a prediction to `cancelled`, you must have on-chain proof that the position does not exist. If you can't prove negative, mark `reconciling` and let the orphan sweep decide.
+
+12. **Settlement is async — wait for it.** External APIs respond before blockchain state finalises. Snapshotting on-chain state immediately after an API response races settlement. Always poll for several seconds (settlement window) before declaring on-chain state authoritative.
+
+13. **Authoritative source > convenient source.** USDC delta is suggestive (could be confounded by other concurrent transactions). CTF `balanceOf(wallet, token_id)` is dispositive. When checking whether a specific bet filled, prefer the per-token authority.
+
+14. **Asymmetric safety: lean toward reconciling.** False positives on `reconciling` waste a sweep cycle. False positives on `cancelled` lose money. The orphan sweep exists to handle uncertainty cheaply — use it.
+
+---
+
 ## $50 Real-Money Loss Post-Mortem — 15 March 2026
 
 **TL;DR.** First real-money run lost the full $50 seed. Two compounding bugs: (a) flipping `simulated: false` preserved the $51.29 paper-ledger balance as if it were real money, and (b) `check_balance_divergence()` silently passed whenever the Polygon RPC was unavailable, so the daemon kept trading blind for hours. A third, older bug — `buy_shares()` passing a plain dict instead of `MarketOrderArgs` — made the first few hours of orders visibly fail; once that was fixed in v19.3, orders started succeeding on-chain. Some orders (count unknown — DB was wiped on 17 March) were not recorded in `predictions` because the CLOB order → DB write was not atomic: on exception between the two, the on-chain position orphans and the daemon has no idea it holds shares. Those orphans resolved without exits being placed and the $50 drained to zero.

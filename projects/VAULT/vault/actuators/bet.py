@@ -218,7 +218,7 @@ class BetActuator(BaseActuator):
             if not fill.success:
                 # CLOB reported a clean failure. Before cancelling, do a quick on-chain check
                 # to catch stealth fills the client didn't spot (already done inside buy_shares
-                # but a second check catches fills that took longer than the 2s sleep).
+                # but a second check catches fills that took longer than the 10s poll window).
                 time.sleep(1)
                 ctf_shares = get_ctf_balance(token_id)
                 if ctf_shares is not None and ctf_shares > 0:
@@ -232,7 +232,22 @@ class BetActuator(BaseActuator):
                     )
                     return {"success": False, "error": f"Stealth fill detected — reconciling", "prediction_id": prediction_id, "reconciling": True}
 
-                # Genuine failure. Cancel the pending row (no USDC moved).
+                # If the CLOB client could not verify on-chain state (RPC blind, USDC moved
+                # without CTF mint, etc.) do NOT silently cancel — defer to the orphan sweep.
+                # This closes the Apr 2026 Pereira hole: cancelling on unverifiable failure
+                # erased the trail before the sweep could investigate.
+                if fill.error and fill.error.startswith("UNVERIFIED"):
+                    log.critical(
+                        f"UNVERIFIED CLOB failure: {fill.error}. Flagging for reconciliation "
+                        f"rather than cancelling."
+                    )
+                    ledger.record_prediction_reconciling(
+                        conn, prediction_id,
+                        f"Unverified failure: {fill.error[:200]}"
+                    )
+                    return {"success": False, "error": f"Unverified — reconciling: {fill.error}", "prediction_id": prediction_id, "reconciling": True}
+
+                # Genuine failure. Cancel the pending row (no USDC moved, CTF unchanged).
                 ledger.record_prediction_cancel(conn, prediction_id, f"CLOB failure: {fill.error}")
                 return {"success": False, "error": f"CLOB order failed: {fill.error}", "prediction_id": prediction_id}
 
