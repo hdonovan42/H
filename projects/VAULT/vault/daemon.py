@@ -455,6 +455,19 @@ def run_daemon(resurrect: bool = False):
                     except Exception as e:
                         log.error(f"Orphan sweep failed: {e}", exc_info=True)
 
+                # Redemption sweep: redeem CTF shares from closed wins that
+                # haven't been redeemed yet. Runs alongside the orphan sweep
+                # (same interval) — both are reconciliation passes that touch
+                # on-chain state, so co-locating keeps cycle-level work bounded.
+                if cycle_count % orphan_interval == 0:
+                    try:
+                        from vault.redeem import redemption_sweep
+                        rsummary = redemption_sweep(conn)
+                        if rsummary.get("redeemed") or rsummary.get("failed"):
+                            log.info(f"Redemption sweep: {rsummary}")
+                    except Exception as e:
+                        log.error(f"Redemption sweep failed: {e}", exc_info=True)
+
             # Sleep in 1-second increments (responsive to signals)
             for _ in range(interval):
                 if _shutdown_requested:

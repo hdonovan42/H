@@ -5,6 +5,41 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v20.2 — On-chain redemption (closing the resolve→redeem gap)
+
+**Baseline**: 68/68 tests green, daemon running real-money.
+
+### What this fixes
+v20.1 exposed a second gap during the Pereira recovery: when a real-mode prediction resolves, `record_prediction_resolve` credits the ledger with the expected payout immediately, but the actual USDC.e doesn't enter the wallet until on-chain CTF redemption. Until v20.2 there was no automated redemption — every winning real-mode bet would create a temporary drift (cash credited but USDC.e still locked in CTF shares) that the divergence safeguard would catch within minutes and auto-pause the daemon.
+
+### Files added/modified
+| File | Changes |
+|------|---------|
+| `vault/redeem.py` (new) | `redeem_prediction(conn, prediction_id, dry_run=False)` calls the right contract per market type (NegRiskAdapter for neg-risk, ConditionalTokens for binary). Idempotent (CTF balance == 0 → success/no-op). Lazy `setApprovalForAll` on first redemption. Multi-RPC fallback. `find_redeemable(conn)` returns closed real-mode wins whose shares are still on-chain. `redemption_sweep(conn)` redeems all of them and writes `redemption_adjustment` ledger entries when the actual recovered USDC differs from the credited payout. |
+| `vault/agent.py` | After `record_prediction_resolve` credits a real-mode win, immediately calls `redeem_prediction` for that pred. Failures are non-fatal — the periodic sweep retries. |
+| `vault/daemon.py` | Periodic `redemption_sweep` in the reconcile/orphan-sweep cadence (every `orphan_sweep_interval_cycles`). Catches anything the inline auto-redeem missed. |
+| `vault/cli.py` | New `vault redeem` command. No args → list redeemable positions. `vault redeem <pred_id>` → redeem one. `vault redeem --all` → sweep everything. `--dry-run` for read-only simulation. |
+| `tests/test_redeem.py` (new) | 7 tests: `find_redeemable` filtering by on-chain balance; idempotent redemption; refusal on unknown market type; refusal on non-real / non-closed; adjustment entry written when actual ≠ expected; no adjustment when they match; sweep continues past individual failures. |
+
+### How it works end-to-end
+1. Market resolves on-chain (UMA finalises the outcome).
+2. Daemon's cycle-start `resolve_predictions` notices, calls `ledger.record_prediction_resolve` → status=`closed`, `payout` and `pnl` populated, ledger credit written.
+3. **NEW**: For real-mode wins the agent immediately calls `redeem_prediction`. This:
+   - Reads `negRisk` flag from gamma API.
+   - Verifies CTF balance > 0 on-chain (else returns no-op success — already redeemed).
+   - Lazily ensures `setApprovalForAll(NegRiskAdapter)` is set (one-time tx ever).
+   - Calls `NegRiskAdapter.redeemPositions(conditionId, [yesAmount, noAmount])` (or `ConditionalTokens.redeemPositions(...)` for binary).
+   - Waits for receipt, reads new USDC.e balance, returns the delta.
+4. Periodic sweep handles auto-redeem failures from step 3 (RPC blip, gas spike, settlement delay).
+5. If actual on-chain delta differs from the credited payout (rounding, partial resolution), the sweep writes a `redemption_adjustment` ledger entry to keep cash and wallet in lockstep.
+
+### What to watch
+- **First real win after v20.2 deploy**: confirm the auto-redeem fires synchronously (you should see `Auto-redeemed pred #N: +$X USDC.e (tx 0x...)` in the journalctl right after the `RESOLVED WON` line).
+- **Approval tx is one-time**: first redemption ever costs an extra ~$0.01 in gas for the `setApprovalForAll`. After that, redemption is one tx (~$0.01 gas).
+- **Sweep loud-fails on persistent issues**: if a redemption fails for several sweep passes, we surface it. Right now the sweep is silent on success ("0 redeemed, 0 failed" doesn't log). It logs only when work happened.
+
+---
+
 ## v20.1 — Stealth-fill detection via on-chain CTF poll (post-25-Apr-2026 Pereira incident)
 
 **Baseline**: daemon back online after 36-hour crash loop, $18.34 cash + 2.29 Pereira YES shares (~$2.29) = $20.63 total value, 61/61 tests green.

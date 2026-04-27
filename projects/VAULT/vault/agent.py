@@ -35,6 +35,29 @@ def resolve_predictions(conn):
                 _resolve_smart_money_entries(conn, pred, winner, pnl)
                 # Resolve any shadow trades for this market
                 _resolve_shadow_trades(conn, pred["market_id"], winner)
+                # Real-mode wins: trigger on-chain redemption immediately so the
+                # ledger payout credit matches actual on-chain USDC. Failures are
+                # non-fatal — the redemption sweep retries pending redemptions.
+                if pred["execution_mode"] == "real" and pred["side"] == winner:
+                    try:
+                        from vault.redeem import redeem_prediction
+                        r = redeem_prediction(conn, pred["id"])
+                        if r.get("success"):
+                            log.info(
+                                f"Auto-redeemed pred #{pred['id']}: "
+                                f"+${r.get('usdc_received', 0):.4f} USDC.e "
+                                f"(tx {r.get('tx_hash', 'n/a')})"
+                            )
+                        else:
+                            log.warning(
+                                f"Auto-redeem failed for pred #{pred['id']}: "
+                                f"{r.get('error')} — sweep will retry"
+                            )
+                    except Exception as redeem_err:
+                        log.warning(
+                            f"Auto-redeem raised for pred #{pred['id']}: {redeem_err} — "
+                            f"sweep will retry"
+                        )
             except ValueError as e:
                 log.warning(f"Failed to resolve prediction {pred['id']}: {e}")
 

@@ -486,6 +486,56 @@ def wallet_sync_cmd():
         conn.close()
 
 
+@cli.command("redeem")
+@click.argument("prediction_id", type=int, required=False)
+@click.option("--dry-run", is_flag=True, help="Simulate via eth_call only (no broadcast)")
+@click.option("--all", "redeem_all", is_flag=True, help="Sweep every redeemable closed real-mode prediction")
+def redeem_cmd(prediction_id, dry_run, redeem_all):
+    """Redeem on-chain CTF shares for closed real-mode predictions.
+
+    Without args: prints redeemable predictions (read-only).
+    With prediction_id: redeem that specific one.
+    With --all: sweep every redeemable position.
+    """
+    from vault.config_loader import load_config
+    from vault.redeem import find_redeemable, redeem_prediction, redemption_sweep
+    load_config()
+    conn = init_db()
+    try:
+        if redeem_all:
+            summary = redemption_sweep(conn)
+            click.echo(f"Redemption sweep: {summary}")
+            return
+        if prediction_id is None:
+            redeemable = find_redeemable(conn)
+            if not redeemable:
+                click.echo("No redeemable positions found.")
+                return
+            click.echo(f"{len(redeemable)} redeemable position(s):")
+            for r in redeemable:
+                click.echo(
+                    f"  pred #{r['id']} market={r['market_id']} side={r['side']} "
+                    f"shares={r['shares']:.4f} expected_payout=${r['expected_payout']:.2f}"
+                )
+            click.echo("\nRun with a prediction_id to redeem one, or --all to redeem everything.")
+            return
+        result = redeem_prediction(conn, prediction_id, dry_run=dry_run)
+        if result.get("success"):
+            if result.get("dry_run"):
+                click.echo(f"DRY RUN — would redeem pred #{prediction_id}: {result}")
+            else:
+                click.echo(
+                    f"Redeemed pred #{prediction_id}: "
+                    f"+${result.get('usdc_received', 0):.4f} USDC.e "
+                    f"(tx {result.get('tx_hash', 'n/a')})"
+                )
+        else:
+            click.echo(f"Failed: {result.get('error')}")
+            sys.exit(1)
+    finally:
+        conn.close()
+
+
 @cli.command("setup-clob")
 def setup_clob():
     """One-time setup: approve USDC + CTF token allowances for Polymarket CLOB."""
