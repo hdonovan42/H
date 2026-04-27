@@ -5,6 +5,24 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v20.3 — Backfill the missing shadow_trades table (latent bug surfaced post-Lakers entry)
+
+**Baseline**: 68/68 tests green, drift $-0.0007 on-chain.
+
+### What this fixes
+After pred #12 (Lakers NO) was placed under v20.1, every subsequent cycle threw `no such table: shadow_trades` from `_evaluate_shadow_variants`. The shadow-pyramid feature was enabled in config and `agent.py` SELECT/INSERT-ed against the table, but no `CREATE TABLE` had ever been added to the schema. The daemon caught the exception per-cycle so it didn't crash, but the rest of momentum analysis silently bailed — every cycle after the first open position became a no-op.
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `vault/db.py` | Added `shadow_trades` to `SCHEMA_SQL` for fresh installs; added v22 migration for existing DBs; bumped `SCHEMA_VERSION` to 22. Indexes on `(market_id, side, variant)` and `resolved`. |
+
+### Notes
+- This was a pre-existing bug unrelated to the v20.1/v20.2 work, but the same Lakers entry that proved v20.1 worked also tickled this hole. Surfacing it counts.
+- Migration is non-destructive (`CREATE TABLE IF NOT EXISTS`); safe to apply on any DB regardless of how the existing daemon was running.
+
+---
+
 ## v20.2 — On-chain redemption (closing the resolve→redeem gap)
 
 **Baseline**: 68/68 tests green, daemon running real-money.

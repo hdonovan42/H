@@ -7,7 +7,7 @@ from vault.config_loader import get_db_path
 
 log = logging.getLogger("vault.db")
 
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -337,6 +337,32 @@ CREATE TABLE IF NOT EXISTS backtest_results (
     cohens_d       REAL,
     significant    INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS shadow_trades (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    cycle_id        INTEGER,
+    market_id       TEXT NOT NULL,
+    question        TEXT,
+    side            TEXT NOT NULL CHECK (side IN ('YES','NO')),
+    variant         TEXT NOT NULL,
+    entry_price     REAL,
+    shares          REAL,
+    cost_basis      REAL,
+    pyramid_mult    REAL,
+    unrealised_roi  REAL,
+    v_1h            REAL,
+    v_6h            REAL,
+    z_1h            REAL,
+    resolved        INTEGER NOT NULL DEFAULT 0,
+    winner          TEXT,
+    shadow_pnl      REAL,
+    resolved_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_shadow_market_side_variant
+    ON shadow_trades(market_id, side, variant);
+CREATE INDEX IF NOT EXISTS idx_shadow_resolved
+    ON shadow_trades(resolved);
 """
 
 
@@ -875,6 +901,47 @@ def _migrate(conn):
         )
         conn.commit()
         log.info("v21 migration: added wallet_transactions table for cashflow tracking")
+
+    if version < 22:
+        # v22: backfill the shadow_trades table that agent.py has been writing
+        # to (and reading from) without a CREATE TABLE in the original schema.
+        # Once a real-mode position was open, every cycle hit the shadow eval
+        # path on subsequent velocity alerts and threw 'no such table' — caught
+        # at the cycle level but skipping the rest of momentum analysis.
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS shadow_trades (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                cycle_id        INTEGER,
+                market_id       TEXT NOT NULL,
+                question        TEXT,
+                side            TEXT NOT NULL CHECK (side IN ('YES','NO')),
+                variant         TEXT NOT NULL,
+                entry_price     REAL,
+                shares          REAL,
+                cost_basis      REAL,
+                pyramid_mult    REAL,
+                unrealised_roi  REAL,
+                v_1h            REAL,
+                v_6h            REAL,
+                z_1h            REAL,
+                resolved        INTEGER NOT NULL DEFAULT 0,
+                winner          TEXT,
+                shadow_pnl      REAL,
+                resolved_at     TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_shadow_market_side_variant
+                ON shadow_trades(market_id, side, variant);
+            CREATE INDEX IF NOT EXISTS idx_shadow_resolved
+                ON shadow_trades(resolved);
+        """)
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "22"),
+        )
+        conn.commit()
+        log.info("v22 migration: created shadow_trades table (was referenced but never declared)")
 
 
 def init_db(db_path: Path | None = None) -> sqlite3.Connection:
