@@ -232,6 +232,13 @@ def get_reconciliation():
         elif drift is not None and drift > tol:
             status = "positive-drift"
 
+        # Daemon liveness — separate signal from reconciliation status.
+        # paused=true means the cycle loop is short-circuiting; daemon_running=false
+        # means there's no active vault process at all.
+        paused_row = conn.execute("SELECT value FROM meta WHERE key = 'paused'").fetchone()
+        is_paused = paused_row is not None and paused_row[0] == "true"
+        daemon_running = read_pid() is not None
+
         return {
             "status": status,
             "is_live": is_live_flag,
@@ -241,6 +248,8 @@ def get_reconciliation():
             "tolerance": tol,
             "pending": [dict(r) for r in pending],
             "reconciling": [dict(r) for r in reconciling],
+            "daemon_running": daemon_running,
+            "paused": is_paused,
         }
     finally:
         conn.close()
