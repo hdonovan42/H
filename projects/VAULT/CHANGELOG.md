@@ -5,6 +5,29 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v20.4 — Wallet sync mustn't double-count redemption inflows
+
+**Baseline**: drift back to $-0.0007 after reversal, 69/69 tests green.
+
+### What this fixes
+Several hours after the Pereira redemption tx (`0xfc598d9b...`) landed on-chain, the periodic `wallet_sync` reconciler scanned the new blocks and saw a `Transfer` event delivering $2.29 USDC.e from `0x3a3bd7bb9528e159577f7c2e685cc81a765002e2` (the Polymarket neg-risk collateral vault) to our wallet. The counterparty wasn't in `INTERNAL_ADDRESSES`, so it was logged as an external **deposit** — adding ledger entry #283 (+$2.29) on top of the `prediction_resolve` credit (+$2.29) already written by v20.2. Result: ledger thought we had $21.86, wallet had $19.77, **dashboard reconciliation panel reported $-2.29 drift**.
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `vault/wallet_sync.py` | Added two addresses to `INTERNAL_ADDRESSES`: NegRiskAdapter (`0xd91E80c...`) and the neg-risk collateral vault (`0x3a3bd7b...`). Both are sources of redemption inflows for neg-risk markets and must not be treated as external counterparties. |
+| `tests/test_wallet_sync.py` | New `test_is_internal_detects_neg_risk_redemption_sources` regression test pinned to the exact addresses involved in the Pereira incident. |
+
+### Recovery
+- Deleted ledger entry #283 (phantom deposit) and `wallet_transactions` row #3 from the live DB.
+- Drift restored to $-0.0007 (rounding).
+- Dashboard reconciliation panel now reports `status: ok`.
+
+### Why this slipped through v20.2
+The redemption module was tested with mocked `redeem_prediction` / mocked on-chain calls. The wallet_sync interaction wasn't covered because it runs on a separate cycle interval and only sees the on-chain state, not the prediction lifecycle. A future refactor should let wallet_sync correlate Transfer events with our own outbound tx hashes — but addresses-as-internal-filter is the scalpel for now.
+
+---
+
 ## v20.3 — Backfill the missing shadow_trades table (latent bug surfaced post-Lakers entry)
 
 **Baseline**: 68/68 tests green, drift $-0.0007 on-chain.

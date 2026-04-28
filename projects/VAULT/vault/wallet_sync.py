@@ -32,6 +32,11 @@ INTERNAL_ADDRESSES = {
     "0xc5d563a36ae78145c45a50134d48a1215220f80a": "Polymarket Neg-Risk Exchange",
     # Conditional Token Framework — not relevant for USDC but safe to exclude
     "0x4d97dcd97ec945f40cf65f87097ace5ea0476045": "Polymarket CTF",
+    # Neg-risk redemption infrastructure. Without these, redeemPositions()
+    # USDC.e transfers from the neg-risk vault would be miscategorised as
+    # external deposits, double-counting the prediction_resolve credit.
+    "0xd91e80cf2e7be2e162c6513ced06f1dd0da35296": "Polymarket Neg-Risk Adapter",
+    "0x3a3bd7bb9528e159577f7c2e685cc81a765002e2": "Polymarket Neg-Risk Vault",
     # Uniswap v3 infra used for native → USDC.e auto-swap
     "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap v3 Router",
     "0xd36ec33c8bed5a9f7b6630855f1533455b98a418": "Uniswap v3 USDC/USDC.e Pool (fee=100)",

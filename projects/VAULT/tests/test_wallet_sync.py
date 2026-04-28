@@ -27,6 +27,17 @@ def test_is_internal_detects_polymarket_exchanges():
     assert _is_internal("0xC5d563A36AE78145C45a50134d48A1215220f80a") is True
 
 
+def test_is_internal_detects_neg_risk_redemption_sources():
+    """Regression: USDC.e arriving from a neg-risk redemption is NOT a deposit.
+    Pereira redemption (Apr 27 2026) sent USDC.e from the neg-risk vault to
+    our wallet — wallet_sync logged it as a +$2.29 deposit, double-counting
+    the prediction_resolve credit and creating a $-2.29 reconciliation drift.
+    Both the NegRiskAdapter and the underlying vault must be classified as
+    internal so future redemptions don't re-trigger the same bug."""
+    assert _is_internal("0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296") is True  # NegRiskAdapter
+    assert _is_internal("0x3a3bd7bb9528e159577f7c2e685cc81a765002e2") is True  # Neg-Risk Vault
+
+
 def test_is_internal_ignores_external_wallet():
     """Random addresses are external (cashflow)."""
     assert _is_internal("0x1234567890123456789012345678901234567890") is False
