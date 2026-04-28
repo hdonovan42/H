@@ -5,6 +5,44 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v20.5 — Stop silent 50/50 fallback when gamma API has no outcomePrices
+
+**Baseline**: 76/76 tests green. Pred #12 `peak_roi` reset from bogus 1.462 to 0.0; 17 polluted snapshots removed; `peak_total_value` reset from $22.11 to $19.99.
+
+### What this fixes
+The user observed pred #12 (Lakers NO) flickering: down 57c → up to +146% → back down 57c. Investigation showed the actual market never moved that much — the data feed did. For ~20 minutes after the daemon resumed (12:16–12:30 UTC on 2026-04-28), the Polymarket gamma API returned market records without `outcomePrices` populated. `_parse_market` had a silent fallback:
+
+```python
+yes_price = 0.5
+no_price = 0.5
+if outcome_prices:
+    ...
+```
+
+So 17 odds_snapshots got written with bogus 50/50 readings. Those poisoned downstream:
+- `predictions_value` (showed $2.54 vs real $0.50)
+- `peak_roi` for pred #12 (pinned to +146.2% — would have skewed every future trailing-stop check)
+- `peak_total_value` ($22.11 vs real $19.99)
+
+Looking at the live logs after the fix: this isn't a one-off. **Every cycle, ~6 different markets** come back from the gamma API without prices. Silent 50/50 defaults were corrupting the snapshot history every minute, just rarely landing on a market we care about.
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `vault/polymarket.py` | `_parse_market` no longer defaults to 0.5/0.5. Sets `yes_price = no_price = None` and adds a `has_prices: bool` flag to the parsed dict. `get_current_odds` returns `None` (with a WARNING log) when `has_prices` is False. |
+| `vault/market_discovery.py` | Skips `_upsert_market` and `record_odds_snapshot` for markets without prices. Comparison `yes < 0.05` would otherwise crash on `None`. |
+| `tests/test_polymarket_parser.py` (new) | 7 regression tests covering: prices-present happy path; missing/null/unparseable/short outcomePrices; `get_current_odds` returning None when has_prices=False; returning prices when present. |
+
+### Data fix on live DB
+- Deleted 17 bogus 50/50 odds_snapshots for market 1970316 between 12:15 and 12:35 UTC.
+- Reset `predictions.peak_roi` for pred #12 from 1.462 to 0.0.
+- Reset `meta.peak_total_value` from 22.106474 to 19.985 (current real total value).
+
+### Knock-on benefits
+Existing callers (`agent.record_objectives`, `api/v1/status`, `guardrails.check_drawdown`) already handled `odds is None` correctly (fall back to cost_basis / skip update). So returning None from `get_current_odds` Just Works for them. No additional caller changes needed.
+
+---
+
 ## v20.4 — Wallet sync mustn't double-count redemption inflows
 
 **Baseline**: drift back to $-0.0007 after reversal, 69/69 tests green.

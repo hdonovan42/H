@@ -61,6 +61,12 @@ def discover_markets(conn, cycle_id: int, themes: list[dict] | None = None,
             continue
         seen_ids.add(mid)
 
+        # Skip when gamma didn't return outcomePrices for this market (transient
+        # API gap). Without a real price we can't snapshot it or evaluate it,
+        # and silently treating it as 50/50 poisons downstream calculations.
+        if not parsed.get("has_prices"):
+            continue
+
         # Skip extreme odds (resolved in all but name)
         yes = parsed["yes_price"]
         if yes < 0.05 or yes > 0.95:
@@ -72,8 +78,7 @@ def discover_markets(conn, cycle_id: int, themes: list[dict] | None = None,
             continue
 
         _upsert_market(conn, parsed)
-        record_odds_snapshot(conn, mid, yes,
-                             parsed.get("no_price", 0.5), cycle_id)
+        record_odds_snapshot(conn, mid, yes, parsed["no_price"], cycle_id)
         tracked.append(parsed)
 
     if tracked:

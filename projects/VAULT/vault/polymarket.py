@@ -169,11 +169,19 @@ def check_resolution(conn, market_id: str) -> dict | None:
 
 
 def get_current_odds(conn, market_id: str) -> dict | None:
-    """Get current YES/NO prices for a market."""
+    """Get current YES/NO prices for a market.
+
+    Returns None if the gamma API didn't include outcomePrices in this fetch
+    (rare but observed). Returning a 50/50 placeholder here is wrong — it
+    poisons MTM, snapshots, and peak_roi tracking.
+    """
     market = fetch_market(conn, market_id)
     if not market:
         return None
-    return {"yes_price": market.get("yes_price", 0), "no_price": market.get("no_price", 0)}
+    if not market.get("has_prices"):
+        log.warning(f"Market {market_id}: gamma API returned no outcomePrices; treating as unknown")
+        return None
+    return {"yes_price": market["yes_price"], "no_price": market["no_price"]}
 
 
 def _parse_clob_token_ids(raw_value) -> list | None:
@@ -200,10 +208,16 @@ def _parse_market(raw: dict) -> dict | None:
     if not market_id:
         return None
 
-    # Parse outcome prices
+    # Parse outcome prices. The gamma API has been observed to return market
+    # records without outcomePrices populated for short windows (e.g. immediately
+    # after a stale-cache refresh). Previously we silently defaulted to 0.5/0.5,
+    # which poisoned odds_snapshots and peak_roi (Apr 28 2026 incident — pred #12
+    # peak_roi inflated to +146% from a 20-minute window of bogus 50/50 reads).
+    # Now: set None and let callers detect missing data via has_prices.
     outcome_prices = raw.get("outcomePrices")
-    yes_price = 0.5
-    no_price = 0.5
+    yes_price = None
+    no_price = None
+    has_prices = False
     if outcome_prices:
         if isinstance(outcome_prices, str):
             try:
@@ -213,6 +227,7 @@ def _parse_market(raw: dict) -> dict | None:
         if outcome_prices and len(outcome_prices) >= 2:
             yes_price = float(outcome_prices[0])
             no_price = float(outcome_prices[1])
+            has_prices = True
 
     # Extract parent event title if available
     events = raw.get("events")
@@ -227,6 +242,7 @@ def _parse_market(raw: dict) -> dict | None:
         "slug": raw.get("slug"),
         "yes_price": yes_price,
         "no_price": no_price,
+        "has_prices": has_prices,
         "volume": float(raw.get("volume", 0) or 0),
         "end_date": raw.get("endDate"),
         "closed": raw.get("closed", False),
