@@ -248,8 +248,26 @@ def buy_shares(token_id: str, amount_usd: float, max_price: float = 0.99) -> Fil
             price=max_price,
         )
 
-        signed_order = client.create_market_order(order_args)
-        resp = client.post_order(signed_order, "FAK")
+        # Polymarket migrated CLOB to v2 in late April 2026. py-clob-client
+        # 0.34.6 still builds v1 orders → server rejects with
+        # 'order_version_mismatch'. We use the SDK to compute the correct
+        # maker/taker amounts (it knows tick sizes, rounding, fee rate, and
+        # neg_risk auto-detection), then re-sign the result for the v2
+        # struct + new verifying contracts.
+        v1_signed = client.create_market_order(order_args)
+        v1 = v1_signed.dict()
+        from vault.clob_v2 import build_signed_order_v2, post_order_v2
+        v2_order = build_signed_order_v2(
+            private_key=os.environ["POLYMARKET_PRIVATE_KEY"],
+            maker=v1["maker"],
+            token_id=v1["tokenId"],
+            maker_amount=int(v1["makerAmount"]),
+            taker_amount=int(v1["takerAmount"]),
+            side=v1["side"],
+            signature_type=int(v1.get("signatureType", 0)),
+            neg_risk=client.get_neg_risk(token_id),
+        )
+        resp = post_order_v2(client=client, signed_order=v2_order, order_type="FAK")
 
         if not resp or not resp.get("success"):
             error_msg = resp.get("errorMsg", "Unknown CLOB error") if resp else "No response from CLOB"
@@ -419,8 +437,21 @@ def sell_shares(token_id: str, shares: float, min_price: float = 0.01) -> FillRe
             price=min_price,
         )
 
-        signed_order = client.create_market_order(order_args)
-        resp = client.post_order(signed_order, "FAK")
+        # v2 path — see comment in buy_shares for context.
+        v1_signed = client.create_market_order(order_args)
+        v1 = v1_signed.dict()
+        from vault.clob_v2 import build_signed_order_v2, post_order_v2
+        v2_order = build_signed_order_v2(
+            private_key=os.environ["POLYMARKET_PRIVATE_KEY"],
+            maker=v1["maker"],
+            token_id=v1["tokenId"],
+            maker_amount=int(v1["makerAmount"]),
+            taker_amount=int(v1["takerAmount"]),
+            side=v1["side"],
+            signature_type=int(v1.get("signatureType", 0)),
+            neg_risk=client.get_neg_risk(token_id),
+        )
+        resp = post_order_v2(client=client, signed_order=v2_order, order_type="FAK")
 
         if not resp or not resp.get("success"):
             error_msg = resp.get("errorMsg", "Unknown CLOB error") if resp else "No response from CLOB"

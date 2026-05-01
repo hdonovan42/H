@@ -16,12 +16,40 @@ import pytest
 from vault.clob_client import buy_shares
 
 
-def _mock_client_returning(resp):
-    """Fake py_clob_client whose post_order returns the given resp."""
+def _mock_client():
+    """Fake py_clob_client. Since the v2 migration we use the SDK only for
+    maker/taker amount calculation + neg_risk lookup; the actual order is
+    signed and POSTed by vault.clob_v2. The v1 SignedOrder needs a .dict()
+    method that returns the fields our v2 builder reads."""
+    v1_signed = MagicMock()
+    v1_signed.dict.return_value = {
+        "maker": "0x" + "00" * 20,
+        "tokenId": "1",
+        "makerAmount": "1480000",
+        "takerAmount": "2480000",
+        "side": "BUY",
+        "signatureType": 0,
+    }
     client = MagicMock()
-    client.create_market_order.return_value = "signed_order"
-    client.post_order.return_value = resp
+    client.create_market_order.return_value = v1_signed
+    client.get_neg_risk.return_value = False
     return client
+
+
+@pytest.fixture(autouse=True)
+def _no_real_signing(monkeypatch):
+    """Stub the v2 sign+POST so we don't need a private key in unit tests.
+    Each test patches `vault.clob_client.post_order_v2` to return its specific
+    response payload. The stub here is a safety net so a missed mock doesn't
+    accidentally hit the live API."""
+    def _refuse(*args, **kwargs):
+        raise RuntimeError("post_order_v2 called without a per-test mock — fix the test")
+    monkeypatch.setenv("POLYMARKET_PRIVATE_KEY", "0x" + "11" * 32)
+    monkeypatch.setattr("vault.clob_v2.post_order_v2", _refuse)
+    monkeypatch.setattr(
+        "vault.clob_v2.build_signed_order_v2",
+        lambda **kwargs: {"signature": "0xstub"},
+    )
 
 
 @pytest.fixture
@@ -31,35 +59,36 @@ def no_sleep():
         yield
 
 
-def test_clob_lies_about_no_fills_but_ctf_shows_shares(no_sleep):
-    """The Pereira regression: post_order returns success=True,trades=[] but
+def test_clob_lies_about_no_fills_but_ctf_shows_shares(no_sleep, monkeypatch):
+    """The Pereira regression: response says success=True,trades=[] but
     CTF shows shares minted. buy_shares MUST return success and report the
     on-chain share count, not silently cancel."""
     fake_resp = {"success": True, "orderID": "ord_pereira", "trades": []}
 
     # USDC: settled by the time we re-check (1.48 spent).
     # CTF: 0 before the call, 2.29 after polling settles.
-    usdc_before_raw = 100_000_000  # 100 USDC in 1e6 base units
-    usdc_after_raw = 100_000_000 - 1_480_000  # spent 1.48
+    usdc_before_raw = 100_000_000
+    usdc_after_raw = 100_000_000 - 1_480_000
 
-    with patch("vault.clob_client._get_client", return_value=_mock_client_returning(fake_resp)), \
+    monkeypatch.setattr("vault.clob_v2.post_order_v2", lambda **kw: fake_resp)
+    with patch("vault.clob_client._get_client", return_value=_mock_client()), \
          patch("vault.clob_client._get_usdc_balance_raw", side_effect=[usdc_before_raw, usdc_after_raw]), \
          patch("vault.clob_client.get_ctf_balance", side_effect=[0.0, 2.28753]):
         result = buy_shares("token_pereira_yes", amount_usd=1.48, max_price=0.597)
 
     assert result.success is True, "MUST detect stealth fill, not cancel"
-    assert result.shares == pytest.approx(2.28753), "shares must match on-chain"
-    assert result.amount_usd == pytest.approx(1.48), "cost must match USDC delta"
+    assert result.shares == pytest.approx(2.28753)
+    assert result.amount_usd == pytest.approx(1.48)
     assert result.avg_price == pytest.approx(1.48 / 2.28753, rel=1e-3)
 
 
-def test_clob_no_fills_ctf_unchanged_genuine_failure(no_sleep):
+def test_clob_no_fills_ctf_unchanged_genuine_failure(no_sleep, monkeypatch):
     """Truly empty fill: CTF unchanged, USDC unchanged → safe to declare no-fill."""
     fake_resp = {"success": True, "orderID": "ord_dry", "trades": []}
     usdc_raw = 100_000_000
 
-    # CTF balance polled 5 times — all zero. side_effect must cover them all.
-    with patch("vault.clob_client._get_client", return_value=_mock_client_returning(fake_resp)), \
+    monkeypatch.setattr("vault.clob_v2.post_order_v2", lambda **kw: fake_resp)
+    with patch("vault.clob_client._get_client", return_value=_mock_client()), \
          patch("vault.clob_client._get_usdc_balance_raw", side_effect=[usdc_raw, usdc_raw]), \
          patch("vault.clob_client.get_ctf_balance", side_effect=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]):
         result = buy_shares("token_dry", amount_usd=1.48, max_price=0.6)
@@ -68,29 +97,31 @@ def test_clob_no_fills_ctf_unchanged_genuine_failure(no_sleep):
     assert "no immediate liquidity" in (result.error or "")
 
 
-def test_clob_no_fills_ctf_blind_returns_unverified(no_sleep):
+def test_clob_no_fills_ctf_blind_returns_unverified(no_sleep, monkeypatch):
     """RPC blind during CTF polling → must NOT cancel. Return UNVERIFIED so
     the bet actuator marks reconciling and the orphan sweep handles it."""
     fake_resp = {"success": True, "orderID": "ord_blind", "trades": []}
     usdc_raw = 100_000_000
 
-    with patch("vault.clob_client._get_client", return_value=_mock_client_returning(fake_resp)), \
+    monkeypatch.setattr("vault.clob_v2.post_order_v2", lambda **kw: fake_resp)
+    with patch("vault.clob_client._get_client", return_value=_mock_client()), \
          patch("vault.clob_client._get_usdc_balance_raw", side_effect=[usdc_raw, usdc_raw]), \
-         patch("vault.clob_client.get_ctf_balance", return_value=None):  # RPC dead
+         patch("vault.clob_client.get_ctf_balance", return_value=None):
         result = buy_shares("token_blind", amount_usd=1.48, max_price=0.6)
 
     assert result.success is False
     assert (result.error or "").startswith("UNVERIFIED")
 
 
-def test_clob_no_fills_usdc_moved_but_no_ctf_is_anomaly(no_sleep):
+def test_clob_no_fills_usdc_moved_but_no_ctf_is_anomaly(no_sleep, monkeypatch):
     """Money left the wallet but no shares minted → serious anomaly. MUST NOT
     silently cancel; surface as UNVERIFIED so an operator investigates."""
     fake_resp = {"success": True, "orderID": "ord_weird", "trades": []}
     usdc_before_raw = 100_000_000
     usdc_after_raw = 100_000_000 - 1_480_000  # USDC vanished
 
-    with patch("vault.clob_client._get_client", return_value=_mock_client_returning(fake_resp)), \
+    monkeypatch.setattr("vault.clob_v2.post_order_v2", lambda **kw: fake_resp)
+    with patch("vault.clob_client._get_client", return_value=_mock_client()), \
          patch("vault.clob_client._get_usdc_balance_raw", side_effect=[usdc_before_raw, usdc_after_raw]), \
          patch("vault.clob_client.get_ctf_balance", side_effect=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]):
         result = buy_shares("token_weird", amount_usd=1.48, max_price=0.6)

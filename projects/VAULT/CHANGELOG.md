@@ -5,6 +5,47 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v20.6 — CLOB protocol v2 support
+
+**Baseline**: 84/84 tests green. Daemon paused 3 days while every order was rejected with `order_version_mismatch`.
+
+### What this fixes
+Polymarket migrated their CLOB API from v1 to v2 in late April 2026 (`GET /version` now returns `{"version": 2}`). Our installed `py-clob-client` (0.34.6) still builds v1 orders, which the new server rejects with `order_version_mismatch`. The TS SDK got v2 support in their `clob-client-v2` repo two weeks ago; the Python SDK hasn't shipped it.
+
+The v2 spec changes (sourced from `clob-client-v2/src/order-utils/model/ctfExchangeV2TypedData.ts` and `exchangeOrderBuilderV2.ts`):
+
+| | v1 | v2 |
+|---|---|---|
+| EIP-712 domain version | `"1"` | `"2"` |
+| verifyingContract (regular) | `0x4bFb41d5...` | `0xE111180000d2663C0091e4f400237545B87B996B` |
+| verifyingContract (neg-risk) | `0xC5d563A3...` | `0xe2222d279d744050d28e00520010520000310F59` |
+| Order struct | salt, maker, signer, taker, tokenId, makerAmount, takerAmount, side, expiration, nonce, feeRateBps, signatureType (12 fields) | salt, maker, signer, tokenId, makerAmount, takerAmount, side, signatureType, timestamp, metadata, builder (11 fields) |
+
+Different domain version + new verifying contracts + new order schema means our v1-signed orders can't be recovered to a valid signer by the new server-side validators.
+
+### Files added/modified
+| File | Changes |
+|------|---------|
+| `vault/clob_v2.py` (new) | `build_signed_order_v2()` constructs the v2 EIP-712 order struct (Polymarket CTF Exchange / version "2", new verifying contracts) and signs via `eth_account.sign_typed_data`. `post_order_v2()` POSTs to `/order` with the existing L2 HMAC headers from `py-clob-client` (auth flow didn't change). Reuses py-clob-client for everything else: API key derivation, neg_risk lookup, tick size, fee rate, market-order amount calculation. |
+| `vault/clob_client.py` | `buy_shares` and `sell_shares`: still call `client.create_market_order(...)` to compute correct maker/taker amounts (rounding, neg_risk auto-detect, fee rate), but extract `.dict()` and re-sign as v2 instead of posting v1. The response shape from `/order` didn't change, so the stealth-fill detection and CTF poll logic from v20.1 work unchanged. |
+| `tests/test_clob_v2.py` (new) | 8 unit tests: domain version is "2", new exchange addresses, JSON shape correct, side handled, invalid side rejected, salts unique per call, neg-risk vs regular produce different signatures (proving different domain hashing), end-to-end signature recovers to signer address. |
+| `tests/test_clob_stealth_fill.py` | Updated mocks to target the new v2 path (`vault.clob_v2.post_order_v2` instead of the old `client.post_order`). All 4 stealth tests still green. |
+
+### What we deliberately kept from py-clob-client
+- L1 auth (API key derivation via signing a ClobAuthDomain message).
+- L2 auth (HMAC-SHA256 with API secret per request) — `create_level_2_headers` is reused verbatim.
+- `client.get_neg_risk(token_id)` for auto-detecting neg-risk markets.
+- `client.create_market_order(args)` for tick-size + rounding + fee-rate calculations. We extract its v1 SignedOrder via `.dict()` and re-sign for v2.
+- All non-order endpoints (book, tick-size, neg-risk, fee-rate, balances/allowances).
+
+### Why not subprocess to the TS SDK
+Considered. Rejected: extra dependency surface (Node + JS), JSON IPC overhead, harder to test in our existing Python pytest suite, and the v2 spec is small (11 fields, one EIP-712 domain) so native Python is maintainable.
+
+### Future-proofing
+The v2 PR description mentions: *"Adds flow to refresh client version and retry posting orders if clob reverts for order mismatch"*. We don't have that yet — if Polymarket migrates to v3 the same break recurs. A follow-up could call `GET /version` at startup and route to v1/v2/v3 builders accordingly. For now we hardcode v2.
+
+---
+
 ## v20.5 — Stop silent 50/50 fallback when gamma API has no outcomePrices
 
 **Baseline**: 76/76 tests green. Pred #12 `peak_roi` reset from bogus 1.462 to 0.0; 17 polluted snapshots removed; `peak_total_value` reset from $22.11 to $19.99.
