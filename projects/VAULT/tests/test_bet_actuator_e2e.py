@@ -20,9 +20,11 @@ MARKET = {
     "slug": "test-market",
     "yes_price": 0.50,
     "no_price": 0.50,
+    "has_prices": True,
     "end_date": "2026-12-31T23:59:59Z",
     "clob_token_ids": ["token_yes", "token_no"],
     "closed": False,
+    "accepting_orders": True,
 }
 
 

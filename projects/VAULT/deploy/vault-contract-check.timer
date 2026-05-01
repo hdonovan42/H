@@ -1,0 +1,12 @@
+[Unit]
+Description=Run VAULT contract check daily
+
+[Timer]
+# Daily at 06:00 UTC. Polymarket typically deploys during US business hours;
+# 06:00 UTC = 02:00 ET = before they wake up. Catches yesterday's changes.
+OnCalendar=*-*-* 06:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

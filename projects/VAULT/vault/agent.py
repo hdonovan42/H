@@ -1471,6 +1471,26 @@ def run_cycle(conn) -> dict:
     # Resolve any settled predictions before the cycle starts
     resolve_predictions(conn)
 
+    # On-chain authoritative share count for real-mode positions. Without
+    # this, any divergence between DB shares and on-chain CTF balance (e.g.
+    # the 1 May 2026 pred #12 phantom-shares incident) flows into MTM,
+    # peak_roi tracking, exit sizing, and the trailing-stop math. Reads
+    # are cheap (1 RPC call per open position) and the chain is the only
+    # truth that can't be tricked by a bad confirm-time read.
+    is_simulated = cfg.get("trading", {}).get("simulated", True)
+    if not is_simulated:
+        try:
+            from vault.positions import reconcile_real_mode_shares
+            recon = reconcile_real_mode_shares(conn)
+            if recon["corrections"] > 0 or recon["updated"] > 0 or recon["blind"] > 0:
+                log.info(
+                    f"Share reconciliation: checked={recon['checked']} "
+                    f"updated={recon['updated']} corrections={recon['corrections']} "
+                    f"blind={recon['blind']}"
+                )
+        except Exception as e:
+            log.error(f"share reconciliation raised: {e}", exc_info=True)
+
     # Portfolio drawdown circuit-breaker — before any trading logic
     cb_triggered, cb_detail = check_drawdown(conn)
     if cb_triggered:

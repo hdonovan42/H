@@ -1,0 +1,14 @@
+[Unit]
+Description=VAULT daily contract check against live Polymarket APIs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=hq
+Group=hq
+WorkingDirectory=/home/hq/vault
+Environment=PATH=/home/hq/vault/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/hq/vault/.venv/bin/python -m pytest tests/contract/ -v --tb=short
+StandardOutput=journal
+StandardError=journal

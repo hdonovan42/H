@@ -65,9 +65,12 @@ def test_buy_order_has_correct_shape():
     assert order["expiration"] == "0"
     assert order["metadata"] == ZERO_BYTES32
     assert order["builder"] == ZERO_BYTES32
-    # All numeric fields are stringified for JSON safety
-    assert isinstance(order["salt"], str)
+    # `salt` is a number (matches the TS SDK's parseInt). Other numeric
+    # amount fields are stringified to avoid JS-side precision loss.
+    assert isinstance(order["salt"], int)
     assert isinstance(order["makerAmount"], str)
+    assert isinstance(order["takerAmount"], str)
+    assert isinstance(order["tokenId"], str)
     assert order["maker"] == TEST_ACCOUNT.address
     assert order["signer"] == TEST_ACCOUNT.address
     # Signature is 65 bytes hex (130 chars + 0x prefix)
@@ -148,6 +151,92 @@ def test_neg_risk_market_signs_against_neg_risk_exchange():
     assert regular["timestamp"] == neg_risk["timestamp"]  # same timestamp
     # Signatures must differ because verifyingContract differs
     assert regular["signature"] != neg_risk["signature"]
+
+
+def test_parse_fill_response_distinguishes_missing_trades_from_empty():
+    """Regression: previously `resp.get("trades", []) or []` made a missing
+    `trades` key indistinguishable from a legitimate empty list. With
+    parse_fill_response we log a CRITICAL when the key is missing (= API
+    schema may have changed) but treat both as no-fill so the on-chain
+    poll can still reconcile."""
+    from vault.clob_v2 import parse_fill_response
+    # Empty trades — legitimate no-fill, no warning expected.
+    order_id, shares, cost, err = parse_fill_response(
+        {"success": True, "orderID": "ord_a", "trades": []}
+    )
+    assert err is None and shares == 0.0 and order_id == "ord_a"
+
+    # Missing trades key — schema-drift signal. Still returns no-fill
+    # (success path) so the caller can run the stealth-fill poll.
+    import logging
+    with _capture_logs("vault.clob_v2", logging.CRITICAL) as logs:
+        order_id, shares, cost, err = parse_fill_response(
+            {"success": True, "orderID": "ord_b"}
+        )
+    assert err is None and shares == 0.0
+    assert any("missing 'trades'" in line for line in logs), logs
+
+
+def test_parse_fill_response_rejects_malformed_trades():
+    """Regression: previously `float(trade.get("size", 0))` silently
+    dropped trades missing size or price. Now: raise ValueError so the
+    bug surfaces immediately in the daemon log instead of corrupting
+    fill totals."""
+    from vault.clob_v2 import parse_fill_response
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError, match="missing required fields"):
+        parse_fill_response(
+            {"success": True, "orderID": "x", "trades": [{"size": "1.5"}]}  # no price
+        )
+
+    with _pytest.raises(ValueError, match="not a dict"):
+        parse_fill_response(
+            {"success": True, "orderID": "x", "trades": ["not-a-dict"]}
+        )
+
+    with _pytest.raises(ValueError, match="out-of-bounds"):
+        parse_fill_response(
+            {"success": True, "orderID": "x", "trades": [{"size": "1", "price": "1.5"}]}
+        )
+
+
+def test_parse_fill_response_handles_explicit_failure():
+    """When success=False the helper surfaces errorMsg verbatim. Don't
+    invent 'Unknown CLOB error' just because the field is absent."""
+    from vault.clob_v2 import parse_fill_response
+    _, _, _, err = parse_fill_response({"success": False, "errorMsg": "bad sig"})
+    assert err == "bad sig"
+    _, _, _, err = parse_fill_response({"success": False})
+    # Missing errorMsg → surface that fact, not a fake one
+    assert err is not None and "success=False" in err
+
+
+def _capture_logs(logger_name, level):
+    """Context manager that captures log messages from a named logger."""
+    import logging
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _ctx():
+        logger = logging.getLogger(logger_name)
+        handler_records = []
+
+        class _ListHandler(logging.Handler):
+            def emit(self, record):
+                handler_records.append(record.getMessage())
+
+        h = _ListHandler(level=level)
+        logger.addHandler(h)
+        old_level = logger.level
+        logger.setLevel(level)
+        try:
+            yield handler_records
+        finally:
+            logger.removeHandler(h)
+            logger.setLevel(old_level)
+
+    return _ctx()
 
 
 def test_signature_recovers_to_signer_address():

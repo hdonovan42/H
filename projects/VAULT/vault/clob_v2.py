@@ -73,8 +73,13 @@ V2_ORDER_TYPES = {
 
 
 def _generate_salt() -> int:
-    """Produce a 256-bit random salt (uint256 fits any value < 2^256)."""
-    return int.from_bytes(secrets.token_bytes(32), "big")
+    """Produce an order salt the server-side JS can JSON-parse without
+    precision loss. The TS SDK uses `Math.round(Math.random() * Date.now())`
+    which lands in roughly [0, 2e12] — well under 2^53. A 256-bit salt
+    looks correct from the contract's perspective but would lose precision
+    when re-serialised by JS, so we match the TS bound.
+    """
+    return secrets.randbelow(2**52)
 
 
 def build_signed_order_v2(
@@ -151,8 +156,10 @@ def build_signed_order_v2(
     # JSON shape sent to /order. Mirrors orderToJsonV2 in the TS SDK:
     # `taker` and `expiration` are present in the JSON but NOT in the
     # signed typed data. `side` here is the string form, not the uint8.
+    # `salt` is a number in the TS payload (parseInt), not a string —
+    # sending it as string yields a 400 "Invalid order payload".
     return {
-        "salt": str(salt),
+        "salt": salt,
         "maker": maker,
         "signer": signer_address,
         "taker": ZERO_ADDRESS,
@@ -167,6 +174,83 @@ def build_signed_order_v2(
         "builder": builder,
         "signature": signature_hex,
     }
+
+
+def parse_fill_response(resp: dict) -> tuple[str, float, float, str | None]:
+    """Parse a CLOB /order response without silent defaults.
+
+    Returns (order_id, total_shares, total_cost, error_message).
+    `error_message` is None on success. The caller should ALSO check whether
+    total_shares is zero (== "no fills") and run the on-chain stealth-fill
+    poll if so — that path is intentionally separate.
+
+    The previous implementation used `resp.get("trades", []) or []` and
+    `float(trade.get("size", 0))`. Two failure modes hid behind those
+    defaults: (1) a missing `trades` key was indistinguishable from a
+    legitimate empty list, and (2) a trade record with missing/malformed
+    size or price was silently dropped. Both contributed to the Apr 2026
+    Pereira incident where the daemon believed an order had no fills
+    while CTF shares had actually been minted on-chain. Now we
+    distinguish: missing keys log a critical warning; malformed trades
+    raise so the caller sees them, not silently zero.
+    """
+    if not isinstance(resp, dict):
+        return ("", 0.0, 0.0, f"non-dict response: {type(resp).__name__}")
+
+    if not resp.get("success"):
+        # The server gave an explicit failure. errorMsg may or may not be set;
+        # if absent we surface that fact rather than inventing "Unknown".
+        return (
+            resp.get("orderID", ""),
+            0.0,
+            0.0,
+            resp.get("errorMsg") or f"server returned success={resp.get('success')!r}",
+        )
+
+    order_id = resp.get("orderID")
+    if order_id is None:
+        log.warning("CLOB response success=True but no orderID — schema may have changed")
+        order_id = ""
+
+    if "trades" not in resp:
+        # Distinguish "trades key missing entirely" from "trades=[]". The
+        # former suggests the API contract changed; the latter is a normal
+        # no-immediate-liquidity outcome. We treat both as no-fill at this
+        # layer (the on-chain stealth poll runs anyway), but a missing
+        # key always logs critical so we notice schema drift.
+        log.critical(
+            f"CLOB response missing 'trades' key (order {order_id[:8] if order_id else '?'}). "
+            f"Schema may have changed. Treating as no-fill; on-chain poll will reconcile."
+        )
+        return (order_id, 0.0, 0.0, None)
+
+    trades = resp["trades"] or []
+    total_shares = 0.0
+    total_cost = 0.0
+    for i, trade in enumerate(trades):
+        if not isinstance(trade, dict):
+            raise ValueError(f"trade #{i} is not a dict: {trade!r}")
+        if "size" not in trade or "price" not in trade:
+            raise ValueError(
+                f"trade #{i} missing required fields (size, price): {trade!r}"
+            )
+        try:
+            shares = float(trade["size"])
+            price = float(trade["price"])
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"trade #{i} has unparseable numerics (size={trade['size']!r}, "
+                f"price={trade['price']!r}): {e}"
+            ) from e
+        if shares < 0 or price < 0 or price > 1.0001:
+            raise ValueError(
+                f"trade #{i} has out-of-bounds values "
+                f"(size={shares}, price={price})"
+            )
+        total_shares += shares
+        total_cost += shares * price
+
+    return (order_id, total_shares, total_cost, None)
 
 
 def post_order_v2(
@@ -211,6 +295,13 @@ def post_order_v2(
         timeout=timeout,
     )
     if resp.status_code >= 400:
+        # Log the body we sent (with signature redacted) so v2 schema bugs are
+        # debuggable from the daemon journal without needing a separate
+        # smoke-test script.
+        debug_body = dict(body)
+        if isinstance(debug_body.get("order"), dict):
+            debug_body["order"] = {**debug_body["order"], "signature": "<redacted>"}
+        log.warning(f"v2 POST /order rejected: {resp.text} | body={debug_body}")
         # Surface the server's error verbatim — the v1-style PolyApiException
         # message format is what the rest of clob_client.py already pattern-
         # matches against (e.g. for the order_version_mismatch detection).

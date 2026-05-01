@@ -347,14 +347,26 @@ def redemption_sweep(conn) -> dict:
         try:
             result = redeem_prediction(conn, item["id"])
             if result.get("success"):
-                if result.get("usdc_received", 0) > 0 or result.get("note"):
+                # `usdc_received` may legitimately be 0 (already redeemed
+                # = no-op success). Use explicit None check, not truthy.
+                actual = result.get("usdc_received")
+                if actual is None:
+                    log.warning(
+                        f"redeem_prediction succeeded but didn't return usdc_received "
+                        f"for pred #{item['id']} — treating as 0"
+                    )
+                    actual = 0.0
+                if actual > 0 or result.get("note"):
                     redeemed += 1
                 else:
                     skipped += 1
                 # If actual redemption amount differs from the credited payout,
                 # write an adjustment ledger entry so cash matches wallet.
-                actual = result.get("usdc_received", 0.0)
-                expected = item["expected_payout"] or 0.0
+                # `expected_payout` of 0 is legit (lost market), so do explicit
+                # None check rather than truthy fall-through.
+                expected = item["expected_payout"]
+                if expected is None:
+                    expected = 0.0
                 delta = round(actual - expected, 6)
                 if abs(delta) > 0.005 and result.get("tx_hash"):
                     last_balance = conn.execute(

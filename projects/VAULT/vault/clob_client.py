@@ -256,6 +256,14 @@ def buy_shares(token_id: str, amount_usd: float, max_price: float = 0.99) -> Fil
         # struct + new verifying contracts.
         v1_signed = client.create_market_order(order_args)
         v1 = v1_signed.dict()
+        # Fail loud if the SDK schema changes — defaulting any of these is
+        # how silent corruptions get into signed orders.
+        for required in ("maker", "tokenId", "makerAmount", "takerAmount", "side", "signatureType"):
+            if v1.get(required) is None:
+                raise RuntimeError(
+                    f"py-clob-client SignedOrder.dict() missing required field {required!r}; "
+                    f"SDK schema may have changed: {v1!r}"
+                )
         from vault.clob_v2 import build_signed_order_v2, post_order_v2
         v2_order = build_signed_order_v2(
             private_key=os.environ["POLYMARKET_PRIVATE_KEY"],
@@ -264,27 +272,16 @@ def buy_shares(token_id: str, amount_usd: float, max_price: float = 0.99) -> Fil
             maker_amount=int(v1["makerAmount"]),
             taker_amount=int(v1["takerAmount"]),
             side=v1["side"],
-            signature_type=int(v1.get("signatureType", 0)),
+            signature_type=int(v1["signatureType"]),
             neg_risk=client.get_neg_risk(token_id),
         )
         resp = post_order_v2(client=client, signed_order=v2_order, order_type="FAK")
 
-        if not resp or not resp.get("success"):
-            error_msg = resp.get("errorMsg", "Unknown CLOB error") if resp else "No response from CLOB"
+        from vault.clob_v2 import parse_fill_response
+        order_id, total_shares, total_cost, error_msg = parse_fill_response(resp)
+        if error_msg is not None:
             log.warning(f"CLOB buy failed: {error_msg}")
             return FillResult(success=False, error=error_msg)
-
-        # Parse fill data from response
-        order_id = resp.get("orderID", "")
-        trades = resp.get("trades", []) or []
-
-        total_shares = 0.0
-        total_cost = 0.0
-        for trade in trades:
-            trade_shares = float(trade.get("size", 0))
-            trade_price = float(trade.get("price", 0))
-            total_shares += trade_shares
-            total_cost += trade_shares * trade_price
 
         if total_shares <= 0:
             # CLOB reported no fills. The Apr 2026 incident showed this response
@@ -440,6 +437,14 @@ def sell_shares(token_id: str, shares: float, min_price: float = 0.01) -> FillRe
         # v2 path — see comment in buy_shares for context.
         v1_signed = client.create_market_order(order_args)
         v1 = v1_signed.dict()
+        # Fail loud if the SDK schema changes — defaulting any of these is
+        # how silent corruptions get into signed orders.
+        for required in ("maker", "tokenId", "makerAmount", "takerAmount", "side", "signatureType"):
+            if v1.get(required) is None:
+                raise RuntimeError(
+                    f"py-clob-client SignedOrder.dict() missing required field {required!r}; "
+                    f"SDK schema may have changed: {v1!r}"
+                )
         from vault.clob_v2 import build_signed_order_v2, post_order_v2
         v2_order = build_signed_order_v2(
             private_key=os.environ["POLYMARKET_PRIVATE_KEY"],
@@ -448,26 +453,16 @@ def sell_shares(token_id: str, shares: float, min_price: float = 0.01) -> FillRe
             maker_amount=int(v1["makerAmount"]),
             taker_amount=int(v1["takerAmount"]),
             side=v1["side"],
-            signature_type=int(v1.get("signatureType", 0)),
+            signature_type=int(v1["signatureType"]),
             neg_risk=client.get_neg_risk(token_id),
         )
         resp = post_order_v2(client=client, signed_order=v2_order, order_type="FAK")
 
-        if not resp or not resp.get("success"):
-            error_msg = resp.get("errorMsg", "Unknown CLOB error") if resp else "No response from CLOB"
+        from vault.clob_v2 import parse_fill_response
+        order_id, total_shares, total_value, error_msg = parse_fill_response(resp)
+        if error_msg is not None:
             log.warning(f"CLOB sell failed: {error_msg}")
             return FillResult(success=False, error=error_msg)
-
-        order_id = resp.get("orderID", "")
-        trades = resp.get("trades", []) or []
-
-        total_shares = 0.0
-        total_value = 0.0
-        for trade in trades:
-            trade_shares = float(trade.get("size", 0))
-            trade_price = float(trade.get("price", 0))
-            total_shares += trade_shares
-            total_value += trade_shares * trade_price
 
         if total_shares <= 0:
             usdc_after = _get_usdc_balance_raw()
@@ -618,7 +613,8 @@ def get_native_usdc_balance() -> float | None:
         return None
     try:
         wallet = Account.from_key(pk).address
-    except Exception:
+    except Exception as e:
+        log.error(f"get_native_usdc_balance: failed to derive wallet from key: {e}")
         return None
 
     def _call(w3):

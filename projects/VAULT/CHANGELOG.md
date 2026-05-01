@@ -5,6 +5,72 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v20.7 — Real-money execution-layer hardening (3-phase audit)
+
+**Baseline**: 94/94 unit tests + 10/10 contract tests green. Pred #12 closed against on-chain reality (booked $-1.03 phantom-share loss). Daemon back live.
+
+### What this fixes
+The user observation: real-money mode has had 6 different failures in 6 weeks while paper mode ran for weeks without issue. The cause: paper mode never exercises CLOB signing, on-chain settlement, wallet sync, redemption, drift detection, or allowance management. Each of those is a distinct integration that bit us once when first activated. v20.7 attacks that pattern in three layers — silent-default removal, on-chain-as-truth for shares, and live contract tests against Polymarket.
+
+### Phase 1 — silent-fallback audit (vault/clob_v2.py, clob_client.py, polymarket.py, redeem.py, wallet_sync.py, actuators/bet.py)
+
+| Site | Before | After |
+|------|--------|-------|
+| `resp.get("trades", []) or []` (buy + sell) | missing key indistinguishable from `[]` | new `parse_fill_response` logs CRITICAL when `trades` key absent (= API schema drift); empty list is the legit no-fill case |
+| `float(trade.get("size", 0))` / `float(trade.get("price", 0))` | malformed trade silently dropped, total_shares wrong | raise `ValueError` so cycle log shows the bad payload |
+| `int(v1.get("signatureType", 0))` | SDK schema change → wrong sig type silently | explicit None check + raise `RuntimeError` if any required v1 field missing |
+| `parsed.get("yes_price", 0)` in cache save | cached fake 0 price when gamma omitted outcomePrices | type-changed to `float \| None`, cache only with prices; metadata-only cache when missing |
+| `result.get("usdc_received", 0)` / `expected_payout or 0.0` (redeem) | conflated "actually 0" with "missing" — broken for losing-market redemptions | explicit None check; legitimate 0 stays 0 |
+| `raw.get("closed", False)` / `acceptingOrders, True` | missing field defaults to "tradeable" — wrong direction | parser sets None on missing; `bet.py` does explicit `is True` / `is False` checks; refuses bet on unknown |
+| `except Exception:` (bare in clob_client + wallet_sync) | swallowed errors silently | logged with the exception |
+
+Net effect: every code path that *invents* a value when the upstream API is silent now either raises or logs CRITICAL. The Pereira and pred #12 failure modes share this DNA — they were defaults pretending to be data. Closed permanently.
+
+### Phase 2 — on-chain authoritative shares (vault/positions.py, agent.py)
+
+`predictions.shares` was written once at confirm time and trusted forever. The 1 May pred #12 incident showed this is unsafe: the v20.1 confirm-time CTF read returned 5.076859 (transient mid-settlement state), the actual on-chain balance was 0.006859, and the phantom 5.07 shares persisted in the DB for 3 days, polluting every downstream consumer (MTM, peak_roi, sell sizing).
+
+**Fix**: at the start of every cycle, `reconcile_real_mode_shares` re-reads the on-chain CTF balance for every open real-mode position and updates the DB to match. Significant divergence (>0.01 shares) writes a `share_correction` ledger entry for audit. RPC blind → leave DB unchanged (next cycle retries) rather than corrupt with stale data.
+
+This makes phantom-shares structurally impossible. The chain wins, every cycle.
+
+| File | Changes |
+|------|---------|
+| `vault/positions.py` (new) | `reconcile_real_mode_shares(conn)`. Per-cycle: query CTF for each open real-mode pred, UPDATE DB, write `share_correction` ledger row when divergence > 0.01 |
+| `vault/agent.py` `run_cycle` | Calls reconciliation immediately after `resolve_predictions`, before any decision logic, so all downstream code reads on-chain truth |
+| `tests/test_positions.py` (new) | 7 tests including the explicit pred #12 regression: DB=5.076859 → on-chain=0.006859 → corrected with audit ledger entry |
+
+### Phase 3 — live contract tests against Polymarket APIs (tests/contract/, deploy/vault-contract-check.timer)
+
+Polymarket's v1→v2 CLOB migration on 28 April 2026 broke us in production because we had no test asserting "what we expect from the API hasn't changed". The test would have flagged it on day 0 (when `GET /version` flipped from `1` to `2`); instead we found out from a live order rejection.
+
+**10 contract tests** cover:
+1. CLOB protocol version pinned to 2
+2. v2 EIP-712 domain constants pinned to clob-client-v2 source
+3. Gamma `outcomePrices` present for active high-volume markets
+4. Gamma `negRisk` flag present (redemption path branches on it)
+5. Gamma `clobTokenIds` present and well-formed
+6. CLOB `/book` returns `{bids, asks}` shape
+7. CLOB `/neg-risk` returns `{neg_risk: bool}`
+8. CLOB `/tick-size` returns `minimum_tick_size`
+9. CLOB `/fee-rate` responds (SDK consumes it)
+10. Polygon RPC `eth_blockNumber` responds with sane recent height
+
+Each test points to the daemon code that depends on the asserted contract — if a test goes red, the failing test name tells you which module needs updating before the next deploy.
+
+**Deployment**: `deploy/vault-contract-check.service` + `vault-contract-check.timer`. Daily at 06:04 UTC (before US business hours = catches yesterday's Polymarket deploys). Output to journalctl. The next regression of this class arrives at 06:04 UTC tomorrow with full context, not as a surprise during live trading.
+
+### What this DOESN'T do
+- Doesn't add a v3 migration handler. If Polymarket flips to v3 we'll see it via the daily contract test (`test_clob_protocol_version_pinned` will go red) and need to repeat the v20.6 work for v3. Same as the TS SDK's strategy.
+- Doesn't audit decision-side modules (`agent.py`, `edge_calculator.py`, `pipeline.py`). Those have been validated by weeks of paper-mode operation. The audit deliberately targeted only the real-money execution layer where bugs cluster.
+- Doesn't change the agent decision logic. The system that picked the bets is the same system that worked in paper.
+
+### What to watch
+- First few cycles after deploy: `Share reconciliation: ...` log lines confirm the new pass is firing. If `corrections > 0` for any cycle without an obvious cause, investigate — the on-chain truth has diverged from DB and we want to know why.
+- Daily journalctl on `vault-contract-check.service`: if any contract test ever goes red, treat it as a P0 — Polymarket changed something we depend on.
+
+---
+
 ## v20.6 — CLOB protocol v2 support
 
 **Baseline**: 84/84 tests green. Daemon paused 3 days while every order was rejected with `order_version_mismatch`.

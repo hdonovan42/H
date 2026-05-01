@@ -61,11 +61,23 @@ class BetActuator(BaseActuator):
         if not market:
             return {"success": False, "error": f"Could not fetch market {market_id}"}
 
-        if market.get("closed"):
+        # `closed` may be True/False/None. None means gamma didn't tell us;
+        # don't fall through assuming open. accepting_orders likewise.
+        if market.get("closed") is True:
             return {"success": False, "error": "Market is already closed"}
+        if market.get("closed") is None:
+            return {"success": False, "error": "Market closed-status unknown (gamma didn't return field)"}
+        if market.get("accepting_orders") is False:
+            return {"success": False, "error": "Market not accepting orders"}
+
+        # `has_prices` is False when the gamma API returned no outcomePrices
+        # for this market — refusing to bet on missing price data is the
+        # whole point of v20.5.
+        if not market.get("has_prices"):
+            return {"success": False, "error": "Market prices unavailable from gamma"}
 
         odds = market["yes_price"] if side == "YES" else market["no_price"]
-        if odds <= 0 or odds >= 1:
+        if odds is None or odds <= 0 or odds >= 1:
             return {"success": False, "error": f"Invalid odds: {odds}"}
 
         # Opportunity cost gate — don't buy if remaining return < risk-free

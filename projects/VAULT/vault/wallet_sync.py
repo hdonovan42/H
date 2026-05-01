@@ -232,7 +232,14 @@ def sync_wallet_transactions(conn) -> dict:
         try:
             block_ts = _call_with_rpc_fallback(_get_block_ts, label=f"block {entry['block_number']} ts")
             ts = datetime.fromtimestamp(block_ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
-        except Exception:
+        except Exception as e:
+            # Fallback to wall-clock when block lookup fails. Log so the
+            # discrepancy (audit-log shows tx happened later than it did)
+            # is visible if it ever matters for reconciliation.
+            log.warning(
+                f"could not fetch block {entry['block_number']} timestamp ({e}); "
+                f"using wall-clock instead — wallet_transactions ts will be approximate"
+            )
             ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         counterparty_label = _label_counterparty(entry["counterparty"])

@@ -33,8 +33,9 @@ def _cache_fresh(conn, market_id: str) -> dict | None:
     return None
 
 
-def _save_cache(conn, market_id: str, data: dict, yes_price: float):
-    """Save market data to cache."""
+def _save_cache(conn, market_id: str, data: dict, yes_price: float | None):
+    """Save market data to cache. yes_price may be None when the gamma API
+    didn't return outcomePrices for this fetch — see _parse_market."""
     conn.execute(
         "INSERT INTO market_cache (asset, source, price_usd, data_json) "
         "VALUES (?, ?, ?, ?) "
@@ -56,7 +57,17 @@ def fetch_market(conn, market_id: str) -> dict | None:
         market = resp.json()
         parsed = _parse_market(market)
         if parsed:
-            _save_cache(conn, market_id, parsed, parsed.get("yes_price", 0))
+            # Don't cache when prices are missing — caching the parsed dict
+            # without prices (yes_price=None) is fine, but caching the
+            # *price index* needs a real value. Skip the price-indexed cache
+            # update when has_prices is False so we don't poison odds_history
+            # readers downstream.
+            if parsed.get("has_prices"):
+                _save_cache(conn, market_id, parsed, parsed["yes_price"])
+            else:
+                # Still cache the metadata (volume, end_date, etc.) but mark
+                # the price entry None so callers know not to trust it.
+                _save_cache(conn, market_id, parsed, None)
         return parsed
     except Exception as e:
         log.warning(f"Failed to fetch market {market_id}: {e}")
@@ -245,7 +256,11 @@ def _parse_market(raw: dict) -> dict | None:
         "has_prices": has_prices,
         "volume": float(raw.get("volume", 0) or 0),
         "end_date": raw.get("endDate"),
-        "closed": raw.get("closed", False),
+        # `closed` and `accepting_orders` default to None (not False/True) so
+        # a missing field doesn't quietly assert "tradeable". Callers must do
+        # explicit equality checks (e.g. `if market.get("closed") is True`).
+        "closed": raw.get("closed"),
+        "accepting_orders": raw.get("acceptingOrders"),
         "clob_token_ids": _parse_clob_token_ids(raw.get("clobTokenIds")),
         # Enriched fields from Gamma API
         "volume_24h": float(raw.get("volume24hr", 0) or 0),
@@ -258,6 +273,5 @@ def _parse_market(raw: dict) -> dict | None:
         "start_date": raw.get("startDate"),
         "game_start_time": raw.get("gameStartTime"),
         "group_item_title": raw.get("groupItemTitle"),
-        "accepting_orders": raw.get("acceptingOrders", True),
         "event_title": event_title,
     }
