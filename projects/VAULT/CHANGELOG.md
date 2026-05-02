@@ -5,6 +5,33 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v20.8.2 — SELL stealth-fill detection (mirror of v20.1 BUY logic)
+
+**Trigger**: Pred #98 (Lady Gaga Met Gala NO, $1.05 cost) appeared as `open` with mark-to-market $0 in the dashboard. User flagged it. Investigation showed the daemon's momentum-reversal-exit *did* sell 2.120 shares for $0.84 successfully on-chain, but our daemon classified it as failed because v2's `/order` endpoint returned `success` without a `trades` key for the FAK fill — same v2 quirk that affects BUYs but our v20.1 stealth-fill detection only handled the BUY case.
+
+### Root cause
+v20.1 added BUY stealth-fill detection: poll CTF balance for *increase* after a "no trades" response. Never added the SELL equivalent (poll for *decrease* + USDC *increase*). When v2 omits the `trades` key on a successful SELL FAK, we silently misreport as "no immediate liquidity at limit" while shares actually moved out and proceeds came in. The drift-reconciliation auto-deposit then mistakenly classifies the SELL proceeds as a fresh external deposit.
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/clob_client.py` | `sell_shares` now snapshots `ctf_before` alongside `usdc_before` and runs the same 5×2s poll loop as `buy_shares`, looking for CTF *decrease*. Detected → returns success with on-chain delta as authoritative. RPC blind / USDC-arrived-without-CTF-burn → returns `UNVERIFIED` so caller marks reconciling not cancelled. |
+| `tests/test_clob_stealth_fill.py` | 4 new tests mirroring the BUY ones: SELL clob lies → CTF decrease detected; SELL genuine no-fill → cancelled; SELL RPC blind → UNVERIFIED; SELL USDC-without-burn anomaly → UNVERIFIED. Pred #98 regression pinned (token, share count, USDC delta from the actual incident). |
+
+### Live data fix-up (one-shot, not committed)
+- **Pred #98**: status `open` → `closed`, payout=$0.842855, pnl=−$0.203665, resolution=`sold`. Phantom "Auto-detected on-chain deposit" (ledger #854, $0.84) reversed via counter-`withdrawal` entry. Real `prediction_close` entry inserted with the actual sell proceeds. Net cash effect: zero. Audit trail preserved.
+- **Pred #101** (separate but related): cancelled in DB but on-chain showed 1.0989 shares — settlement took >11s (longer than our combined 10s+1s polling window), so v20.7's BUY stealth detection ran but didn't catch the late settlement. Reverted from `cancelled` → `open`, ledger debited $1.00 prediction_buy entry that the cancellation never wrote.
+
+### Known gaps still open after this release
+- **BUY late-settle case** (pred #101 pattern): when v2 settlement takes longer than ~11 seconds, BUY stealth detection misses it and the prediction is marked cancelled. Cancelled rows aren't reachable by orphan_sweep. Right fix: extend BUY post-fail to mark `reconciling` instead of `cancelled` when CTF poll is inconclusive, so orphan_sweep at next cycle picks up the late settlement. Not in v20.8.2; flagged for v20.8.3.
+- **`drift_warn` auto-deposit on positive surplus**: the daemon's `_reconcile_balance` saw the $0.84 from pred #98's late-recognized sell as "extra cash" and recorded a phantom deposit. With v20.8.2 the SELL itself is no longer misclassified, but the auto-deposit-on-surplus rule remains a footgun — it will mislabel any unaccounted positive drift as a deposit. Should be more conservative (only treat as deposit if matched by a wallet_sync transfer event from a known external counterparty).
+
+### What to watch on resumption
+- First v2 SELL with the new stealth detection: should log `STEALTH FILL DETECTED on SELL: CTF balance decreased by X shares` and the position should close cleanly with on-chain truth.
+- Pred #99 (currently `reconciling`, DB shares=2.69 vs on-chain 2.66): orphan sweep should resolve at next daemon cycle.
+
+---
+
 ## v20.8.1 — Settlement-adapter allowances (v20.8 follow-up)
 
 **Trigger**: Real bet rejected at 14:46 UTC with `allowance: 0, spender: 0xd91E80c...` (NegRiskAdapter v1). v20.8 granted exchange-level pUSD allowances but missed that v2 settlement still routes through the v1 NegRiskAdapter for neg-risk markets, which needs its own pUSD grant.

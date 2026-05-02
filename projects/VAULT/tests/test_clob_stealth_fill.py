@@ -13,7 +13,25 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from vault.clob_client import buy_shares
+from vault.clob_client import buy_shares, sell_shares
+
+
+def _mock_sell_client():
+    """SELL variant of _mock_client — same idea but the v1 dict has SELL side
+    and amounts framed as shares-out / USDC-in."""
+    v1_signed = MagicMock()
+    v1_signed.dict.return_value = {
+        "maker": "0x" + "00" * 20,
+        "tokenId": "1",
+        "makerAmount": "2120000",  # selling 2.12 CTF shares
+        "takerAmount": "763200",   # for at least $0.7632 USDC
+        "side": "SELL",
+        "signatureType": 0,
+    }
+    client = MagicMock()
+    client.create_market_order.return_value = v1_signed
+    client.get_neg_risk.return_value = False
+    return client
 
 
 def _mock_client():
@@ -125,6 +143,81 @@ def test_clob_no_fills_usdc_moved_but_no_ctf_is_anomaly(no_sleep, monkeypatch):
          patch("vault.clob_client._get_usdc_balance_raw", side_effect=[usdc_before_raw, usdc_after_raw]), \
          patch("vault.clob_client.get_ctf_balance", side_effect=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]):
         result = buy_shares("token_weird", amount_usd=1.48, max_price=0.6)
+
+    assert result.success is False
+    assert (result.error or "").startswith("UNVERIFIED")
+
+
+# ── SELL stealth-fill tests (v20.8.2 regression: pred #98) ─────────────────
+
+def test_sell_clob_lies_about_no_fills_but_ctf_decreased(no_sleep, monkeypatch):
+    """The 2 May 2026 pred #98 regression: v2's /order returned `success`
+    without a `trades` key for a SELL FAK fill. Daemon thought 'no liquidity'
+    and left predictions.shares=2.125 in the DB. On-chain, 2.120 shares had
+    actually moved out and $0.84 USDC arrived. sell_shares MUST detect this
+    via CTF poll (mirror of the v20.1 buy_shares logic) and report success."""
+    fake_resp = {"success": True, "orderID": "ord_pred98", "trades": []}
+
+    # USDC: $0.84 arrived (before=$2, after=$2.84 in raw 1e6 units)
+    usdc_before = 2_000_000
+    usdc_after = 2_000_000 + 842_855
+
+    # CTF: held 2.125 before, 0.005 after (2.120 sold)
+    monkeypatch.setattr("vault.clob_v2.post_order_v2", lambda **kw: fake_resp)
+    with patch("vault.clob_client._get_client", return_value=_mock_sell_client()), \
+         patch("vault.clob_client._get_usdc_balance_raw", side_effect=[usdc_before, usdc_after]), \
+         patch("vault.clob_client.get_ctf_balance", side_effect=[2.125, 0.005]):
+        result = sell_shares("token_pred98", shares=2.120, min_price=0.36)
+
+    assert result.success is True, "MUST detect SELL stealth fill, not silently fail"
+    assert result.shares == pytest.approx(2.120)
+    assert result.amount_usd == pytest.approx(0.842855)
+    assert result.avg_price == pytest.approx(0.842855 / 2.120, rel=1e-3)
+
+
+def test_sell_no_fills_ctf_unchanged_genuine_failure(no_sleep, monkeypatch):
+    """Truly empty SELL: CTF unchanged, USDC unchanged → safe to declare no-fill."""
+    fake_resp = {"success": True, "orderID": "ord_dry_sell", "trades": []}
+    usdc_raw = 2_000_000
+
+    monkeypatch.setattr("vault.clob_v2.post_order_v2", lambda **kw: fake_resp)
+    with patch("vault.clob_client._get_client", return_value=_mock_sell_client()), \
+         patch("vault.clob_client._get_usdc_balance_raw", side_effect=[usdc_raw, usdc_raw]), \
+         patch("vault.clob_client.get_ctf_balance", side_effect=[2.0, 2.0, 2.0, 2.0, 2.0, 2.0]):
+        result = sell_shares("token_dry", shares=1.0, min_price=0.5)
+
+    assert result.success is False
+    assert "no immediate liquidity" in (result.error or "")
+
+
+def test_sell_no_fills_ctf_blind_returns_unverified(no_sleep, monkeypatch):
+    """RPC blind during CTF polling → must NOT silently cancel a SELL.
+    Return UNVERIFIED so caller marks reconciling, orphan sweep handles."""
+    fake_resp = {"success": True, "orderID": "ord_blind_sell", "trades": []}
+    usdc_raw = 2_000_000
+
+    monkeypatch.setattr("vault.clob_v2.post_order_v2", lambda **kw: fake_resp)
+    with patch("vault.clob_client._get_client", return_value=_mock_sell_client()), \
+         patch("vault.clob_client._get_usdc_balance_raw", side_effect=[usdc_raw, usdc_raw]), \
+         patch("vault.clob_client.get_ctf_balance", return_value=None):
+        result = sell_shares("token_blind", shares=1.0, min_price=0.5)
+
+    assert result.success is False
+    assert (result.error or "").startswith("UNVERIFIED")
+
+
+def test_sell_no_fills_usdc_arrived_without_ctf_burn_is_anomaly(no_sleep, monkeypatch):
+    """USDC arrived but CTF didn't move — money for shares we still hold.
+    Refuse to silently cancel; surface as UNVERIFIED."""
+    fake_resp = {"success": True, "orderID": "ord_weird_sell", "trades": []}
+    usdc_before = 2_000_000
+    usdc_after = 2_000_000 + 842_855
+
+    monkeypatch.setattr("vault.clob_v2.post_order_v2", lambda **kw: fake_resp)
+    with patch("vault.clob_client._get_client", return_value=_mock_sell_client()), \
+         patch("vault.clob_client._get_usdc_balance_raw", side_effect=[usdc_before, usdc_after]), \
+         patch("vault.clob_client.get_ctf_balance", side_effect=[2.0, 2.0, 2.0, 2.0, 2.0, 2.0]):
+        result = sell_shares("token_weird_sell", shares=1.0, min_price=0.5)
 
     assert result.success is False
     assert (result.error or "").startswith("UNVERIFIED")
