@@ -5,6 +5,35 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v20.8.1 — Settlement-adapter allowances (v20.8 follow-up)
+
+**Trigger**: Real bet rejected at 14:46 UTC with `allowance: 0, spender: 0xd91E80c...` (NegRiskAdapter v1). v20.8 granted exchange-level pUSD allowances but missed that v2 settlement still routes through the v1 NegRiskAdapter for neg-risk markets, which needs its own pUSD grant.
+
+### What I missed in v20.8
+v2 has **two distinct on-chain layers** for trading and I conflated them:
+1. **Exchange contracts** (`V2_EXCHANGE`, `V2_NEG_RISK_EXCHANGE`) — validate signed order, accept it into the matching engine.
+2. **Settlement adapters** (`NegRiskAdapter` for neg-risk, `CtfCollateralAdapter` for binary, `NegRiskCtfCollateralAdapter` for v2 neg-risk) — actually pull pUSD from the maker's wallet and mint outcome shares.
+
+Both layers need allowance. v20.8 only granted the exchanges. The adapter for the failing bet (NegRiskAdapter) had allowance 0, so the matching engine's pre-fill check rejected.
+
+The clue was visible in v20.8: the audit doc already listed `NegRiskAdapter` and `NegRiskCtfCollateralAdapter` in `INTERNAL_ADDRESSES` for `wallet_sync` reasons (their inflows during redemption shouldn't show as deposits). I wired wallet_sync but didn't make the leap to "if money flows TO us from these contracts, money also flows FROM us through them — both directions need allowance."
+
+### Changes
+- `setup_v2_allowances()` now grants 11 approvals (was 5), adding pUSD allowances to the three settlement adapters and CTF setApprovalForAll for the same.
+- New constants pinned: `NEG_RISK_ADAPTER_ADDRESS`, `CTF_COLLATERAL_ADAPTER_V2_ADDRESS`, `NEG_RISK_CTF_COLLATERAL_ADAPTER_V2_ADDRESS`.
+- Bug fix: nonce race in `setup_v2_allowances` when sending multiple txs same-block. Was using `w3.eth.get_transaction_count(addr, "pending")` fresh for each, which returns the same value before previous tx is visible to the RPC. Now tracks nonce locally and increments after each submit. (Manifested as 2-of-11 failures on first deploy run; restart fixed via idempotency, but the underlying race needed a real fix.)
+- Test `test_setup_v2_allowances_actions_cover_required_grants` updated to pin all 11 grants.
+
+### Live verification
+- 7 new on-chain grants sent (3 in first batch, 2 in second after nonce race, 2 in third batch with the nonce-tracking fix). Total cost ~$0.07 in MATIC gas.
+- Daemon restart now logs `setup_v2_allowances: skipped=11 sent=0 failed=0` — all 11 grants verified MAX. Idempotency confirmed.
+- Drift remains $0.00. Wallet state unchanged (~$2 USDC.e + $19 pUSD + 0.006859 CTF dust).
+
+### Lesson reinforced
+The audit pattern from rule #15 ("audit the whole migration in one pass") works only if you read the whole settlement architecture, not just the SDK config. The exchanges-and-adapters split was documented in the v2 contract repo's deployed-contracts table; I had read that table for v20.8 but treated the adapters as redemption-only contracts. They're also settlement contracts for trading. Single-purpose assumptions about contract names cost a deploy cycle.
+
+---
+
 ## v20.8 — Comprehensive Polymarket v2 migration audit
 
 **Baseline**: 113/113 unit + 12/12 contract tests green. Daemon paused. Wallet at $2.00 USDC.e + $19.03 pUSD + 0.006859 CTF (Lakers NO dust). Live wrap of $17.77 USDC.e → pUSD completed via CollateralOnramp.
