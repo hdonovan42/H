@@ -877,6 +877,16 @@ V2_EXCHANGE_ADDRESS = "0xE111180000d2663C0091e4f400237545B87B996B"
 V2_NEG_RISK_EXCHANGE_ADDRESS = "0xe2222d279d744050d28e00520010520000310F59"
 COLLATERAL_ONRAMP_ADDRESS = "0x93070a847efEf7F70739046A929D47a521F5B8ee"
 
+# Settlement adapters: distinct from the exchanges. The exchange validates
+# the signed order; the adapter is the contract that actually pulls
+# collateral from our wallet and mints outcome shares (or vice versa).
+# Each needs its own allowance grant. The May 2026 audit missed this layer
+# (caught in v20.8 follow-up after a real bet rejected with allowance==0
+# for spender=NegRiskAdapter).
+NEG_RISK_ADAPTER_ADDRESS = "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"  # v1, also used by v2 exchange settlement
+CTF_COLLATERAL_ADAPTER_V2_ADDRESS = "0xADa100874d00e3331D00F2007a9c336a65009718"  # v2 binary settlement
+NEG_RISK_CTF_COLLATERAL_ADAPTER_V2_ADDRESS = "0xAdA200001000ef00D07553cEE7006808F895c6F1"  # v2 neg-risk settlement
+
 _MAX_UINT_256 = 2**256 - 1
 
 
@@ -944,55 +954,30 @@ def setup_v2_allowances() -> dict:
     onramp = Web3.to_checksum_address(COLLATERAL_ONRAMP_ADDRESS)
     v2_exch = Web3.to_checksum_address(V2_EXCHANGE_ADDRESS)
     v2_negrisk = Web3.to_checksum_address(V2_NEG_RISK_EXCHANGE_ADDRESS)
+    nra = Web3.to_checksum_address(NEG_RISK_ADAPTER_ADDRESS)
+    ctf_adapter = Web3.to_checksum_address(CTF_COLLATERAL_ADAPTER_V2_ADDRESS)
+    nr_ctf_adapter = Web3.to_checksum_address(NEG_RISK_CTF_COLLATERAL_ADAPTER_V2_ADDRESS)
 
     actions: list[dict] = []
+    # Local nonce counter — get_transaction_count("pending") races when we
+    # send multiple txs in quick succession (the next call returns the same
+    # value because the previous one isn't yet visible). Track locally and
+    # increment after each successful submission.
+    nonce_state: dict = {"next": w3.eth.get_transaction_count(addr, "pending")}
 
-    def _ensure_erc20_allowance(token, spender: str, label: str) -> None:
-        cur = token.functions.allowance(addr, spender).call()
-        if cur >= _MAX_UINT_256 // 2:
-            actions.append({"label": label, "skipped": True, "reason": "already MAX"})
-            return
+    def _send_with_nonce(fn, label: str, gas_estimate: int) -> None:
         try:
-            fn = token.functions.approve(spender, _MAX_UINT_256)
-            gas = fn.estimate_gas({"from": addr})
-            nonce = w3.eth.get_transaction_count(addr, "pending")
             fee = w3.eth.fee_history(1, "latest", [50])
             priority = w3.to_wei(30, "gwei")
             tx = fn.build_transaction({
-                "from": addr, "nonce": nonce,
-                "gas": int(gas * 1.3),
+                "from": addr, "nonce": nonce_state["next"],
+                "gas": int(gas_estimate * 1.3),
                 "maxFeePerGas": fee["baseFeePerGas"][-1] * 2 + priority,
                 "maxPriorityFeePerGas": priority, "chainId": 137,
             })
             signed = account.sign_transaction(tx)
             h = w3.eth.send_raw_transaction(signed.raw_transaction)
-            r = w3.eth.wait_for_transaction_receipt(h, timeout=180)
-            if r["status"] != 1:
-                actions.append({"label": label, "tx": h.hex(), "ok": False})
-            else:
-                actions.append({"label": label, "tx": h.hex(), "ok": True, "block": r["blockNumber"]})
-        except Exception as e:
-            log.error(f"setup_v2_allowances: {label} failed: {e}")
-            actions.append({"label": label, "ok": False, "error": str(e)[:200]})
-
-    def _ensure_setapprovalforall(spender: str, label: str) -> None:
-        if ctf.functions.isApprovedForAll(addr, spender).call():
-            actions.append({"label": label, "skipped": True, "reason": "already approved"})
-            return
-        try:
-            fn = ctf.functions.setApprovalForAll(spender, True)
-            gas = fn.estimate_gas({"from": addr})
-            nonce = w3.eth.get_transaction_count(addr, "pending")
-            fee = w3.eth.fee_history(1, "latest", [50])
-            priority = w3.to_wei(30, "gwei")
-            tx = fn.build_transaction({
-                "from": addr, "nonce": nonce,
-                "gas": int(gas * 1.3),
-                "maxFeePerGas": fee["baseFeePerGas"][-1] * 2 + priority,
-                "maxPriorityFeePerGas": priority, "chainId": 137,
-            })
-            signed = account.sign_transaction(tx)
-            h = w3.eth.send_raw_transaction(signed.raw_transaction)
+            nonce_state["next"] += 1
             r = w3.eth.wait_for_transaction_receipt(h, timeout=180)
             actions.append({
                 "label": label, "tx": h.hex(),
@@ -1002,11 +987,47 @@ def setup_v2_allowances() -> dict:
             log.error(f"setup_v2_allowances: {label} failed: {e}")
             actions.append({"label": label, "ok": False, "error": str(e)[:200]})
 
+    def _ensure_erc20_allowance(token, spender: str, label: str) -> None:
+        cur = token.functions.allowance(addr, spender).call()
+        if cur >= _MAX_UINT_256 // 2:
+            actions.append({"label": label, "skipped": True, "reason": "already MAX"})
+            return
+        fn = token.functions.approve(spender, _MAX_UINT_256)
+        try:
+            gas = fn.estimate_gas({"from": addr})
+        except Exception as e:
+            actions.append({"label": label, "ok": False, "error": f"gas estimation: {str(e)[:140]}"})
+            return
+        _send_with_nonce(fn, label, gas)
+
+    def _ensure_setapprovalforall(spender: str, label: str) -> None:
+        if ctf.functions.isApprovedForAll(addr, spender).call():
+            actions.append({"label": label, "skipped": True, "reason": "already approved"})
+            return
+        fn = ctf.functions.setApprovalForAll(spender, True)
+        try:
+            gas = fn.estimate_gas({"from": addr})
+        except Exception as e:
+            actions.append({"label": label, "ok": False, "error": f"gas estimation: {str(e)[:140]}"})
+            return
+        _send_with_nonce(fn, label, gas)
+
     _ensure_erc20_allowance(usdc_e, onramp, "USDC.e -> CollateralOnramp")
     _ensure_erc20_allowance(pusd, v2_exch, "pUSD -> V2_EXCHANGE")
     _ensure_erc20_allowance(pusd, v2_negrisk, "pUSD -> V2_NEG_RISK_EXCHANGE")
+    # Settlement adapters: even though we sign orders against the exchange,
+    # the adapter is the contract that takes pUSD on BUY and gives it back on
+    # SELL. Each adapter needs its own allowance grant.
+    _ensure_erc20_allowance(pusd, nra, "pUSD -> NegRiskAdapter (v1, neg-risk settlement)")
+    _ensure_erc20_allowance(pusd, ctf_adapter, "pUSD -> CtfCollateralAdapter (v2 binary settlement)")
+    _ensure_erc20_allowance(pusd, nr_ctf_adapter, "pUSD -> NegRiskCtfCollateralAdapter (v2 neg-risk settlement)")
     _ensure_setapprovalforall(v2_exch, "CTF -> V2_EXCHANGE (setApprovalForAll)")
     _ensure_setapprovalforall(v2_negrisk, "CTF -> V2_NEG_RISK_EXCHANGE (setApprovalForAll)")
+    # CTF approvals for the settlement adapters so they can mint/burn outcome
+    # shares during BUY/SELL flows.
+    _ensure_setapprovalforall(nra, "CTF -> NegRiskAdapter (setApprovalForAll)")
+    _ensure_setapprovalforall(ctf_adapter, "CTF -> CtfCollateralAdapter (setApprovalForAll)")
+    _ensure_setapprovalforall(nr_ctf_adapter, "CTF -> NegRiskCtfCollateralAdapter (setApprovalForAll)")
 
     skipped = sum(1 for a in actions if a.get("skipped"))
     sent = sum(1 for a in actions if a.get("ok") is True)

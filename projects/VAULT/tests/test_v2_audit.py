@@ -79,19 +79,35 @@ def test_pusd_balance_helper_isolates_pusd():
 def test_setup_v2_allowances_actions_cover_required_grants():
     """Pin the exact set of allowances setup_v2_allowances grants. If a future
     Polymarket migration adds a new contract that needs approval, this test
-    surfaces the gap during code review rather than at first failure."""
+    surfaces the gap during code review rather than at first failure.
+
+    The May 2026 incident: v20.8 only granted exchange-level allowances and
+    missed the settlement adapters. A real bet rejected with allowance==0
+    for spender=NegRiskAdapter. The adapters are a distinct on-chain layer
+    from the exchanges — exchange validates the order signature, adapter
+    pulls collateral and mints shares. Both need allowance."""
     import inspect
     from vault.clob_client import setup_v2_allowances
     src = inspect.getsource(setup_v2_allowances)
-    # Check the five required grants are all spelled out
-    required_pairs = [
-        ("USDC.e -> CollateralOnramp", "lets us wrap USDC.e to pUSD"),
-        ("pUSD -> V2_EXCHANGE", "pUSD when our BUY orders fill"),
-        ("pUSD -> V2_NEG_RISK_EXCHANGE", "neg-risk markets"),
-        ("CTF -> V2_EXCHANGE (setApprovalForAll)", "shares when SELL orders fill"),
-        ("CTF -> V2_NEG_RISK_EXCHANGE (setApprovalForAll)", ""),
+    required_grants = [
+        # Onramp
+        "USDC.e -> CollateralOnramp",
+        # Exchange-level pUSD (order validation)
+        "pUSD -> V2_EXCHANGE",
+        "pUSD -> V2_NEG_RISK_EXCHANGE",
+        # Settlement-adapter-level pUSD (actual token movement)
+        "pUSD -> NegRiskAdapter",
+        "pUSD -> CtfCollateralAdapter",
+        "pUSD -> NegRiskCtfCollateralAdapter",
+        # CTF setApprovalForAll for exchanges
+        "CTF -> V2_EXCHANGE (setApprovalForAll)",
+        "CTF -> V2_NEG_RISK_EXCHANGE (setApprovalForAll)",
+        # CTF setApprovalForAll for settlement adapters
+        "CTF -> NegRiskAdapter (setApprovalForAll)",
+        "CTF -> CtfCollateralAdapter (setApprovalForAll)",
+        "CTF -> NegRiskCtfCollateralAdapter (setApprovalForAll)",
     ]
-    for label, _ in required_pairs:
+    for label in required_grants:
         assert label in src, f"setup_v2_allowances missing {label!r}"
 
 
