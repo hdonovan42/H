@@ -5,6 +5,88 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v20.8 — Comprehensive Polymarket v2 migration audit
+
+**Baseline**: 113/113 unit + 12/12 contract tests green. Daemon paused. Wallet at $2.00 USDC.e + $19.03 pUSD + 0.006859 CTF (Lakers NO dust). Live wrap of $17.77 USDC.e → pUSD completed via CollateralOnramp.
+
+### Why this exists
+v20.6 closed the v1→v2 order-signing migration but missed that Polymarket also changed the **collateral token** from USDC.e to pUSD as part of the same migration. The user observation: real-money trading has hit a different failure every cycle since the v2 cutover. This audit's purpose is to catalogue **every** v1↔v2 difference in one pass and ship a coherent fix, instead of chasing one error at a time.
+
+Full diff between v1 and v2 in `tasks/v2-migration-audit.md` — 12 categories audited, 4 changes shipped here.
+
+### What Polymarket actually changed in the v1→v2 migration
+
+| Surface | v1 | v2 | Caught in |
+|---|---|---|---|
+| Order EIP-712 spec | domain v1 + 12-field struct | domain v2 + 11-field struct (timestamp/metadata/builder added; nonce/feeRateBps/taker dropped) | v20.6 |
+| Exchange contracts | 0x4bFb41d5 / 0xC5d563A3 | 0xE111180000 / 0xe2222d27 | v20.6 |
+| **Settlement currency** | USDC.e (`0x2791Bca1`) | **pUSD (`0xC011a7E12`)** | **v20.8 (this)** |
+| Wrap mechanism | n/a | CollateralOnramp.wrap(asset, to, amount) at `0x93070a847` | v20.8 |
+| Allowance grants | USDC.e → exchanges | pUSD → exchanges + USDC.e → onramp | v20.8 |
+| Redemption adapters | NegRiskAdapter `0xd91E80c` | CtfCollateralAdapter `0xADa10` + NegRiskCtfCollateralAdapter `0xAdA20` | partial — flagged for first-win test |
+| CTF tokens | unchanged | unchanged | n/a |
+
+### Changes in v20.8
+
+**`vault/clob_client.py`** — balance and allowance handling:
+
+- New constant `POLYGON_PUSD_ADDRESS = 0xC011a7E12...`
+- `_get_usdc_balance_raw()` now returns `USDC.e + pUSD` (both 1:1 USD-pegged via on-chain wrap). All consumers (drift detection, runway, dashboard) automatically get the right number.
+- New `get_pusd_balance_raw()` for v2 trade-sizing where pUSD specifically matters (BUY orders settle from pUSD, not the combined balance).
+- New `setup_v2_allowances()` — **idempotent** v2 trading setup. Grants USDC.e → CollateralOnramp, pUSD → both v2 exchanges, CTF → both v2 exchanges via setApprovalForAll. Checks each allowance first; skips on MAX. Safe to call every daemon startup.
+- New constants `V2_EXCHANGE_ADDRESS`, `V2_NEG_RISK_EXCHANGE_ADDRESS`, `COLLATERAL_ONRAMP_ADDRESS` pinned and re-used by tests.
+
+**`vault/wallet_sync.py`** — added 8 v2 contract addresses to `INTERNAL_ADDRESSES`:
+
+- pUSD (`0xC011a7E12...`)
+- CollateralOnramp (`0x93070a847...`) and CollateralOfframp (`0x29579226E...`)
+- Collateral Vault (`0xC417fD8E9...`)
+- V2 Exchange and V2 NegRisk Exchange
+- v2 redemption adapters (`0xADa10...`, `0xAdA20...`)
+
+Wraps and unwraps no longer show as phantom external deposits/withdrawals. Same class as the v20.4 fix for the v1 NegRisk Vault.
+
+**`vault/daemon.py`** — added HARD GATE 5: idempotent `setup_v2_allowances` runs at every daemon startup in real mode. New traders boot with allowances; existing daemons skip (gas cost zero on subsequent restarts).
+
+### Tests added (7 unit + 2 contract)
+
+- `tests/test_v2_audit.py`:
+  - `test_v2_addresses_pinned_to_clob_v2_repo` — every v2 address pinned
+  - `test_v1_addresses_unchanged` — v1 addresses also pinned (legacy positions still settle through them)
+  - `test_internal_addresses_includes_v2_ramps` — pinned for the wallet_sync regression
+  - `test_balance_includes_pusd` — explicit USDC.e + pUSD sum
+  - `test_pusd_balance_helper_isolates_pusd` — for v2 trade-sizing
+  - `test_setup_v2_allowances_actions_cover_required_grants` — pins the 5 grants the function makes
+  - `test_setup_v2_allowances_refuses_without_private_key` — clean failure when env not set
+- `tests/contract/test_polymarket_contract.py`:
+  - `test_pusd_collateral_token_is_a_real_erc20` — pUSD address has bytecode + symbol() responds
+  - `test_collateral_onramp_contract_exists` — onramp pinned address has bytecode
+
+### What this audit deliberately does NOT close
+
+Two known gaps, deferred until first observation:
+
+1. **Redemption flow on v2 positions** (`vault/redeem.py` still uses v1 NegRiskAdapter). Until a v2-era position resolves we don't know if v1 adapter still works for it, and what currency it returns. Plan: when first v2 win arrives, log redemption tx carefully. If v1 adapter rejects, switch to v2 adapter (`0xAdA20...` for neg-risk, `0xADa10...` for binary). Adapters are pinned in `INTERNAL_ADDRESSES` already so wallet_sync handles the inflow either way.
+
+2. **`userUSDCBalance` fee hint on v2 market orders**: v2 added an optional parameter that lets the matching engine adjust order amount down to fit balance + fees. Without it, edge-case orders at exactly wallet-balance amount get rejected. We don't currently set it. Deferred because typical bet sizes ($1.50) are well under wallet balance ($19); will surface on a max-aggressive sizing scenario.
+
+### Live state at end of v20.8
+
+- USDC.e: 2.000000 (reserve buffer for v1-style operations)
+- pUSD: 19.033656 (trading collateral)
+- CTF (Lakers NO dust): 0.006859 (worth ~$0.0003, status=closed, written off in v20.7)
+- Allowances all set: USDC.e→Onramp, pUSD→both v2 exchanges, CTF→both v2 exchanges
+- Daemon paused awaiting unpause + first live trade test
+
+### What to watch on resumption
+
+1. First v2 BUY: should get past `balance is not enough` since pUSD is funded.
+2. First cycle's `Share reconciliation`: should be no-op (pred #12 already closed).
+3. First `setup_v2_allowances` call on next restart: should report `skipped=5, sent=0, failed=0`.
+4. First v2 win: log carefully what currency redemption returns. Adjust redeem.py if v1 adapter doesn't work.
+
+---
+
 ## v20.7 — Real-money execution-layer hardening (3-phase audit)
 
 **Baseline**: 94/94 unit tests + 10/10 contract tests green. Pred #12 closed against on-chain reality (booked $-1.03 phantom-share loss). Daemon back live.

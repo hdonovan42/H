@@ -12,10 +12,14 @@ _client = None
 # Ordered list of (url, web3_instance_or_None). Populated lazily; rotated on failure.
 _w3_providers: list = []
 
-# Polygon USDC.e (bridged USDC on Polygon PoS) — Polymarket's collateral token
+# Polygon USDC.e (bridged USDC on Polygon PoS) — Polymarket v1's collateral token
 POLYGON_USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
 # Native Circle USDC on Polygon — what Coinbase sends by default
 POLYGON_NATIVE_USDC_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+# Polymarket pUSD — wrapped collateral token used by the v2 CLOB. Trades
+# settle from this balance, not USDC.e directly. Hold both for safety:
+# pUSD for trading, a small USDC.e reserve for v1-flow legacy operations.
+POLYGON_PUSD_ADDRESS = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
 # Polymarket CTF (Conditional Token Framework) on Polygon — ERC1155
 CTF_CONTRACT = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
 # Uniswap v3 SwapRouter + Factory on Polygon — used for auto-swapping native→USDC.e
@@ -121,10 +125,20 @@ def _call_with_rpc_fallback(fn, *, label: str):
 
 
 def _get_usdc_balance_raw() -> int | None:
-    """Get on-chain USDC.e balance in raw units (6 decimals).
+    """Get on-chain spendable cash balance (USDC.e + pUSD) in raw 6-decimal
+    units.
 
-    Returns integer raw-units on success, or None if ALL RPC providers fail.
-    A return of 0 means the wallet genuinely has zero USDC.
+    Polymarket v2 settles from pUSD (the wrapped collateral token), not
+    USDC.e directly. After the v1->v2 migration most of our trading-cash
+    lives in pUSD; we keep a small USDC.e reserve for legacy redemption
+    flows. The "balance" the daemon cares about for drift detection,
+    runway calc, and reconciliation is the SUM — both tokens are 1:1
+    USD-pegged and freely interconvertible via the CollateralOnramp /
+    CollateralOfframp.
+
+    Returns integer raw-units on success, or None if ALL RPC providers
+    fail for either token. A return of 0 means the wallet genuinely
+    has zero spendable cash.
     """
     from web3 import Web3
     from eth_account import Account
@@ -138,17 +152,54 @@ def _get_usdc_balance_raw() -> int | None:
         log.error(f"Failed to derive wallet address: {e}")
         return None
 
-    def _call(w3):
+    def _call_usdc_e(w3):
         contract = w3.eth.contract(
             address=Web3.to_checksum_address(POLYGON_USDC_ADDRESS),
             abi=ERC20_BALANCE_ABI,
         )
         return int(contract.functions.balanceOf(Web3.to_checksum_address(wallet)).call())
 
+    def _call_pusd(w3):
+        contract = w3.eth.contract(
+            address=Web3.to_checksum_address(POLYGON_PUSD_ADDRESS),
+            abi=ERC20_BALANCE_ABI,
+        )
+        return int(contract.functions.balanceOf(Web3.to_checksum_address(wallet)).call())
+
     try:
-        return _call_with_rpc_fallback(_call, label="USDC balance")
+        usdc_e = _call_with_rpc_fallback(_call_usdc_e, label="USDC.e balance")
+        pusd = _call_with_rpc_fallback(_call_pusd, label="pUSD balance")
+        return usdc_e + pusd
     except Exception as e:
-        log.warning(f"Failed to check on-chain USDC balance: {e}")
+        log.warning(f"Failed to check on-chain cash balance (USDC.e + pUSD): {e}")
+        return None
+
+
+def get_pusd_balance_raw() -> int | None:
+    """pUSD-only balance for v2 trade-sizing and dashboard breakdown.
+    Returns raw 6-decimal units or None on RPC failure."""
+    from web3 import Web3
+    from eth_account import Account
+    pk = os.environ.get("POLYMARKET_PRIVATE_KEY")
+    if not pk:
+        return None
+    try:
+        wallet = Account.from_key(pk).address
+    except Exception as e:
+        log.error(f"Failed to derive wallet address: {e}")
+        return None
+
+    def _call(w3):
+        contract = w3.eth.contract(
+            address=Web3.to_checksum_address(POLYGON_PUSD_ADDRESS),
+            abi=ERC20_BALANCE_ABI,
+        )
+        return int(contract.functions.balanceOf(Web3.to_checksum_address(wallet)).call())
+
+    try:
+        return _call_with_rpc_fallback(_call, label="pUSD balance")
+    except Exception as e:
+        log.warning(f"Failed to check on-chain pUSD balance: {e}")
         return None
 
 
@@ -792,7 +843,11 @@ def check_allowances() -> dict:
 
 
 def setup_allowances():
-    """One-time approval for USDC + CTF token exchange contracts."""
+    """One-time approval for USDC + CTF token exchange contracts (v1).
+
+    Use `setup_v2_allowances()` instead for the v2 contract set — that's
+    what the daemon uses for trading since the May 2026 audit.
+    """
     from py_clob_client.clob_types import BalanceAllowanceParams, AssetType
 
     client = _get_client()
@@ -811,3 +866,154 @@ def setup_allowances():
     except Exception as e:
         log.error(f"Failed to set allowances: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
+
+
+# ── v2 allowance constants and helper ───────────────────────────────────
+# These are the addresses we must approve on-chain for v2 trading. Pinned
+# from Polymarket/ctf-exchange-v2 README; cross-checked against
+# py-clob-client-v2's config.py. If any address ever changes, the daily
+# contract test (test_v2_addresses_pinned) catches it before live trade.
+V2_EXCHANGE_ADDRESS = "0xE111180000d2663C0091e4f400237545B87B996B"
+V2_NEG_RISK_EXCHANGE_ADDRESS = "0xe2222d279d744050d28e00520010520000310F59"
+COLLATERAL_ONRAMP_ADDRESS = "0x93070a847efEf7F70739046A929D47a521F5B8ee"
+
+_MAX_UINT_256 = 2**256 - 1
+
+
+def setup_v2_allowances() -> dict:
+    """Idempotent setup of every on-chain approval needed for v2 trading.
+
+    Grants:
+      - USDC.e → CollateralOnramp (lets us wrap USDC.e to pUSD)
+      - pUSD → V2 Exchange (lets v2 take pUSD when our BUY orders fill)
+      - pUSD → V2 NegRisk Exchange (same, for neg-risk markets)
+      - CTF → V2 Exchange (lets v2 take our shares when SELL orders fill)
+      - CTF → V2 NegRisk Exchange (same)
+
+    Each grant is checked first; if the allowance is already MAX (or the
+    setApprovalForAll is true), we skip — no gas, no nonce churn. Safe to
+    call repeatedly, including on every daemon startup.
+
+    Returns a summary dict with `success: bool` and a list of operations
+    taken vs skipped. Errors are logged but don't raise — caller decides.
+    """
+    from web3 import Web3
+    from eth_account import Account
+
+    pk = os.environ.get("POLYMARKET_PRIVATE_KEY")
+    if not pk:
+        return {"success": False, "error": "POLYMARKET_PRIVATE_KEY not set"}
+
+    try:
+        account = Account.from_key(pk)
+        wallet = account.address
+    except Exception as e:
+        return {"success": False, "error": f"private key invalid: {e}"}
+
+    _ensure_providers()
+    if not _w3_providers:
+        return {"success": False, "error": "no working RPC providers"}
+
+    erc20_abi = [
+        {"inputs": [{"name": "owner", "type": "address"}, {"name": "spender", "type": "address"}],
+         "name": "allowance", "outputs": [{"name": "", "type": "uint256"}],
+         "stateMutability": "view", "type": "function"},
+        {"inputs": [{"name": "spender", "type": "address"}, {"name": "amount", "type": "uint256"}],
+         "name": "approve", "outputs": [{"name": "", "type": "bool"}],
+         "stateMutability": "nonpayable", "type": "function"},
+    ]
+    ctf_abi = [
+        {"inputs": [{"name": "account", "type": "address"}, {"name": "operator", "type": "address"}],
+         "name": "isApprovedForAll", "outputs": [{"name": "", "type": "bool"}],
+         "stateMutability": "view", "type": "function"},
+        {"inputs": [{"name": "operator", "type": "address"}, {"name": "approved", "type": "bool"}],
+         "name": "setApprovalForAll", "outputs": [],
+         "stateMutability": "nonpayable", "type": "function"},
+    ]
+
+    # Pick the first responsive provider for write txs (one consistent
+    # provider keeps nonces sane across the batch).
+    url, _ = _w3_providers[0]
+    w3 = Web3(Web3.HTTPProvider(url, request_kwargs={"timeout": 15}))
+
+    addr = Web3.to_checksum_address(wallet)
+    usdc_e = w3.eth.contract(address=Web3.to_checksum_address(POLYGON_USDC_ADDRESS), abi=erc20_abi)
+    pusd = w3.eth.contract(address=Web3.to_checksum_address(POLYGON_PUSD_ADDRESS), abi=erc20_abi)
+    ctf = w3.eth.contract(address=Web3.to_checksum_address(CTF_CONTRACT), abi=ctf_abi)
+
+    onramp = Web3.to_checksum_address(COLLATERAL_ONRAMP_ADDRESS)
+    v2_exch = Web3.to_checksum_address(V2_EXCHANGE_ADDRESS)
+    v2_negrisk = Web3.to_checksum_address(V2_NEG_RISK_EXCHANGE_ADDRESS)
+
+    actions: list[dict] = []
+
+    def _ensure_erc20_allowance(token, spender: str, label: str) -> None:
+        cur = token.functions.allowance(addr, spender).call()
+        if cur >= _MAX_UINT_256 // 2:
+            actions.append({"label": label, "skipped": True, "reason": "already MAX"})
+            return
+        try:
+            fn = token.functions.approve(spender, _MAX_UINT_256)
+            gas = fn.estimate_gas({"from": addr})
+            nonce = w3.eth.get_transaction_count(addr, "pending")
+            fee = w3.eth.fee_history(1, "latest", [50])
+            priority = w3.to_wei(30, "gwei")
+            tx = fn.build_transaction({
+                "from": addr, "nonce": nonce,
+                "gas": int(gas * 1.3),
+                "maxFeePerGas": fee["baseFeePerGas"][-1] * 2 + priority,
+                "maxPriorityFeePerGas": priority, "chainId": 137,
+            })
+            signed = account.sign_transaction(tx)
+            h = w3.eth.send_raw_transaction(signed.raw_transaction)
+            r = w3.eth.wait_for_transaction_receipt(h, timeout=180)
+            if r["status"] != 1:
+                actions.append({"label": label, "tx": h.hex(), "ok": False})
+            else:
+                actions.append({"label": label, "tx": h.hex(), "ok": True, "block": r["blockNumber"]})
+        except Exception as e:
+            log.error(f"setup_v2_allowances: {label} failed: {e}")
+            actions.append({"label": label, "ok": False, "error": str(e)[:200]})
+
+    def _ensure_setapprovalforall(spender: str, label: str) -> None:
+        if ctf.functions.isApprovedForAll(addr, spender).call():
+            actions.append({"label": label, "skipped": True, "reason": "already approved"})
+            return
+        try:
+            fn = ctf.functions.setApprovalForAll(spender, True)
+            gas = fn.estimate_gas({"from": addr})
+            nonce = w3.eth.get_transaction_count(addr, "pending")
+            fee = w3.eth.fee_history(1, "latest", [50])
+            priority = w3.to_wei(30, "gwei")
+            tx = fn.build_transaction({
+                "from": addr, "nonce": nonce,
+                "gas": int(gas * 1.3),
+                "maxFeePerGas": fee["baseFeePerGas"][-1] * 2 + priority,
+                "maxPriorityFeePerGas": priority, "chainId": 137,
+            })
+            signed = account.sign_transaction(tx)
+            h = w3.eth.send_raw_transaction(signed.raw_transaction)
+            r = w3.eth.wait_for_transaction_receipt(h, timeout=180)
+            actions.append({
+                "label": label, "tx": h.hex(),
+                "ok": r["status"] == 1, "block": r.get("blockNumber"),
+            })
+        except Exception as e:
+            log.error(f"setup_v2_allowances: {label} failed: {e}")
+            actions.append({"label": label, "ok": False, "error": str(e)[:200]})
+
+    _ensure_erc20_allowance(usdc_e, onramp, "USDC.e -> CollateralOnramp")
+    _ensure_erc20_allowance(pusd, v2_exch, "pUSD -> V2_EXCHANGE")
+    _ensure_erc20_allowance(pusd, v2_negrisk, "pUSD -> V2_NEG_RISK_EXCHANGE")
+    _ensure_setapprovalforall(v2_exch, "CTF -> V2_EXCHANGE (setApprovalForAll)")
+    _ensure_setapprovalforall(v2_negrisk, "CTF -> V2_NEG_RISK_EXCHANGE (setApprovalForAll)")
+
+    skipped = sum(1 for a in actions if a.get("skipped"))
+    sent = sum(1 for a in actions if a.get("ok") is True)
+    failed = sum(1 for a in actions if a.get("ok") is False)
+    log.info(f"setup_v2_allowances: skipped={skipped} sent={sent} failed={failed}")
+    return {
+        "success": failed == 0,
+        "actions": actions,
+        "summary": {"skipped": skipped, "sent": sent, "failed": failed},
+    }

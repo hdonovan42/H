@@ -1,5 +1,27 @@
 # VAULT Trading Lessons
 
+## Polymarket v2 Migration — Lesson on Patch-Per-Failure (2 May 2026)
+
+**TL;DR.** Polymarket migrated to CLOB v2 on ~28 April 2026. We hit it as a sequence of seven distinct production failures over four days (`order_version_mismatch` → `Invalid order payload` → `allowance not enough` → `balance not enough` for sells → `balance not enough` for buys with a different currency entirely). Each fix was right but narrow; each new error was a different facet of the same migration. Total live cost: ~$1.50 (pred #12 phantom-share write-off + gas).
+
+**The mistake** was treating the v2 migration as a sequence of bugs instead of a single coordinated change with multiple surfaces. The first fix (v20.6, order signing) only looked at the parts of the migration that had already broken; the next failure exposed an adjacent surface (allowances), then an adjacent surface (currency), each requiring its own audit + deploy + test cycle.
+
+**The right pattern**: when an upstream system makes a versioned migration, do **one comprehensive audit** comparing v_old vs v_new across every dimension we depend on, then ship one coherent fix. The patch-per-failure pattern is six wakeup calls and six "concerning errors at every step" conversations with the user; the audit-once pattern is one weekend of focused work and a normal trading week after.
+
+**What v20.8's audit actually did differently**:
+1. Read every line of Polymarket's official v1 SDK config (`py-clob-client`) and compared it to the v2 SDK config (`py-clob-client-v2`). Differences were: `collateral` field changed token, exchanges added v2 versions, redemption adapters new, settlement currency new.
+2. Read the v2 contract repo's deployed-contracts table (`Polymarket/ctf-exchange-v2` README). New addresses: CollateralOnramp, CollateralOfframp, Collateral Vault, two redemption adapters.
+3. Read every v2 SDK example file. Each example is a feature we may need to support.
+4. For each diff: identified affected code path, change, test. Document is `tasks/v2-migration-audit.md`.
+
+**Rules added** (now 14, 15):
+
+15. **When upstream version-bumps, audit the whole migration in one pass.** Read both old and new client libraries side-by-side, the contract repo, every config field. List every differing surface. Make a coherent plan. Ship one release. The temptation to "fix the immediate error and see what breaks next" is what turned the v2 migration into a four-day-six-failure parade. One week of audit before deploy beats four weeks of fire-fighting after.
+
+16. **Adjacency matters.** A failure in one subsystem during a coordinated upstream change strongly suggests adjacent subsystems are also affected. The first `order_version_mismatch` should have triggered a full v2 surface review, not a one-line domain-version bump. Use the affected-subsystem as a starting point, not an ending point.
+
+---
+
 ## Pereira Stealth Fill — 25 April 2026 (the v20 safeguards working as designed)
 
 **TL;DR.** First real-money bet under v20 (pred #11, Pereira YES @ 0.585, $1.48). CLOB returned `success=true, trades=[]` so the existing logic cancelled the prediction. **2.29 CTF shares were minted on-chain anyway.** v20's drift safeguard caught the $1.48 mismatch within 60 seconds and crash-looped the daemon to halt further trading. Pereira won — the orphan was worth ~$2.29, net win $0.81 — but the lesson holds whatever the outcome.

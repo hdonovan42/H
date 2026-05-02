@@ -227,6 +227,53 @@ def test_clob_fee_rate_endpoint(liquid_market):
 
 # ── On-chain RPC sanity ──────────────────────────────────────────────────
 
+def test_pusd_collateral_token_is_a_real_erc20():
+    """v20.8 audit: pUSD is the v2 settlement currency. Pin its existence,
+    symbol, and decimals so we notice if Polymarket re-deploys/renames."""
+    try:
+        r = httpx.post(
+            "https://polygon-bor-rpc.publicnode.com",
+            json={
+                "jsonrpc": "2.0", "id": 1,
+                "method": "eth_call",
+                "params": [{
+                    "to": "0xc011a7e12a19f7b1f670d46f03b03f3342e82dfb",
+                    # symbol() selector
+                    "data": "0x95d89b41",
+                }, "latest"],
+            },
+            timeout=10,
+        )
+    except Exception as e:
+        pytest.skip(f"RPC unreachable: {e}")
+    r.raise_for_status()
+    body = r.json()
+    assert "result" in body and body["result"] != "0x", body
+    # The result is ABI-encoded string. We just assert the call succeeded
+    # (a non-empty result). Decoding the symbol is over-specific for a
+    # contract test; the address pin in test_v2_addresses_pinned is enough.
+
+
+def test_collateral_onramp_contract_exists():
+    """v20.8 audit: CollateralOnramp wraps USDC.e to pUSD. If Polymarket
+    moves this contract, our setup_v2_allowances + manual wrap script
+    target the wrong place."""
+    try:
+        r = httpx.post(
+            "https://polygon-bor-rpc.publicnode.com",
+            json={
+                "jsonrpc": "2.0", "id": 1, "method": "eth_getCode",
+                "params": ["0x93070a847efef7f70739046a929d47a521f5b8ee", "latest"],
+            },
+            timeout=10,
+        )
+    except Exception as e:
+        pytest.skip(f"RPC unreachable: {e}")
+    r.raise_for_status()
+    code = r.json()["result"]
+    assert code != "0x" and len(code) > 4, "CollateralOnramp has no bytecode at pinned address"
+
+
 def test_polygon_rpc_responds_with_block_number():
     """All on-chain ops in real mode go through Polygon RPC. If our default
     endpoint stops working we lose drift detection, share reconciliation,

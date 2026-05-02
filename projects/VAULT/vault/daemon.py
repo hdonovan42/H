@@ -339,6 +339,23 @@ def run_daemon(resurrect: bool = False):
             print(f"ERROR: orphan sweep failed: {e}")
             sys.exit(1)
 
+        # HARD GATE 5: v2 allowance setup. Idempotent — checks each
+        # allowance and only sends a tx when it's missing. Logs when a
+        # send happens so unexpected gas spend is visible. Doesn't block
+        # startup on failure: trading just won't work, but the divergence
+        # safeguard will catch any successful order anyway.
+        try:
+            from vault.clob_client import setup_v2_allowances
+            v2_setup = setup_v2_allowances()
+            sent = v2_setup["summary"]["sent"]
+            failed = v2_setup["summary"]["failed"]
+            if sent > 0 or failed > 0:
+                log.info(f"v2 allowance setup: {v2_setup['summary']}")
+            if failed > 0:
+                log.warning(f"v2 allowance setup had {failed} failures: {v2_setup['actions']}")
+        except Exception as e:
+            log.error(f"setup_v2_allowances raised at startup: {e}", exc_info=True)
+
     # Guard 6: Set dry-run counter on startup (real trading only)
     if not cfg.get("trading", {}).get("simulated", True):
         dry_run_cycles = cfg.get("trading", {}).get("clob", {}).get("dry_run_startup_cycles", 5)

@@ -27,17 +27,32 @@ log = logging.getLogger("vault.wallet_sync")
 # Internal counterparties — transfers to/from these are system activity, not cashflow.
 # Addresses are stored lowercase; comparisons normalise to lowercase.
 INTERNAL_ADDRESSES = {
-    # Polymarket exchanges (trades, payouts)
-    "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e": "Polymarket CTF Exchange",
-    "0xc5d563a36ae78145c45a50134d48a1215220f80a": "Polymarket Neg-Risk Exchange",
-    # Conditional Token Framework — not relevant for USDC but safe to exclude
+    # ── v1 Polymarket exchanges (still valid for legacy markets) ──
+    "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e": "Polymarket CTF Exchange (v1)",
+    "0xc5d563a36ae78145c45a50134d48a1215220f80a": "Polymarket Neg-Risk Exchange (v1)",
+    # ── v2 Polymarket exchanges (Apr 2026 migration) ──
+    "0xe111180000d2663c0091e4f400237545b87b996b": "Polymarket CTFExchange v2",
+    "0xe2222d279d744050d28e00520010520000310f59": "Polymarket Neg-Risk CTFExchange v2",
+    # ── Conditional Token Framework (unchanged across v1/v2) ──
     "0x4d97dcd97ec945f40cf65f87097ace5ea0476045": "Polymarket CTF",
-    # Neg-risk redemption infrastructure. Without these, redeemPositions()
-    # USDC.e transfers from the neg-risk vault would be miscategorised as
-    # external deposits, double-counting the prediction_resolve credit.
-    "0xd91e80cf2e7be2e162c6513ced06f1dd0da35296": "Polymarket Neg-Risk Adapter",
-    "0x3a3bd7bb9528e159577f7c2e685cc81a765002e2": "Polymarket Neg-Risk Vault",
-    # Uniswap v3 infra used for native → USDC.e auto-swap
+    # ── v1 redemption (still used for v1-era positions) ──
+    "0xd91e80cf2e7be2e162c6513ced06f1dd0da35296": "Polymarket Neg-Risk Adapter (v1)",
+    "0x3a3bd7bb9528e159577f7c2e685cc81a765002e2": "Polymarket Neg-Risk Vault (v1)",
+    # ── v2 collateral wrapping infrastructure ──
+    # pUSD is the v2 settlement currency (wraps USDC.e 1:1). Without these,
+    # wrap/unwrap operations show as withdrawals/deposits in cashflow and
+    # double-count against the unified balance.
+    "0xc011a7e12a19f7b1f670d46f03b03f3342e82dfb": "Polymarket CollateralToken (pUSD)",
+    "0x93070a847efef7f70739046a929d47a521f5b8ee": "Polymarket CollateralOnramp",
+    "0x2957922eb93258b93368531d39facca3b4dc5854": "Polymarket CollateralOfframp",
+    "0xc417fd8e9661c0d2120b64a04bb3278c17e99db1": "Polymarket Collateral Vault",
+    # ── v2 redemption adapters (NEW, untested in our flow) ──
+    # Used when v2-era positions resolve. Until we successfully redeem one
+    # via these we won't know exact behaviour, but classifying as internal
+    # ensures their inflow doesn't show as a phantom deposit.
+    "0xada100874d00e3331d00f2007a9c336a65009718": "Polymarket CtfCollateralAdapter (v2)",
+    "0xada200001000ef00d07553cee7006808f895c6f1": "Polymarket NegRiskCtfCollateralAdapter (v2)",
+    # ── Uniswap v3 infra used for native USDC → USDC.e auto-swap ──
     "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap v3 Router",
     "0xd36ec33c8bed5a9f7b6630855f1533455b98a418": "Uniswap v3 USDC/USDC.e Pool (fee=100)",
     "0xd9abecb39a5885d1e531ed3599adfed620e2fc8a": "Uniswap v3 USDC/USDC.e Pool (fee=500)",
