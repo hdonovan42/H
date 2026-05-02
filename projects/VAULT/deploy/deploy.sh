@@ -46,15 +46,23 @@ echo "Dependencies installed."
 REMOTE
 
 # Install/reload systemd services (requires root)
+# Both vault-api and vault-daemon must restart for python code changes;
+# missing either leaves a process running stale code (May 2026 incident:
+# v20.8 daemon had pUSD support but API didn't, dashboard showed -$19
+# false drift). Contract-check timer is registered too — covers daily
+# upstream-API regression detection.
 echo ">>> Restarting services..."
 ssh root@89.167.4.126 << 'ROOT'
 cp /home/hq/vault/deploy/vault-api.service /etc/systemd/system/
 cp /home/hq/vault/deploy/vault-daemon.service /etc/systemd/system/
+cp /home/hq/vault/deploy/vault-contract-check.service /etc/systemd/system/ 2>/dev/null || true
+cp /home/hq/vault/deploy/vault-contract-check.timer /etc/systemd/system/ 2>/dev/null || true
 systemctl daemon-reload
 systemctl enable vault-api vault-daemon
+systemctl enable --now vault-contract-check.timer 2>/dev/null || true
 systemctl restart vault-api
 systemctl restart vault-daemon
-echo "vault-api and vault-daemon services restarted."
+echo "vault-api, vault-daemon services restarted; vault-contract-check.timer enabled."
 ROOT
 
 echo ""
