@@ -870,7 +870,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
             conf = 0.8
             reasoning = (
                 f"Add to profitable {side} position (ROI {unrealised_roi:+.1%}, "
-                f"v_1h={v_1h:+.0%})"
+                f"YES_v_1h={v_1h:+.0%})"
             )
             log.info(
                 f"Momentum add candidate: {question[:50]} — {side} ${bet_size:.2f} "
@@ -906,7 +906,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
                 follow = True
                 conf = 0.75
                 reasoning = (
-                    f"Momentum auto-follow: {side} v_1h={v_1h:+.0%} "
+                    f"Momentum auto-follow: {side}, YES_v_1h={v_1h:+.0%} "
                     f"(clear signal, no risk triggers)"
                 )
                 log.info(f"Momentum auto-follow: {question[:50]} — {side} ${bet_size:.2f}")
@@ -991,7 +991,7 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         theme_part = f", theme='{event_title[:40]}'" if event_title else ""
         log.info(
             f"Momentum {action_tag} candidate: {question[:50]} — {side} ${bet_size:.2f} "
-            f"(v={v_1h:+.0%}/1h{z_part}, conf={conf:.0%}{theme_part})"
+            f"(YES_v_1h={v_1h:+.0%}{z_part}, conf={conf:.0%}{theme_part})"
         )
 
         # Cap accepted candidates per cycle (applied after filters, not before)
@@ -1294,7 +1294,7 @@ def _exit_momentum_reversal(conn, open_preds, odds_cache):
             log.info(
                 f"Momentum reversal exit: [{pred['id']}] {pred['side']} "
                 f"'{pred['question'][:40]}' @ {our_price:.2%} — "
-                f"v_1h={v:+.1%} reversed against {pred['side']} — PnL: ${pnl:+.2f}"
+                f"YES_v_1h={v:+.1%} reversed against {pred['side']} — PnL: ${pnl:+.2f}"
             )
         except Exception as e:
             log.warning(f"Failed momentum reversal exit {pred['id']}: {e}")
