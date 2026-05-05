@@ -153,7 +153,7 @@ shadow_pyramid:
 
 drawdown_circuit_breaker:
   enabled: true
-  max_drawdown_pct: 0.25
+  max_drawdown_pct: 0.50
 
 snapshot_prune_keep_hours: 48         # keep all snapshots within this window
 snapshot_prune_interval_cycles: 50    # prune every N cycles
