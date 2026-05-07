@@ -305,13 +305,25 @@ def redeem_prediction(conn, prediction_id: int, *, dry_run: bool = False) -> dic
 
 
 def find_redeemable(conn) -> list[dict]:
-    """Return closed real-mode winning predictions whose CTF shares are still
+    """Return closed real-mode WON predictions whose CTF shares are still
     on-chain (i.e. need redeeming). Filters out predictions whose markets
-    haven't actually resolved on-chain yet (UMA finalisation delay)."""
+    haven't actually resolved on-chain yet (UMA finalisation delay).
+
+    `resolution IN ('sold', 'cancelled', 'failed')` are excluded because the
+    SELL proceeds (or lack thereof) were already credited via the SELL
+    flow's prediction_sell ledger entry. Re-redeeming would double-count:
+    the redemption_adjustment compares actual on-chain redemption proceeds
+    against `predictions.payout`, but for a SOLD position that field
+    represents the SELL proceeds, not a yet-to-be-redeemed payout. The
+    1 May 2026 incident: 7 sold positions hit the redemption sweep,
+    each got ~$0.001 from dust shares, and the sweep wrote an adjustment
+    of −(payout − dust) ≈ −$1.50 each, polluting the ledger by ~$10.56.
+    """
     rows = conn.execute(
-        "SELECT id, market_id, condition_id, side, clob_token_id, payout "
+        "SELECT id, market_id, condition_id, side, clob_token_id, payout, resolution "
         "FROM predictions WHERE execution_mode = 'real' AND status = 'closed' "
         "AND payout > 0 AND clob_token_id IS NOT NULL "
+        "AND (resolution IS NULL OR resolution = 'won') "
         "ORDER BY id"
     ).fetchall()
     out = []

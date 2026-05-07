@@ -7,7 +7,7 @@ from vault import ledger
 from vault.redeem import find_redeemable, redeem_prediction, redemption_sweep
 
 
-def _seed_closed_real_win(conn, *, pred_id_marker="test", payout=2.29, shares=2.29, side="YES"):
+def _seed_closed_real_win(conn, *, pred_id_marker="test", payout=2.29, shares=2.29, side="YES", resolution="won"):
     """Insert a closed real-mode winning prediction directly. Returns the row's id."""
     cur = conn.execute(
         "INSERT INTO predictions (market_id, condition_id, question, slug, side, "
@@ -31,7 +31,7 @@ def _seed_closed_real_win(conn, *, pred_id_marker="test", payout=2.29, shares=2.
             payout - (shares * 0.5),
             "2026-04-25T00:00:00Z",
             "2026-04-26T00:00:00Z",
-            "won",
+            resolution,
         ),
     )
     conn.commit()
@@ -185,3 +185,32 @@ def test_redemption_sweep_keeps_going_after_individual_failure(seeded_db):
 
     assert summary["redeemed"] == 1
     assert summary["failed"] == 1
+
+
+def test_find_redeemable_excludes_sold_positions(seeded_db):
+    """Regression: 1 May 2026 incident. After v20.8.2's SELL stealth fix
+    started cleanly closing positions via momentum exit, the
+    redemption_sweep kept trying to redeem them anyway. Each sweep found
+    only dust (~0.001 shares) on-chain, redeemed it for ~$0.001, then
+    wrote redemption_adjustment = actual − payout = roughly −$1.50 against
+    the SELL proceeds that had ALREADY been credited via the sell flow.
+    7 such phantom adjustments cumulatively poisoned the ledger by
+    −$10.56 over 4 days. Fix: skip resolution='sold' (and 'cancelled',
+    'failed') — only redeem positions resolved through market settlement."""
+    ledger.go_live_reset(seeded_db, 50.0)
+    pid_won = _seed_closed_real_win(seeded_db, pred_id_marker="won", resolution="won")
+    pid_sold = _seed_closed_real_win(seeded_db, pred_id_marker="sold", resolution="sold")
+    pid_cancelled = _seed_closed_real_win(seeded_db, pred_id_marker="cancelled", resolution="cancelled")
+    pid_failed = _seed_closed_real_win(seeded_db, pred_id_marker="failed", resolution="failed")
+    pid_null = _seed_closed_real_win(seeded_db, pred_id_marker="null", resolution=None)
+
+    # All have on-chain dust shares
+    with patch("vault.redeem.get_ctf_balance", return_value=0.005):
+        out = find_redeemable(seeded_db)
+
+    ids = {r["id"] for r in out}
+    assert pid_won in ids, "won positions are redeemable"
+    assert pid_null in ids, "null resolution treated as redeemable (UMA-pending wins)"
+    assert pid_sold not in ids, "SELL proceeds already credited; don't double-account via redeem"
+    assert pid_cancelled not in ids
+    assert pid_failed not in ids
