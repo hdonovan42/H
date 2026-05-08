@@ -74,24 +74,46 @@ def _orphan_sweep(conn, cfg) -> dict:
             continue
 
         expected_shares = pred["shares"]
-        if ctf_shares >= expected_shares * 0.99:
-            # On-chain has (at least) the shares we expected. Confirm the bet.
+        # Polymarket v2 produces routine 1-5% slippage between predicted
+        # and on-chain shares due to fees + partial matching. The original
+        # 99% threshold paused for manual review on every legitimate v2
+        # fill; the May 2026 incidents (pred #99, #134) showed this auto-
+        # pauses the daemon multiple times per day. Accept down to 90% as
+        # a normal partial fill; below that, treat as ambiguous.
+        ORPHAN_FULL_FILL_THRESHOLD = 0.90
+        if ctf_shares >= expected_shares * ORPHAN_FULL_FILL_THRESHOLD:
+            # On-chain has effectively the shares we expected (within
+            # acceptable v2 slippage). Confirm with the on-chain count
+            # as authoritative, not the DB's predicted count.
             try:
                 ledger.record_prediction_confirm(
                     conn, pred["id"],
                     fill_amount_usd=pred["cost_basis"],
-                    fill_shares=expected_shares,
+                    fill_shares=ctf_shares,  # on-chain truth, not DB prediction
                     fill_odds=pred["entry_odds"],
                     fill_verified=True,
                 )
                 confirmed += 1
+                slippage_pct = (
+                    (1 - ctf_shares / expected_shares) * 100
+                    if expected_shares > 0 else 0
+                )
                 log.info(
                     f"Orphan sweep: confirmed pred #{pred['id']} "
-                    f"({expected_shares:.2f} shares @ {pred['entry_odds']:.0%})"
+                    f"({ctf_shares:.4f} shares on-chain vs {expected_shares:.4f} predicted, "
+                    f"slippage {slippage_pct:+.1f}%)"
                 )
             except ValueError as e:
-                # Already transitioned out of pending — race with cycle
+                # Already transitioned out of pending — race with cycle.
+                # Fall through to the share_correction path below if the
+                # DB still claims a different share count.
                 log.debug(f"Pred #{pred['id']} already confirmed: {e}")
+                if abs(ctf_shares - expected_shares) > 0.01:
+                    conn.execute(
+                        "UPDATE predictions SET shares = ? WHERE id = ?",
+                        (round(ctf_shares, 6), pred["id"]),
+                    )
+                    conn.commit()
                 skipped += 1
         elif ctf_shares < 0.01:
             # No shares on-chain; USDC clearly didn't move. Safe to cancel.
@@ -111,11 +133,13 @@ def _orphan_sweep(conn, cfg) -> dict:
                 conn.commit()
                 cancelled += 1
         else:
-            # Ambiguous: some shares on-chain but less than expected (partial fill? extra position?)
-            # Refuse to auto-reconcile; flag for manual review and pause the daemon.
+            # Truly ambiguous (10%+ slippage from expected): some shares
+            # on-chain but the discrepancy is large enough to suggest a
+            # real problem rather than v2 fee noise. Pause for review.
             log.critical(
-                f"Pred #{pred['id']}: partial on-chain match (expected {expected_shares:.4f}, "
-                f"got {ctf_shares:.4f}). Cannot auto-reconcile. Pausing daemon."
+                f"Pred #{pred['id']}: large partial on-chain match "
+                f"(expected {expected_shares:.4f}, got {ctf_shares:.4f}, "
+                f"ratio {ctf_shares/expected_shares:.1%}). Pausing daemon."
             )
             set_meta(conn, "paused", "true")
             conn.execute(

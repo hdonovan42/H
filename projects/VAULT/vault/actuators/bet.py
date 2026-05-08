@@ -264,10 +264,24 @@ class BetActuator(BaseActuator):
                 return {"success": False, "error": f"CLOB order failed: {fill.error}", "prediction_id": prediction_id}
 
             # ── PHASE 3: CLOB reported success. Verify on-chain, then confirm atomically. ──
+            # Polymarket v2 has settlement quirks that can produce 1-5%
+            # slippage between SDK-predicted and on-chain shares (fees,
+            # rounding, partial matching). Plus the chain-state read here
+            # races the matchOrders settlement — a single read can return 0
+            # while the tx is in mempool. Both motivate a wider tolerance
+            # and one short retry before declaring mismatch.
+            CTF_VERIFY_TOLERANCE = 0.95  # accept >= 95% of reported shares
             fill_verified = False
             if clob_cfg.get("verify_ctf_on_confirm", True):
                 time.sleep(2)  # let the chain settle
                 ctf_after = get_ctf_balance(token_id)
+                # If the first read suggests mismatch, retry once after a
+                # short pause — usually a settlement race, not a real diff.
+                if ctf_after is not None and ctf_after < fill.shares * CTF_VERIFY_TOLERANCE:
+                    time.sleep(3)
+                    retry = get_ctf_balance(token_id)
+                    if retry is not None and retry > ctf_after:
+                        ctf_after = retry
                 if ctf_after is None:
                     # RPC blind — we have a CLOB-reported fill but can't verify on-chain.
                     # Accept the fill (CLOB is authoritative) but log loudly and flag unverified.
@@ -275,7 +289,7 @@ class BetActuator(BaseActuator):
                         f"CTF verify skipped: RPC unavailable after fill. "
                         f"Trusting CLOB: {fill.shares:.2f} shares, ${fill.amount_usd:.2f}"
                     )
-                elif ctf_after < fill.shares * 0.99:  # allow 1% tolerance for rounding
+                elif ctf_after < fill.shares * CTF_VERIFY_TOLERANCE:
                     log.critical(
                         f"CTF VERIFY FAILED: CLOB reported {fill.shares:.4f} shares but on-chain "
                         f"CTF balance is {ctf_after:.4f} (existing {existing_shares or 0:.4f}). "
