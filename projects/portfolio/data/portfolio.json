@@ -14,9 +14,17 @@
       "action": "SELL",
       "ticker": "TSLA",
       "quantity": 4
+    },
+    {
+      "id": 3,
+      "ts": "2026-05-11T14:59:39Z",
+      "action": "BUY",
+      "ticker": "AAPL",
+      "quantity": 5
     }
   ],
   "positions": {
-    "TSLA": 6
+    "TSLA": 6,
+    "AAPL": 5
   }
 }
