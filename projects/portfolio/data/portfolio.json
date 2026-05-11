@@ -28,11 +28,19 @@
       "action": "BUY",
       "ticker": "MSFT",
       "quantity": 3
+    },
+    {
+      "id": 5,
+      "ts": "2026-05-11T16:12:02Z",
+      "action": "BUY",
+      "ticker": "NVDA",
+      "quantity": 1
     }
   ],
   "positions": {
     "TSLA": 6,
     "AAPL": 5,
-    "MSFT": 3
+    "MSFT": 3,
+    "NVDA": 1
   }
 }
