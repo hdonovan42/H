@@ -7,9 +7,16 @@
       "action": "BUY",
       "ticker": "TSLA",
       "quantity": 10
+    },
+    {
+      "id": 2,
+      "ts": "2026-05-11T14:59:32Z",
+      "action": "SELL",
+      "ticker": "TSLA",
+      "quantity": 4
     }
   ],
   "positions": {
-    "TSLA": 10
+    "TSLA": 6
   }
 }
