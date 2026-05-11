@@ -626,28 +626,80 @@ def sell_shares(token_id: str, shares: float, min_price: float = 0.01) -> FillRe
         )
 
     except Exception as e:
+        # CTF balance is the authoritative signal — USDC delta alone can be
+        # poisoned by an unrelated SELL settling at the same time (e.g. pred
+        # 133/144 incident, 8 May 2026: pred 133's FAK was rejected but
+        # pred 144's $1.17 fill arrived 2s earlier, so a USDC-only check
+        # falsely credited pred 133). Poll CTF for ~10s the same way the
+        # success path does.
+        import time as _time
+        ctf_after = ctf_before
+        ctf_delta = 0.0
+        for _attempt in range(5):  # 2,4,6,8,10s — async settlement window
+            _time.sleep(2)
+            probe = get_ctf_balance(token_id)
+            if probe is not None and ctf_before is not None:
+                ctf_after = probe
+                ctf_delta = ctf_before - probe
+                if ctf_delta > 0.01:
+                    break
+
         usdc_after = _get_usdc_balance_raw()
-        if usdc_before is not None and usdc_after is not None:
-            received = (usdc_after - usdc_before) / 1e6
-            if received > 0.01:
-                log.error(
-                    f"STEALTH FILL DETECTED: post_order threw '{e}' but ${received:.2f} USDC "
-                    f"arrived. Treating as successful sell."
-                )
-                return FillResult(
-                    success=True,
-                    order_id="stealth-fill",
-                    side="SELL",
-                    token_id=token_id,
-                    amount_usd=round(received, 6),
-                    shares=round(shares, 6),
-                    avg_price=round(received / shares, 6) if shares > 0 else 0,
-                )
-        else:
-            log.critical(
-                f"STEALTH CHECK BLIND on sell: post_order threw '{e}' and RPC unavailable. "
-                f"Reconciliation sweep will handle."
+        received = (
+            (usdc_after - usdc_before) / 1e6
+            if (usdc_before is not None and usdc_after is not None)
+            else None
+        )
+
+        if ctf_delta > 0.01:
+            # CTF decreased → real fill regardless of the exception.
+            if received is not None and received > 0.01:
+                actual_proceeds = received
+                avg_price = received / ctf_delta
+            else:
+                actual_proceeds = round(ctf_delta * min_price, 6)
+                avg_price = min_price
+            log.error(
+                f"STEALTH FILL DETECTED on SELL (exception path): post_order threw '{e}' "
+                f"but CTF balance decreased by {ctf_delta:.4f} shares "
+                f"(USDC delta ${received if received is not None else '?'}). "
+                f"Order actually executed."
             )
+            return FillResult(
+                success=True,
+                order_id="stealth-fill",
+                side="SELL",
+                token_id=token_id,
+                amount_usd=round(actual_proceeds, 6),
+                shares=round(ctf_delta, 6),
+                avg_price=round(avg_price, 6),
+            )
+
+        if ctf_before is None or ctf_after is None:
+            log.critical(
+                f"STEALTH CHECK BLIND on sell (exception): post_order threw '{e}' and CTF "
+                f"RPC unavailable. Reconciliation sweep will handle."
+            )
+            log.error(f"CLOB sell error: {e}", exc_info=True)
+            return FillResult(
+                success=False,
+                error=f"UNVERIFIED: {e} and CTF RPC unavailable",
+            )
+
+        if received is not None and received > 0.01:
+            # USDC arrived but CTF didn't move → the proceeds belong to a
+            # different SELL that settled in the same window. Do NOT credit.
+            log.critical(
+                f"ANOMALY on SELL (exception path): post_order threw '{e}' and "
+                f"${received:.2f} USDC arrived but CTF unchanged "
+                f"(still {ctf_after:.4f} shares). Refusing to credit phantom sell."
+            )
+            log.error(f"CLOB sell error: {e}", exc_info=True)
+            return FillResult(
+                success=False,
+                error=f"UNVERIFIED: USDC delta ${received:.2f} without matching CTF burn after exception",
+            )
+
         log.error(f"CLOB sell error: {e}", exc_info=True)
         return FillResult(success=False, error=str(e))
 
