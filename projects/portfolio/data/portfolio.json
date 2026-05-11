@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "transactions": [
+    {
+      "id": 1,
+      "ts": "2026-05-11T14:59:26Z",
+      "action": "BUY",
+      "ticker": "TSLA",
+      "quantity": 10
+    }
+  ],
+  "positions": {
+    "TSLA": 10
+  }
+}
