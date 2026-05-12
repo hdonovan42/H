@@ -24,26 +24,31 @@ def discover_markets(conn, cycle_id: int, themes: list[dict] | None = None,
     if cfg is None:
         cfg = load_config()
 
-    min_volume = cfg.get("velocity", {}).get("momentum_min_volume", 10000)
+    vel_cfg = cfg.get("velocity", {})
+    max_markets = vel_cfg.get("discovery_max_markets", 2000)
+    min_volume_24h = vel_cfg.get("discovery_min_volume_24h", 50)
 
-    # Fetch in bulk — 5 pages of 100, sorted by volume
+    # Fetch in bulk. We deliberately do NOT pass `order=volume` — the
+    # 12 May 2026 Tesla-robotaxi incident showed that `restricted:true`
+    # markets get deranked below rank 2000 on every gamma sort we tried,
+    # but show up at rank 1244 under the default sort. The default sort
+    # surfaces the long-tail markets where smart money tends to hide.
+    page = 500
     all_raw = []
-    for offset in [0, 100, 200, 300, 400]:
+    for offset in range(0, max_markets, page):
         try:
             resp = http_get_with_retry(
                 f"{GAMMA_BASE}/markets",
                 params={
                     "active": "true",
                     "closed": "false",
-                    "limit": 100,
+                    "limit": page,
                     "offset": offset,
-                    "order": "volume",
-                    "ascending": "false",
                 },
             )
             batch = resp.json()
             all_raw.extend(batch)
-            if len(batch) < 100:
+            if len(batch) < page:
                 break
         except Exception as e:
             log.warning(f"Failed to fetch markets (offset {offset}): {e}")
@@ -72,9 +77,11 @@ def discover_markets(conn, cycle_id: int, themes: list[dict] | None = None,
         if yes < 0.05 or yes > 0.95:
             continue
 
-        # Volume gate — same threshold used at entry stage in agent.py
-        volume = parsed.get("volume", 0) or 0
-        if volume < min_volume:
+        # Discovery-stage sanity floor: market must show signs of life in
+        # the last 24h. The entry-stage volume gate (agent.py:535) is the
+        # real execution check; here we just trim genuinely dead markets.
+        vol_24h = parsed.get("volume_24h", 0) or 0
+        if vol_24h < min_volume_24h:
             continue
 
         _upsert_market(conn, parsed)
@@ -86,7 +93,7 @@ def discover_markets(conn, cycle_id: int, themes: list[dict] | None = None,
 
     log.info(
         f"Market discovery: {len(tracked)} tracked for velocity "
-        f"(>=${min_volume:,.0f} vol) from {len(all_raw)} scanned (cycle {cycle_id})"
+        f"(>=${min_volume_24h:,.0f}/24h vol) from {len(all_raw)} scanned (cycle {cycle_id})"
     )
     return tracked
 

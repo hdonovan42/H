@@ -41,6 +41,19 @@ def live_db(seeded_db):
     return seeded_db
 
 
+@pytest.fixture(autouse=True)
+def _orderbook_depth_ok():
+    """Default check_orderbook_depth to a permissive stub so these e2e
+    tests don't reach the live CLOB /book endpoint. Individual tests can
+    override with their own patch."""
+    with patch(
+        "vault.clob_client.check_orderbook_depth",
+        return_value={"ok": True, "depth_shares": 1000.0, "our_consume_pct": 0.01,
+                      "best": 0.50, "error": None},
+    ):
+        yield
+
+
 @pytest.fixture
 def real_mode_config(monkeypatch, tmp_path):
     """Force simulated=false by writing a config.yaml override."""

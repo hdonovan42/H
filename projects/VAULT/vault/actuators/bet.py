@@ -182,6 +182,27 @@ class BetActuator(BaseActuator):
                     "error": f"Opportunity cost at CLOB ask: remaining {real_remaining:.2%} < risk-free {risk_free:.2%} (ask ${best_ask:.2f})",
                 }
 
+            # Pre-flight: orderbook depth probe. Widening discovery means
+            # we'll see thin markets the old volume gate hid from us; the
+            # real safety is "the book can absorb our order without nuking
+            # the price." See 12 May 2026 Tesla-robotaxi gap notes.
+            from vault.clob_client import check_orderbook_depth
+            from vault.config_loader import load_config as _load_cfg
+            _vel_cfg = _load_cfg().get("velocity", {})
+            shares_we_need = amount_usd / best_ask if best_ask > 0 else 0
+            depth = check_orderbook_depth(
+                token_id=token_id,
+                side="BUY",
+                shares_needed=shares_we_need,
+                max_consume_pct=_vel_cfg.get("orderbook_max_consume_pct", 0.30),
+                price_band=_vel_cfg.get("orderbook_price_band", 0.02),
+            )
+            if not depth["ok"]:
+                return {
+                    "success": False,
+                    "error": f"Thin orderbook: {depth['error']}",
+                }
+
             # Guard 4: On-chain position existence check (skip if RPC down here — stale data better than no bet)
             existing_shares = get_ctf_balance(token_id)
             if existing_shares is not None and existing_shares > 0:

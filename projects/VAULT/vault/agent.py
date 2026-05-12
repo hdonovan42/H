@@ -1196,10 +1196,25 @@ def _sell_prediction_auto(conn, pred: dict, our_price: float) -> float:
         if not token_id:
             log.warning(f"Real position {pred['id']} missing clob_token_id, selling at paper price")
         else:
-            from vault.clob_client import sell_shares
+            from vault.clob_client import sell_shares, check_orderbook_depth
             clob_cfg = cfg.get("trading", {}).get("clob", {})
             slippage = clob_cfg.get("slippage_pct", 0.02)
             min_price = max(our_price - slippage, 0.01)
+            # Depth probe before SELL — refuse to dump into thin bid stack.
+            # Same rationale as BUY: discovery now sees thin markets, the
+            # book is the real safety check.
+            vel_cfg_local = cfg.get("velocity", {})
+            depth = check_orderbook_depth(
+                token_id=token_id,
+                side="SELL",
+                shares_needed=pred["shares"],
+                max_consume_pct=vel_cfg_local.get("orderbook_max_consume_pct", 0.30),
+                price_band=vel_cfg_local.get("orderbook_price_band", 0.02),
+            )
+            if not depth["ok"]:
+                raise RuntimeError(
+                    f"CLOB sell aborted for [{pred['id']}]: thin orderbook: {depth['error']}"
+                )
             fill = sell_shares(token_id, pred["shares"], min_price=min_price)
             if fill.success:
                 our_price = fill.avg_price

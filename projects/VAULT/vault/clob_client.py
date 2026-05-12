@@ -266,6 +266,99 @@ def get_best_ask(token_id: str) -> float | None:
         return None
 
 
+def check_orderbook_depth(
+    token_id: str,
+    side: str,
+    shares_needed: float,
+    max_consume_pct: float = 0.30,
+    price_band: float = 0.02,
+) -> dict:
+    """Verify the orderbook has enough resting liquidity for our trade size.
+
+    Sums resting size within `price_band` of best (asks for BUY, bids for
+    SELL) and refuses if our order would consume more than `max_consume_pct`
+    of that depth. Cheap pre-trade probe — one HTTP call to /book.
+
+    Why: widening discovery to thin markets (12 May 2026 Tesla-robotaxi
+    gap) means we'll see opportunities we previously filtered by 24h
+    volume. The execution check used to be `volume >= $5000`; now it's
+    "the book can actually absorb our trade without nuking the price."
+
+    Returns dict:
+        ok: bool — True if depth is sufficient
+        depth_shares: float — total resting size in the band
+        our_consume_pct: float — our_size / depth (or 1.0 if depth=0)
+        best: float — best price on our side
+        error: str — set when ok=False (None otherwise)
+    """
+    import httpx
+
+    side = side.upper()
+    if side not in ("BUY", "SELL"):
+        return {
+            "ok": False,
+            "depth_shares": 0.0,
+            "our_consume_pct": 1.0,
+            "best": None,
+            "error": f"invalid side {side!r}",
+        }
+
+    try:
+        resp = httpx.get(
+            f"https://clob.polymarket.com/book",
+            params={"token_id": token_id},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        book = resp.json()
+    except Exception as e:
+        # Treat probe failure as a hard block. The whole point is to avoid
+        # blind trades; if we can't see the book, we don't trade.
+        log.warning(f"Orderbook probe failed for {token_id[:8]}: {e}")
+        return {
+            "ok": False,
+            "depth_shares": 0.0,
+            "our_consume_pct": 1.0,
+            "best": None,
+            "error": f"book fetch failed: {e}",
+        }
+
+    if side == "BUY":
+        levels = [(float(a["price"]), float(a["size"])) for a in book.get("asks", [])]
+        if not levels:
+            return {"ok": False, "depth_shares": 0.0, "our_consume_pct": 1.0,
+                    "best": None, "error": "no asks"}
+        best = min(p for p, _ in levels)
+        depth = sum(s for p, s in levels if p <= best + price_band)
+    else:  # SELL
+        levels = [(float(b["price"]), float(b["size"])) for b in book.get("bids", [])]
+        if not levels:
+            return {"ok": False, "depth_shares": 0.0, "our_consume_pct": 1.0,
+                    "best": None, "error": "no bids"}
+        best = max(p for p, _ in levels)
+        depth = sum(s for p, s in levels if p >= best - price_band)
+
+    consume = shares_needed / depth if depth > 0 else 1.0
+    if consume > max_consume_pct:
+        return {
+            "ok": False,
+            "depth_shares": round(depth, 4),
+            "our_consume_pct": round(consume, 4),
+            "best": best,
+            "error": (
+                f"would consume {consume:.0%} of {depth:.0f}-share depth within "
+                f"{price_band:.2f} of best {side.lower()} {best:.3f}; cap {max_consume_pct:.0%}"
+            ),
+        }
+    return {
+        "ok": True,
+        "depth_shares": round(depth, 4),
+        "our_consume_pct": round(consume, 4),
+        "best": best,
+        "error": None,
+    }
+
+
 def buy_shares(token_id: str, amount_usd: float, max_price: float = 0.99) -> FillResult:
     """Place a FAK (immediate-or-cancel) market buy order. Returns FillResult.
 

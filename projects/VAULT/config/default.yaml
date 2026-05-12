@@ -97,7 +97,11 @@ velocity:
   momentum_add_cooldown_minutes: 10  # minimum minutes between adds to same market+side
   max_momentum_per_cycle: 3
   momentum_max_exposure_pct: 0.50
-  momentum_min_volume: 5000      # skip markets below $5k volume (thin/manipulable)
+  momentum_min_volume: 500       # entry-stage gate (lowered 5000→500: 12 May 2026 Tesla-robotaxi gap; orderbook depth probe is the real safety)
+  discovery_max_markets: 2000    # how deep to paginate gamma /markets (was implicit 500)
+  discovery_min_volume_24h: 50   # discovery-stage sanity floor — must show signs of life
+  orderbook_max_consume_pct: 0.50  # refuse if our order > 50% of resting depth in price_band — at 2¢ band on ~$0.30 markets, worst slippage is ~7%
+  orderbook_price_band: 0.02       # depth window = 2¢ either side of best
   z_min_snapshots: 30            # need 30+ snapshots in 24h for reliable z-score
   z_sizing_low: 3.0              # z < 3: haircut confidence (noisy move)
   z_sizing_high: 4.0             # z >= 4: boost confidence (significant move)
