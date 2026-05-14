@@ -342,7 +342,13 @@ export default function StockTracker() {
             volume: quote.volume[i] || 0
           })).filter(b => b.close !== null);
 
-          setIntradayData(intradayBars);
+          // Collapse to a single trading day — 1D calcX is time-of-day only, so a mixed
+          // yesterday/today payload from Yahoo would overlay both sessions on one axis.
+          const state = getMarketState(clockDataRef.current).state;
+          const sessionToday = state === MarketState.OPEN || state === MarketState.POST_MARKET;
+          const toDate = b => dayjs(b.date).tz(EST).format('YYYY-MM-DD');
+          const cutoff = sessionToday ? getTodayEST() : [...new Set(intradayBars.map(toDate))].sort().pop();
+          setIntradayData(intradayBars.filter(b => toDate(b) === cutoff));
         }
       }
     } catch (error) {
