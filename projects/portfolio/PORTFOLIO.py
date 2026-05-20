@@ -159,7 +159,8 @@ def render_positions(positions: dict[str, int], title: str) -> Table:
 
 
 def render_value_table(positions: dict[str, int]) -> Table:
-    table = Table(title="Portfolio (live)", header_style="bold cyan", title_style="bold")
+    now_local = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
+    table = Table(title=f"Portfolio (live) — {now_local}", header_style="bold cyan", title_style="bold")
     table.add_column("Ticker", style="white")
     table.add_column("Quantity", justify="right", style="green")
     table.add_column("Price (USD)", justify="right")
