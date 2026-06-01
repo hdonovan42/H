@@ -97,7 +97,8 @@ velocity:
   momentum_add_cooldown_minutes: 10  # minimum minutes between adds to same market+side
   max_momentum_per_cycle: 3
   momentum_max_exposure_pct: 0.50
-  momentum_min_volume: 500       # entry-stage gate (lowered 5000→500: 12 May 2026 Tesla-robotaxi gap; orderbook depth probe is the real safety)
+  momentum_min_volume: 5000      # entry-stage gate (reverted 500→5000 on 1 Jun 2026: backtester rates $5K floor +$19.50, blocks 12/13 losers). Orderbook depth probe is secondary safety.
+  momentum_max_entry_odds: 0.90  # reject momentum entries at/above this price — favourite-chasing is -EV (1 Jun 2026: >0.85 entries cost -$5.48 of -$8.01 total). See agent.py favourite cap.
   discovery_max_markets: 2000    # how deep to paginate gamma /markets (was implicit 500)
   discovery_min_volume_24h: 50   # discovery-stage sanity floor — must show signs of life
   orderbook_max_consume_pct: 0.50  # refuse if our order > 50% of resting depth in price_band — at 2¢ band on ~$0.30 markets, worst slippage is ~7%

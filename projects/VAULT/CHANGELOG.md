@@ -5,6 +5,29 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v21.0 — Re-arm: discovery regression fix + favourite cap + $5K volume floor + snapshot index
+
+**Trigger**: User reported the profitable paper momentum strategy turned net-negative live, and the most recent bet failed with `No CLOB liquidity at ≥$0.99`. Investigation (1 Jun 2026) found VAULT had effectively stopped trading since ~13 May (last 500 cycles all `hold`, `0 velocity alerts`), and the live edge is genuinely negative (72 closed trades: 42% win, avg loss −$0.468 > avg win +$0.389; favourite-chasing >0.85 cost −$5.48 of the −$8.01 total).
+
+### Root cause (idleness)
+Commit `9b50c2f` ("widen discovery", 12 May) changed the discovery loop from `for offset in [0,100,200,300,400]` (5×100, volume-sorted) to `page = 500; for offset in range(0, max_markets, page)`. Gamma silently caps `limit` at 100, so the loop fetched one capped page of 100, hit `if len(batch) < page: break`, and stopped — scanning **100 unsorted markets** (27 tracked) instead of paginating to 2000. All quiet → `0 velocity alerts` → permanent `auto-hold` from the day after the commit deployed. The same commit also lowered `momentum_min_volume` 5000→500.
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/market_discovery.py` | `page = 500` → `page = 100` (gamma's real cap). Restores `range(0, 2000, 100)` deep pagination. Kept the deliberate no-`order` param (surfaces restricted markets). Post-deploy: **2000 scanned, 391 tracked** (was 100/27). |
+| `vault/agent.py` | Favourite cap: the hardcoded `entry_price >= 0.995` extreme-entry guard is now config-driven `velocity.momentum_max_entry_odds` (default **0.90**). Buying near-certain favourites is −EV by construction (tiny upside vs near-total downside + spread/gas). |
+| `config/default.yaml` | `momentum_min_volume` 500 → **5000** (backtester: $5K floor +$19.50, blocks 12/13 losers). Added `momentum_max_entry_odds: 0.90`. |
+| `vault/db.py` | Schema **v23**: create `idx_odds_snapshots_market_ts` on `odds_snapshots(market_id, ts)`. It was only declared in the v14 migration block, which the live DB (reset 24 Apr) skipped — the table had **zero indexes**. Added to base DDL + v23 migration. Cut cycle time **19,043ms → 1,835ms** despite 14× more markets (velocity calc was full-scanning a 107k-row table per market per cycle). |
+
+### Retroactive impact (cost of not having #1, on 72 closed trades)
+Rejecting entries >0.90 removes +$4.18; >0.85 removes +$5.48 (loss −$8.01 → −$2.53). The >0.95 slice alone cost −$4.08 on 6 trades (−$0.68/trade) — the most toxic.
+
+### What to watch on resumption
+- **~1h delay before trades resume**: the 391 newly-tracked markets have no price history; velocity (v_1h) needs ≥1h of snapshots. Expect continued `hold` until history rebuilds, then entries gated by the favourite cap + $5K floor.
+- **Snapshot growth**: 27 → 391 tracked markets ≈ ~1.1M rows steady-state (48h prune). Index keeps queries fast; monitor `vault.db` size (was 41 MB).
+- **Edge is still negative** — this re-arms trading *with guardrails* but does not fix the core thesis. Deferred: model execution costs in paper ledger (#2); test fade vs follow (#4). See `tasks/todo.md`.
+
 ## v20.8.2 — SELL stealth-fill detection (mirror of v20.1 BUY logic)
 
 **Trigger**: Pred #98 (Lady Gaga Met Gala NO, $1.05 cost) appeared as `open` with mark-to-market $0 in the dashboard. User flagged it. Investigation showed the daemon's momentum-reversal-exit *did* sell 2.120 shares for $0.84 successfully on-chain, but our daemon classified it as failed because v2's `/order` endpoint returned `success` without a `trades` key for the FAK fill — same v2 quirk that affects BUYs but our v20.1 stealth-fill detection only handled the BUY case.

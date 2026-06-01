@@ -511,9 +511,13 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
         entry_price = market_odds if side == "YES" else (1 - market_odds)
         remaining = _remaining_return_pct(entry_price)
 
-        # 2. Extreme odds filter — check ENTRY side, not just YES side
-        if entry_price >= 0.995:
-            log.info(f"Momentum skip (extreme entry): {question[:50]} — {side} @ {entry_price:.2%}")
+        # 2. Favourite cap — check ENTRY side, not just YES side.
+        # Buying near-certain favourites is -EV by construction (tiny upside vs
+        # near-total downside, eroded further by spread+gas). Live data to 1 Jun
+        # 2026: entries >0.85 cost -$5.48 of the -$8.01 total. Config-driven.
+        max_entry_odds = vel_cfg.get("momentum_max_entry_odds", 0.90)
+        if entry_price >= max_entry_odds:
+            log.info(f"Momentum skip (favourite cap {max_entry_odds:.0%}): {question[:50]} — {side} @ {entry_price:.2%}")
             continue
 
         # 2b. Minimum entry odds — very low entries are noise (sub-10% means 90%+ odds against)

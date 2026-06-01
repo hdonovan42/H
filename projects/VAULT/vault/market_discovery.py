@@ -33,7 +33,11 @@ def discover_markets(conn, cycle_id: int, themes: list[dict] | None = None,
     # markets get deranked below rank 2000 on every gamma sort we tried,
     # but show up at rank 1244 under the default sort. The default sort
     # surfaces the long-tail markets where smart money tends to hide.
-    page = 500
+    # Gamma silently caps `limit` at 100 per request. Passing a larger page
+    # returns only 100 rows, and the short-batch `break` below then stops after
+    # a single page — the 12 May 2026 regression that scanned just 100 unsorted
+    # markets and silently killed discovery (0 velocity alerts). Keep this 100.
+    page = 100
     all_raw = []
     for offset in range(0, max_markets, page):
         try:

@@ -7,7 +7,7 @@ from vault.config_loader import get_db_path
 
 log = logging.getLogger("vault.db")
 
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -214,6 +214,9 @@ CREATE TABLE IF NOT EXISTS odds_snapshots (
     cycle_id    INTEGER,
     FOREIGN KEY (cycle_id) REFERENCES cycles(id)
 );
+-- Hot path: velocity calc queries WHERE market_id=? AND ts>? every cycle, per
+-- tracked market. Without this index that's a full scan × hundreds of markets.
+CREATE INDEX IF NOT EXISTS idx_odds_snapshots_market_ts ON odds_snapshots(market_id, ts);
 
 CREATE TABLE IF NOT EXISTS estimates (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -942,6 +945,27 @@ def _migrate(conn):
         )
         conn.commit()
         log.info("v22 migration: created shadow_trades table (was referenced but never declared)")
+
+    if version < 23:
+        # v23: create the odds_snapshots(market_id, ts) index on live DBs. It was
+        # only ever declared in the v14 migration block, which fresh/reset DBs skip
+        # (init seeds schema_version directly to SCHEMA_VERSION, bypassing v14). The
+        # live DB has had ZERO indexes on odds_snapshots. Critical before re-widening
+        # discovery (1 Jun 2026): velocity calc scans this table per market per cycle.
+        try:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_odds_snapshots_market_ts "
+                "ON odds_snapshots(market_id, ts)"
+            )
+        except sqlite3.OperationalError as e:
+            log.warning(f"Failed to create index idx_odds_snapshots_market_ts: {e}")
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "23"),
+        )
+        conn.commit()
+        log.info("v23 migration: created idx_odds_snapshots_market_ts (was missing on live DB)")
 
 
 def init_db(db_path: Path | None = None) -> sqlite3.Connection:
