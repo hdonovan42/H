@@ -70,6 +70,32 @@ trading P&L −$8.01 on 72 closed trades. Paper was profitable; live reversed.
       corrected −$1.62 → **−$2.89** (true money-only loss).
 - [ ] **Shadow A/B spread** (only if reactivated) — shadow_trades fill at mid, not
       ask/bid; overstates paper P&L. Dormant now, low priority.
+
+### Known loose ends — accounting (as of v21.2, 1 Jun 2026)
+- **Trade tally still distorted** (LOOSE END): the headline `Trading P&L` (−$8.01)
+  = `SUM(predictions.pnl WHERE closed)`. Its per-trade rows still carry the
+  historical phantom-deposit / redemption-reversal distortions, so the GROSS tally
+  (−$8.01) does NOT match the reconciled Account P&L (−$2.89). Account-level numbers
+  are now correct (balance $17.11 = on-chain; account_pnl −$2.89 = value − $20 deposits);
+  only the per-trade `predictions.pnl` decomposition is dirty. Left intact for audit
+  integrity. Cleaning it = a forensic pass re-attributing phantom proceeds to their
+  originating trades (rebuild each `predictions.pnl` from actual fills/redemptions).
+  Not urgent — it's a reporting/decomposition issue, not a money issue.
+- **$0.09 expected-vs-actual on-chain** — `compute_expected_onchain` ($17.20) vs actual
+  USDC.e ($17.11); settlement/gas/rounding noise, within tolerance. Ignore.
+- **Reconciliation tooling** — `vault reconcile-balance [--yes]` exists for future drift;
+  refuses while positions in flight. The redemption_adjustment code that caused the
+  residue is already removed, so recurrence is unlikely.
 - [ ] **#4** test a FADE (mean-revert) variant vs FOLLOW — lagging-signal hypothesis.
-- [ ] **Watch resumption** — confirm first post-fix trade is gated correctly (no >0.90
-      entries, no <$5K-volume entries) and monitor `vault.db` growth at 391 markets.
+- [~] **Resumption observed (1 Jun 2026, cycle ~28162)** — discovery fix CONFIRMED
+      working: 383 markets tracked, `3 velocity alerts`, momentum logic actively
+      evaluating. Cycle time ~1.9s. Still need to observe a first actual fill to
+      confirm the favourite cap + $5K floor gate live.
+- [ ] **BLOCKER — bets below CLOB minimum** (NEW, found during v21.2 deploy): base
+      bet = `momentum_base_bet_pct` 5% × balance $17.11 = **$0.86 < $1.00 CLOB min**,
+      so every candidate is skipped ("Momentum skip (below CLOB min)"). The 5% base
+      only clears $1.00 at balance ≥ $20; the reconciliation to $17.11 worsened it.
+      Options: (a) raise `momentum_base_bet_pct` to ~0.06–0.07 (6–7% → $1.03–$1.20),
+      or (b) top up the wallet to ≥ $20. Velocity-scaled bets clear the min, but the
+      BASE entry can't. Needs a decision before VAULT can trade again.
+- [ ] **Monitor `vault.db` growth** at ~383 tracked markets (48h prune bounds it).
