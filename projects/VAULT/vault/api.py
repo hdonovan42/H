@@ -75,6 +75,7 @@ def get_status():
         runway = ledger.get_runway(conn)
         total_api = ledger.get_total_api_costs(conn)
         total_pnl = ledger.get_total_pnl(conn)
+        verified_deposits = ledger.get_verified_deposits(conn)
         alive = is_alive(conn)
         pid = read_pid()
         cycle_count = conn.execute("SELECT COUNT(*) as c FROM cycles").fetchone()["c"]
@@ -145,6 +146,8 @@ def get_status():
             "cycle_count": cycle_count,
             "total_api_costs": round(total_api, 4),
             "total_pnl": round(total_pnl, 4),
+            "verified_deposits": round(verified_deposits, 4),
+            "account_pnl": ledger.get_account_pnl(conn, total_value),
             "peak_total_value": peak_total_value,
             "drawdown_pct": drawdown_pct,
             "paused": paused_row is not None and paused_row["value"] == "true",

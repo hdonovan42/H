@@ -232,16 +232,22 @@ def _reconcile_balance(conn, cfg):
     diff = round(actual - expected, 6)
     tolerance = cfg.get("trading", {}).get("clob", {}).get("balance_drift_warn", 0.50)
 
-    if diff > tolerance:
-        ledger.record_deposit(conn, diff)
-        log.info(f"Deposit detected: ${diff:.2f} (on-chain ${actual:.2f}, expected ${expected:.2f})")
-    elif diff < -tolerance:
-        log.warning(
-            f"Negative balance drift: ${diff:.2f} (on-chain ${actual:.2f}, expected ${expected:.2f}) "
-            "— possible withdrawal or settlement lag, not auto-adjusting"
-        )
-    else:
+    if abs(diff) <= tolerance:
         log.debug(f"Balance reconciliation OK: drift ${diff:.2f} within tolerance")
+    else:
+        # Drift beyond tolerance. Real external deposits/withdrawals are ALREADY
+        # recorded by sync_wallet_transactions (Step 2) from actual Transfer
+        # events. Anything left here is UNATTRIBUTED — almost always late trade
+        # settlement, redemption proceeds, or gas — NOT a deposit. We refuse to
+        # auto-book it: the old `record_deposit(diff)` here mislabelled ~$6 of
+        # trade-settlement drift as phantom deposits, corrupting deposits and P&L
+        # (the −$8-reported vs −$2-real reconciliation, 1 Jun 2026). Log only.
+        kind = "surplus" if diff > 0 else "shortfall"
+        log.warning(
+            f"Unattributed on-chain {kind}: ${diff:+.2f} "
+            f"(on-chain ${actual:.2f}, expected ${expected:.2f}) — NOT auto-adjusting. "
+            "Real transfers are captured by wallet_sync; this is likely settlement/gas drift."
+        )
 
 
 def _handle_signal(signum, frame):

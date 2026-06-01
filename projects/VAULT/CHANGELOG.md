@@ -5,6 +5,33 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v21.1 — Accounting fix: kill phantom-deposit footgun + honest Account P&L
+
+**Trigger**: Dashboard reported P&L ≈ −$8.00 but the account was only ~$2 down since inception. Investigation (1 Jun 2026) found VAULT kept two unreconciled sets of books: `balance` = SUM(ledger.amount) = $18.38, and the headline "P&L" = SUM(predictions.pnl + positions.pnl) = −$8.01, which never looks at actual cash or deposits.
+
+### Root cause — the drift→deposit footgun
+`daemon._reconcile_balance` (Step 3) booked *any* positive on-chain drift beyond tolerance as a deposit: `if diff > tolerance: ledger.record_deposit(conn, diff)`. But real external transfers are already captured by `sync_wallet_transactions` (Step 2, which scans Transfer events and writes the ledger entry), so `compute_expected_onchain` already accounts for them — meaning Step 3 only ever fires on **unattributed** drift (late trade settlement, redemption proceeds, gas), which is **never** a deposit. The result: late-settling trade proceeds got mislabelled as **phantom deposits** — simultaneously overstating deposits (+$6.05: $1.26 "pUSD residue" + $0.84 [already reversed] + $2.00/$1.22/$0.73 on 8 May) **and** overstating trading losses by ~the same amount. Balance netted out roughly right (±$1.18 on-chain drift), which is why it hid — but every *derived* figure (P&L, deposits, "down since inception") was wrong.
+
+### Reconciliation
+Real deposits (`wallet_transactions` truth) = **$20.00** ($12.67 seed + $7.33 bridge). Value $18.38 → **real account P&L −$1.62** ✓ (matches the ~$2 observed). The −$8.01 is a gross per-trade tally, not the account's position.
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/daemon.py` | `_reconcile_balance` Step 3 no longer auto-books positive drift as a deposit. Beyond-tolerance drift (either sign) is now logged as an "unattributed surplus/shortfall" for review. Real deposits flow only through `sync_wallet_transactions`. |
+| `vault/ledger.py` | Added `get_verified_deposits()` (net external cash from `wallet_transactions`, the truth source — not the phantom-contaminated `deposit` ledger rows) and `get_account_pnl(current_value)` = value − verified deposits. |
+| `vault/api.py` | Status now returns `verified_deposits` and `account_pnl` (value-based, includes mark-to-market). |
+| `vault/reporting.py` | CLI status box: `Trading P&L` relabelled "(gross trades)"; added `Net in` and `Account P&L (vs deposits)` rows. |
+| `dashboard/StatusBar.jsx` | Front-page P/L now shows `account_pnl` ("vs $20.00 in"), falling back to `total_pnl` if the API is old. |
+
+### Decision (user, 1 Jun 2026)
+Leave the $6.05 of historical phantom deposits in the ledger for audit integrity — the reconciled view corrects the headline without mutating live money records. The 8 May entries confirmed phantom (no real top-up).
+
+### Still open
+- `predictions.pnl` (−$8.01) vs ledger trade-cashflow (−$5.87) = **$2.14** redemption-adjustment residue (sells double-counted vs redemptions).
+- Ledger value vs on-chain = **$1.18** settlement/gas drift.
+- Original #2: explicitly debit gas + realised spread at trade time so trade P&L and balance reconcile going forward (not yet done).
+
 ## v21.0 — Re-arm: discovery regression fix + favourite cap + $5K volume floor + snapshot index
 
 **Trigger**: User reported the profitable paper momentum strategy turned net-negative live, and the most recent bet failed with `No CLOB liquidity at ≥$0.99`. Investigation (1 Jun 2026) found VAULT had effectively stopped trading since ~13 May (last 500 cycles all `hold`, `0 velocity alerts`), and the live edge is genuinely negative (72 closed trades: 42% win, avg loss −$0.468 > avg win +$0.389; favourite-chasing >0.85 cost −$5.48 of the −$8.01 total).

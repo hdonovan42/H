@@ -573,6 +573,34 @@ def get_total_pnl(conn) -> float:
     return trade_pnl + pred_pnl
 
 
+def get_verified_deposits(conn) -> float:
+    """Net external cash in, from on-chain Transfer events (wallet_transactions).
+
+    SOURCE OF TRUTH for deposits — unlike SUM(ledger WHERE entry_type='deposit'),
+    which historically also included drift-detected phantoms (the pre-v21.1
+    `_reconcile_balance` footgun booked late-settling trade proceeds as fake
+    deposits). Use this for account-level P&L. See CHANGELOG v21.1.
+    """
+    row = conn.execute(
+        "SELECT COALESCE(SUM(CASE WHEN direction = 'deposit' THEN amount_usd "
+        "ELSE -amount_usd END), 0) AS net FROM wallet_transactions"
+    ).fetchone()
+    return round(row["net"], 6)
+
+
+def get_account_pnl(conn, current_value: float | None = None) -> float:
+    """Account-level P&L since inception: current value − verified net deposits.
+
+    The honest 'are we up or down' figure. Differs from get_total_pnl (a gross
+    per-trade outcome tally) which drifts from reality via accounting artifacts
+    (phantom deposits, redemption-adjustment residue, unmodelled gas/spread).
+    Pass current_value (cash + marked-to-market positions) for the full figure;
+    defaults to cash balance when omitted.
+    """
+    value = current_value if current_value is not None else get_balance(conn)
+    return round(value - get_verified_deposits(conn), 4)
+
+
 def get_total_api_costs(conn) -> float:
     """Total API costs spent."""
     row = conn.execute(

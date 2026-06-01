@@ -58,7 +58,15 @@ trading P&L −$8.01 on 72 closed trades. Paper was profitable; live reversed.
 - [ ] **Heal other missing migration-block indexes on live DB** — `idx_predictions_status`
       (v14), `idx_predictions_market_closed` (v15), `idx_api_calls_*`, `idx_smart_money_log_*`
       never ran (same reset gap). Low-impact (tiny tables) but backport to base DDL.
-- [ ] **#2** model execution cost (spread+gas) in paper/shadow ledger (fill at ask).
+- [x] **#2 (part 1) accounting reconciliation** — v21.1. Reported P&L −$8.01 was a
+      gross trade tally; real account P&L is **−$1.62** (value $18.38 − verified
+      deposits $20.00). Root cause: `_reconcile_balance` footgun booked late
+      trade-settlement drift as phantom deposits (+$6.05). Killed the footgun;
+      added `get_account_pnl`/`get_verified_deposits` + dashboard/CLI/API surfaces.
+- [ ] **#2 (part 2)** model execution cost (gas + realised spread) — debit at trade
+      time so trade P&L and balance reconcile. Resolves the $1.18 on-chain drift.
+- [ ] **Redemption-adjustment residue** — `predictions.pnl` (−$8.01) vs ledger
+      trade-cashflow (−$5.87) = $2.14 from sells double-counted vs redemptions.
 - [ ] **#4** test a FADE (mean-revert) variant vs FOLLOW — lagging-signal hypothesis.
 - [ ] **Watch resumption** — confirm first post-fix trade is gated correctly (no >0.90
       entries, no <$5K-volume entries) and monitor `vault.db` growth at 391 markets.

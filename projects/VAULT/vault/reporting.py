@@ -14,6 +14,8 @@ def status_report(conn) -> str:
     runway = ledger.get_runway(conn)
     total_api = ledger.get_total_api_costs(conn)
     total_pnl = ledger.get_total_pnl(conn)
+    verified_deposits = ledger.get_verified_deposits(conn)
+    account_pnl = ledger.get_account_pnl(conn)
     positions = ledger.get_open_positions(conn)
     alive = is_alive(conn)
     pid = read_pid()
@@ -45,7 +47,9 @@ def status_report(conn) -> str:
         f"║  Alive:      {f'{alive_days:.1f} days':<24}║",
         f"║  Cycles:     {cycle_count:<24}║",
         f"║  API costs:  {format_cost(total_api):<24}║",
-        f"║  Trading P&L:{f' ${total_pnl:+.2f}':<24}║",
+        f"║  Trading P&L:{f' ${total_pnl:+.2f} (gross trades)':<24}║",
+        f"║  Net in:     {format_cost(verified_deposits):<24}║",
+        f"║  Account P&L:{f' ${account_pnl:+.2f} (vs deposits)':<24}║",
         f"╚══════════════════════════════════════╝",
     ]
 

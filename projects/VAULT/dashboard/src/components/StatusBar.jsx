@@ -16,10 +16,13 @@ export default function StatusBar({ status }) {
 
   const {
     balance, positions_value, total_value, burn_rate, runway_days, cycle_count,
-    total_api_costs, total_pnl, alive_days, paused,
+    total_api_costs, total_pnl, account_pnl, verified_deposits, alive_days, paused,
   } = status;
 
   const displayBalance = total_value ?? balance;
+  // Account P&L (value − verified deposits) is the honest figure; total_pnl is
+  // a gross per-trade tally that drifts from reality. Fall back if API is old.
+  const acctPnl = account_pnl ?? total_pnl;
 
   return (
     <div className="status-bar">
@@ -43,10 +46,12 @@ export default function StatusBar({ status }) {
 
       <div className="stat">
         <div className="stat-label">P/L</div>
-        <div className={`stat-value ${total_pnl > 0 ? 'green' : total_pnl < 0 ? 'red' : ''}`}>
-          {total_pnl >= 0 ? '+' : ''}{formatCost(total_pnl)}
+        <div className={`stat-value ${acctPnl > 0 ? 'green' : acctPnl < 0 ? 'red' : ''}`}>
+          {acctPnl >= 0 ? '+' : ''}{formatCost(acctPnl)}
         </div>
-        <div className="stat-sub">realised</div>
+        <div className="stat-sub">
+          {verified_deposits != null ? `vs ${formatCost(verified_deposits)} in` : 'since inception'}
+        </div>
       </div>
 
       <div className="stat">
