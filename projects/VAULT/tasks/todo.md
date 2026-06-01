@@ -91,11 +91,8 @@ trading P&L −$8.01 on 72 closed trades. Paper was profitable; live reversed.
       working: 383 markets tracked, `3 velocity alerts`, momentum logic actively
       evaluating. Cycle time ~1.9s. Still need to observe a first actual fill to
       confirm the favourite cap + $5K floor gate live.
-- [ ] **BLOCKER — bets below CLOB minimum** (NEW, found during v21.2 deploy): base
-      bet = `momentum_base_bet_pct` 5% × balance $17.11 = **$0.86 < $1.00 CLOB min**,
-      so every candidate is skipped ("Momentum skip (below CLOB min)"). The 5% base
-      only clears $1.00 at balance ≥ $20; the reconciliation to $17.11 worsened it.
-      Options: (a) raise `momentum_base_bet_pct` to ~0.06–0.07 (6–7% → $1.03–$1.20),
-      or (b) top up the wallet to ≥ $20. Velocity-scaled bets clear the min, but the
-      BASE entry can't. Needs a decision before VAULT can trade again.
+- [x] **BLOCKER RESOLVED — bets below CLOB minimum** (v21.3, 1 Jun 2026): raised
+      `momentum_base_bet_pct` 5% → 7% (7% × $17.11 = ~$1.20, clears $1.00 floor).
+      Verified: "below CLOB min" skip gone; candidates now flow to the volume/spread/
+      favourite gates. Re-blocks if balance drops below ~$14.3 (top up if so).
 - [ ] **Monitor `vault.db` growth** at ~383 tracked markets (48h prune bounds it).

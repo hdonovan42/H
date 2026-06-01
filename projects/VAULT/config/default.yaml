@@ -88,7 +88,7 @@ velocity:
   momentum_enabled: true
   momentum_model: claude-haiku-4-5-20251001
   momentum_follow_confidence: 0.6   # Haiku must be this confident to follow
-  momentum_base_bet_pct: 0.05       # 5% of total value (~$1.00 at $20 — above CLOB $1 min)
+  momentum_base_bet_pct: 0.07       # 7% of total value (~$1.20 at $17 — clears CLOB $1 min; raised 5%->7% on 1 Jun 2026 after balance fell below $20)
   momentum_max_bet_pct: 0.10        # 10% of total value (~$2.00 at $20)
   momentum_vel_scale_20: 1.5        # 1.5x at |v_1h| >= 20%
   momentum_vel_scale_40: 2.0        # 2x at |v_1h| >= 40%

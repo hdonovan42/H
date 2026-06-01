@@ -5,6 +5,14 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v21.3 — Unblock trading: base bet 5% → 7%
+
+**Trigger**: After the v21.0–21.2 fixes, the momentum engine generated alerts every cycle but every candidate was skipped — `Momentum skip (below CLOB min): sized $0.86 < $1.00`. Base bet was 5% of total value, and the balance had fallen to ~$17 (5% = $0.86, under Polymarket's $1.00 marketable-order floor).
+
+**Change**: `config/default.yaml` `momentum_base_bet_pct` 0.05 → **0.07** (7% × $17.11 = ~$1.20, clears the floor with headroom down to ~$14.3 balance).
+
+**Verified post-deploy**: the "below CLOB min" skip is gone; candidates now flow to the real quality gates (the first batch was correctly filtered by the $5K volume floor and the >10% spread filter — current alerts are illiquid IPO/political long-tail markets). VAULT will place its first trade when a momentum signal lands on a liquid market (>$5K vol, <10% spread, |v_1h|>10%, odds<0.90 favourite cap). Watch: confirm the first real fill gates + executes correctly. If balance drops below ~$14.3, the floor re-blocks — top up or raise further.
+
 ## v21.2 — Reconcile ledger to on-chain (clear redemption-adjustment residue)
 
 **Trigger**: Follow-up to v21.1. On-chain truth: USDC.e = **$17.11**, `compute_expected_onchain` = $17.20 (accurate to $0.09), but ledger `balance` = $18.38 — **overstated by $1.27**. Investigation of "model gas + spread" (#2 part 2) found: (a) **spread on real trades is already captured** (`record_prediction_confirm` debits the actual on-chain USDC delta, not mid); (b) **gas is gasless on CLOB trades** and otherwise a tiny separate MATIC pot (0.61 MATIC), so it never touches the USDC balance. The $1.27 was therefore neither gas nor spread — it was the **redemption-adjustment reversal saga** (−$10.56 booked, +$9.39 reversed) leaving the ledger entries ~$2.14 above the (accurate) predictions-table reconstruction, netting +$1.27 vs on-chain after the −$0.96 API offset. That logic is already gone from the code, so the residue is purely historical.
