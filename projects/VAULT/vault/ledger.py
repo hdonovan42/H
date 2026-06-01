@@ -519,6 +519,35 @@ def record_deposit(conn, amount: float) -> float:
     return new_balance
 
 
+def record_reconciliation(conn, *, target_balance: float, reason: str) -> float:
+    """Snap the running ledger balance to `target_balance` via an additive
+    correction entry. Preserves history (it does NOT rewrite prior rows) — the
+    `reconciliation` entry documents the delta and the before/after, leaving a
+    clean audit trail. Returns the delta applied.
+
+    Use to clear accumulated accounting residue (e.g. the redemption-adjustment
+    reversal saga that left the ledger ~$1.27 above actual on-chain USDC.e —
+    1 Jun 2026). `reconciliation` is excluded from compute_expected_onchain, so
+    it never affects the on-chain divergence check.
+    """
+    current = round(get_balance(conn), 6)
+    delta = round(target_balance - current, 6)
+    conn.execute(
+        "INSERT INTO ledger (entry_type, amount, description, balance_after) "
+        "VALUES (?, ?, ?, ?)",
+        ("reconciliation", delta,
+         f"Reconciliation ({reason}): ${current:.4f} -> ${target_balance:.4f}",
+         round(target_balance, 6)),
+    )
+    conn.execute(
+        "INSERT INTO events (event, detail) VALUES (?, ?)",
+        ("reconciliation",
+         f"Balance snapped ${current:.2f} -> ${target_balance:.2f} (delta ${delta:+.4f}; {reason})"),
+    )
+    log.warning(f"Ledger reconciliation: ${current:.4f} -> ${target_balance:.4f} (delta ${delta:+.4f}; {reason})")
+    return delta
+
+
 def get_open_predictions(conn) -> list[dict]:
     """Get all open predictions."""
     rows = conn.execute(

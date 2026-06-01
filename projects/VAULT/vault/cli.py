@@ -136,6 +136,55 @@ def resume():
     click.echo("VAULT resumed.")
 
 
+@cli.command("reconcile-balance")
+@click.option("--yes", is_flag=True, help="Apply without interactive confirmation")
+@click.option("--target", type=float, default=None,
+              help="Override target balance (default: actual on-chain USDC.e)")
+def reconcile_balance(yes, target):
+    """Snap the ledger cash balance to actual on-chain USDC.e via a recorded
+    reconciliation entry. Clears accumulated accounting residue. Refuses while
+    positions are in flight (cash legitimately differs from on-chain then)."""
+    from vault import ledger
+    conn = init_db()
+    inflight = conn.execute(
+        "SELECT COUNT(*) FROM predictions WHERE status IN ('open', 'pending', 'reconciling')"
+    ).fetchone()[0]
+    if inflight:
+        click.echo(f"Refusing: {inflight} position(s) in flight — cash balance legitimately "
+                   "differs from on-chain USDC.e. Resolve/settle them first.")
+        conn.close()
+        return
+
+    if target is None:
+        from vault.clob_client import get_usdc_balance
+        target = get_usdc_balance()
+        if target is None:
+            click.echo("RPC unavailable — cannot read on-chain USDC.e. Pass --target to override.")
+            conn.close()
+            return
+
+    balance = ledger.get_balance(conn)
+    delta = round(target - balance, 6)
+    click.echo(f"Ledger balance   : ${balance:.4f}")
+    click.echo(f"Target (on-chain): ${target:.4f}")
+    click.echo(f"Delta            : ${delta:+.4f}")
+    if abs(delta) < 0.01:
+        click.echo("Within $0.01 — nothing to reconcile.")
+        conn.close()
+        return
+    if not yes and not click.confirm("Apply this reconciliation entry?"):
+        click.echo("Aborted.")
+        conn.close()
+        return
+
+    ledger.record_reconciliation(conn, target_balance=target,
+                                 reason="manual reconcile-balance: snap to on-chain USDC.e")
+    conn.commit()
+    click.echo(f"Applied. New balance: ${ledger.get_balance(conn):.4f} | "
+               f"Account P&L: ${ledger.get_account_pnl(conn):+.2f}")
+    conn.close()
+
+
 @cli.command("seed-intel")
 @click.argument("filepath", type=click.Path(exists=True))
 def seed_intel(filepath):

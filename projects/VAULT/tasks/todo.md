@@ -63,10 +63,13 @@ trading P&L −$8.01 on 72 closed trades. Paper was profitable; live reversed.
       deposits $20.00). Root cause: `_reconcile_balance` footgun booked late
       trade-settlement drift as phantom deposits (+$6.05). Killed the footgun;
       added `get_account_pnl`/`get_verified_deposits` + dashboard/CLI/API surfaces.
-- [ ] **#2 (part 2)** model execution cost (gas + realised spread) — debit at trade
-      time so trade P&L and balance reconcile. Resolves the $1.18 on-chain drift.
-- [ ] **Redemption-adjustment residue** — `predictions.pnl` (−$8.01) vs ledger
-      trade-cashflow (−$5.87) = $2.14 from sells double-counted vs redemptions.
+- [x] **#2 (part 2) investigated + drift fixed** — v21.2. Spread already captured
+      (actual fill cost); gas is cents in a separate MATIC pot (skipped, user call).
+      The $1.27 drift was the redemption residue, not gas/spread: reconciled ledger
+      balance $18.38 → on-chain $17.11 via `vault reconcile-balance`. Account P&L
+      corrected −$1.62 → **−$2.89** (true money-only loss).
+- [ ] **Shadow A/B spread** (only if reactivated) — shadow_trades fill at mid, not
+      ask/bid; overstates paper P&L. Dormant now, low priority.
 - [ ] **#4** test a FADE (mean-revert) variant vs FOLLOW — lagging-signal hypothesis.
 - [ ] **Watch resumption** — confirm first post-fix trade is gated correctly (no >0.90
       entries, no <$5K-volume entries) and monitor `vault.db` growth at 391 markets.

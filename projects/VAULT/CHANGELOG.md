@@ -5,6 +5,22 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v21.2 — Reconcile ledger to on-chain (clear redemption-adjustment residue)
+
+**Trigger**: Follow-up to v21.1. On-chain truth: USDC.e = **$17.11**, `compute_expected_onchain` = $17.20 (accurate to $0.09), but ledger `balance` = $18.38 — **overstated by $1.27**. Investigation of "model gas + spread" (#2 part 2) found: (a) **spread on real trades is already captured** (`record_prediction_confirm` debits the actual on-chain USDC delta, not mid); (b) **gas is gasless on CLOB trades** and otherwise a tiny separate MATIC pot (0.61 MATIC), so it never touches the USDC balance. The $1.27 was therefore neither gas nor spread — it was the **redemption-adjustment reversal saga** (−$10.56 booked, +$9.39 reversed) leaving the ledger entries ~$2.14 above the (accurate) predictions-table reconstruction, netting +$1.27 vs on-chain after the −$0.96 API offset. That logic is already gone from the code, so the residue is purely historical.
+
+### Files modified
+| File | Change |
+|------|--------|
+| `vault/ledger.py` | Added `record_reconciliation(target_balance, reason)` — an **additive** correction entry (`reconciliation` type) that snaps the running balance to a target and documents the before/after. Does not rewrite history; excluded from `compute_expected_onchain` so it never affects the divergence check. |
+| `vault/cli.py` | Added `vault reconcile-balance [--yes] [--target]` — reads actual on-chain USDC.e, refuses while positions are in flight, shows the delta, applies a recorded reconciliation entry. |
+
+### Applied (one-off, on VPS)
+`vault reconcile-balance --yes`: balance **$18.3777 → $17.1091** (delta −$1.2686). Account P&L corrected **−$1.62 → −$2.89** — the residue had been *flattering* the P&L; the true money position was always ~−$2.9 (deposits $20.00 − on-chain $17.11).
+
+### Note on #2 (gas/spread) — deliberately NOT done
+Real-trade spread is already captured; gas is cents in a separate MATIC pot and doesn't affect the USDC P&L. Modelling it was judged not worth the complexity (user call). The shadow A/B ledger still fills at mid, but it's dormant. Revisit only if shadow/paper trading is re-activated.
+
 ## v21.1 — Accounting fix: kill phantom-deposit footgun + honest Account P&L
 
 **Trigger**: Dashboard reported P&L ≈ −$8.00 but the account was only ~$2 down since inception. Investigation (1 Jun 2026) found VAULT kept two unreconciled sets of books: `balance` = SUM(ledger.amount) = $18.38, and the headline "P&L" = SUM(predictions.pnl + positions.pnl) = −$8.01, which never looks at actual cash or deposits.
