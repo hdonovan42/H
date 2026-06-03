@@ -86,7 +86,14 @@ trading P&L −$8.01 on 72 closed trades. Paper was profitable; live reversed.
 - **Reconciliation tooling** — `vault reconcile-balance [--yes]` exists for future drift;
   refuses while positions in flight. The redemption_adjustment code that caused the
   residue is already removed, so recurrence is unlikely.
-- [ ] **#4** test a FADE (mean-revert) variant vs FOLLOW — lagging-signal hypothesis.
+- [~] **#4 FADE hypothesis — backtest built** (`vault/fade_backtest.py`, `vault fade-backtest`).
+      Spread-aware counterfactual on live momentum trades. Frictionless/all-trades fade
+      looks like +$280-308 but that's an ARTIFACT (extreme-favourite fades buy 2-9c
+      longshots whose true spread >> the headline market spread). GATED to what the
+      current config would fade (cap 0.90, vol>=$5k, spread<=10%): **fade +$5.06 vs
+      follow -$3.06** over 62 trades, win rate 39%->58%, net of $5.06 spread. Direction
+      confirmed (follow is the wrong sign) but edge is thin (+$0.08/trade, small sample).
+      NEXT: shadow-track fade alongside live follow before flipping real capital.
 - [~] **Resumption observed (1 Jun 2026, cycle ~28162)** — discovery fix CONFIRMED
       working: 383 markets tracked, `3 velocity alerts`, momentum logic actively
       evaluating. Cycle time ~1.9s. Still need to observe a first actual fill to
