@@ -7,7 +7,7 @@ from vault.config_loader import get_db_path
 
 log = logging.getLogger("vault.db")
 
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -217,6 +217,30 @@ CREATE TABLE IF NOT EXISTS odds_snapshots (
 -- Hot path: velocity calc queries WHERE market_id=? AND ts>? every cycle, per
 -- tracked market. Without this index that's a full scan × hundreds of markets.
 CREATE INDEX IF NOT EXISTS idx_odds_snapshots_market_ts ON odds_snapshots(market_id, ts);
+
+CREATE TABLE IF NOT EXISTS shadow_fades (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    cycle_id      INTEGER,
+    market_id     TEXT NOT NULL,
+    question      TEXT,
+    follow_side   TEXT,
+    fade_side     TEXT,
+    entry_price   REAL,
+    stake         REAL,
+    v_1h          REAL,
+    v_6h          REAL,
+    z_1h          REAL,
+    spread        REAL,
+    horizon_hours REAL,
+    status        TEXT NOT NULL DEFAULT 'open',
+    exit_price    REAL,
+    exit_ts       TEXT,
+    fade_pnl      REAL,
+    resolved_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_shadow_fades_status ON shadow_fades(status);
+CREATE INDEX IF NOT EXISTS idx_shadow_fades_market ON shadow_fades(market_id, status);
 
 CREATE TABLE IF NOT EXISTS estimates (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -966,6 +990,43 @@ def _migrate(conn):
         )
         conn.commit()
         log.info("v23 migration: created idx_odds_snapshots_market_ts (was missing on live DB)")
+
+    if version < 24:
+        # v24: shadow_fades — paper-track the FADE counterfactual of each momentum
+        # signal out-of-sample (observe-only, never affects trading). See
+        # vault/shadow_fade.py and vault/fade_backtest.py.
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS shadow_fades (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                cycle_id      INTEGER,
+                market_id     TEXT NOT NULL,
+                question      TEXT,
+                follow_side   TEXT,
+                fade_side     TEXT,
+                entry_price   REAL,
+                stake         REAL,
+                v_1h          REAL,
+                v_6h          REAL,
+                z_1h          REAL,
+                spread        REAL,
+                horizon_hours REAL,
+                status        TEXT NOT NULL DEFAULT 'open',
+                exit_price    REAL,
+                exit_ts       TEXT,
+                fade_pnl      REAL,
+                resolved_at   TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_shadow_fades_status ON shadow_fades(status);
+            CREATE INDEX IF NOT EXISTS idx_shadow_fades_market ON shadow_fades(market_id, status);
+        """)
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("schema_version", "24"),
+        )
+        conn.commit()
+        log.info("v24 migration: created shadow_fades table (out-of-sample fade tracking)")
 
 
 def init_db(db_path: Path | None = None) -> sqlite3.Connection:

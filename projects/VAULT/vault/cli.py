@@ -95,10 +95,18 @@ def fade_backtest():
     """Counterfactual: what if momentum signals had been FADED (mean-reverted)
     instead of followed? Spread-aware, with the current entry gates applied."""
     from vault.fade_backtest import run_fade_backtest, format_report
+    from vault.shadow_fade import shadow_fade_summary
     from vault.config_loader import load_config
     conn = init_db()
     res = run_fade_backtest(conn, load_config())
     click.echo(format_report(res))
+    s = shadow_fade_summary(conn)
+    click.echo("")
+    line = (f"LIVE shadow-fade record: {s['logged']} logged "
+            f"({s['open']} open, {s['closed']} resolved, {s['expired']} expired)")
+    if s["closed"]:
+        line += f" | fade P&L ${s['fade_pnl']:+.2f} | win {s['win_rate']}% | avg ${s['avg_pnl']:+.3f}/trade"
+    click.echo(line)
     conn.close()
 
 

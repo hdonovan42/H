@@ -141,6 +141,15 @@ velocity:
   haiku_route_max_liquidity: 5000.0
   haiku_route_ambiguous_category: true    # route non-sports markets with " vs " in question
 
+# Shadow-fade: paper-track what FADING (mean-reverting) each momentum signal would
+# return, out-of-sample, alongside the real FOLLOW trades. Observe-only — never
+# affects trading. Validates the #4 lagging-signal hypothesis before risking capital.
+shadow_fade:
+  enabled: true
+  horizon_hours: 3.0       # close the paper fade this long after entry (momentum profit sweet spot)
+  stake: 1.00              # fixed hypothetical $ per shadow fade (comparable per-trade returns)
+  cooldown_minutes: 30     # don't re-log the same market within this window
+
 # Shadow pyramid — log what reworked pyramid adds WOULD have done (A/B test)
 shadow_pyramid:
   enabled: true

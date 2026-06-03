@@ -93,7 +93,20 @@ trading P&L −$8.01 on 72 closed trades. Paper was profitable; live reversed.
       current config would fade (cap 0.90, vol>=$5k, spread<=10%): **fade +$5.06 vs
       follow -$3.06** over 62 trades, win rate 39%->58%, net of $5.06 spread. Direction
       confirmed (follow is the wrong sign) but edge is thin (+$0.08/trade, small sample).
-      NEXT: shadow-track fade alongside live follow before flipping real capital.
+- [x] **Shadow-fade logging wired** (v21.4, `vault/shadow_fade.py`, schema v24). Observe-only;
+      logs fade counterfactual for each fully-qualifying momentum signal, resolves at 3h
+      horizon, spread-aware. Surfaced in `vault fade-backtest`. Accumulates slowly (only
+      tradeable signals log). Re-run periodically; add Welch's t-test once enough resolved.
+
+### Open trading issues (found 3 Jun 2026 during shadow-fade deploy)
+- [ ] **Stuck position #173** (OpenAI consumer-hardware YES @ 0.51, $1.17) — stale-exit
+      repeatedly fails: `CLOB sell ... no orders found to match with FAK order` (no bid
+      liquidity at limit). Trapped. Decide: leave/hold-to-resolution, or market-sell cheap.
+- [ ] **Balance bleeding**: $17.11 → $13.86 since trading re-enabled (2 days), account_pnl
+      -$2.89 → -$4.63. Follow strategy losing as predicted. Also now below ~$14.3 so base
+      bets re-blocked (7% × $13.86 = $0.97 < $1.00). Decide: top up, raise base %, or pause.
+- [ ] **Thin-book exit risk**: momentum enters on velocity but these long-tail markets have
+      no bids to exit into (wide spreads 18-51%). Entry liquidity != exit liquidity.
 - [~] **Resumption observed (1 Jun 2026, cycle ~28162)** — discovery fix CONFIRMED
       working: 383 markets tracked, `3 velocity alerts`, momentum logic actively
       evaluating. Cycle time ~1.9s. Still need to observe a first actual fill to

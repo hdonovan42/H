@@ -5,6 +5,23 @@ Correlate cycle ranges with performance to identify what works.
 
 ---
 
+## v21.4 — Shadow-fade logging (out-of-sample #4 fade validation)
+
+**What**: Paper-track what FADING (mean-reverting) each momentum signal would return, live and out-of-sample, alongside the real FOLLOW trades — to validate the #4 lagging-signal hypothesis before risking capital. **Observe-only**: every shadow-fade function is fully wrapped so a bug can never touch the follow path.
+
+**How**: For each momentum signal that passes the live quality gates (after favourite cap / volume / spread / velocity, gated to the same favourite band as real entries), log a hypothetical fade entry (opposite side at mirror mid). After `horizon_hours` (3h default), close it at the fade-side mid and record spread-aware P&L using the same model as `vault/fade_backtest.py` (round-trip spread = spread × shares).
+
+### Files
+| File | Change |
+|------|--------|
+| `vault/shadow_fade.py` | NEW — `log_shadow_fade`, `resolve_shadow_fades`, `shadow_fade_summary`. Defensive throughout. |
+| `vault/db.py` | Schema **v24**: `shadow_fades` table (base DDL + migration). |
+| `config/default.yaml` | `shadow_fade` block (enabled, horizon_hours 3.0, stake $1.00, cooldown 30m). |
+| `vault/agent.py` | Two wrapped hooks: log on qualifying signal (after velocity gate); resolve due fades each cycle (after pipeline, when odds are fresh). |
+| `vault/cli.py` | `vault fade-backtest` now also prints the accumulating live shadow-fade record. |
+
+**Verified**: migration ran (v24, table + indexes); `log_shadow_fade` direct-test inserts correctly; the logger reaches its hook (placed after all quality gates). Accumulation is **slow by design** — only fully-tradeable signals log, and current markets are mostly illiquid long-tail (wide spreads / weak velocity), so expect few rows until clean signals appear. Re-run `vault fade-backtest` periodically; add a Welch's t-test once enough resolved.
+
 ## v21.3 — Unblock trading: base bet 5% → 7%
 
 **Trigger**: After the v21.0–21.2 fixes, the momentum engine generated alerts every cycle but every candidate was skipped — `Momentum skip (below CLOB min): sized $0.86 < $1.00`. Base bet was 5% of total value, and the balance had fallen to ~$17 (5% = $0.86, under Polymarket's $1.00 marketable-order floor).

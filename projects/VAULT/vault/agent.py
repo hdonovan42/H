@@ -583,6 +583,19 @@ def _analyze_momentum_opportunities(conn, cycle_id: int, pipeline_result, cfg: d
                 f"Momentum z-gate override: {question[:50]} — "
                 f"|v_1h| {abs_v:.1%} < {momentum_min_velocity:.0%} but z={z_1h:.1f} >= {z_override_threshold}"
             )
+        # Shadow-fade (observe-only): paper-log what FADING this signal would do.
+        # Placed after all quality gates passed; wrapped so a bug here can never
+        # affect the real follow path.
+        try:
+            from vault.shadow_fade import log_shadow_fade
+            log_shadow_fade(
+                conn, cycle_id=cycle_id, market_id=alert["market_id"],
+                question=question, follow_side=side, follow_entry_price=entry_price,
+                v_1h=v_1h, v_6h=alert.get("v_6h"), z_1h=z_1h, spread=mkt_spread, cfg=cfg,
+            )
+        except Exception:
+            pass
+
         # Oscillation dampener: detect noisy mean-reverting markets
         osc_max_rev = vel_cfg.get("oscillation_max_reversals", 6)
         osc_net_override = vel_cfg.get("oscillation_net_move_override", 0.15)
@@ -1595,6 +1608,14 @@ def run_cycle(conn) -> dict:
     # Pass pipeline edges to context for actuators
     if pipeline_result and pipeline_result.edges:
         context["pipeline_edges"] = pipeline_result.edges
+
+    # Resolve any due shadow-fades (observe-only; never affects trading). Runs
+    # here because discovery just refreshed odds_snapshots for the exit price.
+    try:
+        from vault.shadow_fade import resolve_shadow_fades
+        resolve_shadow_fades(conn, cfg)
+    except Exception:
+        pass
 
     # ── Auto-pilot: pipeline-driven decision ──
     if pipeline_result and pipeline_result.enabled:
