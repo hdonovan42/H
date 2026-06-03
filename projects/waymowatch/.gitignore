@@ -1,0 +1,16 @@
+data/
+.venv/
+venv/
+node_modules/
+*.db
+*.db-wal
+*.db-shm
+__pycache__/
+*.pyc
+models/*.pt
+models/*.onnx
+.env
+
+# auto-downloaded model weights
+*.pt
+*.onnx
