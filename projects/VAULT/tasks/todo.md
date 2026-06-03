@@ -98,15 +98,23 @@ trading P&L −$8.01 on 72 closed trades. Paper was profitable; live reversed.
       horizon, spread-aware. Surfaced in `vault fade-backtest`. Accumulates slowly (only
       tradeable signals log). Re-run periodically; add Welch's t-test once enough resolved.
 
-### Open trading issues (found 3 Jun 2026 during shadow-fade deploy)
-- [ ] **Stuck position #173** (OpenAI consumer-hardware YES @ 0.51, $1.17) — stale-exit
-      repeatedly fails: `CLOB sell ... no orders found to match with FAK order` (no bid
-      liquidity at limit). Trapped. Decide: leave/hold-to-resolution, or market-sell cheap.
-- [ ] **Balance bleeding**: $17.11 → $13.86 since trading re-enabled (2 days), account_pnl
-      -$2.89 → -$4.63. Follow strategy losing as predicted. Also now below ~$14.3 so base
-      bets re-blocked (7% × $13.86 = $0.97 < $1.00). Decide: top up, raise base %, or pause.
-- [ ] **Thin-book exit risk**: momentum enters on velocity but these long-tail markets have
-      no bids to exit into (wide spreads 18-51%). Entry liquidity != exit liquidity.
+### Wind-down state (3 Jun 2026)
+- [x] **PAUSED** — `vault pause` (daemon alive, skips whole cycle). Stops the bleed, the
+      #173 exit churn, AND shadow-fade observation (the cycle is fully skipped while paused).
+      Follow strategy lost real money as predicted: $17.11 → ~$14 value, account_pnl -$4.63.
+- [x] **#173 — HOLD to resolution** (user call). NOT a bug: best bid 0.30 / ask 0.95 (65%
+      spread); the stale-exit's 0.36 limit was above the bid, so the slippage guard correctly
+      refused to fire-sale. Parked; pays 2.3sh×$1 if OpenAI ships consumer hardware else $0.
+- [ ] **#173 re-churn on resume** — if the daemon is unpaused before #173 resolves, the
+      stale-exit will retry+fail every cycle (FAK kill at 0.36 vs 0.30 bid). Needs either a
+      failed-exit back-off (mark hold after N fails) or manual exclusion before resuming.
+- [ ] **#181** (NVIDIA-largest NO @ 0.135, $1.15) — also open, parked by the pause. Not stuck.
+- [ ] **Thin-book exit risk (systemic)**: momentum enters on velocity but long-tail markets
+      have no bids to exit into (spreads 18-65%). Entry liquidity != exit liquidity — a core
+      flaw in trading these markets at all.
+- [ ] **Shadow-fade paused too** — pausing skips the cycle, so no fade data accrues. To keep
+      gathering fade evidence WITHOUT real trading would need an observe-only mode (e.g. run
+      cycle + shadow-fade but skip real execution). Decide if worth building.
 - [~] **Resumption observed (1 Jun 2026, cycle ~28162)** — discovery fix CONFIRMED
       working: 383 markets tracked, `3 velocity alerts`, momentum logic actively
       evaluating. Cycle time ~1.9s. Still need to observe a first actual fill to
