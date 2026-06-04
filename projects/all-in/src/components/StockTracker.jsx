@@ -1000,6 +1000,8 @@ export default function StockTracker() {
               timeframe={timeframe}
               onTimeframeChange={setTimeframe}
               previousClose={quote?.pc}
+              livePrice={currentPrice}
+              marketOpen={currentMarketState.isRegularHours}
             />
           </div>
         </div>

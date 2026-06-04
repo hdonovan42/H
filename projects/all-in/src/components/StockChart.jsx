@@ -20,7 +20,7 @@ const TIMEFRAME_DAYS = {
   'ALL': Infinity
 };
 
-export default function StockChart({ chartData, maxRangeData, intradayData, weeklyData, monthlyData, timeframe, onTimeframeChange, previousClose }) {
+export default function StockChart({ chartData, maxRangeData, intradayData, weeklyData, monthlyData, timeframe, onTimeframeChange, previousClose, livePrice, marketOpen }) {
   const svgRef = useRef(null);
   const containerRef = useRef(null);
   const [hoverData, setHoverData] = useState(null);
@@ -100,11 +100,29 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
 
   // Determine which data source to use and slice appropriately
   const visibleData = useMemo(() => {
-    // 1D: intraday (5-min intervals)
+    // 1D: 1-min intraday bars, extended in real time with the live price.
+    // During regular hours we append the live tick as a trailing point so the line
+    // keeps moving between Yahoo's minute bars; before the day's first bar arrives we
+    // seed an open-anchored point so a line can still render in the first ~minute.
     if (visibleDays <= 1) {
-      if (intradayData?.length) return intradayData;
-      // Fallback to weekly data
-      if (weeklyData?.length) return sliceByTradingDays(weeklyData, 1);
+      let base = intradayData?.length
+        ? intradayData
+        : (weeklyData?.length ? sliceByTradingDays(weeklyData, 1) : []);
+
+      if (marketOpen && livePrice > 0) {
+        const now = dayjs().tz(EST);
+        const point = (t, v) => ({ date: t.toISOString(), open: v, high: v, low: v, close: v, volume: 0 });
+        if (!base.length) {
+          // Seed the first ~minute before any official bar lands: anchor at the open.
+          const anchorVal = previousClose || livePrice;
+          base = [point(now.hour(9).minute(30).second(0).millisecond(0), anchorVal)];
+        }
+        // Append the live tick (guard against a backwards point on clock skew).
+        const lastTime = dayjs(base[base.length - 1].date).valueOf();
+        return now.valueOf() >= lastTime ? [...base, point(now, livePrice)] : base;
+      }
+
+      if (base.length) return base;
     }
 
     // 2-5D: weekly (15-min intervals)
@@ -129,7 +147,7 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
     }
 
     return [];
-  }, [chartData, maxRangeData, intradayData, weeklyData, monthlyData, visibleDays, sliceByTradingDays]);
+  }, [chartData, maxRangeData, intradayData, weeklyData, monthlyData, visibleDays, sliceByTradingDays, livePrice, marketOpen, previousClose]);
 
   // Early market: data spans < 2 hours, scale to 2-hour window instead of full day
   const earlyMarket = useMemo(() => {
