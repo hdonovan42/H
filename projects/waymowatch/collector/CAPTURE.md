@@ -19,7 +19,16 @@ the true JamCam viewpoint to fix the synthetic→real gap.
 - After a handful of confirmed reals → re-seed the surfacer from those real CCTV crops; it then
   stops flagging vans and becomes genuinely discriminative.
 
-## WhatsApp alerts (you-only) — one-time re-link needed
+## Email alerts (ACTIVE → donovanh59@gmail.com)
+Digest email with the review sheet attached, via Resend (autosnipe's verified domain), 4×/day:
+```
+0 8,12,16,20 * * * cd /home/hdonovan/hjd.ai/H/projects/waymowatch && .venv/bin/python collector/live_capture.py --email-digest >> data/candidates/capture.log 2>&1
+```
+- Goes to donovanh59@gmail.com only. `RESEND_API_KEY` in `.env` (gitignored). Tune cadence via cron.
+- Manual send: `… collector/live_capture.py --email-digest` · test: `… collector/email_alert.py --sheet`
+- Scan the attached sheet for a white I-PACE + dark roof dome; confirm reals with `--confirm <ids>`.
+
+## WhatsApp alerts (OPTIONAL — later, needs moltbot re-link)
 moltbot's gateway is up but its **WhatsApp session expired** (nothing sent in months). The pipe and
 target are already verified (dry-run; recipient hard-locked to +447702188120). To activate:
 1. `ssh hq@89.167.4.126` → `ssh moltbot@localhost`

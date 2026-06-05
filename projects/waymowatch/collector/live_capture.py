@@ -192,6 +192,7 @@ def main():
     ap.add_argument("--sample-every", type=int, default=SAMPLE_EVERY)
     ap.add_argument("--review", action="store_true")
     ap.add_argument("--digest", action="store_true", help="WhatsApp the operator a daily review nudge")
+    ap.add_argument("--email-digest", action="store_true", help="email the operator a candidate digest + sheet")
     ap.add_argument("--confirm", default="")
     ap.add_argument("--reject", default="")
     a = ap.parse_args()
@@ -216,6 +217,21 @@ def main():
         from whatsapp_alert import send_to_user
         send_to_user(msg)
         print("digest:", msg)
+    elif a.email_digest:
+        review_sheet(con)
+        n = con.execute("SELECT COUNT(*) FROM candidates WHERE status='new'").fetchone()[0]
+        top = con.execute("SELECT camera_id,score,captured_at FROM candidates WHERE status='new' "
+                          "ORDER BY score DESC LIMIT 1").fetchone()
+        sheet = os.path.join(BASE, "data/candidates/review_sheet.jpg")
+        html = f"<p><b>WaymoWatch — King's Cross</b>: {n} candidate(s) awaiting review.</p>"
+        if top:
+            html += f"<p>Top score {top[1]:.2f} at {top[0].replace('JamCams_', '')} ({top[2]}).</p>"
+        html += ("<p>Scan the attached sheet for a white I-PACE with a dark roof dome. On the capture "
+                 "box: <code>live_capture.py --confirm &lt;ids&gt;</code> to bank a real one.</p>")
+        sys.path.insert(0, HERE)
+        from email_alert import send_email
+        send_email(f"WaymoWatch: {n} King's Cross candidate(s) to review", html,
+                   attachments=[sheet] if os.path.exists(sheet) else None)
     else:
         sweep(con, a.cameras, a.sample_every)
         review_sheet(con)
