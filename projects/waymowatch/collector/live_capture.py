@@ -54,11 +54,14 @@ DEDUP_TH = 0.93       # cosine >= this => same vehicle: one entry, crop updated 
 KX_CENTRE = (51.5310, -0.1255)   # King's Cross / British Library centre (for --collect area)
 PARK_ROYAL = (51.5235, -0.2830)  # Waymo's London depot (NW10) — cars start/end runs here; the
                                  # ring of cams covers the depot + its arterials (A40, A406, Hanger Ln)
-PROB_TH = 0.83        # high-probability bar: keep/email only candidates more dome-like than ~98%
-                      # of 221 vetted white non-Waymos (their p98=0.83, max=0.87). Tunable.
-BATCH_SIZE = 5        # email the operator each time this many new high-prob candidates accumulate
+PROB_TH = 0.86        # high-probability bar (raised from 0.83 to cut FP volume; ~halves it). NOTE:
+                      # 0 real positives to calibrate against — a low-res CCTV dome could score below
+                      # this, so a real Waymo might be missed. Re-examine once a real positive lands.
+BATCH_SIZE = 5        # (legacy count-trigger; auto path now uses a once-daily digest — see DIGEST_HOUR)
 COLLECT_HOURS = (9, 21)  # auto-sweep only 09:00-21:00 Europe/London (BST/GMT handled automatically);
                          # Waymos don't test overnight + halves compute. Manual commands run any time.
+DIGEST_HOUR = 20      # send ONE digest per day, on the first sweep at/after 20:00 London (window
+                      # closes 21:00). Daytime sweeps just accumulate; you review one email at day's end.
 CAND_DIR = os.path.join(BASE, "data", "candidates")
 REAL_DIR = os.path.join(BASE, "data", "real_positives")
 SAMPLE_EVERY = 8       # ~3 fps — enough chances to catch a pass, light on CPU
@@ -105,9 +108,12 @@ def nearest_short_ids(cams, k, centre=KX_CENTRE):
 
 
 def is_white(car):
-    """Stage-1 cheap colour filter: Waymos are (predominantly) white. Lenient — also passes
-    silver/off-white and white-in-shadow so we don't miss a Waymo; white vans/cabs pass too
-    (they're the hard negatives Stage 2 needs). Discards red buses, black cabs, dark/coloured cars."""
+    """Stage-1 cheap colour filter: Waymos are (predominantly) white. Lenient on brightness — also
+    passes silver/off-white and white-in-shadow so we don't miss a Waymo; white vans/cabs pass too
+    (the hard negatives Stage 2 needs). The mean-saturation gate discards genuinely coloured cars
+    (red/blue/orange); muted-green and grey/silver are as desaturated as white and CANNOT be split
+    here — that's the dome classifier's job. Validated: rejects bright-coloured leaks, passes ~96%
+    of 225 real white crops (vs 98% without the gate)."""
     if car is None or car.size == 0:
         return False
     h, w = car.shape[:2]
@@ -117,8 +123,8 @@ def is_white(car):
     hsv = cv2.cvtColor(c, cv2.COLOR_BGR2HSV)
     v = hsv[:, :, 2].astype(np.float32) / 255.0
     s = hsv[:, :, 1].astype(np.float32) / 255.0
-    whiteish = ((v > 0.55) & (s < 0.28)).mean()   # bright + desaturated body panels
-    return whiteish > 0.30
+    whiteish = ((v > 0.55) & (s < 0.28)).mean()      # bright + desaturated body panels
+    return whiteish > 0.30 and float(s.mean()) < 0.24  # + colour gate: reject saturated (coloured) cars
 
 
 def iou(a, b):
@@ -297,6 +303,22 @@ def send_digest(con, force=False):
     return len(rows)
 
 
+def maybe_send_daily_digest(con):
+    """Once-daily digest: on the first sweep at/after DIGEST_HOUR (London), email the day's
+    accumulated high-prob candidates. Records the date so it fires at most once per day; if there's
+    nothing to send yet it leaves the date unset so a later sweep that day can still send."""
+    now = datetime.now(ZoneInfo("Europe/London"))
+    if now.hour < DIGEST_HOUR:
+        return
+    today = now.strftime("%Y-%m-%d")
+    row = con.execute("SELECT value FROM kv WHERE key='last_digest_date'").fetchone()
+    if row and row[0] == today:
+        return
+    if send_digest(con, force=True) > 0:
+        con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_date',?)", (today,))
+        con.commit()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cameras", type=int, default=0, help="0 = all zone cameras")
@@ -378,7 +400,7 @@ def main():
                 foc |= nearest_short_ids(cams, a.pr, PARK_ROYAL)
         sweep(con, focus=foc)                     # foc=None -> core 8 KX cams (FOCUS default)
         review_sheet(con)
-        send_digest(con)   # auto-email once BATCH_SIZE new high-prob candidates have accumulated
+        maybe_send_daily_digest(con)   # one email per day at/after 20:00 London, not per-batch
 
 
 if __name__ == "__main__":
