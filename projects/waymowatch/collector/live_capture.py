@@ -21,6 +21,8 @@ import json
 import os
 import sys
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import cv2
 import numpy as np
@@ -55,6 +57,8 @@ PARK_ROYAL = (51.5235, -0.2830)  # Waymo's London depot (NW10) — cars start/en
 PROB_TH = 0.83        # high-probability bar: keep/email only candidates more dome-like than ~98%
                       # of 221 vetted white non-Waymos (their p98=0.83, max=0.87). Tunable.
 BATCH_SIZE = 5        # email the operator each time this many new high-prob candidates accumulate
+COLLECT_HOURS = (9, 21)  # auto-sweep only 09:00-21:00 Europe/London (BST/GMT handled automatically);
+                         # Waymos don't test overnight + halves compute. Manual commands run any time.
 CAND_DIR = os.path.join(BASE, "data", "candidates")
 REAL_DIR = os.path.join(BASE, "data", "real_positives")
 SAMPLE_EVERY = 8       # ~3 fps — enough chances to catch a pass, light on CPU
@@ -85,6 +89,12 @@ def dome_centroid(embed):
 def in_zone(c):
     return (c.get("lat") and ZONE["lat0"] <= c["lat"] <= ZONE["lat1"]
             and ZONE["lon0"] <= c["lon"] <= ZONE["lon1"])
+
+
+def in_collection_window():
+    """True if it's within the daytime collection window in London local time (BST/GMT auto)."""
+    h = datetime.now(ZoneInfo("Europe/London")).hour
+    return COLLECT_HOURS[0] <= h < COLLECT_HOURS[1]
 
 
 def nearest_short_ids(cams, k, centre=KX_CENTRE):
@@ -353,6 +363,11 @@ def main():
                    attachments=[sheet] if shown else None)
         print(f"collected {len(rows)} white cars -> emailed ({shown} on sheet)")
     else:
+        if not in_collection_window():
+            now = datetime.now(ZoneInfo("Europe/London")).strftime("%H:%M %Z")
+            print(f"outside collection window {COLLECT_HOURS[0]:02d}:00-{COLLECT_HOURS[1]:02d}:00 "
+                  f"London (now {now}) — skipping sweep")
+            return
         foc = None
         if a.wide or a.pr:                       # one sweep over the union of the active areas
             cams = dp.fetch_camera_list()
