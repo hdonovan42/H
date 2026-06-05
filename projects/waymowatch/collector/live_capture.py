@@ -52,7 +52,7 @@ DEDUP_TH = 0.93       # cosine >= this => same vehicle: one entry, crop updated 
 KX_CENTRE = (51.5310, -0.1255)   # King's Cross / British Library centre (for --collect area)
 PROB_TH = 0.83        # high-probability bar: keep/email only candidates more dome-like than ~98%
                       # of 221 vetted white non-Waymos (their p98=0.83, max=0.87). Tunable.
-BATCH_SIZE = 20       # email the operator each time this many new high-prob candidates accumulate
+BATCH_SIZE = 5        # email the operator each time this many new high-prob candidates accumulate
 CAND_DIR = os.path.join(BASE, "data", "candidates")
 REAL_DIR = os.path.join(BASE, "data", "real_positives")
 SAMPLE_EVERY = 8       # ~3 fps — enough chances to catch a pass, light on CPU
