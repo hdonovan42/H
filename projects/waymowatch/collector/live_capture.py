@@ -169,13 +169,10 @@ def sweep(con, n, sample_every):
     print(f"focus cameras swept: {len(chosen)} | new candidates (top-{TOPK_PER_CAM}/cam ≥ {SCORE_FLOOR}): {found}")
 
 
-def review_sheet(con, n=24):
-    rows = con.execute("SELECT id,camera_id,score,crop_path FROM candidates WHERE status='new' "
-                       "ORDER BY score DESC LIMIT ?", (n,)).fetchall()
-    if not rows:
-        print("no new candidates to review"); return
+def _build_sheet(rows, out_path, cols=6, cap=72):
+    """rows = [(id, score, crop_path), ...]; render up to `cap` into a grid. Returns count shown."""
     cells = []
-    for cid, cam, sc, cp in rows:
+    for cid, sc, cp in rows[:cap]:
         im = cv2.imread(cp)
         if im is None:
             continue
@@ -183,12 +180,22 @@ def review_sheet(con, n=24):
         cv2.rectangle(c, (0, 0), (96, 20), (0, 0, 0), -1)
         cv2.putText(c, f"#{cid} {sc:.2f}", (3, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 255, 255), 1)
         cells.append(c)
-    cols = 6
+    shown = len(cells)
+    if shown == 0:
+        return 0
     cells += [np.full((150, 200, 3), 35, np.uint8)] * ((-len(cells)) % cols)
     grid = np.vstack([np.hstack(cells[i:i + cols]) for i in range(0, len(cells), cols)])
+    cv2.imwrite(out_path, grid)
+    return shown
+
+
+def review_sheet(con, n=72):
+    rows = con.execute("SELECT id,score,crop_path FROM candidates WHERE status='new' "
+                       "ORDER BY score DESC LIMIT ?", (n,)).fetchall()
     out = os.path.join(BASE, "data/candidates/review_sheet.jpg")
-    cv2.imwrite(out, grid)
-    print(f"review sheet ({len(rows)} candidates) -> {out}  | confirm with: live_capture.py --confirm <ids>")
+    shown = _build_sheet(rows, out)
+    print(f"review sheet ({shown} candidates) -> {out}  | confirm: live_capture.py --confirm <ids>"
+          if shown else "no new candidates to review")
 
 
 def confirm(con, ids, status):
@@ -239,20 +246,28 @@ def main():
         send_to_user(msg)
         print("digest:", msg)
     elif a.email_digest:
-        review_sheet(con)
-        n = con.execute("SELECT COUNT(*) FROM candidates WHERE status='new'").fetchone()[0]
-        top = con.execute("SELECT camera_id,score,captured_at FROM candidates WHERE status='new' "
-                          "ORDER BY score DESC LIMIT 1").fetchone()
-        sheet = os.path.join(BASE, "data/candidates/review_sheet.jpg")
-        html = f"<p><b>WaymoWatch — King's Cross</b>: {n} candidate(s) awaiting review.</p>"
-        if top:
-            html += f"<p>Top score {top[1]:.2f} at {top[0].replace('JamCams_', '')} ({top[2]}).</p>"
-        html += ("<p>Scan the attached sheet for a white I-PACE with a dark roof dome. On the capture "
-                 "box: <code>live_capture.py --confirm &lt;ids&gt;</code> to bank a real one.</p>")
-        sys.path.insert(0, HERE)
-        from email_alert import send_email
-        send_email(f"WaymoWatch: {n} King's Cross candidate(s) to review", html,
-                   attachments=[sheet] if os.path.exists(sheet) else None)
+        row = con.execute("SELECT value FROM kv WHERE key='last_digest_id'").fetchone()
+        last_id = int(row[0]) if row else 0
+        rows = con.execute("SELECT id,score,crop_path FROM candidates WHERE id>? AND status='new' "
+                           "ORDER BY score DESC", (last_id,)).fetchall()
+        total = len(rows)
+        if total == 0:
+            print("email-digest: no new candidates since last digest — skipping")
+        else:
+            sheet = os.path.join(BASE, "data/candidates/digest_sheet.jpg")
+            shown = _build_sheet(rows, sheet)
+            maxid = con.execute("SELECT MAX(id) FROM candidates").fetchone()[0] or last_id
+            con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_id',?)", (str(maxid),))
+            con.commit()
+            more = f" (+{total - shown} more — review on the capture box)" if total > shown else ""
+            html = (f"<p><b>WaymoWatch — King's Cross</b>: {total} new candidate(s) since the last digest"
+                    f" — showing {shown}{more}.</p><p>Scan the attached sheet for a white I-PACE with a "
+                    f"dark roof dome; reply with its <b>#</b> to confirm a real one.</p>")
+            sys.path.insert(0, HERE)
+            from email_alert import send_email
+            send_email(f"WaymoWatch: {total} new King's Cross candidate(s)", html,
+                       attachments=[sheet] if os.path.exists(sheet) else None)
+            print(f"email-digest: {total} new ({shown} shown) -> advanced last_digest_id to {maxid}")
     else:
         sweep(con, a.cameras, a.sample_every)
         review_sheet(con)
