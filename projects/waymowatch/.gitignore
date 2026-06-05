@@ -14,3 +14,4 @@ models/*.onnx
 # auto-downloaded model weights
 *.pt
 *.onnx
+runs/

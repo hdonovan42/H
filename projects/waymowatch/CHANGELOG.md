@@ -1,5 +1,24 @@
 # WaymoWatch — Changelog
 
+## v0.2 — High-quality dataset + GPU training recipe (2026-06-05)
+
+- **Domes:** Commons (`Jaguar I-Pace (Waymo)`) + Bing crawl → auto-extracted roof crops,
+  deduped → **39 diverse real dome templates** (from 8).
+- **Backplates:** broadened to **4,734 frames / 92 cameras** (from 637/12).
+- **Positives:** **400** dome composites across 67 source cameras, provenance-tracked (manifest).
+- **Dataset:** 1-class `waymo`; in-domain real negatives (matched + plain traffic), ~4:1;
+  **by-camera split** (10 feeds held out); 1,629 train / 335 val; QA'd.
+- **Separability study:** dome separates easily from ordinary cars, but **Wayve is a genuine
+  roof-rack confuser**; ≥90% dome-vs-Wayve can't be cheaply certified (frozen-probe-limited) →
+  Wayve kept as hard-negative, ≥90% is a POST-TRAIN gate (`train/eval_wayve_gate.py`).
+- **GPU recipe:** `train/train.py` (YOLO11s, imgsz1280, small-object-safe aug, ONNX export) +
+  `train/RUNBOOK.md`. Validated end-to-end by the CPU smoke train (val P0.79 / mAP50 0.39).
+- **Quality trim:** positives floored at host ≥44px (dome-resolvable); audit confirms 0 invalid
+  labels + 0 train/val camera leakage. Final: 400 positives, 1,772 train / 194 val.
+- Added `inferencePlan.md` — serving + self-hosted inference-cluster reference (rent-vs-buy, hardware).
+- New scripts: dataset/{extract_domes,extract_roofs,crawl_images,wayve_fetch,build_dataset,
+  separability,separability_eval,separability_scale_eval}.py; train/{train,eval_wayve_gate}.py.
+
 ## v0.1 — Data plane + synthetic-positive engine (2026-06-03)
 
 First working slice. Detect-and-train infrastructure not built yet; this proves the two

@@ -20,8 +20,8 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(BASE, "data", "sources", "waymo")
 API = "https://commons.wikimedia.org/w/api.php"
 UA = "WaymoWatch/0.1 (autonomous-vehicle spotting research; https://hjd.ai)"
-CATEGORIES = ["Category:Waymo", "Category:Waymo vehicles", "Category:Jaguar I-Pace"]
-MAX_IMAGES = 28
+CATEGORIES = ["Category:Jaguar I-Pace (Waymo)", "Category:Waymo vehicles", "Category:Waymo"]
+MAX_IMAGES = 48
 
 
 def api(params):
