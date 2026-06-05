@@ -50,6 +50,8 @@ TOPK_PER_CAM = 3      # (legacy; superseded by per-vehicle dedup below)
 SCORE_FLOOR = 0.50
 DEDUP_TH = 0.93       # cosine >= this => same vehicle: one entry, crop updated to the best view
 KX_CENTRE = (51.5310, -0.1255)   # King's Cross / British Library centre (for --collect area)
+PARK_ROYAL = (51.5235, -0.2830)  # Waymo's London depot (NW10) — cars start/end runs here; the
+                                 # ring of cams covers the depot + its arterials (A40, A406, Hanger Ln)
 PROB_TH = 0.83        # high-probability bar: keep/email only candidates more dome-like than ~98%
                       # of 221 vetted white non-Waymos (their p98=0.83, max=0.87). Tunable.
 BATCH_SIZE = 5        # email the operator each time this many new high-prob candidates accumulate
@@ -85,10 +87,10 @@ def in_zone(c):
             and ZONE["lon0"] <= c["lon"] <= ZONE["lon1"])
 
 
-def nearest_short_ids(cams, k):
+def nearest_short_ids(cams, k, centre=KX_CENTRE):
     avail = [c for c in cams if dp.props(c).get("available") == "true"
              and dp.props(c).get("videoUrl") and c.get("lat")]
-    avail.sort(key=lambda c: (c["lat"] - KX_CENTRE[0]) ** 2 + (c["lon"] - KX_CENTRE[1]) ** 2)
+    avail.sort(key=lambda c: (c["lat"] - centre[0]) ** 2 + (c["lon"] - centre[1]) ** 2)
     return {c["id"].replace("JamCams_", "") for c in avail[:k]}
 
 
@@ -274,12 +276,12 @@ def send_digest(con, force=False):
     con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_id',?)", (str(maxid),))
     con.commit()
     more = f" (+{len(rows) - shown} more)" if len(rows) > shown else ""
-    html = (f"<p><b>WaymoWatch — King's Cross</b>: {len(rows)} <b>high-probability</b> Waymo "
-            f"candidate(s){more}.</p><p>Reply with the <b>#</b> of any that is a real Waymo "
+    html = (f"<p><b>WaymoWatch — King's Cross + Park Royal</b>: {len(rows)} <b>high-probability</b> "
+            f"Waymo candidate(s){more}.</p><p>Reply with the <b>#</b> of any that is a real Waymo "
             f"(white Jaguar I-PACE with a dark roof dome).</p>")
     sys.path.insert(0, HERE)
     from email_alert import send_email
-    send_email(f"WaymoWatch: {len(rows)} possible Waymo(s) — King's Cross", html,
+    send_email(f"WaymoWatch: {len(rows)} possible Waymo(s) — KX + Park Royal", html,
                attachments=[sheet] if shown else None)
     print(f"digest emailed: {len(rows)} high-prob candidate(s) (force={force})")
     return len(rows)
@@ -295,6 +297,7 @@ def main():
     ap.add_argument("--collect", type=int, default=0, help="wipe + collect N distinct white cars (KX area) + email")
     ap.add_argument("--cams", type=int, default=70, help="nearest-KX cameras to use for --collect")
     ap.add_argument("--wide", type=int, default=0, help="live watch over the N nearest-KX cameras (else 8 core)")
+    ap.add_argument("--pr", type=int, default=0, help="ALSO watch the N nearest cameras to Park Royal depot")
     ap.add_argument("--confirm", default="")
     ap.add_argument("--reject", default="")
     a = ap.parse_args()
@@ -350,11 +353,15 @@ def main():
                    attachments=[sheet] if shown else None)
         print(f"collected {len(rows)} white cars -> emailed ({shown} on sheet)")
     else:
-        if a.wide:
+        foc = None
+        if a.wide or a.pr:                       # one sweep over the union of the active areas
             cams = dp.fetch_camera_list()
-            sweep(con, focus=nearest_short_ids(cams, a.wide))
-        else:
-            sweep(con)
+            foc = set()
+            if a.wide:
+                foc |= nearest_short_ids(cams, a.wide, KX_CENTRE)
+            if a.pr:
+                foc |= nearest_short_ids(cams, a.pr, PARK_ROYAL)
+        sweep(con, focus=foc)                     # foc=None -> core 8 KX cams (FOCUS default)
         review_sheet(con)
         send_digest(con)   # auto-email once BATCH_SIZE new high-prob candidates have accumulated
 
