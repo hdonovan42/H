@@ -60,13 +60,14 @@ def ensure_schema(con):
     con.executescript("""
     CREATE TABLE IF NOT EXISTS candidates(
       id INTEGER PRIMARY KEY AUTOINCREMENT, camera_id TEXT, captured_at TEXT,
-      score REAL, crop_path TEXT, frame_path TEXT, status TEXT DEFAULT 'new', emb TEXT);
+      score REAL, crop_path TEXT, frame_path TEXT, status TEXT DEFAULT 'new', emb TEXT, bbox TEXT);
     CREATE INDEX IF NOT EXISTS idx_cand_status ON candidates(status);
     CREATE INDEX IF NOT EXISTS idx_cand_cam ON candidates(camera_id);""")
-    try:
-        con.execute("ALTER TABLE candidates ADD COLUMN emb TEXT")  # for pre-existing tables
-    except Exception:
-        pass
+    for col in ("emb TEXT", "bbox TEXT"):                  # for pre-existing tables
+        try:
+            con.execute(f"ALTER TABLE candidates ADD COLUMN {col}")
+        except Exception:
+            pass
 
 
 def dome_centroid(embed):
@@ -97,6 +98,14 @@ def is_white(car):
     return whiteish > 0.30
 
 
+def iou(a, b):
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    inter = max(0, min(ax2, bx2) - max(ax1, bx1)) * max(0, min(ay2, by2) - max(ay1, by1))
+    ua = (ax2 - ax1) * (ay2 - ay1) + (bx2 - bx1) * (by2 - by1) - inter
+    return inter / ua if ua > 0 else 0.0
+
+
 def sweep(con, n, sample_every):
     from ultralytics import YOLO
     embed = build_embedder()
@@ -117,74 +126,78 @@ def sweep(con, n, sample_every):
         if not body:
             continue
         open(tmp, "wb").write(body)
-        cap = cv2.VideoCapture(tmp)
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         short = cam["id"].replace("JamCams_", "")
-        idx = 0
-        cand = []
-        while True:
-            ok, fr = cap.read()
-            if not ok:
-                break
-            if idx % sample_every == 0:
-                r = det.predict(fr, conf=0.30, verbose=False, imgsz=352)[0]
+        stamp = now.replace("-", "").replace(":", "").replace("T", "").replace("Z", "")
+        # within-clip ByteTrack: collapse each moving car (many frames) into ONE track;
+        # keep its biggest (closest) view as the representative.
+        best = {}  # track id -> (bbox_area, frame, bbox)
+        try:
+            for r in det.track(tmp, persist=False, tracker="bytetrack.yaml", classes=[2],
+                               conf=0.30, imgsz=352, vid_stride=3, stream=True, verbose=False):
+                fr = r.orig_img
+                if r.boxes is None or r.boxes.id is None:
+                    continue
                 for b in r.boxes:
-                    if int(b.cls[0]) != 2:
-                        continue
                     x1, y1, x2, y2 = map(int, b.xyxy[0].tolist())
                     if (y2 - y1) < MIN_H:
                         continue
                     if not is_white(fr[max(0, y1):y2, max(0, x1):x2]):
-                        continue  # Stage-1 colour filter — discard non-white traffic cheaply
-                    mx = int((x2 - x1) * 0.16)
-                    roof = fr[max(0, int(y1 - (y2 - y1) * 0.06)):int(y1 + (y2 - y1) * 0.45),
-                              max(0, x1 + mx):min(fr.shape[1], x2 - mx)]
-                    if roof.size == 0 or min(roof.shape[:2]) < 6:
                         continue
-                    e = embed(jamcam(roof))           # roof band -> dome-similarity ranking
-                    hd = int((y2 - y1) * 0.12)
-                    car = fr[max(0, y1 - hd):min(fr.shape[0], y2), max(0, x1):min(fr.shape[1], x2)]
-                    cand.append((float(e @ cen), car.copy(), fr.copy(), idx, e))  # save WHOLE car
-            idx += 1
-        cap.release()
-        # ONE entry per vehicle (per camera): match each detection against recent candidates by
-        # appearance. Same vehicle -> update that entry's crop when this view is more dome-like
-        # (better); otherwise skip. Never create a second row for the same car.
-        pool = [[rid, rsc, np.array(json.loads(remb)), st] for rid, rsc, remb, st in con.execute(
-            "SELECT id,score,emb,status FROM candidates WHERE camera_id=? AND emb IS NOT NULL "
-            "ORDER BY id DESC LIMIT 400", (cam["id"],)).fetchall() if remb]
-        for s, crop, frm, fi, e in sorted(cand, key=lambda t: -t[0]):
+                    tid = int(b.id[0])
+                    area = (x2 - x1) * (y2 - y1)
+                    if tid not in best or area > best[tid][0]:
+                        best[tid] = (area, fr.copy(), (x1, y1, x2, y2))
+        except Exception:
+            continue
+        # recent entries at this camera, for cross-sweep dedup (parked cars = same bbox spot)
+        recent = [[rid, rsc, np.array(json.loads(remb)), st, (json.loads(bb) if bb else None)]
+                  for rid, rsc, remb, st, bb in con.execute(
+                      "SELECT id,score,emb,status,bbox FROM candidates WHERE camera_id=? "
+                      "ORDER BY id DESC LIMIT 400", (cam["id"],)).fetchall() if remb]
+        for tid, (area, frm, bbox) in best.items():
+            x1, y1, x2, y2 = bbox
+            mx = int((x2 - x1) * 0.16)
+            roof = frm[max(0, int(y1 - (y2 - y1) * 0.06)):int(y1 + (y2 - y1) * 0.45),
+                       max(0, x1 + mx):min(frm.shape[1], x2 - mx)]
+            if roof.size == 0 or min(roof.shape[:2]) < 6:
+                continue
+            e = embed(jamcam(roof))
+            s = float(e @ cen)
             if s < SCORE_FLOOR:
-                break
-            m = max(pool, key=lambda p: float(e @ p[2])) if pool else None
-            if m and float(e @ m[2]) >= DEDUP_TH:
-                if m[3] == "new" and s > m[1] + 0.01:        # better view of an unreviewed vehicle
+                continue
+            hd = int((y2 - y1) * 0.12)
+            car = frm[max(0, y1 - hd):y2, max(0, x1):min(frm.shape[1], x2)]
+            # same vehicle if same parked spot (bbox IoU) OR near-identical appearance
+            m = next((c for c in recent if (c[4] and iou(bbox, c[4]) > 0.45)
+                      or float(e @ c[2]) >= DEDUP_TH), None)
+            cp = os.path.join(CAND_DIR, f"{short}_t{tid}_{stamp}.jpg")
+            fpth = os.path.join(CAND_DIR, f"{short}_t{tid}_{stamp}_frame.jpg")
+            if m:
+                if m[3] == "new" and s > m[1] + 0.01:        # better view -> update existing entry
                     old = con.execute("SELECT crop_path,frame_path FROM candidates WHERE id=?", (m[0],)).fetchone()
-                    cp = os.path.join(CAND_DIR, f"{short}_{fi}_{int(s*100)}.jpg")
-                    fpth = os.path.join(CAND_DIR, f"{short}_{fi}_frame.jpg")
-                    cv2.imwrite(cp, crop); cv2.imwrite(fpth, frm)
-                    con.execute("UPDATE candidates SET score=?,crop_path=?,frame_path=?,emb=?,captured_at=? "
-                                "WHERE id=?", (s, cp, fpth, json.dumps([round(float(x), 4) for x in e]), now, m[0]))
+                    cv2.imwrite(cp, car); cv2.imwrite(fpth, frm)
+                    con.execute("UPDATE candidates SET score=?,crop_path=?,frame_path=?,emb=?,bbox=?,captured_at=? "
+                                "WHERE id=?", (s, cp, fpth, json.dumps([round(float(x), 4) for x in e]),
+                                               json.dumps(list(bbox)), now, m[0]))
                     for f in (old or []):
                         if f and f not in (cp, fpth) and os.path.exists(f):
                             try:
                                 os.remove(f)
                             except Exception:
                                 pass
-                    m[1], m[2] = s, e
-                continue                                      # same vehicle already known -> no new row
-            cp = os.path.join(CAND_DIR, f"{short}_{fi}_{int(s*100)}.jpg")
-            fpth = os.path.join(CAND_DIR, f"{short}_{fi}_frame.jpg")
-            cv2.imwrite(cp, crop); cv2.imwrite(fpth, frm)
-            cur = con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb)"
-                              " VALUES(?,?,?,?,?,?)", (cam["id"], now, s, cp, fpth,
-                              json.dumps([round(float(x), 4) for x in e])))
-            pool.append([cur.lastrowid, s, e, "new"])
+                    m[1], m[2], m[4] = s, e, list(bbox)
+                continue                                      # same vehicle -> no new row
+            cv2.imwrite(cp, car); cv2.imwrite(fpth, frm)
+            cur = con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb,bbox)"
+                              " VALUES(?,?,?,?,?,?,?)", (cam["id"], now, s, cp, fpth,
+                              json.dumps([round(float(x), 4) for x in e]), json.dumps(list(bbox))))
+            recent.insert(0, [cur.lastrowid, s, e, "new", list(bbox)])
             found += 1
     cut = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 7 * 86400))
     con.execute("DELETE FROM candidates WHERE captured_at < ? AND status='new'", (cut,))
     con.commit()
-    print(f"focus cameras swept: {len(chosen)} | new candidates (top-{TOPK_PER_CAM}/cam ≥ {SCORE_FLOOR}): {found}")
+    print(f"focus cameras swept: {len(chosen)} | distinct vehicles added: {found}")
 
 
 def _build_sheet(rows, out_path, cols=6, cap=72):
