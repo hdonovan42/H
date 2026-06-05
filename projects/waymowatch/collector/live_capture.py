@@ -79,6 +79,23 @@ def in_zone(c):
             and ZONE["lon0"] <= c["lon"] <= ZONE["lon1"])
 
 
+def is_white(car):
+    """Stage-1 cheap colour filter: Waymos are (predominantly) white. Lenient — also passes
+    silver/off-white and white-in-shadow so we don't miss a Waymo; white vans/cabs pass too
+    (they're the hard negatives Stage 2 needs). Discards red buses, black cabs, dark/coloured cars."""
+    if car is None or car.size == 0:
+        return False
+    h, w = car.shape[:2]
+    c = car[int(h * 0.20):int(h * 0.85), int(w * 0.20):int(w * 0.80)]  # central body, skip road/edges
+    if c.size == 0:
+        return False
+    hsv = cv2.cvtColor(c, cv2.COLOR_BGR2HSV)
+    v = hsv[:, :, 2].astype(np.float32) / 255.0
+    s = hsv[:, :, 1].astype(np.float32) / 255.0
+    whiteish = ((v > 0.55) & (s < 0.28)).mean()   # bright + desaturated body panels
+    return whiteish > 0.30
+
+
 def sweep(con, n, sample_every):
     from ultralytics import YOLO
     embed = build_embedder()
@@ -116,13 +133,17 @@ def sweep(con, n, sample_every):
                     x1, y1, x2, y2 = map(int, b.xyxy[0].tolist())
                     if (y2 - y1) < MIN_H:
                         continue
+                    if not is_white(fr[max(0, y1):y2, max(0, x1):x2]):
+                        continue  # Stage-1 colour filter — discard non-white traffic cheaply
                     mx = int((x2 - x1) * 0.16)
                     roof = fr[max(0, int(y1 - (y2 - y1) * 0.06)):int(y1 + (y2 - y1) * 0.45),
                               max(0, x1 + mx):min(fr.shape[1], x2 - mx)]
                     if roof.size == 0 or min(roof.shape[:2]) < 6:
                         continue
-                    e = embed(jamcam(roof))
-                    cand.append((float(e @ cen), roof.copy(), fr.copy(), idx, e))
+                    e = embed(jamcam(roof))           # roof band -> dome-similarity ranking
+                    hd = int((y2 - y1) * 0.12)
+                    car = fr[max(0, y1 - hd):min(fr.shape[0], y2), max(0, x1):min(fr.shape[1], x2)]
+                    cand.append((float(e @ cen), car.copy(), fr.copy(), idx, e))  # save WHOLE car
             idx += 1
         cap.release()
         # keep only the most dome-like vehicles at this camera this sweep (bounds review volume),
@@ -130,14 +151,14 @@ def sweep(con, n, sample_every):
         recent = [np.array(json.loads(r[0])) for r in con.execute(
             "SELECT emb FROM candidates WHERE camera_id=? AND emb IS NOT NULL ORDER BY id DESC LIMIT 80",
             (cam["id"],)).fetchall() if r[0]]
-        for s, roof, frm, fi, e in sorted(cand, key=lambda t: -t[0])[:TOPK_PER_CAM]:
+        for s, crop, frm, fi, e in sorted(cand, key=lambda t: -t[0])[:TOPK_PER_CAM]:
             if s < SCORE_FLOOR:
                 break
             if recent and max(float(e @ r) for r in recent) > 0.96:
                 continue  # same (likely parked) vehicle already queued for this camera
             cp = os.path.join(CAND_DIR, f"{short}_{fi}_{int(s*100)}.jpg")
             fpth = os.path.join(CAND_DIR, f"{short}_{fi}_frame.jpg")
-            cv2.imwrite(cp, roof); cv2.imwrite(fpth, frm)
+            cv2.imwrite(cp, crop); cv2.imwrite(fpth, frm)
             con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb)"
                         " VALUES(?,?,?,?,?,?)", (cam["id"], now, s, cp, fpth,
                         json.dumps([round(float(x), 4) for x in e])))
