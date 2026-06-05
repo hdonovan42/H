@@ -52,6 +52,7 @@ DEDUP_TH = 0.93       # cosine >= this => same vehicle: one entry, crop updated 
 KX_CENTRE = (51.5310, -0.1255)   # King's Cross / British Library centre (for --collect area)
 PROB_TH = 0.83        # high-probability bar: keep/email only candidates more dome-like than ~98%
                       # of 221 vetted white non-Waymos (their p98=0.83, max=0.87). Tunable.
+BATCH_SIZE = 20       # email the operator each time this many new high-prob candidates accumulate
 CAND_DIR = os.path.join(BASE, "data", "candidates")
 REAL_DIR = os.path.join(BASE, "data", "real_positives")
 SAMPLE_EVERY = 8       # ~3 fps — enough chances to catch a pass, light on CPU
@@ -258,6 +259,32 @@ def confirm(con, ids, status):
     print(f"marked {len(ids)} candidates as {status}" + (f" -> copied to {REAL_DIR}" if status == "waymo" else ""))
 
 
+def send_digest(con, force=False):
+    """Email the operator the new high-probability candidates since the last digest.
+    Auto-fires once BATCH_SIZE have accumulated; force=True sends whatever is pending."""
+    row = con.execute("SELECT value FROM kv WHERE key='last_digest_id'").fetchone()
+    last_id = int(row[0]) if row else 0
+    rows = con.execute("SELECT id,score,crop_path FROM candidates WHERE id>? AND status='new' "
+                       "ORDER BY score DESC", (last_id,)).fetchall()
+    if not rows or (not force and len(rows) < BATCH_SIZE):
+        return 0
+    sheet = os.path.join(BASE, "data/candidates/digest_sheet.jpg")
+    shown = _build_sheet(rows, sheet, cap=max(72, BATCH_SIZE + 12))
+    maxid = con.execute("SELECT MAX(id) FROM candidates").fetchone()[0] or last_id
+    con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_id',?)", (str(maxid),))
+    con.commit()
+    more = f" (+{len(rows) - shown} more)" if len(rows) > shown else ""
+    html = (f"<p><b>WaymoWatch — King's Cross</b>: {len(rows)} <b>high-probability</b> Waymo "
+            f"candidate(s){more}.</p><p>Reply with the <b>#</b> of any that is a real Waymo "
+            f"(white Jaguar I-PACE with a dark roof dome).</p>")
+    sys.path.insert(0, HERE)
+    from email_alert import send_email
+    send_email(f"WaymoWatch: {len(rows)} possible Waymo(s) — King's Cross", html,
+               attachments=[sheet] if shown else None)
+    print(f"digest emailed: {len(rows)} high-prob candidate(s) (force={force})")
+    return len(rows)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cameras", type=int, default=0, help="0 = all zone cameras")
@@ -267,6 +294,7 @@ def main():
     ap.add_argument("--email-digest", action="store_true", help="email the operator a candidate digest + sheet")
     ap.add_argument("--collect", type=int, default=0, help="wipe + collect N distinct white cars (KX area) + email")
     ap.add_argument("--cams", type=int, default=70, help="nearest-KX cameras to use for --collect")
+    ap.add_argument("--wide", type=int, default=0, help="live watch over the N nearest-KX cameras (else 8 core)")
     ap.add_argument("--confirm", default="")
     ap.add_argument("--reject", default="")
     a = ap.parse_args()
@@ -292,28 +320,8 @@ def main():
         send_to_user(msg)
         print("digest:", msg)
     elif a.email_digest:
-        row = con.execute("SELECT value FROM kv WHERE key='last_digest_id'").fetchone()
-        last_id = int(row[0]) if row else 0
-        rows = con.execute("SELECT id,score,crop_path FROM candidates WHERE id>? AND status='new' "
-                           "ORDER BY score DESC", (last_id,)).fetchall()
-        total = len(rows)
-        if total == 0:
-            print("email-digest: no new candidates since last digest — skipping")
-        else:
-            sheet = os.path.join(BASE, "data/candidates/digest_sheet.jpg")
-            shown = _build_sheet(rows, sheet)
-            maxid = con.execute("SELECT MAX(id) FROM candidates").fetchone()[0] or last_id
-            con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_id',?)", (str(maxid),))
-            con.commit()
-            more = f" (+{total - shown} more)" if total > shown else ""
-            html = (f"<p><b>WaymoWatch — King's Cross</b>: {total} <b>high-probability</b> Waymo "
-                    f"candidate(s){more}.</p><p>Reply with the <b>#</b> of any that is a real Waymo "
-                    f"(white Jaguar I-PACE with a dark roof dome).</p>")
-            sys.path.insert(0, HERE)
-            from email_alert import send_email
-            send_email(f"WaymoWatch: {total} possible Waymo(s) — King's Cross", html,
-                       attachments=[sheet] if os.path.exists(sheet) else None)
-            print(f"email-digest: {total} new ({shown} shown) -> advanced last_digest_id to {maxid}")
+        if send_digest(con, force=True) == 0:
+            print("email-digest: nothing new to send")
     elif a.collect:
         # wipe the candidate queue, then collect N distinct white cars from the KX area + email all
         con.execute("DELETE FROM candidates")
@@ -342,8 +350,13 @@ def main():
                    attachments=[sheet] if shown else None)
         print(f"collected {len(rows)} white cars -> emailed ({shown} on sheet)")
     else:
-        sweep(con)
+        if a.wide:
+            cams = dp.fetch_camera_list()
+            sweep(con, focus=nearest_short_ids(cams, a.wide))
+        else:
+            sweep(con)
         review_sheet(con)
+        send_digest(con)   # auto-email once BATCH_SIZE new high-prob candidates have accumulated
 
 
 if __name__ == "__main__":
