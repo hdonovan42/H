@@ -17,6 +17,7 @@ Run on a schedule (cron/systemd, every ~10 min) to accumulate real data 24/7. CP
 """
 import argparse
 import glob
+import json
 import os
 import sys
 import time
@@ -58,8 +59,13 @@ def ensure_schema(con):
     con.executescript("""
     CREATE TABLE IF NOT EXISTS candidates(
       id INTEGER PRIMARY KEY AUTOINCREMENT, camera_id TEXT, captured_at TEXT,
-      score REAL, crop_path TEXT, frame_path TEXT, status TEXT DEFAULT 'new');
-    CREATE INDEX IF NOT EXISTS idx_cand_status ON candidates(status);""")
+      score REAL, crop_path TEXT, frame_path TEXT, status TEXT DEFAULT 'new', emb TEXT);
+    CREATE INDEX IF NOT EXISTS idx_cand_status ON candidates(status);
+    CREATE INDEX IF NOT EXISTS idx_cand_cam ON candidates(camera_id);""")
+    try:
+        con.execute("ALTER TABLE candidates ADD COLUMN emb TEXT")  # for pre-existing tables
+    except Exception:
+        pass
 
 
 def dome_centroid(embed):
@@ -115,20 +121,29 @@ def sweep(con, n, sample_every):
                               max(0, x1 + mx):min(fr.shape[1], x2 - mx)]
                     if roof.size == 0 or min(roof.shape[:2]) < 6:
                         continue
-                    s = float(embed(jamcam(roof)) @ cen)
-                    cand.append((s, roof.copy(), fr.copy(), idx))
+                    e = embed(jamcam(roof))
+                    cand.append((float(e @ cen), roof.copy(), fr.copy(), idx, e))
             idx += 1
         cap.release()
-        # keep only the most dome-like vehicles at this camera this sweep (bounds review volume)
-        for s, roof, frm, fi in sorted(cand, key=lambda t: -t[0])[:TOPK_PER_CAM]:
+        # keep only the most dome-like vehicles at this camera this sweep (bounds review volume),
+        # and skip ones near-identical to recent candidates at this camera (parked-vehicle dedup)
+        recent = [np.array(json.loads(r[0])) for r in con.execute(
+            "SELECT emb FROM candidates WHERE camera_id=? AND emb IS NOT NULL ORDER BY id DESC LIMIT 80",
+            (cam["id"],)).fetchall() if r[0]]
+        for s, roof, frm, fi, e in sorted(cand, key=lambda t: -t[0])[:TOPK_PER_CAM]:
             if s < SCORE_FLOOR:
                 break
+            if recent and max(float(e @ r) for r in recent) > 0.96:
+                continue  # same (likely parked) vehicle already queued for this camera
             cp = os.path.join(CAND_DIR, f"{short}_{fi}_{int(s*100)}.jpg")
             fpth = os.path.join(CAND_DIR, f"{short}_{fi}_frame.jpg")
             cv2.imwrite(cp, roof); cv2.imwrite(fpth, frm)
-            con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path)"
-                        " VALUES(?,?,?,?,?)", (cam["id"], now, s, cp, fpth))
-            found += 1
+            con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb)"
+                        " VALUES(?,?,?,?,?,?)", (cam["id"], now, s, cp, fpth,
+                        json.dumps([round(float(x), 4) for x in e])))
+            recent.append(e); found += 1
+    cut = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 7 * 86400))
+    con.execute("DELETE FROM candidates WHERE captured_at < ? AND status='new'", (cut,))
     con.commit()
     print(f"focus cameras swept: {len(chosen)} | new candidates (top-{TOPK_PER_CAM}/cam ≥ {SCORE_FLOOR}): {found}")
 
@@ -176,6 +191,7 @@ def main():
     ap.add_argument("--cameras", type=int, default=0, help="0 = all zone cameras")
     ap.add_argument("--sample-every", type=int, default=SAMPLE_EVERY)
     ap.add_argument("--review", action="store_true")
+    ap.add_argument("--digest", action="store_true", help="WhatsApp the operator a daily review nudge")
     ap.add_argument("--confirm", default="")
     ap.add_argument("--reject", default="")
     a = ap.parse_args()
@@ -187,6 +203,19 @@ def main():
         confirm(con, [int(x) for x in a.reject.split(",") if x], "reject")
     elif a.review:
         review_sheet(con)
+    elif a.digest:
+        today = time.strftime("%Y-%m-%d", time.gmtime())
+        n = con.execute("SELECT COUNT(*) FROM candidates WHERE captured_at LIKE ? AND status='new'",
+                        (today + "%",)).fetchone()[0]
+        top = con.execute("SELECT camera_id,score FROM candidates WHERE captured_at LIKE ? AND "
+                          "status='new' ORDER BY score DESC LIMIT 1", (today + "%",)).fetchone()
+        msg = f"WaymoWatch (King's Cross): {n} candidate(s) to review today."
+        if top:
+            msg += f" Top {top[1]:.2f} at {top[0].replace('JamCams_', '')}."
+        sys.path.insert(0, HERE)
+        from whatsapp_alert import send_to_user
+        send_to_user(msg)
+        print("digest:", msg)
     else:
         sweep(con, a.cameras, a.sample_every)
         review_sheet(con)
