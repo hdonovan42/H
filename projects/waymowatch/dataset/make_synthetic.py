@@ -33,7 +33,7 @@ MANIFEST = os.path.join(BASE, "data", "synthetic", "manifest.json")
 DOMES_DIR = os.path.join(BASE, "data", "sources", "domes")  # harvested dome crops go here
 DOME_FALLBACK_SRC = os.path.join(BASE, "data/sources/waymo/05_Waymo_Driverless_Vehicle_Brickell_Miami_April_.jpg")
 DOME_FALLBACK_BBOX = (553, 150, 685, 245)
-MIN_H = 30          # min host-vehicle bbox height (px) — dome must be resolvable
+MIN_H = 44          # min host-vehicle bbox height (px) — dome only resolvable near/mid field
 MAX_AR = 1.9        # max width/height — excludes long buses/lorries; Waymos are cars
 VEHICLE_CLS = {2}   # COCO car only (Waymo = car-sized Jaguar I-PACE)
 MAX_POS = 400

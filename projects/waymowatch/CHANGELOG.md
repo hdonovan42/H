@@ -13,6 +13,9 @@
   Wayve kept as hard-negative, ≥90% is a POST-TRAIN gate (`train/eval_wayve_gate.py`).
 - **GPU recipe:** `train/train.py` (YOLO11s, imgsz1280, small-object-safe aug, ONNX export) +
   `train/RUNBOOK.md`. Validated end-to-end by the CPU smoke train (val P0.79 / mAP50 0.39).
+- **Quality trim:** positives floored at host ≥44px (dome-resolvable); audit confirms 0 invalid
+  labels + 0 train/val camera leakage. Final: 400 positives, 1,772 train / 194 val.
+- Added `inferencePlan.md` — serving + self-hosted inference-cluster reference (rent-vs-buy, hardware).
 - New scripts: dataset/{extract_domes,extract_roofs,crawl_images,wayve_fetch,build_dataset,
   separability,separability_eval,separability_scale_eval}.py; train/{train,eval_wayve_gate}.py.
 
