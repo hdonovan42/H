@@ -31,8 +31,22 @@ sys.path.insert(0, os.path.join(BASE, "dataset"))
 import data_plane as dp  # noqa: E402
 from separability_eval import build_embedder, jamcam  # noqa: E402
 
-# central + inner London bounding box (~Waymo's 20 test boroughs)
+# central + inner London bounding box (~Waymo's 20 test boroughs) — wide-net fallback
 ZONE = dict(lat0=51.44, lat1=51.57, lon0=-0.27, lon1=0.04)
+# Manual detection phase: King's Cross / British Library / Euston Rd corridor only
+# (user's highest-density Waymo-sighting area) — max hit-rate, min wasted compute.
+FOCUS = {
+    "00001.07356",  # Euston Rd / Grays Inn Rd   (British Library corner)
+    "00001.07358",  # A501 W of Mabledon Place    (Euston Rd / St Pancras)
+    "00001.09630",  # Caledonian Rd / Caledonia St (King's Cross station)
+    "00001.03591",  # Kings X Rd / Swinton St
+    "00001.03590",  # Kings X Rd / Wharton St
+    "00001.09640",  # Grays Inn Rd / Acton St
+    "00001.07360",  # A501 East of Melton St      (Euston Rd)
+    "00001.07355",  # Pentonville Road / Penton Rise
+}
+TOPK_PER_CAM = 3      # keep only the most dome-like vehicles per camera per sweep
+SCORE_FLOOR = 0.50
 CAND_DIR = os.path.join(BASE, "data", "candidates")
 REAL_DIR = os.path.join(BASE, "data", "real_positives")
 SAMPLE_EVERY = 8       # ~3 fps — enough chances to catch a pass, light on CPU
@@ -66,8 +80,8 @@ def sweep(con, n, sample_every):
     det = YOLO("yolo11n.pt")
     cams = dp.fetch_camera_list()
     dp.upsert_cameras(con, cams)
-    zone = [c for c in cams if dp.props(c).get("available") == "true" and in_zone(c)]
-    chosen = zone[:n] if n else zone
+    chosen = [c for c in cams if dp.props(c).get("available") == "true"
+              and c["id"].replace("JamCams_", "") in FOCUS]
     os.makedirs(CAND_DIR, exist_ok=True)
     tmp = os.path.join(CAND_DIR, "_tmp.mp4")
     found = 0
@@ -83,6 +97,7 @@ def sweep(con, n, sample_every):
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         short = cam["id"].replace("JamCams_", "")
         idx = 0
+        cand = []
         while True:
             ok, fr = cap.read()
             if not ok:
@@ -101,17 +116,21 @@ def sweep(con, n, sample_every):
                     if roof.size == 0 or min(roof.shape[:2]) < 6:
                         continue
                     s = float(embed(jamcam(roof)) @ cen)
-                    if s >= SCORE_THRESH:
-                        cp = os.path.join(CAND_DIR, f"{short}_{idx}_{int(s*100)}.jpg")
-                        fpth = os.path.join(CAND_DIR, f"{short}_{idx}_frame.jpg")
-                        cv2.imwrite(cp, roof); cv2.imwrite(fpth, fr)
-                        con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path)"
-                                    " VALUES(?,?,?,?,?)", (cam["id"], now, s, cp, fpth))
-                        found += 1
+                    cand.append((s, roof.copy(), fr.copy(), idx))
             idx += 1
         cap.release()
+        # keep only the most dome-like vehicles at this camera this sweep (bounds review volume)
+        for s, roof, frm, fi in sorted(cand, key=lambda t: -t[0])[:TOPK_PER_CAM]:
+            if s < SCORE_FLOOR:
+                break
+            cp = os.path.join(CAND_DIR, f"{short}_{fi}_{int(s*100)}.jpg")
+            fpth = os.path.join(CAND_DIR, f"{short}_{fi}_frame.jpg")
+            cv2.imwrite(cp, roof); cv2.imwrite(fpth, frm)
+            con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path)"
+                        " VALUES(?,?,?,?,?)", (cam["id"], now, s, cp, fpth))
+            found += 1
     con.commit()
-    print(f"zone cameras available: {len(zone)} | swept: {len(chosen)} | new candidates >= {SCORE_THRESH}: {found}")
+    print(f"focus cameras swept: {len(chosen)} | new candidates (top-{TOPK_PER_CAM}/cam ≥ {SCORE_FLOOR}): {found}")
 
 
 def review_sheet(con, n=24):
