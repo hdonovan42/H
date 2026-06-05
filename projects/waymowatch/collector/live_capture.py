@@ -46,8 +46,9 @@ FOCUS = {
     "00001.07360",  # A501 East of Melton St      (Euston Rd)
     "00001.07355",  # Pentonville Road / Penton Rise
 }
-TOPK_PER_CAM = 3      # keep only the most dome-like vehicles per camera per sweep
+TOPK_PER_CAM = 3      # (legacy; superseded by per-vehicle dedup below)
 SCORE_FLOOR = 0.50
+DEDUP_TH = 0.93       # cosine >= this => same vehicle: one entry, crop updated to the best view
 CAND_DIR = os.path.join(BASE, "data", "candidates")
 REAL_DIR = os.path.join(BASE, "data", "real_positives")
 SAMPLE_EVERY = 8       # ~3 fps — enough chances to catch a pass, light on CPU
@@ -146,23 +147,40 @@ def sweep(con, n, sample_every):
                     cand.append((float(e @ cen), car.copy(), fr.copy(), idx, e))  # save WHOLE car
             idx += 1
         cap.release()
-        # keep only the most dome-like vehicles at this camera this sweep (bounds review volume),
-        # and skip ones near-identical to recent candidates at this camera (parked-vehicle dedup)
-        recent = [np.array(json.loads(r[0])) for r in con.execute(
-            "SELECT emb FROM candidates WHERE camera_id=? AND emb IS NOT NULL ORDER BY id DESC LIMIT 80",
-            (cam["id"],)).fetchall() if r[0]]
-        for s, crop, frm, fi, e in sorted(cand, key=lambda t: -t[0])[:TOPK_PER_CAM]:
+        # ONE entry per vehicle (per camera): match each detection against recent candidates by
+        # appearance. Same vehicle -> update that entry's crop when this view is more dome-like
+        # (better); otherwise skip. Never create a second row for the same car.
+        pool = [[rid, rsc, np.array(json.loads(remb)), st] for rid, rsc, remb, st in con.execute(
+            "SELECT id,score,emb,status FROM candidates WHERE camera_id=? AND emb IS NOT NULL "
+            "ORDER BY id DESC LIMIT 400", (cam["id"],)).fetchall() if remb]
+        for s, crop, frm, fi, e in sorted(cand, key=lambda t: -t[0]):
             if s < SCORE_FLOOR:
                 break
-            if recent and max(float(e @ r) for r in recent) > 0.96:
-                continue  # same (likely parked) vehicle already queued for this camera
+            m = max(pool, key=lambda p: float(e @ p[2])) if pool else None
+            if m and float(e @ m[2]) >= DEDUP_TH:
+                if m[3] == "new" and s > m[1] + 0.01:        # better view of an unreviewed vehicle
+                    old = con.execute("SELECT crop_path,frame_path FROM candidates WHERE id=?", (m[0],)).fetchone()
+                    cp = os.path.join(CAND_DIR, f"{short}_{fi}_{int(s*100)}.jpg")
+                    fpth = os.path.join(CAND_DIR, f"{short}_{fi}_frame.jpg")
+                    cv2.imwrite(cp, crop); cv2.imwrite(fpth, frm)
+                    con.execute("UPDATE candidates SET score=?,crop_path=?,frame_path=?,emb=?,captured_at=? "
+                                "WHERE id=?", (s, cp, fpth, json.dumps([round(float(x), 4) for x in e]), now, m[0]))
+                    for f in (old or []):
+                        if f and f not in (cp, fpth) and os.path.exists(f):
+                            try:
+                                os.remove(f)
+                            except Exception:
+                                pass
+                    m[1], m[2] = s, e
+                continue                                      # same vehicle already known -> no new row
             cp = os.path.join(CAND_DIR, f"{short}_{fi}_{int(s*100)}.jpg")
             fpth = os.path.join(CAND_DIR, f"{short}_{fi}_frame.jpg")
             cv2.imwrite(cp, crop); cv2.imwrite(fpth, frm)
-            con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb)"
-                        " VALUES(?,?,?,?,?,?)", (cam["id"], now, s, cp, fpth,
-                        json.dumps([round(float(x), 4) for x in e])))
-            recent.append(e); found += 1
+            cur = con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb)"
+                              " VALUES(?,?,?,?,?,?)", (cam["id"], now, s, cp, fpth,
+                              json.dumps([round(float(x), 4) for x in e])))
+            pool.append([cur.lastrowid, s, e, "new"])
+            found += 1
     cut = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 7 * 86400))
     con.execute("DELETE FROM candidates WHERE captured_at < ? AND status='new'", (cut,))
     con.commit()
