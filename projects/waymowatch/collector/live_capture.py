@@ -50,6 +50,8 @@ TOPK_PER_CAM = 3      # (legacy; superseded by per-vehicle dedup below)
 SCORE_FLOOR = 0.50
 DEDUP_TH = 0.93       # cosine >= this => same vehicle: one entry, crop updated to the best view
 KX_CENTRE = (51.5310, -0.1255)   # King's Cross / British Library centre (for --collect area)
+PROB_TH = 0.83        # high-probability bar: keep/email only candidates more dome-like than ~98%
+                      # of 221 vetted white non-Waymos (their p98=0.83, max=0.87). Tunable.
 CAND_DIR = os.path.join(BASE, "data", "candidates")
 REAL_DIR = os.path.join(BASE, "data", "real_positives")
 SAMPLE_EVERY = 8       # ~3 fps — enough chances to catch a pass, light on CPU
@@ -173,8 +175,8 @@ def sweep(con, focus=None, target=None):
                 continue
             e = embed(jamcam(roof))
             s = float(e @ cen)
-            if s < SCORE_FLOOR:
-                continue
+            if s < PROB_TH:
+                continue  # only keep high-probability (dome-like) candidates; discard the rest
             hd = int((y2 - y1) * 0.12)
             car = frm[max(0, y1 - hd):y2, max(0, x1):min(frm.shape[1], x2)]
             # same vehicle if same parked spot (bbox IoU) OR near-identical appearance
@@ -303,13 +305,13 @@ def main():
             maxid = con.execute("SELECT MAX(id) FROM candidates").fetchone()[0] or last_id
             con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_id',?)", (str(maxid),))
             con.commit()
-            more = f" (+{total - shown} more — review on the capture box)" if total > shown else ""
-            html = (f"<p><b>WaymoWatch — King's Cross</b>: {total} new candidate(s) since the last digest"
-                    f" — showing {shown}{more}.</p><p>Scan the attached sheet for a white I-PACE with a "
-                    f"dark roof dome; reply with its <b>#</b> to confirm a real one.</p>")
+            more = f" (+{total - shown} more)" if total > shown else ""
+            html = (f"<p><b>WaymoWatch — King's Cross</b>: {total} <b>high-probability</b> Waymo "
+                    f"candidate(s){more}.</p><p>Reply with the <b>#</b> of any that is a real Waymo "
+                    f"(white Jaguar I-PACE with a dark roof dome).</p>")
             sys.path.insert(0, HERE)
             from email_alert import send_email
-            send_email(f"WaymoWatch: {total} new King's Cross candidate(s)", html,
+            send_email(f"WaymoWatch: {total} possible Waymo(s) — King's Cross", html,
                        attachments=[sheet] if os.path.exists(sheet) else None)
             print(f"email-digest: {total} new ({shown} shown) -> advanced last_digest_id to {maxid}")
     elif a.collect:
