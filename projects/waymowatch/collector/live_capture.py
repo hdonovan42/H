@@ -49,6 +49,7 @@ FOCUS = {
 TOPK_PER_CAM = 3      # (legacy; superseded by per-vehicle dedup below)
 SCORE_FLOOR = 0.50
 DEDUP_TH = 0.93       # cosine >= this => same vehicle: one entry, crop updated to the best view
+KX_CENTRE = (51.5310, -0.1255)   # King's Cross / British Library centre (for --collect area)
 CAND_DIR = os.path.join(BASE, "data", "candidates")
 REAL_DIR = os.path.join(BASE, "data", "real_positives")
 SAMPLE_EVERY = 8       # ~3 fps — enough chances to catch a pass, light on CPU
@@ -81,6 +82,13 @@ def in_zone(c):
             and ZONE["lon0"] <= c["lon"] <= ZONE["lon1"])
 
 
+def nearest_short_ids(cams, k):
+    avail = [c for c in cams if dp.props(c).get("available") == "true"
+             and dp.props(c).get("videoUrl") and c.get("lat")]
+    avail.sort(key=lambda c: (c["lat"] - KX_CENTRE[0]) ** 2 + (c["lon"] - KX_CENTRE[1]) ** 2)
+    return {c["id"].replace("JamCams_", "") for c in avail[:k]}
+
+
 def is_white(car):
     """Stage-1 cheap colour filter: Waymos are (predominantly) white. Lenient — also passes
     silver/off-white and white-in-shadow so we don't miss a Waymo; white vans/cabs pass too
@@ -106,15 +114,16 @@ def iou(a, b):
     return inter / ua if ua > 0 else 0.0
 
 
-def sweep(con, n, sample_every):
+def sweep(con, focus=None, target=None):
     from ultralytics import YOLO
     embed = build_embedder()
     cen = dome_centroid(embed)
     det = YOLO("yolo11n.pt")
     cams = dp.fetch_camera_list()
     dp.upsert_cameras(con, cams)
+    foc = focus or FOCUS
     chosen = [c for c in cams if dp.props(c).get("available") == "true"
-              and c["id"].replace("JamCams_", "") in FOCUS]
+              and c["id"].replace("JamCams_", "") in foc]
     os.makedirs(CAND_DIR, exist_ok=True)
     tmp = os.path.join(CAND_DIR, "_tmp.mp4")
     found = 0
@@ -194,6 +203,8 @@ def sweep(con, n, sample_every):
                               json.dumps([round(float(x), 4) for x in e]), json.dumps(list(bbox))))
             recent.insert(0, [cur.lastrowid, s, e, "new", list(bbox)])
             found += 1
+        if target and found >= target:
+            break
     cut = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 7 * 86400))
     con.execute("DELETE FROM candidates WHERE captured_at < ? AND status='new'", (cut,))
     con.commit()
@@ -252,6 +263,8 @@ def main():
     ap.add_argument("--review", action="store_true")
     ap.add_argument("--digest", action="store_true", help="WhatsApp the operator a daily review nudge")
     ap.add_argument("--email-digest", action="store_true", help="email the operator a candidate digest + sheet")
+    ap.add_argument("--collect", type=int, default=0, help="wipe + collect N distinct white cars (KX area) + email")
+    ap.add_argument("--cams", type=int, default=70, help="nearest-KX cameras to use for --collect")
     ap.add_argument("--confirm", default="")
     ap.add_argument("--reject", default="")
     a = ap.parse_args()
@@ -299,8 +312,35 @@ def main():
             send_email(f"WaymoWatch: {total} new King's Cross candidate(s)", html,
                        attachments=[sheet] if os.path.exists(sheet) else None)
             print(f"email-digest: {total} new ({shown} shown) -> advanced last_digest_id to {maxid}")
+    elif a.collect:
+        # wipe the candidate queue, then collect N distinct white cars from the KX area + email all
+        con.execute("DELETE FROM candidates")
+        con.execute("DELETE FROM kv WHERE key='last_digest_id'")
+        con.commit()
+        for f in glob.glob(os.path.join(CAND_DIR, "*.jpg")):
+            try:
+                os.remove(f)
+            except Exception:
+                pass
+        cams = dp.fetch_camera_list()
+        sweep(con, focus=nearest_short_ids(cams, a.cams), target=a.collect)
+        rows = con.execute("SELECT id,score,crop_path FROM candidates WHERE status='new' "
+                           "ORDER BY score DESC").fetchall()
+        sheet = os.path.join(BASE, "data/candidates/collect_sheet.jpg")
+        shown = _build_sheet(rows, sheet, cap=a.collect + 30)
+        con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_id',?)",
+                    (str(con.execute("SELECT MAX(id) FROM candidates").fetchone()[0] or 0),))
+        con.commit()
+        sys.path.insert(0, HERE)
+        from email_alert import send_email
+        send_email(f"WaymoWatch: {len(rows)} white cars (King's Cross area) to review",
+                   f"<p><b>{len(rows)} distinct white cars</b> collected from the King's Cross area. "
+                   f"Scan the attached sheet for a white Jaguar I-PACE with a dark roof dome and reply "
+                   f"with the <b>#</b> of any Waymo.</p>",
+                   attachments=[sheet] if shown else None)
+        print(f"collected {len(rows)} white cars -> emailed ({shown} on sheet)")
     else:
-        sweep(con, a.cameras, a.sample_every)
+        sweep(con)
         review_sheet(con)
 
 
