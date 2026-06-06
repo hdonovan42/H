@@ -57,6 +57,9 @@ PARK_ROYAL = (51.5235, -0.2830)  # Waymo's London depot (NW10) — cars start/en
 PROB_TH = 0.86        # high-probability bar (raised from 0.83 to cut FP volume; ~halves it). NOTE:
                       # 0 real positives to calibrate against — a low-res CCTV dome could score below
                       # this, so a real Waymo might be missed. Re-examine once a real positive lands.
+ALERT_TH = 0.90       # instant-alert bar: any candidate at/above this emails you immediately on the
+                      # next sweep (~15 min), instead of waiting for the 23:00 daily digest. Scores are
+                      # uncalibrated (no real positive yet) — tune alongside PROB_TH once one lands.
 BATCH_SIZE = 5        # (legacy count-trigger; auto path now uses a once-daily digest — see DIGEST_HOUR)
 COLLECT_HOURS = (6, 23)  # auto-sweep only 06:00-23:00 Europe/London (BST/GMT handled automatically);
                          # no dead-of-night sweeps. Manual commands run any time.
@@ -73,10 +76,11 @@ def ensure_schema(con):
     con.executescript("""
     CREATE TABLE IF NOT EXISTS candidates(
       id INTEGER PRIMARY KEY AUTOINCREMENT, camera_id TEXT, captured_at TEXT,
-      score REAL, crop_path TEXT, frame_path TEXT, status TEXT DEFAULT 'new', emb TEXT, bbox TEXT);
+      score REAL, crop_path TEXT, frame_path TEXT, status TEXT DEFAULT 'new', emb TEXT, bbox TEXT,
+      alerted INTEGER DEFAULT 0);
     CREATE INDEX IF NOT EXISTS idx_cand_status ON candidates(status);
     CREATE INDEX IF NOT EXISTS idx_cand_cam ON candidates(camera_id);""")
-    for col in ("emb TEXT", "bbox TEXT"):                  # for pre-existing tables
+    for col in ("emb TEXT", "bbox TEXT", "alerted INTEGER DEFAULT 0"):   # for pre-existing tables
         try:
             con.execute(f"ALTER TABLE candidates ADD COLUMN {col}")
         except Exception:
@@ -303,6 +307,37 @@ def send_digest(con, force=False):
     return len(rows)
 
 
+def maybe_send_instant_alerts(con):
+    """Immediate alert for a near-certain sighting: email the moment any candidate lands at
+    score >= ALERT_TH, instead of waiting for the 23:00 daily digest. Runs every sweep; the
+    `alerted` flag guarantees each vehicle is sent at most once, and is set ONLY on a successful
+    send so a transient email failure simply retries on the next cron tick. Vehicles whose score
+    rises across sweeps to cross ALERT_TH are still picked up (their flag is unset until sent)."""
+    rows = con.execute("SELECT id,score,crop_path,camera_id FROM candidates "
+                       "WHERE status='new' AND score >= ? AND COALESCE(alerted,0)=0 "
+                       "ORDER BY score DESC", (ALERT_TH,)).fetchall()
+    if not rows:
+        return 0
+    sheet = os.path.join(BASE, "data/candidates/alert_sheet.jpg")
+    shown = _build_sheet([(r[0], r[1], r[2]) for r in rows], sheet, cap=24)
+    top_score, top_cam = rows[0][1], rows[0][3].replace("JamCams_", "")
+    html = (f"<p><b>WaymoWatch — high-confidence sighting</b></p>"
+            f"<p>{len(rows)} candidate(s) at score &ge; {ALERT_TH:.2f} just now "
+            f"(top <b>{top_score:.2f}</b> at camera {top_cam}).</p>"
+            f"<p>Reply with the <b>#</b> of any real Waymo (white Jaguar I-PACE, dark roof dome).</p>")
+    sys.path.insert(0, HERE)
+    from email_alert import send_email
+    if send_email(f"\U0001F6A8 WaymoWatch: possible Waymo now — score {top_score:.2f} (cam {top_cam})",
+                  html, attachments=[sheet] if shown else None):
+        con.execute("UPDATE candidates SET alerted=1 WHERE id IN (%s)"
+                    % ",".join(str(int(r[0])) for r in rows))
+        con.commit()
+        print(f"instant alert emailed: {len(rows)} candidate(s) >= {ALERT_TH}")
+        return len(rows)
+    print(f"instant alert send failed — will retry next tick ({len(rows)} pending)")
+    return 0
+
+
 def maybe_send_daily_digest(con):
     """Once-daily digest: on the first cron tick at/after DIGEST_HOUR (London, i.e. after collection
     closes), email the day's accumulated high-prob candidates. Records the date so it fires at most
@@ -400,7 +435,8 @@ def main():
             now = datetime.now(ZoneInfo("Europe/London")).strftime("%H:%M %Z")
             print(f"outside collection window {COLLECT_HOURS[0]:02d}:00-{COLLECT_HOURS[1]:02d}:00 "
                   f"London (now {now}) — no sweep")
-        maybe_send_daily_digest(con)   # always runs; self-gates to once/day after collection closes
+        maybe_send_instant_alerts(con)  # fire NOW on any score >= ALERT_TH; retries if a send failed
+        maybe_send_daily_digest(con)    # always runs; self-gates to once/day after collection closes
 
 
 if __name__ == "__main__":
