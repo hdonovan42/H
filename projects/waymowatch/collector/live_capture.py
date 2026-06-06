@@ -58,10 +58,10 @@ PROB_TH = 0.86        # high-probability bar (raised from 0.83 to cut FP volume;
                       # 0 real positives to calibrate against — a low-res CCTV dome could score below
                       # this, so a real Waymo might be missed. Re-examine once a real positive lands.
 BATCH_SIZE = 5        # (legacy count-trigger; auto path now uses a once-daily digest — see DIGEST_HOUR)
-COLLECT_HOURS = (9, 21)  # auto-sweep only 09:00-21:00 Europe/London (BST/GMT handled automatically);
-                         # Waymos don't test overnight + halves compute. Manual commands run any time.
-DIGEST_HOUR = 20      # send ONE digest per day, on the first sweep at/after 20:00 London (window
-                      # closes 21:00). Daytime sweeps just accumulate; you review one email at day's end.
+COLLECT_HOURS = (6, 23)  # auto-sweep only 06:00-23:00 Europe/London (BST/GMT handled automatically);
+                         # no dead-of-night sweeps. Manual commands run any time.
+DIGEST_HOUR = COLLECT_HOURS[1]   # send ONE digest/day right after collection closes (23:00 London),
+                                 # so it captures the WHOLE day. Fires on a cron tick even with no sweep.
 CAND_DIR = os.path.join(BASE, "data", "candidates")
 REAL_DIR = os.path.join(BASE, "data", "real_positives")
 SAMPLE_EVERY = 8       # ~3 fps — enough chances to catch a pass, light on CPU
@@ -304,9 +304,9 @@ def send_digest(con, force=False):
 
 
 def maybe_send_daily_digest(con):
-    """Once-daily digest: on the first sweep at/after DIGEST_HOUR (London), email the day's
-    accumulated high-prob candidates. Records the date so it fires at most once per day; if there's
-    nothing to send yet it leaves the date unset so a later sweep that day can still send."""
+    """Once-daily digest: on the first cron tick at/after DIGEST_HOUR (London, i.e. after collection
+    closes), email the day's accumulated high-prob candidates. Records the date so it fires at most
+    once per day; if there's nothing to send yet it leaves the date unset so a later tick can send."""
     now = datetime.now(ZoneInfo("Europe/London"))
     if now.hour < DIGEST_HOUR:
         return
@@ -385,22 +385,22 @@ def main():
                    attachments=[sheet] if shown else None)
         print(f"collected {len(rows)} white cars -> emailed ({shown} on sheet)")
     else:
-        if not in_collection_window():
+        if in_collection_window():
+            foc = None
+            if a.wide or a.pr:                   # one sweep over the union of the active areas
+                cams = dp.fetch_camera_list()
+                foc = set()
+                if a.wide:
+                    foc |= nearest_short_ids(cams, a.wide, KX_CENTRE)
+                if a.pr:
+                    foc |= nearest_short_ids(cams, a.pr, PARK_ROYAL)
+            sweep(con, focus=foc)                 # foc=None -> core 8 KX cams (FOCUS default)
+            review_sheet(con)
+        else:
             now = datetime.now(ZoneInfo("Europe/London")).strftime("%H:%M %Z")
             print(f"outside collection window {COLLECT_HOURS[0]:02d}:00-{COLLECT_HOURS[1]:02d}:00 "
-                  f"London (now {now}) — skipping sweep")
-            return
-        foc = None
-        if a.wide or a.pr:                       # one sweep over the union of the active areas
-            cams = dp.fetch_camera_list()
-            foc = set()
-            if a.wide:
-                foc |= nearest_short_ids(cams, a.wide, KX_CENTRE)
-            if a.pr:
-                foc |= nearest_short_ids(cams, a.pr, PARK_ROYAL)
-        sweep(con, focus=foc)                     # foc=None -> core 8 KX cams (FOCUS default)
-        review_sheet(con)
-        maybe_send_daily_digest(con)   # one email per day at/after 20:00 London, not per-batch
+                  f"London (now {now}) — no sweep")
+        maybe_send_daily_digest(con)   # always runs; self-gates to once/day after collection closes
 
 
 if __name__ == "__main__":
