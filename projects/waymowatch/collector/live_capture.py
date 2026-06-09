@@ -54,9 +54,9 @@ DEDUP_TH = 0.93       # cosine >= this => same vehicle: one entry, crop updated 
 KX_CENTRE = (51.5310, -0.1255)   # King's Cross / British Library centre (for --collect area)
 PARK_ROYAL = (51.5235, -0.2830)  # Waymo's London depot (NW10) — cars start/end runs here; the
                                  # ring of cams covers the depot + its arterials (A40, A406, Hanger Ln)
-PROB_TH = 0.86        # high-probability bar (raised from 0.83 to cut FP volume; ~halves it). NOTE:
-                      # 0 real positives to calibrate against — a low-res CCTV dome could score below
-                      # this, so a real Waymo might be missed. Re-examine once a real positive lands.
+PROB_TH = 0.82        # high-probability bar — LOWERED 0.86->0.82 for recall (catch a degraded CCTV dome
+                      # that may score below 0.86; our white-car negatives top out at 0.88). The daily
+                      # digest bounds the extra noise. Instant-alert (ALERT_TH 0.90) stays above all negs.
 ALERT_TH = 0.90       # instant-alert bar: any candidate at/above this emails you immediately on the
                       # next sweep (~15 min), instead of waiting for the 23:00 daily digest. Scores are
                       # uncalibrated (no real positive yet) — tune alongside PROB_TH once one lands.
@@ -291,7 +291,7 @@ def send_digest(con, force=False):
     if not rows or (not force and len(rows) < BATCH_SIZE):
         return 0
     sheet = os.path.join(BASE, "data/candidates/digest_sheet.jpg")
-    shown = _build_sheet(rows, sheet, cap=max(72, BATCH_SIZE + 12))
+    shown = _build_sheet(rows, sheet, cap=200)   # show the full day's set (lowered PROB_TH => more/day)
     maxid = con.execute("SELECT MAX(id) FROM candidates").fetchone()[0] or last_id
     con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_id',?)", (str(maxid),))
     con.commit()
