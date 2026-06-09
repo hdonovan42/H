@@ -95,6 +95,15 @@ human-gated rare candidates — NOT a live fleet tracker (days between sightings
 
 ## Review
 
+### 2026-06-09 (evening) — v0.4 autonomous coverage
+User directive: no human-triggered capture — the site finds them. Shipped the continuous spine
+loop: ~117 cams along Park Royal → A40 → Marylebone Rd → Euston Rd/KX, ETag conditional-GET per
+cycle (decode only fresh clips), 24/7, per-camera WAL commits, cron demoted to supervisor
+(flock + nice). ~2.3× clips/day, all on the fleet's corridor. ALERT_TH 0.88→0.93 (live tails beat
+synthetic calibration; 6 FPs rejected+banked). Dataset audit (6 sheets emailed): dome templates
+are street-level but JamCams look down — NEXT: harvest elevated-angle domes → re-seed centroid;
+tighten synthetic host gate (vans/greys leak). Strategy locked: real positives first, train later.
+
 ### 2026-06-09 — Surfacer recall fix (v0.3)
 4 days / 0 Waymos prompted a planted-positive recall test (`dataset/recall_eval.py`) instead of
 more waiting. Found the live funnel was blind: 2.5% end-to-end recall, dome lift +0.016 (centroid
