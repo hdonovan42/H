@@ -24,6 +24,19 @@ binding constraint (95 cams, 6-min ticks, 17h/day, ~70-80% of clip refreshes cau
 - **Next (recognition)**: harvest elevated-angle dome imagery -> re-seed centroid (the audit showed
   street-level templates are the wrong viewpoint for JamCams); then real positives -> Stage 2.
 
+### v0.4.1 addendum — real-images-first support (same evening)
+
+Strategy locked by user: capture first, train on REAL images only ("once we get the first one
+we can perfect the dome"). Two pieces shipped in support:
+- **Near-miss archive**: scores in [0.81, 0.83) stored silently (status='near', never emailed,
+  7-day prune incl. jpgs; 'new'-row file cleanup fixed too — was orphaning forever). Purpose:
+  once a real Waymo is confirmed anywhere, mine its sub-bar passes at other cameras
+  (`status='near'` ± 45 min) as extra real training views. Near vehicles that later cross the
+  bar are promoted into the digest.
+- **`dataset/reseed_from_real.py`**: one command from first confirm -> pure-real (or blended
+  <5 reals) centroid + recalibrated threshold quantiles + live artifact. Zero-delay
+  "perfect the dome" the moment it happens.
+
 ## v0.3 — Surfacer recall fix: the funnel was blind (2026-06-09)
 
 After 4 days of live watching with zero confirmed Waymos (user sees them daily on Euston Rd),
