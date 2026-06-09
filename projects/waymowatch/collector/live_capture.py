@@ -54,21 +54,33 @@ DEDUP_TH = 0.93       # cosine >= this => same vehicle: one entry, crop updated 
 KX_CENTRE = (51.5310, -0.1255)   # King's Cross / British Library centre (for --collect area)
 PARK_ROYAL = (51.5235, -0.2830)  # Waymo's London depot (NW10) — cars start/end runs here; the
                                  # ring of cams covers the depot + its arterials (A40, A406, Hanger Ln)
+# Depot->city SPINE (2026-06-09): every run starts/ends at Park Royal, and the A40/Westway ->
+# Marylebone Rd -> Euston Rd corridor is the natural path to central London (user-confirmed
+# sightings: Euston Rd). Cover the spine end-to-end, densest at the sighting hotspot.
+SPINE = [
+    (PARK_ROYAL, 22),            # depot + A40 / A406 / Hanger Lane
+    ((51.5208, -0.2050), 18),    # Westway / Royal Oak / Paddington approaches
+    ((51.5226, -0.1571), 20),    # Marylebone Rd / Baker St
+    (KX_CENTRE, 60),             # Euston Rd / King's Cross / St Pancras
+]
+MIN_CYCLE = 60        # --loop: minimum seconds per cycle (don't hot-spin when feeds are down /
+                      # everything 304s; processing time dominates in steady state anyway)
 PROB_TH = 0.83        # digest bar — RECALIBRATED 2026-06-09 for the tight-crop + re-seeded centroid
                       # (NEW score scale, incomparable to pre-fix scores): white-car p95 = 0.831
                       # (export_centroid.py, n=108), so ~5% of white cars pass -> bounded digest volume
                       # at ~45% synthetic recall (camera-split, reseed_centroid_eval.py).
-ALERT_TH = 0.88       # instant-alert bar: above ALL 108 known white-car scores (max 0.868) on the new
-                      # scale; emails immediately on the next sweep. Synthetic split recall ~23-33% here.
-                      # Still uncalibrated on a REAL CCTV Waymo — re-tune once one lands.
+ALERT_TH = 0.93       # instant-alert bar — RAISED 0.88->0.93 (2026-06-09 evening): live white-car
+                      # tails are fatter than the 108-sample synthetic calibration suggested (5 FPs
+                      # >=0.886 within 90 min of deploy, max 0.902, all human-rejected). The digest is
+                      # the primary channel until the scorer is re-seeded on elevated-angle/real domes.
 BATCH_SIZE = 5        # (legacy count-trigger; superseded by PAGE_SIZE paging below)
 PAGE_SIZE = 200       # digest paging: the moment this many candidates pile up during the day, email
                       # that full page right away and reset; the remainder (< PAGE_SIZE) goes at
                       # DIGEST_HOUR. e.g. 456/day -> 200 + 200 + 56 across 3 emails. Overflow never lost.
-COLLECT_HOURS = (6, 23)  # auto-sweep only 06:00-23:00 Europe/London (BST/GMT handled automatically);
-                         # no dead-of-night sweeps. Manual commands run any time.
-DIGEST_HOUR = COLLECT_HOURS[1]   # send ONE digest/day right after collection closes (23:00 London),
-                                 # so it captures the WHOLE day. Fires on a cron tick even with no sweep.
+COLLECT_HOURS = (0, 24)  # 24/7 (2026-06-09): Waymo runs at night too and overnight CPU is idle —
+                         # the site's job is to find them, so it never stops looking.
+DIGEST_HOUR = 23         # ONE digest/day at 23:00 London; overnight candidates roll into the next
+                         # day's pages (paging guarantees nothing is ever lost).
 CAND_DIR = os.path.join(BASE, "data", "candidates")
 REAL_DIR = os.path.join(BASE, "data", "real_positives")
 SAMPLE_EVERY = 8       # ~3 fps — enough chances to catch a pass, light on CPU
@@ -136,6 +148,23 @@ def nearest_short_ids(cams, k, centre=KX_CENTRE):
     return {c["id"].replace("JamCams_", "") for c in avail[:k]}
 
 
+def spine_focus(cams):
+    """Union of the SPINE clusters — the depot->city corridor, ~110-120 cams after overlap."""
+    foc = set()
+    for centre, k in SPINE:
+        foc |= nearest_short_ids(cams, k, centre)
+    return foc
+
+
+def kv_get(con, key):
+    row = con.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def kv_set(con, key, value):
+    con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES(?,?)", (key, value))
+
+
 def is_white(car):
     """Stage-1 cheap colour filter: Waymos are (predominantly) white. Lenient on brightness — also
     passes silver/off-white and white-in-shadow so we don't miss a Waymo; white vans/cabs pass too
@@ -176,17 +205,20 @@ def sweep(con, focus=None, target=None):
               and c["id"].replace("JamCams_", "") in foc]
     os.makedirs(CAND_DIR, exist_ok=True)
     tmp = os.path.join(CAND_DIR, "_tmp.mp4")
-    found = 0
+    found, fresh = 0, 0
     for cam in chosen:
+        short_id = cam["id"].replace("JamCams_", "")
         try:
-            _, body, _ = dp.http_get(dp.props(cam).get("videoUrl"))
+            st, body, hdrs = dp.http_get(dp.props(cam).get("videoUrl"),
+                                         etag=kv_get(con, f"etag:{short_id}"))
         except Exception:
             continue
-        if not body:
-            continue
+        if st == 304 or not body:
+            continue            # clip unchanged since last visit — zero download, zero decode
+        fresh += 1
         open(tmp, "wb").write(body)
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        short = cam["id"].replace("JamCams_", "")
+        short = short_id
         stamp = now.replace("-", "").replace(":", "").replace("T", "").replace("Z", "")
         # within-clip ByteTrack: collapse each moving car (many frames) into ONE track;
         # keep its biggest (closest) view as the representative.
@@ -251,12 +283,17 @@ def sweep(con, focus=None, target=None):
                               json.dumps([round(float(x), 4) for x in e]), json.dumps(list(bbox))))
             recent.insert(0, [cur.lastrowid, s, e, "new", list(bbox)])
             found += 1
+        et = (hdrs.get("ETag") or "").strip() if hdrs else ""
+        if et:
+            kv_set(con, f"etag:{short_id}", et)
+        con.commit()        # per-camera commit: keep WAL write transactions short
         if target and found >= target:
             break
     cut = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 7 * 86400))
     con.execute("DELETE FROM candidates WHERE captured_at < ? AND status='new'", (cut,))
     con.commit()
-    print(f"focus cameras swept: {len(chosen)} | distinct vehicles added: {found}")
+    print(f"cams checked: {len(chosen)} | fresh clips: {fresh} | distinct vehicles added: {found}",
+          flush=True)
 
 
 def _build_sheet(rows, out_path, cols=6, cap=72):
@@ -413,9 +450,32 @@ def maybe_send_daily_digest(con):
     con.commit()
 
 
+def watch_loop(con):
+    """Continuous watcher (the cron entrypoint since 2026-06-09): each cycle conditional-GETs
+    every SPINE camera and decodes ONLY fresh clips (ETag 304 = skip, ~zero cost), so every
+    published clip on the depot->city corridor is processed — no refresh ever missed, 24/7.
+    Self-pacing: when processing falls behind, the cycle simply lengthens (newest clip per
+    camera still wins); MIN_CYCLE only prevents hot-spinning when the feed is down."""
+    print(f"watch loop starting: spine corridor, 24/7, min cycle {MIN_CYCLE}s", flush=True)
+    while True:
+        t0 = time.time()
+        try:
+            if in_collection_window():
+                sweep(con, focus=spine_focus(dp.fetch_camera_list()))
+                review_sheet(con)
+                emit_pages(con)         # page out a full digest the moment 200 pile up
+            maybe_send_instant_alerts(con)
+            maybe_send_daily_digest(con)
+        except Exception as e:
+            print(f"cycle error: {e}", flush=True)
+        time.sleep(max(0, MIN_CYCLE - (time.time() - t0)))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cameras", type=int, default=0, help="0 = all zone cameras")
+    ap.add_argument("--loop", action="store_true",
+                    help="run forever: ETag-driven spine watch (cron supervises via flock)")
     ap.add_argument("--sample-every", type=int, default=SAMPLE_EVERY)
     ap.add_argument("--review", action="store_true")
     ap.add_argument("--digest", action="store_true", help="WhatsApp the operator a daily review nudge")
@@ -429,7 +489,9 @@ def main():
     a = ap.parse_args()
     con = dp.db_connect(dp.DEFAULT_DB)
     ensure_schema(con)
-    if a.confirm:
+    if a.loop:
+        watch_loop(con)
+    elif a.confirm:
         confirm(con, [int(x) for x in a.confirm.split(",") if x], "waymo")
     elif a.reject:
         confirm(con, [int(x) for x in a.reject.split(",") if x], "reject")

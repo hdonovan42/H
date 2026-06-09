@@ -1,5 +1,29 @@
 # WaymoWatch — Changelog
 
+## v0.4 — Autonomous coverage: continuous spine loop (2026-06-09, evening)
+
+User directive: the site finds Waymos itself — no human-triggered capture. Coverage was the
+binding constraint (95 cams, 6-min ticks, 17h/day, ~70-80% of clip refreshes caught), so:
+
+- **Depot->city SPINE**: watch expanded from 2 clusters (KX+PR, 95 cams) to **~117 cams** along
+  the corridor every run must use — Park Royal depot -> A40/Westway -> Marylebone Rd ->
+  Euston Rd/King's Cross (user-confirmed sighting hotspot), densest at KX (`SPINE`, `spine_focus()`).
+- **Continuous ETag loop** (`--loop`, `watch_loop()`): replaces fixed sweeps. Each cycle
+  conditional-GETs every spine cam (304 = zero download/decode) and processes ONLY fresh clips —
+  no refresh missed, no wasted re-decode. Self-pacing under load (newest clip per cam wins).
+  Per-camera DB commits (WAL writer no longer held for whole sweeps).
+- **24/7**: `COLLECT_HOURS` (6,23) -> (0,24); Waymo tests at night and overnight CPU was idle.
+  Digest stays 23:00; overnight candidates roll into next day's pages.
+- **Supervision**: cron line unchanged (every 6 min) but `run_watch.sh` now starts the loop under
+  `flock -n` + `nice -10` — alive = no-op, dead = restart within 6 min.
+- **ALERT_TH 0.88 -> 0.93**: live white-car tails beat the 108-sample synthetic calibration
+  (5 FPs >= 0.886 in the first 90 min, max 0.902, all user-rejected + banked). Digest is the
+  primary channel until the scorer is re-seeded.
+- Coverage arithmetic: ~117 cams x every refresh x 24h vs 95 x ~75% x 17h ≈ **2.3x more clips/day**,
+  all of it on the corridor the fleet actually uses.
+- **Next (recognition)**: harvest elevated-angle dome imagery -> re-seed centroid (the audit showed
+  street-level templates are the wrong viewpoint for JamCams); then real positives -> Stage 2.
+
 ## v0.3 — Surfacer recall fix: the funnel was blind (2026-06-09)
 
 After 4 days of live watching with zero confirmed Waymos (user sees them daily on Euston Rd),
