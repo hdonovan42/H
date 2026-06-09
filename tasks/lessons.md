@@ -45,3 +45,20 @@ Count-triggered digests (every N) + a loose surfacer = hourly all-FP spam. Switc
 digest** at 20:00 London (`maybe_send_daily_digest`, code-gated, TZ-correct) and raised `PROB_TH`
 0.83→0.86 (~halves volume). **Risk logged:** with 0 real positives we can't calibrate the bar — a
 low-res CCTV dome may score <0.86 and be missed. Re-examine the bar the moment a real positive lands.
+
+### Never run a detector in production without a planted-positive recall test (2026-06-09)
+WaymoWatch's surfacer ran live for 4 days, 153 candidates reviewed, 0 Waymos — and the whole time
+its end-to-end recall on realistic planted positives was **2.5%** (dome lift on the score: +0.016).
+The system *looked* healthy (sweeps ran, digests sent, scores clustered near the bar) while being
+functionally blind. Zero detections carried no information because P(surface | Waymo in frame) ≈ 0.
+The bug wasn't a crash — it was a silent domain mismatch: centroid from close-up dome *photos*,
+scoring on wide in-frame roof crops; the embedding never saw the dome.
+**How to apply:**
+- Before trusting any "no detections yet" result, **measure recall end-to-end with planted
+  positives through the exact production code path** (same functions, same thresholds) — not a
+  proxy eval on crops. WaymoWatch's crop-level separability evals all passed while the funnel was blind.
+- A paired test (same input with/without the target feature) directly measures whether the score
+  even sees the discriminating feature. If the paired lift ≈ 0, no threshold tuning can help.
+- Embedding similarity is domain-fragile: templates and queries must come from the SAME crop
+  geometry/scale/codec. Share the crop function (one source of truth) between seeding and serving.
+- Days of silence from a rare-event detector are NOT evidence it's working. Only a recall number is.
