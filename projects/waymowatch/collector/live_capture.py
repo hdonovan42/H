@@ -69,6 +69,11 @@ PROB_TH = 0.83        # digest bar — RECALIBRATED 2026-06-09 for the tight-cro
                       # (NEW score scale, incomparable to pre-fix scores): white-car p95 = 0.831
                       # (export_centroid.py, n=108), so ~5% of white cars pass -> bounded digest volume
                       # at ~45% synthetic recall (camera-split, reseed_centroid_eval.py).
+NEAR_TH = 0.81        # near-miss archive floor: [NEAR_TH, PROB_TH) candidates are stored SILENTLY
+                      # (status='near' — never emailed, never on sheets) so that once a real Waymo is
+                      # confirmed anywhere, its sub-bar passes at other cameras can be mined as extra
+                      # REAL training views ("train on real images" strategy). Bounded by NEAR_KEEP_DAYS.
+NEAR_KEEP_DAYS = 7    # near rows + their jpgs are pruned after this many days (mine promptly)
 ALERT_TH = 0.93       # instant-alert bar — RAISED 0.88->0.93 (2026-06-09 evening): live white-car
                       # tails are fatter than the 108-sample synthetic calibration suggested (5 FPs
                       # >=0.886 within 90 min of deploy, max 0.902, all human-rejected). The digest is
@@ -205,7 +210,7 @@ def sweep(con, focus=None, target=None):
               and c["id"].replace("JamCams_", "") in foc]
     os.makedirs(CAND_DIR, exist_ok=True)
     tmp = os.path.join(CAND_DIR, "_tmp.mp4")
-    found, fresh = 0, 0
+    found, fresh, near = 0, 0, 0
     for cam in chosen:
         short_id = cam["id"].replace("JamCams_", "")
         try:
@@ -253,8 +258,9 @@ def sweep(con, focus=None, target=None):
                 continue
             e = embed(jamcam(roof))
             s = float(e @ cen)
-            if s < PROB_TH:
-                continue  # only keep high-probability (dome-like) candidates; discard the rest
+            if s < NEAR_TH:
+                continue  # below even the near-miss band; discard
+            status = "new" if s >= PROB_TH else "near"        # near = silent archive
             hd = int((y2 - y1) * 0.12)
             car = frm[max(0, y1 - hd):y2, max(0, x1):min(frm.shape[1], x2)]
             # same vehicle if same parked spot (bbox IoU) OR near-identical appearance
@@ -263,12 +269,14 @@ def sweep(con, focus=None, target=None):
             cp = os.path.join(CAND_DIR, f"{short}_t{tid}_{stamp}.jpg")
             fpth = os.path.join(CAND_DIR, f"{short}_t{tid}_{stamp}_frame.jpg")
             if m:
-                if m[3] == "new" and s > m[1] + 0.01:        # better view -> update existing entry
+                promote = m[3] == "near" and status == "new"  # near vehicle crossed the digest bar
+                if m[3] in ("new", "near") and (s > m[1] + 0.01 or promote):  # better view -> update
                     old = con.execute("SELECT crop_path,frame_path FROM candidates WHERE id=?", (m[0],)).fetchone()
                     cv2.imwrite(cp, car); cv2.imwrite(fpth, frm)
-                    con.execute("UPDATE candidates SET score=?,crop_path=?,frame_path=?,emb=?,bbox=?,captured_at=? "
-                                "WHERE id=?", (s, cp, fpth, json.dumps([round(float(x), 4) for x in e]),
-                                               json.dumps(list(bbox)), now, m[0]))
+                    con.execute("UPDATE candidates SET score=?,crop_path=?,frame_path=?,emb=?,bbox=?,"
+                                "captured_at=?,status=? WHERE id=?",
+                                (s, cp, fpth, json.dumps([round(float(x), 4) for x in e]),
+                                 json.dumps(list(bbox)), now, "new" if promote else m[3], m[0]))
                     for f in (old or []):
                         if f and f not in (cp, fpth) and os.path.exists(f):
                             try:
@@ -276,23 +284,40 @@ def sweep(con, focus=None, target=None):
                             except Exception:
                                 pass
                     m[1], m[2], m[4] = s, e, list(bbox)
+                    if promote:
+                        m[3] = "new"
+                        found += 1
                 continue                                      # same vehicle -> no new row
             cv2.imwrite(cp, car); cv2.imwrite(fpth, frm)
-            cur = con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb,bbox)"
-                              " VALUES(?,?,?,?,?,?,?)", (cam["id"], now, s, cp, fpth,
-                              json.dumps([round(float(x), 4) for x in e]), json.dumps(list(bbox))))
-            recent.insert(0, [cur.lastrowid, s, e, "new", list(bbox)])
-            found += 1
+            cur = con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb,bbox,status)"
+                              " VALUES(?,?,?,?,?,?,?,?)", (cam["id"], now, s, cp, fpth,
+                              json.dumps([round(float(x), 4) for x in e]), json.dumps(list(bbox)), status))
+            recent.insert(0, [cur.lastrowid, s, e, status, list(bbox)])
+            if status == "new":
+                found += 1
+            else:
+                near += 1
         et = (hdrs.get("ETag") or "").strip() if hdrs else ""
         if et:
             kv_set(con, f"etag:{short_id}", et)
         con.commit()        # per-camera commit: keep WAL write transactions short
         if target and found >= target:
             break
-    cut = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 7 * 86400))
-    con.execute("DELETE FROM candidates WHERE captured_at < ? AND status='new'", (cut,))
+    # retention: prune stale rows AND their jpgs (files were previously orphaned forever)
+    for status_, days in (("new", 7), ("near", NEAR_KEEP_DAYS)):
+        cut = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - days * 86400))
+        stale = con.execute("SELECT crop_path,frame_path FROM candidates WHERE captured_at < ? "
+                            "AND status=?", (cut, status_)).fetchall()
+        for row in stale:
+            for f in row:
+                if f and os.path.exists(f):
+                    try:
+                        os.remove(f)
+                    except Exception:
+                        pass
+        con.execute("DELETE FROM candidates WHERE captured_at < ? AND status=?", (cut, status_))
     con.commit()
-    print(f"cams checked: {len(chosen)} | fresh clips: {fresh} | distinct vehicles added: {found}",
+    print(f"cams checked: {len(chosen)} | fresh clips: {fresh} | vehicles: +{found} new, +{near} near",
           flush=True)
 
 
