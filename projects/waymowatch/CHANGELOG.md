@@ -1,5 +1,73 @@
 # WaymoWatch — Changelog
 
+## v0.4 — Autonomous coverage: continuous spine loop (2026-06-09, evening)
+
+User directive: the site finds Waymos itself — no human-triggered capture. Coverage was the
+binding constraint (95 cams, 6-min ticks, 17h/day, ~70-80% of clip refreshes caught), so:
+
+- **Depot->city SPINE**: watch expanded from 2 clusters (KX+PR, 95 cams) to **~117 cams** along
+  the corridor every run must use — Park Royal depot -> A40/Westway -> Marylebone Rd ->
+  Euston Rd/King's Cross (user-confirmed sighting hotspot), densest at KX (`SPINE`, `spine_focus()`).
+- **Continuous ETag loop** (`--loop`, `watch_loop()`): replaces fixed sweeps. Each cycle
+  conditional-GETs every spine cam (304 = zero download/decode) and processes ONLY fresh clips —
+  no refresh missed, no wasted re-decode. Self-pacing under load (newest clip per cam wins).
+  Per-camera DB commits (WAL writer no longer held for whole sweeps).
+- **24/7**: `COLLECT_HOURS` (6,23) -> (0,24); Waymo tests at night and overnight CPU was idle.
+  Digest stays 23:00; overnight candidates roll into next day's pages.
+- **Supervision**: cron line unchanged (every 6 min) but `run_watch.sh` now starts the loop under
+  `flock -n` + `nice -10` — alive = no-op, dead = restart within 6 min.
+- **ALERT_TH 0.88 -> 0.93**: live white-car tails beat the 108-sample synthetic calibration
+  (5 FPs >= 0.886 in the first 90 min, max 0.902, all user-rejected + banked). Digest is the
+  primary channel until the scorer is re-seeded.
+- Coverage arithmetic: ~117 cams x every refresh x 24h vs 95 x ~75% x 17h ≈ **2.3x more clips/day**,
+  all of it on the corridor the fleet actually uses.
+- **Next (recognition)**: harvest elevated-angle dome imagery -> re-seed centroid (the audit showed
+  street-level templates are the wrong viewpoint for JamCams); then real positives -> Stage 2.
+
+### v0.4.1 addendum — real-images-first support (same evening)
+
+Strategy locked by user: capture first, train on REAL images only ("once we get the first one
+we can perfect the dome"). Two pieces shipped in support:
+- **Near-miss archive**: scores in [0.81, 0.83) stored silently (status='near', never emailed,
+  7-day prune incl. jpgs; 'new'-row file cleanup fixed too — was orphaning forever). Purpose:
+  once a real Waymo is confirmed anywhere, mine its sub-bar passes at other cameras
+  (`status='near'` ± 45 min) as extra real training views. Near vehicles that later cross the
+  bar are promoted into the digest.
+- **`dataset/reseed_from_real.py`**: one command from first confirm -> pure-real (or blended
+  <5 reals) centroid + recalibrated threshold quantiles + live artifact. Zero-delay
+  "perfect the dome" the moment it happens.
+
+## v0.3 — Surfacer recall fix: the funnel was blind (2026-06-09)
+
+After 4 days of live watching with zero confirmed Waymos (user sees them daily on Euston Rd),
+built a planted-positive recall test instead of waiting longer. Verdict: waiting was pointless.
+
+- **Recall test** (`dataset/recall_eval.py`): synthetic Waymos (real dome pasted on real *white*
+  JamCam hosts, copy-paste engine geometry) pushed through the EXACT live funnel. Pre-fix result:
+  **end-to-end recall 2.5%** @ 0.82 digest bar, **0%** @ 0.90 alert bar; paired dome lift just
+  **+0.016** — the score barely saw the dome. The 4 silent days fully explained: every reviewed
+  candidate was white-car noise tail, and a real Waymo would have scored ~0.66.
+- **Root cause:** domain mismatch. The centroid was built from tight close-up dome *photos*, but
+  live scored the whole roof region (top 45% of car, 16% inset) — the MobileNet embedding was
+  dominated by car/scene context, not the dome.
+- **Fix** (validated honestly in `dataset/reseed_centroid_eval.py`, camera-grouped split):
+  - **tight roof crop** — top 22% of bbox, 28% inset (`roof_crop()` is now the single source of
+    truth in `live_capture.py`, imported by all eval scripts so geometry can't drift);
+  - **centroid re-seeded from synthetic roof crops at live geometry** (`dataset/export_centroid.py`
+    → `collector/dome_centroid_tight.json`, 108 pairs / 25 cameras, committed artifact);
+  - pasted-vs-unpasted ROC-AUC **0.614 → 0.839**; recall **33% @ 1%** / **45% @ 5%** white-car
+    pass-rate.
+- **Thresholds recalibrated** (new score scale, incomparable to old): `PROB_TH` 0.82→**0.83**
+  (white-car p95 = 0.831 → ~5% pass, digest volume ≈ unchanged); `ALERT_TH` 0.90→**0.88**
+  (above all 108 known white-car scores, max 0.868).
+- **Shipped-funnel regression** (in-sample): 54% of scored @ digest / 38% end-to-end — ~15× the
+  blind funnel. Trust the split numbers (33–45%) as the honest estimate.
+- Deployed to VPS; **114 old-scale pending candidates retired** (status→reject, files kept — old
+  scores are incomparable). Verified: local 5-cam + VPS 8-cam sweeps clean under the cron flock.
+- **What to watch:** digest volume (~5% of white tracks); `DEDUP_TH` 0.93 now compares tight-crop
+  embeddings (less context — watch for distinct vehicles merging); **re-seed the centroid and
+  re-tune both bars the moment the first real CCTV Waymo is confirmed.**
+
 ## v0.2 — High-quality dataset + GPU training recipe (2026-06-05)
 
 - **Domes:** Commons (`Jaguar I-Pace (Waymo)`) + Bing crawl → auto-extracted roof crops,

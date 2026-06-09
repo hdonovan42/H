@@ -54,14 +54,38 @@ DEDUP_TH = 0.93       # cosine >= this => same vehicle: one entry, crop updated 
 KX_CENTRE = (51.5310, -0.1255)   # King's Cross / British Library centre (for --collect area)
 PARK_ROYAL = (51.5235, -0.2830)  # Waymo's London depot (NW10) — cars start/end runs here; the
                                  # ring of cams covers the depot + its arterials (A40, A406, Hanger Ln)
-PROB_TH = 0.86        # high-probability bar (raised from 0.83 to cut FP volume; ~halves it). NOTE:
-                      # 0 real positives to calibrate against — a low-res CCTV dome could score below
-                      # this, so a real Waymo might be missed. Re-examine once a real positive lands.
-BATCH_SIZE = 5        # (legacy count-trigger; auto path now uses a once-daily digest — see DIGEST_HOUR)
-COLLECT_HOURS = (9, 21)  # auto-sweep only 09:00-21:00 Europe/London (BST/GMT handled automatically);
-                         # Waymos don't test overnight + halves compute. Manual commands run any time.
-DIGEST_HOUR = 20      # send ONE digest per day, on the first sweep at/after 20:00 London (window
-                      # closes 21:00). Daytime sweeps just accumulate; you review one email at day's end.
+# Depot->city SPINE (2026-06-09): every run starts/ends at Park Royal, and the A40/Westway ->
+# Marylebone Rd -> Euston Rd corridor is the natural path to central London (user-confirmed
+# sightings: Euston Rd). Cover the spine end-to-end, densest at the sighting hotspot.
+SPINE = [
+    (PARK_ROYAL, 22),            # depot + A40 / A406 / Hanger Lane
+    ((51.5208, -0.2050), 18),    # Westway / Royal Oak / Paddington approaches
+    ((51.5226, -0.1571), 20),    # Marylebone Rd / Baker St
+    (KX_CENTRE, 60),             # Euston Rd / King's Cross / St Pancras
+]
+MIN_CYCLE = 60        # --loop: minimum seconds per cycle (don't hot-spin when feeds are down /
+                      # everything 304s; processing time dominates in steady state anyway)
+PROB_TH = 0.83        # digest bar — RECALIBRATED 2026-06-09 for the tight-crop + re-seeded centroid
+                      # (NEW score scale, incomparable to pre-fix scores): white-car p95 = 0.831
+                      # (export_centroid.py, n=108), so ~5% of white cars pass -> bounded digest volume
+                      # at ~45% synthetic recall (camera-split, reseed_centroid_eval.py).
+NEAR_TH = 0.81        # near-miss archive floor: [NEAR_TH, PROB_TH) candidates are stored SILENTLY
+                      # (status='near' — never emailed, never on sheets) so that once a real Waymo is
+                      # confirmed anywhere, its sub-bar passes at other cameras can be mined as extra
+                      # REAL training views ("train on real images" strategy). Bounded by NEAR_KEEP_DAYS.
+NEAR_KEEP_DAYS = 7    # near rows + their jpgs are pruned after this many days (mine promptly)
+ALERT_TH = 0.93       # instant-alert bar — RAISED 0.88->0.93 (2026-06-09 evening): live white-car
+                      # tails are fatter than the 108-sample synthetic calibration suggested (5 FPs
+                      # >=0.886 within 90 min of deploy, max 0.902, all human-rejected). The digest is
+                      # the primary channel until the scorer is re-seeded on elevated-angle/real domes.
+BATCH_SIZE = 5        # (legacy count-trigger; superseded by PAGE_SIZE paging below)
+PAGE_SIZE = 200       # digest paging: the moment this many candidates pile up during the day, email
+                      # that full page right away and reset; the remainder (< PAGE_SIZE) goes at
+                      # DIGEST_HOUR. e.g. 456/day -> 200 + 200 + 56 across 3 emails. Overflow never lost.
+COLLECT_HOURS = (0, 24)  # 24/7 (2026-06-09): Waymo runs at night too and overnight CPU is idle —
+                         # the site's job is to find them, so it never stops looking.
+DIGEST_HOUR = 23         # ONE digest/day at 23:00 London; overnight candidates roll into the next
+                         # day's pages (paging guarantees nothing is ever lost).
 CAND_DIR = os.path.join(BASE, "data", "candidates")
 REAL_DIR = os.path.join(BASE, "data", "real_positives")
 SAMPLE_EVERY = 8       # ~3 fps — enough chances to catch a pass, light on CPU
@@ -73,19 +97,41 @@ def ensure_schema(con):
     con.executescript("""
     CREATE TABLE IF NOT EXISTS candidates(
       id INTEGER PRIMARY KEY AUTOINCREMENT, camera_id TEXT, captured_at TEXT,
-      score REAL, crop_path TEXT, frame_path TEXT, status TEXT DEFAULT 'new', emb TEXT, bbox TEXT);
+      score REAL, crop_path TEXT, frame_path TEXT, status TEXT DEFAULT 'new', emb TEXT, bbox TEXT,
+      alerted INTEGER DEFAULT 0);
     CREATE INDEX IF NOT EXISTS idx_cand_status ON candidates(status);
     CREATE INDEX IF NOT EXISTS idx_cand_cam ON candidates(camera_id);""")
-    for col in ("emb TEXT", "bbox TEXT"):                  # for pre-existing tables
+    for col in ("emb TEXT", "bbox TEXT", "alerted INTEGER DEFAULT 0"):   # for pre-existing tables
         try:
             con.execute(f"ALTER TABLE candidates ADD COLUMN {col}")
         except Exception:
             pass
 
 
-def dome_centroid(embed):
-    domes = glob.glob(os.path.join(BASE, "data/sources/domes/*.jpg"))
-    c = np.mean([embed(jamcam(cv2.imread(f))) for f in domes], 0)
+# Roof-crop geometry (TIGHT, 2026-06-09): top ~22% of the vehicle bbox, 28% side inset.
+# The old 45%/16% crop buried the dome in car/scene context — adding a dome moved the
+# cosine score only +0.016 (dataset/recall_eval.py: end-to-end recall 2.5% @ 0.82, the
+# 4 silent days explained). At 22%/28% the dome dominates the embedded image:
+# pasted-vs-unpasted ROC-AUC 0.614 -> 0.839 (camera-split, dataset/reseed_centroid_eval.py).
+ROOF_TOP, ROOF_BOTTOM, ROOF_INSET = -0.06, 0.22, 0.28
+CENTROID_FILE = os.path.join(HERE, "dome_centroid_tight.json")
+
+
+def roof_crop(frm, bbox):
+    """The live roof crop — single source of truth, shared with the eval scripts."""
+    x1, y1, x2, y2 = bbox
+    mx = int((x2 - x1) * ROOF_INSET)
+    return frm[max(0, int(y1 + (y2 - y1) * ROOF_TOP)):int(y1 + (y2 - y1) * ROOF_BOTTOM),
+               max(0, x1 + mx):min(frm.shape[1], x2 - mx)]
+
+
+def load_centroid():
+    """Deployed surfacer centroid: mean MobileNetV3 embedding of SYNTHETIC Waymo roof crops
+    (real dome pasted on real white JamCam hosts, tight geometry) — built by
+    dataset/export_centroid.py, committed as dome_centroid_tight.json. The old centroid
+    (raw close-up dome photos) didn't transfer to in-frame roof crops. Re-seed from real
+    CCTV domes once confirmed positives land."""
+    c = np.array(json.load(open(CENTROID_FILE))["centroid"], dtype=np.float32)
     return c / (np.linalg.norm(c) + 1e-8)
 
 
@@ -105,6 +151,23 @@ def nearest_short_ids(cams, k, centre=KX_CENTRE):
              and dp.props(c).get("videoUrl") and c.get("lat")]
     avail.sort(key=lambda c: (c["lat"] - centre[0]) ** 2 + (c["lon"] - centre[1]) ** 2)
     return {c["id"].replace("JamCams_", "") for c in avail[:k]}
+
+
+def spine_focus(cams):
+    """Union of the SPINE clusters — the depot->city corridor, ~110-120 cams after overlap."""
+    foc = set()
+    for centre, k in SPINE:
+        foc |= nearest_short_ids(cams, k, centre)
+    return foc
+
+
+def kv_get(con, key):
+    row = con.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def kv_set(con, key, value):
+    con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES(?,?)", (key, value))
 
 
 def is_white(car):
@@ -138,7 +201,7 @@ def iou(a, b):
 def sweep(con, focus=None, target=None):
     from ultralytics import YOLO
     embed = build_embedder()
-    cen = dome_centroid(embed)
+    cen = load_centroid()
     det = YOLO("yolo11n.pt")
     cams = dp.fetch_camera_list()
     dp.upsert_cameras(con, cams)
@@ -147,17 +210,20 @@ def sweep(con, focus=None, target=None):
               and c["id"].replace("JamCams_", "") in foc]
     os.makedirs(CAND_DIR, exist_ok=True)
     tmp = os.path.join(CAND_DIR, "_tmp.mp4")
-    found = 0
+    found, fresh, near = 0, 0, 0
     for cam in chosen:
+        short_id = cam["id"].replace("JamCams_", "")
         try:
-            _, body, _ = dp.http_get(dp.props(cam).get("videoUrl"))
+            st, body, hdrs = dp.http_get(dp.props(cam).get("videoUrl"),
+                                         etag=kv_get(con, f"etag:{short_id}"))
         except Exception:
             continue
-        if not body:
-            continue
+        if st == 304 or not body:
+            continue            # clip unchanged since last visit — zero download, zero decode
+        fresh += 1
         open(tmp, "wb").write(body)
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        short = cam["id"].replace("JamCams_", "")
+        short = short_id
         stamp = now.replace("-", "").replace(":", "").replace("T", "").replace("Z", "")
         # within-clip ByteTrack: collapse each moving car (many frames) into ONE track;
         # keep its biggest (closest) view as the representative.
@@ -187,15 +253,14 @@ def sweep(con, focus=None, target=None):
                       "ORDER BY id DESC LIMIT 400", (cam["id"],)).fetchall() if remb]
         for tid, (area, frm, bbox) in best.items():
             x1, y1, x2, y2 = bbox
-            mx = int((x2 - x1) * 0.16)
-            roof = frm[max(0, int(y1 - (y2 - y1) * 0.06)):int(y1 + (y2 - y1) * 0.45),
-                       max(0, x1 + mx):min(frm.shape[1], x2 - mx)]
+            roof = roof_crop(frm, bbox)
             if roof.size == 0 or min(roof.shape[:2]) < 6:
                 continue
             e = embed(jamcam(roof))
             s = float(e @ cen)
-            if s < PROB_TH:
-                continue  # only keep high-probability (dome-like) candidates; discard the rest
+            if s < NEAR_TH:
+                continue  # below even the near-miss band; discard
+            status = "new" if s >= PROB_TH else "near"        # near = silent archive
             hd = int((y2 - y1) * 0.12)
             car = frm[max(0, y1 - hd):y2, max(0, x1):min(frm.shape[1], x2)]
             # same vehicle if same parked spot (bbox IoU) OR near-identical appearance
@@ -204,12 +269,14 @@ def sweep(con, focus=None, target=None):
             cp = os.path.join(CAND_DIR, f"{short}_t{tid}_{stamp}.jpg")
             fpth = os.path.join(CAND_DIR, f"{short}_t{tid}_{stamp}_frame.jpg")
             if m:
-                if m[3] == "new" and s > m[1] + 0.01:        # better view -> update existing entry
+                promote = m[3] == "near" and status == "new"  # near vehicle crossed the digest bar
+                if m[3] in ("new", "near") and (s > m[1] + 0.01 or promote):  # better view -> update
                     old = con.execute("SELECT crop_path,frame_path FROM candidates WHERE id=?", (m[0],)).fetchone()
                     cv2.imwrite(cp, car); cv2.imwrite(fpth, frm)
-                    con.execute("UPDATE candidates SET score=?,crop_path=?,frame_path=?,emb=?,bbox=?,captured_at=? "
-                                "WHERE id=?", (s, cp, fpth, json.dumps([round(float(x), 4) for x in e]),
-                                               json.dumps(list(bbox)), now, m[0]))
+                    con.execute("UPDATE candidates SET score=?,crop_path=?,frame_path=?,emb=?,bbox=?,"
+                                "captured_at=?,status=? WHERE id=?",
+                                (s, cp, fpth, json.dumps([round(float(x), 4) for x in e]),
+                                 json.dumps(list(bbox)), now, "new" if promote else m[3], m[0]))
                     for f in (old or []):
                         if f and f not in (cp, fpth) and os.path.exists(f):
                             try:
@@ -217,19 +284,41 @@ def sweep(con, focus=None, target=None):
                             except Exception:
                                 pass
                     m[1], m[2], m[4] = s, e, list(bbox)
+                    if promote:
+                        m[3] = "new"
+                        found += 1
                 continue                                      # same vehicle -> no new row
             cv2.imwrite(cp, car); cv2.imwrite(fpth, frm)
-            cur = con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb,bbox)"
-                              " VALUES(?,?,?,?,?,?,?)", (cam["id"], now, s, cp, fpth,
-                              json.dumps([round(float(x), 4) for x in e]), json.dumps(list(bbox))))
-            recent.insert(0, [cur.lastrowid, s, e, "new", list(bbox)])
-            found += 1
+            cur = con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb,bbox,status)"
+                              " VALUES(?,?,?,?,?,?,?,?)", (cam["id"], now, s, cp, fpth,
+                              json.dumps([round(float(x), 4) for x in e]), json.dumps(list(bbox)), status))
+            recent.insert(0, [cur.lastrowid, s, e, status, list(bbox)])
+            if status == "new":
+                found += 1
+            else:
+                near += 1
+        et = (hdrs.get("ETag") or "").strip() if hdrs else ""
+        if et:
+            kv_set(con, f"etag:{short_id}", et)
+        con.commit()        # per-camera commit: keep WAL write transactions short
         if target and found >= target:
             break
-    cut = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 7 * 86400))
-    con.execute("DELETE FROM candidates WHERE captured_at < ? AND status='new'", (cut,))
+    # retention: prune stale rows AND their jpgs (files were previously orphaned forever)
+    for status_, days in (("new", 7), ("near", NEAR_KEEP_DAYS)):
+        cut = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - days * 86400))
+        stale = con.execute("SELECT crop_path,frame_path FROM candidates WHERE captured_at < ? "
+                            "AND status=?", (cut, status_)).fetchall()
+        for row in stale:
+            for f in row:
+                if f and os.path.exists(f):
+                    try:
+                        os.remove(f)
+                    except Exception:
+                        pass
+        con.execute("DELETE FROM candidates WHERE captured_at < ? AND status=?", (cut, status_))
     con.commit()
-    print(f"focus cameras swept: {len(chosen)} | distinct vehicles added: {found}")
+    print(f"cams checked: {len(chosen)} | fresh clips: {fresh} | vehicles: +{found} new, +{near} near",
+          flush=True)
 
 
 def _build_sheet(rows, out_path, cols=6, cap=72):
@@ -277,36 +366,102 @@ def confirm(con, ids, status):
     print(f"marked {len(ids)} candidates as {status}" + (f" -> copied to {REAL_DIR}" if status == "waymo" else ""))
 
 
-def send_digest(con, force=False):
-    """Email the operator the new high-probability candidates since the last digest.
-    Auto-fires once BATCH_SIZE have accumulated; force=True sends whatever is pending."""
+def pending_count(con):
+    """How many high-prob candidates are waiting to be sent (since the last digest/page)."""
     row = con.execute("SELECT value FROM kv WHERE key='last_digest_id'").fetchone()
     last_id = int(row[0]) if row else 0
-    rows = con.execute("SELECT id,score,crop_path FROM candidates WHERE id>? AND status='new' "
-                       "ORDER BY score DESC", (last_id,)).fetchall()
-    if not rows or (not force and len(rows) < BATCH_SIZE):
+    return con.execute("SELECT COUNT(*) FROM candidates WHERE id>? AND status='new'",
+                       (last_id,)).fetchone()[0]
+
+
+def send_digest(con, limit=None, reason="digest"):
+    """Email the pending high-prob candidates (id > last_digest_id, status='new'), OLDEST first.
+    If `limit` is given, send only the oldest `limit` of them (one page) and advance the high-water
+    mark past EXACTLY those — so any overflow rolls into the next send and is NEVER lost. The sheet
+    is rendered best-score-first for easier eyeballing. Returns the number sent (0 if none pending)."""
+    row = con.execute("SELECT value FROM kv WHERE key='last_digest_id'").fetchone()
+    last_id = int(row[0]) if row else 0
+    q = "SELECT id,score,crop_path FROM candidates WHERE id>? AND status='new' ORDER BY id ASC"
+    params = [last_id]
+    if limit:
+        q += " LIMIT ?"
+        params.append(int(limit))
+    rows = con.execute(q, params).fetchall()
+    if not rows:
         return 0
+    new_high = max(r[0] for r in rows)                 # advance ONLY past what we actually send
+    sheet_rows = sorted(rows, key=lambda r: -r[1])     # display most-dome-like first
     sheet = os.path.join(BASE, "data/candidates/digest_sheet.jpg")
-    shown = _build_sheet(rows, sheet, cap=max(72, BATCH_SIZE + 12))
-    maxid = con.execute("SELECT MAX(id) FROM candidates").fetchone()[0] or last_id
-    con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_id',?)", (str(maxid),))
+    shown = _build_sheet(sheet_rows, sheet, cap=len(sheet_rows))
+    con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_id',?)", (str(new_high),))
     con.commit()
-    more = f" (+{len(rows) - shown} more)" if len(rows) > shown else ""
+    remaining = con.execute("SELECT COUNT(*) FROM candidates WHERE id>? AND status='new'",
+                            (new_high,)).fetchone()[0]
+    note = f" — {remaining} more pending today" if remaining else ""
+    subj = f"WaymoWatch: {len(rows)} possible Waymo(s) — KX + Park Royal"
+    if reason == "page":
+        subj += f" (page; {remaining} more today)"
+    elif reason == "end-of-day":
+        subj += " (end of day)"
     html = (f"<p><b>WaymoWatch — King's Cross + Park Royal</b>: {len(rows)} <b>high-probability</b> "
-            f"Waymo candidate(s){more}.</p><p>Reply with the <b>#</b> of any that is a real Waymo "
+            f"Waymo candidate(s){note}.</p><p>Reply with the <b>#</b> of any that is a real Waymo "
             f"(white Jaguar I-PACE with a dark roof dome).</p>")
     sys.path.insert(0, HERE)
     from email_alert import send_email
-    send_email(f"WaymoWatch: {len(rows)} possible Waymo(s) — KX + Park Royal", html,
-               attachments=[sheet] if shown else None)
-    print(f"digest emailed: {len(rows)} high-prob candidate(s) (force={force})")
+    send_email(subj, html, attachments=[sheet] if shown else None)
+    print(f"digest emailed: {len(rows)} ({reason}); {remaining} still pending")
     return len(rows)
 
 
+def emit_pages(con):
+    """Send a full PAGE_SIZE email each time that many candidates have piled up during the day,
+    'right away' (on the sweep that crosses the threshold). Loops in case a backlog spans several
+    pages; each page advances the high-water mark past exactly its rows, so nothing is lost."""
+    total = 0
+    while pending_count(con) >= PAGE_SIZE:
+        n = send_digest(con, limit=PAGE_SIZE, reason="page")
+        if n == 0:
+            break
+        total += n
+    return total
+
+
+def maybe_send_instant_alerts(con):
+    """Immediate alert for a near-certain sighting: email the moment any candidate lands at
+    score >= ALERT_TH, instead of waiting for the 23:00 daily digest. Runs every sweep; the
+    `alerted` flag guarantees each vehicle is sent at most once, and is set ONLY on a successful
+    send so a transient email failure simply retries on the next cron tick. Vehicles whose score
+    rises across sweeps to cross ALERT_TH are still picked up (their flag is unset until sent)."""
+    rows = con.execute("SELECT id,score,crop_path,camera_id FROM candidates "
+                       "WHERE status='new' AND score >= ? AND COALESCE(alerted,0)=0 "
+                       "ORDER BY score DESC", (ALERT_TH,)).fetchall()
+    if not rows:
+        return 0
+    sheet = os.path.join(BASE, "data/candidates/alert_sheet.jpg")
+    shown = _build_sheet([(r[0], r[1], r[2]) for r in rows], sheet, cap=24)
+    top_score, top_cam = rows[0][1], rows[0][3].replace("JamCams_", "")
+    html = (f"<p><b>WaymoWatch — high-confidence sighting</b></p>"
+            f"<p>{len(rows)} candidate(s) at score &ge; {ALERT_TH:.2f} just now "
+            f"(top <b>{top_score:.2f}</b> at camera {top_cam}).</p>"
+            f"<p>Reply with the <b>#</b> of any real Waymo (white Jaguar I-PACE, dark roof dome).</p>")
+    sys.path.insert(0, HERE)
+    from email_alert import send_email
+    if send_email(f"\U0001F6A8 WaymoWatch: possible Waymo now — score {top_score:.2f} (cam {top_cam})",
+                  html, attachments=[sheet] if shown else None):
+        con.execute("UPDATE candidates SET alerted=1 WHERE id IN (%s)"
+                    % ",".join(str(int(r[0])) for r in rows))
+        con.commit()
+        print(f"instant alert emailed: {len(rows)} candidate(s) >= {ALERT_TH}")
+        return len(rows)
+    print(f"instant alert send failed — will retry next tick ({len(rows)} pending)")
+    return 0
+
+
 def maybe_send_daily_digest(con):
-    """Once-daily digest: on the first sweep at/after DIGEST_HOUR (London), email the day's
-    accumulated high-prob candidates. Records the date so it fires at most once per day; if there's
-    nothing to send yet it leaves the date unset so a later sweep that day can still send."""
+    """End-of-day flush: at/after DIGEST_HOUR (London, after collection closes) flush any remaining
+    full pages, then send the day's remainder (whatever is left, < PAGE_SIZE). Runs once per day.
+    During the day emit_pages() has already sent the full 200s; this just mops up the tail. The
+    collection window ends at 23:00 so no new candidates arrive after this — safe to mark the day done."""
     now = datetime.now(ZoneInfo("Europe/London"))
     if now.hour < DIGEST_HOUR:
         return
@@ -314,14 +469,38 @@ def maybe_send_daily_digest(con):
     row = con.execute("SELECT value FROM kv WHERE key='last_digest_date'").fetchone()
     if row and row[0] == today:
         return
-    if send_digest(con, force=True) > 0:
-        con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_date',?)", (today,))
-        con.commit()
+    emit_pages(con)                          # drain any full pages first
+    send_digest(con, reason="end-of-day")    # then the remainder (sends nothing if 0 pending)
+    con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_date',?)", (today,))
+    con.commit()
+
+
+def watch_loop(con):
+    """Continuous watcher (the cron entrypoint since 2026-06-09): each cycle conditional-GETs
+    every SPINE camera and decodes ONLY fresh clips (ETag 304 = skip, ~zero cost), so every
+    published clip on the depot->city corridor is processed — no refresh ever missed, 24/7.
+    Self-pacing: when processing falls behind, the cycle simply lengthens (newest clip per
+    camera still wins); MIN_CYCLE only prevents hot-spinning when the feed is down."""
+    print(f"watch loop starting: spine corridor, 24/7, min cycle {MIN_CYCLE}s", flush=True)
+    while True:
+        t0 = time.time()
+        try:
+            if in_collection_window():
+                sweep(con, focus=spine_focus(dp.fetch_camera_list()))
+                review_sheet(con)
+                emit_pages(con)         # page out a full digest the moment 200 pile up
+            maybe_send_instant_alerts(con)
+            maybe_send_daily_digest(con)
+        except Exception as e:
+            print(f"cycle error: {e}", flush=True)
+        time.sleep(max(0, MIN_CYCLE - (time.time() - t0)))
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cameras", type=int, default=0, help="0 = all zone cameras")
+    ap.add_argument("--loop", action="store_true",
+                    help="run forever: ETag-driven spine watch (cron supervises via flock)")
     ap.add_argument("--sample-every", type=int, default=SAMPLE_EVERY)
     ap.add_argument("--review", action="store_true")
     ap.add_argument("--digest", action="store_true", help="WhatsApp the operator a daily review nudge")
@@ -335,7 +514,9 @@ def main():
     a = ap.parse_args()
     con = dp.db_connect(dp.DEFAULT_DB)
     ensure_schema(con)
-    if a.confirm:
+    if a.loop:
+        watch_loop(con)
+    elif a.confirm:
         confirm(con, [int(x) for x in a.confirm.split(",") if x], "waymo")
     elif a.reject:
         confirm(con, [int(x) for x in a.reject.split(",") if x], "reject")
@@ -355,8 +536,8 @@ def main():
         send_to_user(msg)
         print("digest:", msg)
     elif a.email_digest:
-        if send_digest(con, force=True) == 0:
-            print("email-digest: nothing new to send")
+        sent = emit_pages(con) + send_digest(con, reason="manual")   # full pages + remainder, now
+        print("email-digest: nothing new to send" if sent == 0 else f"email-digest: sent {sent}")
     elif a.collect:
         # wipe the candidate queue, then collect N distinct white cars from the KX area + email all
         con.execute("DELETE FROM candidates")
@@ -385,22 +566,24 @@ def main():
                    attachments=[sheet] if shown else None)
         print(f"collected {len(rows)} white cars -> emailed ({shown} on sheet)")
     else:
-        if not in_collection_window():
+        if in_collection_window():
+            foc = None
+            if a.wide or a.pr:                   # one sweep over the union of the active areas
+                cams = dp.fetch_camera_list()
+                foc = set()
+                if a.wide:
+                    foc |= nearest_short_ids(cams, a.wide, KX_CENTRE)
+                if a.pr:
+                    foc |= nearest_short_ids(cams, a.pr, PARK_ROYAL)
+            sweep(con, focus=foc)                 # foc=None -> core 8 KX cams (FOCUS default)
+            review_sheet(con)
+            emit_pages(con)             # send a full email each time PAGE_SIZE pile up, right away
+        else:
             now = datetime.now(ZoneInfo("Europe/London")).strftime("%H:%M %Z")
             print(f"outside collection window {COLLECT_HOURS[0]:02d}:00-{COLLECT_HOURS[1]:02d}:00 "
-                  f"London (now {now}) — skipping sweep")
-            return
-        foc = None
-        if a.wide or a.pr:                       # one sweep over the union of the active areas
-            cams = dp.fetch_camera_list()
-            foc = set()
-            if a.wide:
-                foc |= nearest_short_ids(cams, a.wide, KX_CENTRE)
-            if a.pr:
-                foc |= nearest_short_ids(cams, a.pr, PARK_ROYAL)
-        sweep(con, focus=foc)                     # foc=None -> core 8 KX cams (FOCUS default)
-        review_sheet(con)
-        maybe_send_daily_digest(con)   # one email per day at/after 20:00 London, not per-batch
+                  f"London (now {now}) — no sweep")
+        maybe_send_instant_alerts(con)  # fire NOW on any score >= ALERT_TH; retries if a send failed
+        maybe_send_daily_digest(con)    # end-of-day flush of the remainder (< PAGE_SIZE)
 
 
 if __name__ == "__main__":
