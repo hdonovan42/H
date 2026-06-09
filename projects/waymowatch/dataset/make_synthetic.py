@@ -70,9 +70,10 @@ def camera_of(frame_path):
     return os.path.basename(os.path.dirname(os.path.dirname(frame_path)))
 
 
-def synth_one(frame, boxes, domes, dome_pair=None):
+def synth_one(frame, boxes, domes, dome_pair=None, target_frac=0.34):
     """Paste a dome on the largest resolvable car; return (img, yolo_line, bbox) or None.
-    `dome_pair` pins the (dome, alpha) template (recall_eval's leave-one-out); default random."""
+    `dome_pair` pins the (dome, alpha) template (eval scripts); default random.
+    `target_frac` = paste width as a fraction of vehicle width (0.34 dome; ~0.55 Wayve bar)."""
     cand = [b for b in boxes if (b[3] - b[1]) >= MIN_H
             and (b[2] - b[0]) / max(1, b[3] - b[1]) <= MAX_AR]
     if not cand:
@@ -80,7 +81,7 @@ def synth_one(frame, boxes, domes, dome_pair=None):
     x1, y1, x2, y2 = max(cand, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
     vw, vh = x2 - x1, y2 - y1
     dome, dome_a = dome_pair if dome_pair is not None else random.choice(domes)
-    target_w = max(8, int(vw * 0.34))
+    target_w = max(8, int(vw * target_frac))
     scale = target_w / dome.shape[1]
     cx = x1 + vw * 0.5 + random.uniform(-0.05, 0.05) * vw
     cy = y1 + dome.shape[0] * scale * 0.45 + vh * 0.04  # sit just on the roofline
