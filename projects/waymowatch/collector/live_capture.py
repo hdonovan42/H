@@ -60,7 +60,10 @@ PROB_TH = 0.82        # high-probability bar — LOWERED 0.86->0.82 for recall (
 ALERT_TH = 0.90       # instant-alert bar: any candidate at/above this emails you immediately on the
                       # next sweep (~15 min), instead of waiting for the 23:00 daily digest. Scores are
                       # uncalibrated (no real positive yet) — tune alongside PROB_TH once one lands.
-BATCH_SIZE = 5        # (legacy count-trigger; auto path now uses a once-daily digest — see DIGEST_HOUR)
+BATCH_SIZE = 5        # (legacy count-trigger; superseded by PAGE_SIZE paging below)
+PAGE_SIZE = 200       # digest paging: the moment this many candidates pile up during the day, email
+                      # that full page right away and reset; the remainder (< PAGE_SIZE) goes at
+                      # DIGEST_HOUR. e.g. 456/day -> 200 + 200 + 56 across 3 emails. Overflow never lost.
 COLLECT_HOURS = (6, 23)  # auto-sweep only 06:00-23:00 Europe/London (BST/GMT handled automatically);
                          # no dead-of-night sweeps. Manual commands run any time.
 DIGEST_HOUR = COLLECT_HOURS[1]   # send ONE digest/day right after collection closes (23:00 London),
@@ -281,30 +284,64 @@ def confirm(con, ids, status):
     print(f"marked {len(ids)} candidates as {status}" + (f" -> copied to {REAL_DIR}" if status == "waymo" else ""))
 
 
-def send_digest(con, force=False):
-    """Email the operator the new high-probability candidates since the last digest.
-    Auto-fires once BATCH_SIZE have accumulated; force=True sends whatever is pending."""
+def pending_count(con):
+    """How many high-prob candidates are waiting to be sent (since the last digest/page)."""
     row = con.execute("SELECT value FROM kv WHERE key='last_digest_id'").fetchone()
     last_id = int(row[0]) if row else 0
-    rows = con.execute("SELECT id,score,crop_path FROM candidates WHERE id>? AND status='new' "
-                       "ORDER BY score DESC", (last_id,)).fetchall()
-    if not rows or (not force and len(rows) < BATCH_SIZE):
+    return con.execute("SELECT COUNT(*) FROM candidates WHERE id>? AND status='new'",
+                       (last_id,)).fetchone()[0]
+
+
+def send_digest(con, limit=None, reason="digest"):
+    """Email the pending high-prob candidates (id > last_digest_id, status='new'), OLDEST first.
+    If `limit` is given, send only the oldest `limit` of them (one page) and advance the high-water
+    mark past EXACTLY those — so any overflow rolls into the next send and is NEVER lost. The sheet
+    is rendered best-score-first for easier eyeballing. Returns the number sent (0 if none pending)."""
+    row = con.execute("SELECT value FROM kv WHERE key='last_digest_id'").fetchone()
+    last_id = int(row[0]) if row else 0
+    q = "SELECT id,score,crop_path FROM candidates WHERE id>? AND status='new' ORDER BY id ASC"
+    params = [last_id]
+    if limit:
+        q += " LIMIT ?"
+        params.append(int(limit))
+    rows = con.execute(q, params).fetchall()
+    if not rows:
         return 0
+    new_high = max(r[0] for r in rows)                 # advance ONLY past what we actually send
+    sheet_rows = sorted(rows, key=lambda r: -r[1])     # display most-dome-like first
     sheet = os.path.join(BASE, "data/candidates/digest_sheet.jpg")
-    shown = _build_sheet(rows, sheet, cap=200)   # show the full day's set (lowered PROB_TH => more/day)
-    maxid = con.execute("SELECT MAX(id) FROM candidates").fetchone()[0] or last_id
-    con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_id',?)", (str(maxid),))
+    shown = _build_sheet(sheet_rows, sheet, cap=len(sheet_rows))
+    con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_id',?)", (str(new_high),))
     con.commit()
-    more = f" (+{len(rows) - shown} more)" if len(rows) > shown else ""
+    remaining = con.execute("SELECT COUNT(*) FROM candidates WHERE id>? AND status='new'",
+                            (new_high,)).fetchone()[0]
+    note = f" — {remaining} more pending today" if remaining else ""
+    subj = f"WaymoWatch: {len(rows)} possible Waymo(s) — KX + Park Royal"
+    if reason == "page":
+        subj += f" (page; {remaining} more today)"
+    elif reason == "end-of-day":
+        subj += " (end of day)"
     html = (f"<p><b>WaymoWatch — King's Cross + Park Royal</b>: {len(rows)} <b>high-probability</b> "
-            f"Waymo candidate(s){more}.</p><p>Reply with the <b>#</b> of any that is a real Waymo "
+            f"Waymo candidate(s){note}.</p><p>Reply with the <b>#</b> of any that is a real Waymo "
             f"(white Jaguar I-PACE with a dark roof dome).</p>")
     sys.path.insert(0, HERE)
     from email_alert import send_email
-    send_email(f"WaymoWatch: {len(rows)} possible Waymo(s) — KX + Park Royal", html,
-               attachments=[sheet] if shown else None)
-    print(f"digest emailed: {len(rows)} high-prob candidate(s) (force={force})")
+    send_email(subj, html, attachments=[sheet] if shown else None)
+    print(f"digest emailed: {len(rows)} ({reason}); {remaining} still pending")
     return len(rows)
+
+
+def emit_pages(con):
+    """Send a full PAGE_SIZE email each time that many candidates have piled up during the day,
+    'right away' (on the sweep that crosses the threshold). Loops in case a backlog spans several
+    pages; each page advances the high-water mark past exactly its rows, so nothing is lost."""
+    total = 0
+    while pending_count(con) >= PAGE_SIZE:
+        n = send_digest(con, limit=PAGE_SIZE, reason="page")
+        if n == 0:
+            break
+        total += n
+    return total
 
 
 def maybe_send_instant_alerts(con):
@@ -339,9 +376,10 @@ def maybe_send_instant_alerts(con):
 
 
 def maybe_send_daily_digest(con):
-    """Once-daily digest: on the first cron tick at/after DIGEST_HOUR (London, i.e. after collection
-    closes), email the day's accumulated high-prob candidates. Records the date so it fires at most
-    once per day; if there's nothing to send yet it leaves the date unset so a later tick can send."""
+    """End-of-day flush: at/after DIGEST_HOUR (London, after collection closes) flush any remaining
+    full pages, then send the day's remainder (whatever is left, < PAGE_SIZE). Runs once per day.
+    During the day emit_pages() has already sent the full 200s; this just mops up the tail. The
+    collection window ends at 23:00 so no new candidates arrive after this — safe to mark the day done."""
     now = datetime.now(ZoneInfo("Europe/London"))
     if now.hour < DIGEST_HOUR:
         return
@@ -349,9 +387,10 @@ def maybe_send_daily_digest(con):
     row = con.execute("SELECT value FROM kv WHERE key='last_digest_date'").fetchone()
     if row and row[0] == today:
         return
-    if send_digest(con, force=True) > 0:
-        con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_date',?)", (today,))
-        con.commit()
+    emit_pages(con)                          # drain any full pages first
+    send_digest(con, reason="end-of-day")    # then the remainder (sends nothing if 0 pending)
+    con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_date',?)", (today,))
+    con.commit()
 
 
 def main():
@@ -390,8 +429,8 @@ def main():
         send_to_user(msg)
         print("digest:", msg)
     elif a.email_digest:
-        if send_digest(con, force=True) == 0:
-            print("email-digest: nothing new to send")
+        sent = emit_pages(con) + send_digest(con, reason="manual")   # full pages + remainder, now
+        print("email-digest: nothing new to send" if sent == 0 else f"email-digest: sent {sent}")
     elif a.collect:
         # wipe the candidate queue, then collect N distinct white cars from the KX area + email all
         con.execute("DELETE FROM candidates")
@@ -431,12 +470,13 @@ def main():
                     foc |= nearest_short_ids(cams, a.pr, PARK_ROYAL)
             sweep(con, focus=foc)                 # foc=None -> core 8 KX cams (FOCUS default)
             review_sheet(con)
+            emit_pages(con)             # send a full email each time PAGE_SIZE pile up, right away
         else:
             now = datetime.now(ZoneInfo("Europe/London")).strftime("%H:%M %Z")
             print(f"outside collection window {COLLECT_HOURS[0]:02d}:00-{COLLECT_HOURS[1]:02d}:00 "
                   f"London (now {now}) — no sweep")
         maybe_send_instant_alerts(con)  # fire NOW on any score >= ALERT_TH; retries if a send failed
-        maybe_send_daily_digest(con)    # always runs; self-gates to once/day after collection closes
+        maybe_send_daily_digest(con)    # end-of-day flush of the remainder (< PAGE_SIZE)
 
 
 if __name__ == "__main__":
