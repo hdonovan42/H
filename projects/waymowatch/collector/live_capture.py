@@ -54,12 +54,13 @@ DEDUP_TH = 0.93       # cosine >= this => same vehicle: one entry, crop updated 
 KX_CENTRE = (51.5310, -0.1255)   # King's Cross / British Library centre (for --collect area)
 PARK_ROYAL = (51.5235, -0.2830)  # Waymo's London depot (NW10) — cars start/end runs here; the
                                  # ring of cams covers the depot + its arterials (A40, A406, Hanger Ln)
-PROB_TH = 0.82        # high-probability bar — LOWERED 0.86->0.82 for recall (catch a degraded CCTV dome
-                      # that may score below 0.86; our white-car negatives top out at 0.88). The daily
-                      # digest bounds the extra noise. Instant-alert (ALERT_TH 0.90) stays above all negs.
-ALERT_TH = 0.90       # instant-alert bar: any candidate at/above this emails you immediately on the
-                      # next sweep (~15 min), instead of waiting for the 23:00 daily digest. Scores are
-                      # uncalibrated (no real positive yet) — tune alongside PROB_TH once one lands.
+PROB_TH = 0.83        # digest bar — RECALIBRATED 2026-06-09 for the tight-crop + re-seeded centroid
+                      # (NEW score scale, incomparable to pre-fix scores): white-car p95 = 0.831
+                      # (export_centroid.py, n=108), so ~5% of white cars pass -> bounded digest volume
+                      # at ~45% synthetic recall (camera-split, reseed_centroid_eval.py).
+ALERT_TH = 0.88       # instant-alert bar: above ALL 108 known white-car scores (max 0.868) on the new
+                      # scale; emails immediately on the next sweep. Synthetic split recall ~23-33% here.
+                      # Still uncalibrated on a REAL CCTV Waymo — re-tune once one lands.
 BATCH_SIZE = 5        # (legacy count-trigger; superseded by PAGE_SIZE paging below)
 PAGE_SIZE = 200       # digest paging: the moment this many candidates pile up during the day, email
                       # that full page right away and reset; the remainder (< PAGE_SIZE) goes at
@@ -90,9 +91,30 @@ def ensure_schema(con):
             pass
 
 
-def dome_centroid(embed):
-    domes = glob.glob(os.path.join(BASE, "data/sources/domes/*.jpg"))
-    c = np.mean([embed(jamcam(cv2.imread(f))) for f in domes], 0)
+# Roof-crop geometry (TIGHT, 2026-06-09): top ~22% of the vehicle bbox, 28% side inset.
+# The old 45%/16% crop buried the dome in car/scene context — adding a dome moved the
+# cosine score only +0.016 (dataset/recall_eval.py: end-to-end recall 2.5% @ 0.82, the
+# 4 silent days explained). At 22%/28% the dome dominates the embedded image:
+# pasted-vs-unpasted ROC-AUC 0.614 -> 0.839 (camera-split, dataset/reseed_centroid_eval.py).
+ROOF_TOP, ROOF_BOTTOM, ROOF_INSET = -0.06, 0.22, 0.28
+CENTROID_FILE = os.path.join(HERE, "dome_centroid_tight.json")
+
+
+def roof_crop(frm, bbox):
+    """The live roof crop — single source of truth, shared with the eval scripts."""
+    x1, y1, x2, y2 = bbox
+    mx = int((x2 - x1) * ROOF_INSET)
+    return frm[max(0, int(y1 + (y2 - y1) * ROOF_TOP)):int(y1 + (y2 - y1) * ROOF_BOTTOM),
+               max(0, x1 + mx):min(frm.shape[1], x2 - mx)]
+
+
+def load_centroid():
+    """Deployed surfacer centroid: mean MobileNetV3 embedding of SYNTHETIC Waymo roof crops
+    (real dome pasted on real white JamCam hosts, tight geometry) — built by
+    dataset/export_centroid.py, committed as dome_centroid_tight.json. The old centroid
+    (raw close-up dome photos) didn't transfer to in-frame roof crops. Re-seed from real
+    CCTV domes once confirmed positives land."""
+    c = np.array(json.load(open(CENTROID_FILE))["centroid"], dtype=np.float32)
     return c / (np.linalg.norm(c) + 1e-8)
 
 
@@ -145,7 +167,7 @@ def iou(a, b):
 def sweep(con, focus=None, target=None):
     from ultralytics import YOLO
     embed = build_embedder()
-    cen = dome_centroid(embed)
+    cen = load_centroid()
     det = YOLO("yolo11n.pt")
     cams = dp.fetch_camera_list()
     dp.upsert_cameras(con, cams)
@@ -194,9 +216,7 @@ def sweep(con, focus=None, target=None):
                       "ORDER BY id DESC LIMIT 400", (cam["id"],)).fetchall() if remb]
         for tid, (area, frm, bbox) in best.items():
             x1, y1, x2, y2 = bbox
-            mx = int((x2 - x1) * 0.16)
-            roof = frm[max(0, int(y1 - (y2 - y1) * 0.06)):int(y1 + (y2 - y1) * 0.45),
-                       max(0, x1 + mx):min(frm.shape[1], x2 - mx)]
+            roof = roof_crop(frm, bbox)
             if roof.size == 0 or min(roof.shape[:2]) < 6:
                 continue
             e = embed(jamcam(roof))

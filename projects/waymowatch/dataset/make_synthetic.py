@@ -70,15 +70,16 @@ def camera_of(frame_path):
     return os.path.basename(os.path.dirname(os.path.dirname(frame_path)))
 
 
-def synth_one(frame, boxes, domes):
-    """Paste a random dome on the largest resolvable car; return (img, yolo_line, bbox) or None."""
+def synth_one(frame, boxes, domes, dome_pair=None):
+    """Paste a dome on the largest resolvable car; return (img, yolo_line, bbox) or None.
+    `dome_pair` pins the (dome, alpha) template (recall_eval's leave-one-out); default random."""
     cand = [b for b in boxes if (b[3] - b[1]) >= MIN_H
             and (b[2] - b[0]) / max(1, b[3] - b[1]) <= MAX_AR]
     if not cand:
         return None
     x1, y1, x2, y2 = max(cand, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
     vw, vh = x2 - x1, y2 - y1
-    dome, dome_a = random.choice(domes)
+    dome, dome_a = dome_pair if dome_pair is not None else random.choice(domes)
     target_w = max(8, int(vw * 0.34))
     scale = target_w / dome.shape[1]
     cx = x1 + vw * 0.5 + random.uniform(-0.05, 0.05) * vw
