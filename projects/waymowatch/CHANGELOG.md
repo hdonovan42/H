@@ -32,6 +32,13 @@ Phase 2 of the roadmap executed same-hour:
   highest-value negative set possible: the closest impostors under the real-seeded scorer,
   human-cleared. They feed build_real_dataset (hard-neg backgrounds) + eval_gate (FP test)
   automatically and permanently suppress on the live sheets.
+- **Negative-set curation (post-confirm)**: all rejects re-scored onto the v0.6 scale (older
+  ones carried old-scale scores — RE-SCORE REJECTS AFTER EVERY RE-SEED or hardest-first
+  selection corrupts). Pool: 427 frames / 193 cams, 234 still >=0.86; target 600-1,000 by
+  training time via verdict-banked sheets; remove nothing (suppression + build-time cap).
+  Gap to fill: night = 20/427 — bank late-hour sheets toward ~25-30%. Stage2's 233 crops
+  DEMOTED to scorer-regression-only (mostly easy under the real scorer: 4/229 >= 0.86; no
+  frames/bboxes so the detector can't use them anyway). 4 hidden test crops stay hidden.
 - **Verdict-only training labels** (supersedes the short-lived similarity quarantine, which
   the user correctly rejected — it routed the most informative hard negatives AROUND
   training and added builder complexity): build_real_dataset now uses **explicit rejects
