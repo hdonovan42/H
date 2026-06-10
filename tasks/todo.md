@@ -93,7 +93,35 @@ human-gated rare candidates — NOT a live fleet tracker (days between sightings
 ### Phase 7 — Analytics
 - [ ] "At least N" + Little's-Law concurrency (lower-bound captioned); hull/alpha-shape; KDE; 24×7
 
+## Plan — v0.5 reliable zone-wide coverage (2026-06-10)
+
+Measured: 2.7s CPU/clip, 1 core pegged (85%), cycles 3-11 min vs 3-8 min refresh → ~80% spine
+catch; 659 digest candidates/day (calibration drifted); zone = ~432 cams = 4× load. Build:
+
+- [x] 1. OpenVINO INT8 yolo11n export (local, calib on 300 of our frames) + vid_stride 3→5
+- [x] 2. Verified on VPS BEFORE building: 2.49s → 0.91s/clip (2.74×), INT8 finds MORE boxes
+- [x] 3. live_capture v0.5: threaded poll (484 cams / 150s < min refresh) + tiered FIFO queues,
+       spine never dropped, zone drop-oldest at 400 backlog; single process, single DB writer
+- [x] 4. Telemetry: cycles table, timestamped lines, per-cam period EMA, digest coverage line
+- [x] 5. run_watch.sh: stale-heartbeat watchdog (>10 min → kill hung loop, cron restarts)
+- [x] 6. Recalibrated LIVE: PROB_TH 0.88, NEAR_TH 0.86, ALERT_TH 0.93 (>24h max FP 0.921);
+       685 sub-bar pending demoted to near
+- [x] 7. Component tests pass; recall_eval @0.88: 8%/pass synthetic (vs 54% @0.83) — frozen-
+       embedding ceiling, offset by 4× opportunities + near-band mining; real positives fix it
+- [x] 8. Deployed: rsync + openvino on VPS, old loop killed, cron restarting v0.5
+- [x] 9. CHANGELOG v0.5 + commit + memory update
+
 ## Review
+
+### 2026-06-10 — v0.5 reliable zone-wide coverage
+User: coverage is existential for the site; first digest also drowning in cars. Measured first
+(2.7s/clip torch, 1 core pegged, ~80% spine catch, 1,188 live FPs ≥0.81/24h, zone = 484 cams),
+then shipped: OpenVINO INT8 (calibrated on our frames, 2.74× with stride 5, VPS-verified
+BEFORE the rewrite), threaded 150s ETag poll of all 484 zone cams (< min refresh → polling
+misses nothing), tiered queues (spine never dropped, zone drop-oldest counted), cycles
+telemetry + digest coverage line + heartbeat watchdog for hangs, thresholds re-anchored to
+live data (0.88/0.86/0.93). Honest trade-off recorded: synthetic recall 8%/pass at the new
+bar — offset by 4× scoring opportunities; scorer quality is the REAL-positive flywheel's job.
 
 ### 2026-06-09 (evening) — v0.4 autonomous coverage
 User directive: no human-triggered capture — the site finds them. Shipped the continuous spine

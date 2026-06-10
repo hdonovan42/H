@@ -1,5 +1,43 @@
 # WaymoWatch — Changelog
 
+## v0.5 — Reliable zone-wide coverage: 484 cams, telemetered (2026-06-10)
+
+User: "the entire site relies on… reliable coverage" + first digest was drowning in cars.
+Measured before building: 2.7s CPU/clip (torch), one core pegged at 85%, cycles 3-11 min vs
+TfL's 3-8 min refresh (~80% spine catch), 1,188 live candidates ≥0.81 in 24h (max 0.921, all
+FPs), Waymo zone ≈ 484 available cams = 4x the spine load. Changes:
+
+- **OpenVINO INT8 yolo11n** (`dataset/export_openvino.py` -> committed
+  `collector/models/yolo11n_int8_openvino_model/`, 3.2MB), quantisation CALIBRATED on 300 of
+  our own JamCam frames; + **vid_stride 3->5** (5 sampled fps; a passing car = 10-20 samples).
+  VPS-measured: **2.49s -> 0.91s/clip (2.74x)** — and that was benched while the old loop ran.
+  INT8 finds MORE car boxes than torch (49 vs 28 on the parity clip), so no funnel recall risk.
+- **Zone-wide tiered watchlist** (`zone_watchlist()`): tier-1 = the 117-cam spine (processed
+  first, NEVER dropped); tier-2 = every other available cam in the Waymo operating-zone box
+  (lat 51.42-51.58, lon -0.36..-0.02) = **484 cams total** (was 117).
+- **Poll/process split** (`watch_loop()` v2): one threaded conditional-GET pass over all 484
+  cams every **POLL_EVERY=150s** (12 threads, pure I/O, no DB in workers). 150s < TfL's ~180s
+  minimum refresh -> a camera can never publish two clips between polls — **the polling layer
+  misses nothing**. Fresh clips queue per tier (FIFO); zone queue sheds OLDEST beyond
+  MAX_BACKLOG=400, every drop counted. Single process, single DB writer, ~44MB peak queue.
+- **Coverage telemetry**: per-cycle `cycles` row + timestamped log line (polled/fresh/processed/
+  backlog/dropped/secs); per-cam refresh-period EMA (`per:<id>` kv) -> the daily digest now
+  opens with an honest coverage line: processed / fetched / est. published.
+- **Watchdog**: loop writes a heartbeat every iteration; `run_watch.sh` kills a HUNG loop
+  (lock held, heartbeat >10 min stale) — flock alone only catches a dead one.
+- **Thresholds re-anchored to LIVE data** (synthetic calibration was off: 0.83 bar -> 659
+  digest/day): PROB_TH 0.83->**0.88** (~116/day spine, est ~300/day zone, score-sorted),
+  NEAR_TH 0.81->**0.86**, ALERT_TH stays **0.93** (> live 24h max FP 0.921, n=1,188).
+  685 pending sub-0.88 candidates demoted to 'near' (minable, 7-day prune).
+- **Honest recall cost** (recall_eval at the new bar): planted-synthetic recall **8% per pass**
+  @0.88 (was 54% @0.83) — the live FP tail overlaps the synthetic positive distribution; this
+  is the frozen-embedding ceiling, not a regression. Offsets: ~4x more scoring opportunities
+  zone-wide; the 0.86-0.88 near band still archives sub-bar passes for post-confirm mining;
+  scorer upgrade comes from REAL positives (locked strategy), coverage was the binding ask.
+- **What to watch**: dropped count in cycle lines (sustained drops -> shrink zone box or tune
+  conf up); digest volume at 0.88 zone-wide (re-anchor if >>300/day); mem (two extra OpenVINO
+  buffers); per-cam period EMAs converging (~1h) before the coverage % is trustworthy.
+
 ## v0.4 — Autonomous coverage: continuous spine loop (2026-06-09, evening)
 
 User directive: the site finds Waymos itself — no human-triggered capture. Coverage was the
