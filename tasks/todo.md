@@ -116,6 +116,14 @@ catch; 659 digest candidates/day (calibration drifted); zone = ~432 cams = 4× l
 
 ## Review
 
+### 2026-06-10 (night) — v0.8.1 hourly candidate backup → github.com/hdonovan42/waymo
+User-requested: all Phase-3 scored candidates preserved off-VPS (they were one prune-cycle
+from deletion — 7-day retention). `collector/backup_github.sh` on VPS cron :37 — append-only
+rsync of all candidate jpgs + candidates.csv/cameras.csv snapshots into a clone of the
+private `waymo` repo, repo-scoped write deploy key (`github-waymo` alias). Backfill pushed:
+4,088 rows / 8,212 jpgs / ~217MB; idempotency + incremental commits verified. Watch repo
+growth (~200MB/day) vs GitHub's soft ~5GB guidance; mitigation = drop crops or rotate repo.
+
 ### 2026-06-10 (evening) — v0.6 FIRST CONFIRMED REAL WAYMO 🎉
 #2605, Limehouse Tunnel/Butcher Row, 15:26 London (white I-PACE, dark dome, user-confirmed).
 Surfaced ONLY because of ranked sending (scored 0.868, under the old 0.88 bar) and zone-wide
