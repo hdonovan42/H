@@ -16,6 +16,21 @@ concurrently. Both surfaced by the pure-real retrospective (top and bottom of it
 - Note: #722's id predates its captured_at — best-view dedup UPDATES a row in place
   (captured_at moves to the better view). Id = insert order of the VEHICLE entry, not the
   final capture time.
+- **Leave-one-out calibration audit** (user asked what the 7 sightings actually bought):
+  each real scored against a centroid of the OTHER six, ranked vs 3,568 known non-Waymos —
+  **all 7 land on page one of the daily ranked sheets as unseen vehicles** (FPs above:
+  0, 0, 7, 11, 45, 131, 169); LOO within ~0.01 of in-centroid scores = the centroid
+  GENERALISES across views, it doesn't memorise. Per-view variance (0.841-0.916) remains
+  the structural limit: the frozen ImageNet embedding mostly encodes photometrics (dome
+  moves the score only ~+0.07) — scorer is a SURFACER; the trained YOLO26 is the detector.
+- **Nearest-view scoring REJECTED** (same harness): max-cosine over the 7 views loses to
+  the mean centroid on ALL 7 reals (#722: 0 FPs above -> 156) — max gives every impostor
+  seven chances to match one view; the mean cancels view-specific noise and keeps the
+  shared (dome) component. Zero-cost upgrade space is now exhausted by measurement:
+  probe (overfits), hardware centroid (no gain), nearest-view (worse). DAY_CAP 1600 noted
+  as a designed knob (8 pages × 200, sized above expected steady-state as a flood ceiling),
+  not a derived constant — tune to review appetite; ranking decides WHAT, the cap only
+  decides HOW MANY.
 
 ## v0.7 — PURE-REAL SCORER: 5 confirms, synthetic blend retired (2026-06-10, night)
 
