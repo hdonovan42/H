@@ -73,14 +73,17 @@ human-gated rare candidates — NOT a live fleet tracker (days between sightings
 - [ ] Generate matched negatives (same cars, no paste); assemble dataset.yaml (waymo, wayve)
 - [ ] Negative pool weighted to 5 hard-neg families (wayve bar, taxi sign, roof box, lightbar, moped)
 
-### Phase 3 — Autolabel + verify
-- [ ] YOLOE-11L visual-prompt proposer (localiser) + Claude vision dome/bar/neither (classifier)
-- [ ] Self-hosted CVAT; import proposals as pre-annotations; human verify → labels in waymo.db
-
-### Phase 4 — Train WaymoNet v0  ⏳ RECIPE READY (`train/`), awaiting rented-GPU run
-- [ ] YOLO11s + P2 head, 2-class; rented 4090, imgsz=1280, domain augmentation
-- [ ] Eval by held-out CLIP: P/R + AP@0.3/0.5, per-distance bins, waymo↔wayve confusion
-- [ ] Ship-gate: precision≥0.9 + near-zero Wayve-as-Waymo; export ONNX
+### Phases 3+4 — REAL-DATA ROADMAP (user-locked 2026-06-10; synthetic training retired)
+1. **Find** — live 484-cam zone loop + ranked digests surface the first real Waymo(s) [RUNNING]
+2. **Recalibrate** — `dataset/reseed_from_real.py` re-anchors scorer + thresholds on real
+   crops; mine near archive ±45 min for extra passes → precision jumps, confirms accelerate
+3. **Collect** — recalibrated loop runs until ~100+ confirms across ≥5 cameras (rejects
+   accrue as vetted hard negatives for free); below that a detector memorises
+4. **Train** — `dataset/build_real_dataset.py` (DB→YOLO dataset: confirms=labels,
+   rejects=hard-neg backgrounds, by-camera split) → `train/preflight.py` (CPU, free) →
+   `train/train.py` (YOLO26s-P2 @704, cache, auto-batch, mosaic 0.4) → `train/eval_gate.py`
+   (IoU-matched recall vs vetted-neg FP on held-out cams; ship bar precision≥0.9) → ONNX
+   [TOOLING BUILT + CPU-TESTED 2026-06-10; awaiting data]
 
 ### Phase 5 — Inference runtime
 - [ ] Always-on GPU; ONNX→TensorRT FP16@384; two-stage selective SAHI; ByteTrack collapse
@@ -112,6 +115,17 @@ catch; 659 digest candidates/day (calibration drifted); zone = ~432 cams = 4× l
 - [x] 9. CHANGELOG v0.5 + commit + memory update
 
 ## Review
+
+### 2026-06-10 (evening) — real-data training pipeline (Phase-4 tooling)
+User locked the roadmap: find → recalibrate → collect clean → train YOLO for prod; all
+synthetic training retired. Audit of old recipe found: yolo11s-p2.yaml doesn't exist (would
+crash the GPU box), imgsz 1280 = 3× compute on interpolation, mosaic 1.0 pushes domes below
+the resolvability floor, gate counted stray boxes as recall, no real-data path at all.
+Shipped: build_real_dataset.py (waymo.db → dataset; confirms=labels, rejects=hard negs,
+'near' never used as negatives — unreviewed), train.py on YOLO26s-P2 @704 (latest gen,
+verified builds + COCO transfer), eval_gate.py (IoU-matched, real negatives incl. rejected
+Wayves), preflight.py (CPU, catches all crashes free). Full chain tested with fabricated
+confirms: build → split → preflight PASS. eval_wayve_gate.py (synthetic) deleted.
 
 ### 2026-06-10 (later) — v0.5.1 ranked budgeted sending
 User: recall to their eyes is everything ("make sure they are sent to me"). Fixed thresholds
