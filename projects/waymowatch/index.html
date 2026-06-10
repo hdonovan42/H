@@ -489,6 +489,42 @@ map.on("load", () => {
   const live = SIGHTINGS.features.filter(f => f.properties.when === "hour").length;
   document.getElementById("key-foot").textContent =
     `${n} sightings · past 7 days · ${live} in the last hour · demo data`;
+
+  /* --- idle prefetch: pre-warm the 3D view's tiles ---
+     The 3D toggle eases to zoom 14.4, which needs z14 vector tiles
+     the opening z13.2 view never loaded — fetching them mid-animation
+     is the visible hitch. Once the map first goes idle, trickle-fetch
+     them through the service worker (cache-first, claims the page on
+     first visit) so the rise to 3D never waits on the network. */
+  map.once("idle", () => {
+    const src = vectorSrc && map.getSource(vectorSrc);
+    const tpl = src && src.tiles && src.tiles[0];
+    if (!tpl) return;
+    const z = 14, nTiles = 2 ** z;
+    const tileXY = (lng, lat) => {
+      const r = (lat * Math.PI) / 180;
+      return [
+        Math.floor(((lng + 180) / 360) * nTiles),
+        Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * nTiles)
+      ];
+    };
+    const b = map.getBounds();
+    /* pitching to 57° pulls in ground past the flat viewport edges */
+    const padX = (b.getEast() - b.getWest()) * 0.4;
+    const padY = (b.getNorth() - b.getSouth()) * 0.4;
+    const [x0, y0] = tileXY(b.getWest() - padX, b.getNorth() + padY);
+    const [x1, y1] = tileXY(b.getEast() + padX, b.getSouth() - padY);
+    const urls = [];
+    for (let x = x0; x <= x1; x++)
+      for (let y = y0; y <= y1; y++)
+        urls.push(tpl.replace("{z}", z).replace("{x}", x).replace("{y}", y));
+    if (urls.length > 120) return; /* user zoomed way out before idle; skip */
+    let i = 0;
+    const next = () => {
+      if (i < urls.length) fetch(urls[i++], { priority: "low" }).catch(() => {}).finally(next);
+    };
+    for (let lane = 0; lane < 4; lane++) next();
+  });
 });
 
 /* ============================================================

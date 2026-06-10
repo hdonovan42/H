@@ -18,6 +18,12 @@ Replaced the base-map prototype `index.html` with the new tube-map-styled dashbo
 - Tweaks vs the supplied design (user-requested): map defaults to the **British Library**
   as centre (51.5300, -0.1276, z13.2) instead of a fitted central-London bounds; 2D/3D
   buttons flattened — two-colour top-stripe accent and box-shadow removed, single colour.
+- **Idle prefetch (first-press 3D lag fix)**: the 3D toggle eases to z14.4, needing z14
+  tiles the opening z13.2 view never loaded — fetching them mid-animation was the visible
+  hitch (the SW only helps on the SECOND request). On first map idle, the z14 tiles for
+  the pitch-padded viewport (±40%) are trickle-fetched (4 lanes, low priority, capped at
+  120) through the service worker, so the rise to 3D never waits on the network — even on
+  the very first visit (sw.js claims the page immediately via skipWaiting+clients.claim).
 
 ## v0.5.1 — Recall to human eyes: score-ranked budgeted sending (2026-06-10, later)
 

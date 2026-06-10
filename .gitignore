@@ -1,3 +1,4 @@
 axiom-bootstrap.tar.gz
 *:Zone.Identifier
 .env
+/temp/
