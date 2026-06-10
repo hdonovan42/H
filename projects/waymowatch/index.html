@@ -68,7 +68,7 @@
     position: absolute;
     left: 14px; bottom: 26px;
     z-index: 5;
-    width: 252px;
+    width: 198px;
     background: #FFFFFF;
     border: 1px solid var(--hairline);
     border-top: 4px solid var(--blue);
@@ -365,8 +365,8 @@ map.on("load", () => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const rows = (await res.json()).sightings;
       map.getSource("sightings").setData(toFeatureCollection(rows));
-      foot.textContent = rows.length
-        ? `${rows.length} confirmed sighting${rows.length === 1 ? "" : "s"} · ` +
+      foot.innerHTML = rows.length
+        ? `${rows.length} confirmed sighting${rows.length === 1 ? "" : "s"}<br>` +
           `latest ${fmtDate(rows[0].captured_at)} ${fmtTime(rows[0].captured_at)}`
         : "No confirmed sightings yet";
     } catch (err) {
