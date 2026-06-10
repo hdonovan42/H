@@ -118,9 +118,9 @@ catch; 659 digest candidates/day (calibration drifted); zone = ~432 cams = 4× l
 
 ### 2026-06-10 (night) — v0.8.1 hourly candidate backup → github.com/hdonovan42/waymo
 User-requested: all Phase-3 scored candidates preserved off-VPS (they were one prune-cycle
-from deletion — 7-day retention). `collector/backup_github.sh` on VPS cron :37 — append-only
-rsync of all candidate jpgs + candidates.csv/cameras.csv snapshots into a clone of the
-private `waymo` repo, repo-scoped write deploy key (`github-waymo` alias). Backfill pushed:
+from deletion — 7-day retention). `backup_github.sh` (lives in the waymo repo itself, per
+user; VPS cron :37) — append-only rsync of all candidate jpgs + candidates.csv/cameras.csv
+snapshots into the repo clone, repo-scoped write deploy key (`github-waymo` alias). Pushed:
 4,088 rows / 8,212 jpgs / ~217MB; idempotency + incremental commits verified. Watch repo
 growth (~200MB/day) vs GitHub's soft ~5GB guidance; mitigation = drop crops or rotate repo.
 
