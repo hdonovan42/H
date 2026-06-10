@@ -1,5 +1,28 @@
 # WaymoWatch — Changelog
 
+## v0.8.1 — Hourly candidate backup to GitHub (2026-06-10, night)
+
+User created a private repo (`hdonovan42/waymo`) for off-VPS preservation of the Phase-3
+collection: candidate data was perishable (7-day retention prune + best-view dedup deletes
+superseded jpgs), so everything above the archive floor survived only a week, on one disk.
+
+- **`backup_github.sh` — lives IN the waymo repo itself** (user: backup tooling goes to
+  `waymo`, not stored in `H`; deployed at `/home/hq/waymo-backup/backup_github.sh`).
+  Hourly cron (:37) on the VPS: rsyncs every candidate jpg (crop + frame; excludes
+  transient sheets/log/heartbeat) into the repo clone, dumps full `candidates.csv`
+  (no emb column — embeddings are recomputable from crops with the committed MobileNetV3
+  code) + `cameras.csv`, commits and pushes. **APPEND-ONLY**: `--ignore-existing`, no
+  `--delete` — the repo keeps what the VPS prunes. flock-guarded; no-op when unchanged.
+- Auth: new VPS deploy key `id_ed25519_waymo` (write access, repo-scoped) via the existing
+  per-repo ssh-alias pattern (`Host github-waymo`).
+- Initial backfill pushed: **4,088 rows / 8,212 jpgs (~217MB)** incl. all 12 confirms,
+  1,008 vetted rejects, and the real_positives gold set. Idempotency verified (second run
+  = no commit).
+- **What to watch**: repo growth (~200MB/day at the v0.8 capture rate → GitHub's soft
+  ~5GB guidance in roughly a month). If Phase 3 runs long: drop vehicle crops from the
+  backup (frames+bbox reconstruct them) or rotate to a `waymo-2` repo. `data/backup.log`
+  shows the real rate.
+
 ## v0.8 — Coverage push: zone extended EAST + archive floor lowered (2026-06-10, night)
 
 User: "what can we do to maximise coverage — we don't want to miss waymos." Measured first,
