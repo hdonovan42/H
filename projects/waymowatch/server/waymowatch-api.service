@@ -1,0 +1,13 @@
+[Unit]
+Description=WaymoWatch sightings API (port 3104)
+After=network.target
+
+[Service]
+User=hq
+WorkingDirectory=/home/hq/waymowatch
+ExecStart=/home/hq/waymowatch/.venv/bin/python server/sightings_api.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

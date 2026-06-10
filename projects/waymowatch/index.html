@@ -84,30 +84,6 @@
     color: var(--blue);
     font-weight: 400;
   }
-  .key-row {
-    appearance: none;
-    border: 0;
-    background: transparent;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 5px 2px;
-    font: 13px var(--body);
-    color: var(--ink);
-    cursor: pointer;
-    border-radius: 4px;
-  }
-  .key-row:hover { background: #F4F3EE; }
-  .key-row:focus-visible { outline: 2px solid var(--red); }
-  .key-row.off { opacity: 0.35; }
-  .key-bar { width: 30px; height: 6px; border-radius: 3px; flex: none; }
-  .key-bar.dashed {
-    background: repeating-linear-gradient(90deg, var(--district) 0 7px, transparent 7px 12px);
-  }
-  .key-label { flex: 1; text-align: left; }
-  .key-count { font-size: 12px; color: var(--grey); font-variant-numeric: tabular-nums; }
-  .key-divider { border: 0; border-top: 1px solid var(--hairline); margin: 8px 0; }
   .key-ringrow { display: flex; align-items: center; gap: 10px; padding: 4px 2px; font-size: 13px; }
   .ring {
     width: 13px; height: 13px;
@@ -145,6 +121,15 @@
     margin: 0 14px 3px 0;
   }
   .pop-line { font-size: 12.5px; color: var(--ink); margin: 1px 0; }
+  .pop-img {
+    display: block;
+    width: 264px;
+    max-width: 100%;
+    border-radius: 4px;
+    border: 1px solid var(--hairline);
+    margin: 4px 0 7px;
+    background: #F4F3EE;
+  }
   .pop-chip {
     display: inline-block;
     margin-top: 6px;
@@ -171,22 +156,6 @@
 
 <aside class="key" aria-label="Map key">
   <h2>KEY</h2>
-  <button class="key-row" data-line="spine">
-    <span class="key-bar" style="background:var(--red)"></span>
-    <span class="key-label">City spine</span>
-    <span class="key-count">41/wk</span>
-  </button>
-  <button class="key-row" data-line="westway">
-    <span class="key-bar" style="background:var(--picc)"></span>
-    <span class="key-label">Westway corridor</span>
-    <span class="key-count">18/wk</span>
-  </button>
-  <button class="key-row" data-line="south">
-    <span class="key-bar dashed"></span>
-    <span class="key-label">South circuit</span>
-    <span class="key-count">6/wk</span>
-  </button>
-  <hr class="key-divider" />
   <div class="key-ringrow"><span class="ring ring-hour"></span> Seen in the past hour</div>
   <div class="key-ringrow"><span class="ring ring-today"></span> Seen today</div>
   <div class="key-ringrow"><span class="ring ring-week"></span> Seen this week</div>
@@ -205,77 +174,43 @@ if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
 }
 
 /* ============================================================
-   Demo data. Replace CORRIDORS and SIGHTINGS with fetches to
-   your tracking API; everything downstream is data-driven.
+   Live data: confirmed Waymo sightings from waymo.db on the
+   VPS, via the read-only sightings API. The map polls every
+   60s, so new confirms appear without a reload.
    ============================================================ */
-const CORRIDOR_META = {
-  spine:   { name: "City spine",       color: "#E32017", count: 41, dashed: false },
-  westway: { name: "Westway corridor", color: "#003688", count: 18, dashed: false },
-  south:   { name: "South circuit",    color: "#00782A", count: 6,  dashed: true  }
-};
+const API_BASE = "https://axiom.hjd.ai/waymowatch";
+const POLL_MS = 60000;
+const LONDON = "Europe/London";
 
-const CORRIDORS = {
+const fmtDate = iso => new Date(iso).toLocaleDateString("en-GB",
+  { timeZone: LONDON, day: "numeric", month: "short", year: "numeric" });
+const fmtTime = iso => new Date(iso).toLocaleTimeString("en-GB",
+  { timeZone: LONDON, hour: "2-digit", minute: "2-digit" });
+
+/* hour / today / week drive the ring colours; anything older
+   than today renders grey alongside this week's */
+function recency(iso) {
+  const t = Date.parse(iso);
+  if (Date.now() - t < 3600e3) return "hour";
+  const day = ms => new Date(ms).toLocaleDateString("en-GB", { timeZone: LONDON });
+  return day(t) === day(Date.now()) ? "today" : "week";
+}
+
+const toFeatureCollection = rows => ({
   type: "FeatureCollection",
-  features: [
-    { type: "Feature", properties: { line: "spine", dashed: false },
-      geometry: { type: "LineString", coordinates: [
-        [-0.1589, 51.5135], [-0.1500, 51.5145], [-0.1419, 51.5152],
-        [-0.1300, 51.5163], [-0.1201, 51.5172], [-0.1090, 51.5174],
-        [-0.0976, 51.5147], [-0.0886, 51.5133]
-      ] } },
-    { type: "Feature", properties: { line: "westway", dashed: false },
-      geometry: { type: "LineString", coordinates: [
-        [-0.2240, 51.5046], [-0.2100, 51.5070], [-0.1963, 51.5092],
-        [-0.1879, 51.5122], [-0.1759, 51.5154], [-0.1668, 51.5202],
-        [-0.1571, 51.5226], [-0.1466, 51.5250], [-0.1338, 51.5282],
-        [-0.1240, 51.5308]
-      ] } },
-    { type: "Feature", properties: { line: "south", dashed: true },
-      geometry: { type: "LineString", coordinates: [
-        [-0.1230, 51.4861], [-0.1215, 51.4935], [-0.1180, 51.4990],
-        [-0.1132, 51.5036], [-0.1030, 51.5045], [-0.0900, 51.5048],
-        [-0.0865, 51.5060], [-0.0859, 51.5101], [-0.0886, 51.5133]
-      ] } }
-  ]
-};
-
-const S = (id, lng, lat, when, area, time) => ({
-  type: "Feature",
-  properties: { id, when, area, time },
-  geometry: { type: "Point", coordinates: [lng, lat] }
+  features: rows.map(s => ({
+    type: "Feature",
+    properties: {
+      id: s.id,
+      when: recency(s.captured_at),
+      name: s.common_name,
+      view: s.view,
+      captured_at: s.captured_at,
+      score: s.score
+    },
+    geometry: { type: "Point", coordinates: [s.lon, s.lat] }
+  }))
 });
-
-const SIGHTINGS = {
-  type: "FeatureCollection",
-  features: [
-    S("WM-204", -0.1419, 51.5150, "hour", "Oxford Circus", "14:32"),
-    S("WM-117", -0.1189, 51.5175, "hour", "Holborn", "14:21"),
-    S("WM-088", -0.1278, 51.5079, "hour", "Trafalgar Square", "14:08"),
-    S("WM-151", -0.1545, 51.5139, "hour", "Marble Arch", "13:58"),
-    S("WM-093", -0.1352, 51.5159, "today", "Soho", "11:42"),
-    S("WM-042", -0.1284, 51.5166, "today", "Bloomsbury", "10:15"),
-    S("WM-204", -0.1052, 51.5160, "today", "City Thameslink", "09:37"),
-    S("WM-076", -0.0933, 51.5140, "today", "Cheapside", "12:05"),
-    S("WM-117", -0.1963, 51.5095, "today", "Notting Hill Gate", "08:54"),
-    S("WM-130", -0.1759, 51.5157, "today", "Paddington", "12:48"),
-    S("WM-093", -0.1466, 51.5252, "today", "Regent's Park", "07:33"),
-    S("WM-042", -0.1132, 51.5039, "today", "Waterloo", "13:11"),
-    S("WM-165", -0.0775, 51.5235, "today", "Shoreditch", "09:02"),
-    S("WM-088", -0.0886, 51.5130, "week", "Bank", "Mon"),
-    S("WM-130", -0.2200, 51.5050, "week", "Shepherd's Bush", "Sun"),
-    S("WM-076", -0.2080, 51.5068, "week", "Holland Park", "Tue"),
-    S("WM-151", -0.1879, 51.5119, "week", "Bayswater", "Mon"),
-    S("WM-165", -0.1571, 51.5229, "week", "Baker Street", "Wed"),
-    S("WM-042", -0.1338, 51.5279, "week", "Euston", "Tue"),
-    S("WM-093", -0.1240, 51.5305, "week", "King's Cross", "Sat"),
-    S("WM-204", -0.1230, 51.4865, "week", "Vauxhall", "Sun"),
-    S("WM-117", -0.1180, 51.4992, "week", "Lambeth", "Mon"),
-    S("WM-088", -0.0900, 51.5050, "week", "Borough", "Tue"),
-    S("WM-130", -0.0865, 51.5057, "week", "London Bridge", "Wed"),
-    S("WM-076", -0.1607, 51.5018, "week", "Knightsbridge", "Sat"),
-    S("WM-151", -0.0976, 51.5144, "week", "St Paul's", "Thu")
-  ]
-};
 
 /* ============================================================
    Map setup
@@ -366,36 +301,11 @@ map.on("load", () => {
     }, firstSymbol);
   }
 
-  /* --- corridors, tube-line treatment --- */
-  map.addSource("corridors", { type: "geojson", data: CORRIDORS });
-  const lineColor = ["match", ["get", "line"],
-    "spine", CORRIDOR_META.spine.color,
-    "westway", CORRIDOR_META.westway.color,
-    "south", CORRIDOR_META.south.color,
-    "#6E6E73"];
-
-  map.addLayer({
-    id: "corridors-casing", type: "line", source: "corridors",
-    layout: { "line-cap": "round", "line-join": "round" },
-    paint: { "line-color": "#FFFFFF", "line-width": 9 }
-  }, firstSymbol);
-
-  map.addLayer({
-    id: "corridors-solid", type: "line", source: "corridors",
-    filter: ["!=", ["get", "dashed"], true],
-    layout: { "line-cap": "round", "line-join": "round" },
-    paint: { "line-color": lineColor, "line-width": 5 }
-  }, firstSymbol);
-
-  map.addLayer({
-    id: "corridors-dashed", type: "line", source: "corridors",
-    filter: ["==", ["get", "dashed"], true],
-    layout: { "line-join": "round" },
-    paint: { "line-color": lineColor, "line-width": 5, "line-dasharray": [1.6, 1.4] }
-  }, firstSymbol);
-
   /* --- sightings as station-style markers --- */
-  map.addSource("sightings", { type: "geojson", data: SIGHTINGS });
+  map.addSource("sightings", {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] }
+  });
 
   map.addLayer({
     id: "sightings-pulse", type: "circle", source: "sightings",
@@ -435,60 +345,42 @@ map.on("load", () => {
 
   map.on("click", "sightings", (e) => {
     const p = e.features[0].properties;
-    new maplibregl.Popup({ offset: 12 })
+    new maplibregl.Popup({ offset: 12, maxWidth: "300px" })
       .setLngLat(e.features[0].geometry.coordinates)
       .setHTML(
-        `<p class="pop-title">${p.id}</p>` +
-        `<p class="pop-line">${p.area}</p>` +
-        `<p class="pop-line">Last seen: ${p.time}</p>` +
+        `<p class="pop-title">Waymo · #${p.id}</p>` +
+        `<img class="pop-img" src="${API_BASE}/img/${p.id}_frame.jpg" ` +
+        `alt="JamCam frame of sighting #${p.id}" loading="lazy" />` +
+        `<p class="pop-line"><strong>${p.name}</strong>${p.view ? ` (facing ${p.view})` : ""}</p>` +
+        `<p class="pop-line">${fmtDate(p.captured_at)} · ${fmtTime(p.captured_at)}</p>` +
+        `<p class="pop-line">Detector score ${Number(p.score).toFixed(2)}</p>` +
         `<span class="pop-chip" style="background:${WHEN_COLOR[p.when]}">${WHEN_LABEL[p.when]}</span>`
       )
       .addTo(map);
   });
 
-  const corridorClick = (e) => {
-    const meta = CORRIDOR_META[e.features[0].properties.line];
-    if (!meta) return;
-    new maplibregl.Popup({ offset: 8 })
-      .setLngLat(e.lngLat)
-      .setHTML(
-        `<p class="pop-title">${meta.name}</p>` +
-        `<p class="pop-line">${meta.count} sightings per week</p>` +
-        `<span class="pop-chip" style="background:${meta.color}">` +
-        `${meta.dashed ? "Unconfirmed corridor" : "Confirmed corridor"}</span>`
-      )
-      .addTo(map);
-  };
-  map.on("click", "corridors-solid", corridorClick);
-  map.on("click", "corridors-dashed", corridorClick);
+  map.on("mouseenter", "sightings", () => { map.getCanvas().style.cursor = "pointer"; });
+  map.on("mouseleave", "sightings", () => { map.getCanvas().style.cursor = ""; });
 
-  for (const lyr of ["sightings", "corridors-solid", "corridors-dashed"]) {
-    map.on("mouseenter", lyr, () => { map.getCanvas().style.cursor = "pointer"; });
-    map.on("mouseleave", lyr, () => { map.getCanvas().style.cursor = ""; });
+  /* --- live feed: fetch confirmed sightings, poll for new ones --- */
+  const foot = document.getElementById("key-foot");
+  async function refreshSightings() {
+    try {
+      const res = await fetch(`${API_BASE}/api/sightings`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const rows = (await res.json()).sightings;
+      map.getSource("sightings").setData(toFeatureCollection(rows));
+      foot.textContent = rows.length
+        ? `${rows.length} confirmed sighting${rows.length === 1 ? "" : "s"} · ` +
+          `latest ${fmtDate(rows[0].captured_at)} ${fmtTime(rows[0].captured_at)}`
+        : "No confirmed sightings yet";
+    } catch (err) {
+      if (!foot.textContent || foot.textContent === "Loading…")
+        foot.textContent = "Sightings feed unreachable";
+    }
   }
-
-  /* --- key wiring: toggle corridors --- */
-  const hidden = new Set();
-  const applyFilters = () => {
-    const h = ["!", ["in", ["get", "line"], ["literal", [...hidden]]]];
-    map.setFilter("corridors-casing", h);
-    map.setFilter("corridors-solid", ["all", ["!=", ["get", "dashed"], true], h]);
-    map.setFilter("corridors-dashed", ["all", ["==", ["get", "dashed"], true], h]);
-  };
-  document.querySelectorAll(".key-row").forEach((row) => {
-    row.addEventListener("click", () => {
-      const key = row.dataset.line;
-      hidden.has(key) ? hidden.delete(key) : hidden.add(key);
-      row.classList.toggle("off", hidden.has(key));
-      applyFilters();
-    });
-  });
-
-  /* --- footer stats --- */
-  const n = SIGHTINGS.features.length;
-  const live = SIGHTINGS.features.filter(f => f.properties.when === "hour").length;
-  document.getElementById("key-foot").textContent =
-    `${n} sightings · past 7 days · ${live} in the last hour · demo data`;
+  refreshSightings();
+  setInterval(refreshSightings, POLL_MS);
 
   /* --- idle prefetch: pre-warm the 3D view's tiles ---
      The 3D toggle eases to zoom 14.4, which needs z14 vector tiles
