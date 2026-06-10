@@ -1,5 +1,27 @@
 # WaymoWatch — Changelog
 
+## v0.6.1 — Dashboard wired to the real sightings DB (2026-06-10, evening)
+
+The map now shows the real confirm (#2605) instead of demo data — Phase 6 (sighting feed)
+has begun, pre-model interface behaviour: one dot per confirmed sighting, auto-updating.
+
+- **`server/sightings_api.py`** — read-only stdlib HTTP API on 127.0.0.1:3104 (systemd
+  `waymowatch-api.service`, user hq): `GET /api/sightings` (status='waymo' rows joined
+  with camera name/view/lat/lon, newest first) + `GET /img/<id>[_frame].jpg`. Images are
+  served ONLY for confirmed rows — unreviewed candidates stay private. CORS `*` (the data
+  is what the public map shows anyway), sightings no-store, images cacheable 24h.
+- **Exposed at `https://axiom.hjd.ai/waymowatch/`** via a new auth-free location block on
+  the axiom vhost (no Cloudflare credentials on the VPS to mint a waymowatch.hjd.ai
+  record + cert; swap to its own subdomain later if DNS is added).
+- **Dashboard demo data deleted** — the fictional corridors/weekly counts and 26 fake
+  sightings are gone. The map fetches the live feed on load and **polls every 60s**, so
+  new confirms appear without a reload. One dot today: Limehouse.
+- **Popup per sighting**: annotated JamCam frame, camera name (+ facing direction),
+  date + time (Europe/London), detector score, recency chip. Recency (hour/today/week
+  rings) computed client-side from `captured_at`.
+- Footer shows confirmed count + latest sighting time; reads "Sightings feed
+  unreachable" if the API is down.
+
 ## v0.6 — FIRST CONFIRMED REAL WAYMO + real-blended scorer (2026-06-10, evening)
 
 **#2605, Limehouse Tunnel/Butcher Row (00002.00361), 15:26 London — white I-PACE, dark roof
