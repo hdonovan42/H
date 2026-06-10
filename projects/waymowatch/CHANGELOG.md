@@ -1,5 +1,34 @@
 # WaymoWatch — Changelog
 
+## Dashboard v2.1 — serving trims: London-clamped, self-hosted assets (2026-06-10, late night)
+
+Measured audit first (multi-agent: live curl measurements, tile math, licensing research,
+adversarial verification): first load is ~1.4MB desktop / ~1.1MB mobile, of which ~95% is
+CARTO tile PNGs; the fixed page was only 72.8KB but spread across 9 origins, with
+render-blocking Leaflet on un-preconnected unpkg.com and the sightings JSON uncompressed.
+Raster tiles fetch per-viewport, so no "rest of the world" data was ever shipped — the
+real waste was origins, retina tile weight (@2x = 2.76x plain) and an unclamped map.
+
+Trims shipped (no visual change):
+- **Map clamped to London**: maxBounds [[51.25,-0.60],[51.75,0.45]] viscosity 1.0,
+  minZoom 10, maxZoom 16 (was: unbounded, z19) — caps worst-case tile spend.
+- **Leaflet self-hosted**: leaflet.js 1.9.4 → `assets/` (sha256 verified against the
+  official dist), leaflet.css inlined into the HTML — kills the render-blocking
+  unpkg.com origin entirely.
+- **Font self-hosted**: Hammersmith One latin woff2 (19.6KB, SIL OFL 1.1, licence in
+  `assets/OFL-HammersmithOne.txt`) + preload; both Google Fonts origins gone (browser
+  font caches are per-site since 2020, so the shared-cache argument was already dead).
+- **API**: preconnect to axiom.hjd.ai; nginx now serves the sightings JSON gzipped
+  (2,776 → 1,007 B per 60s poll) and the axiom vhost speaks HTTP/2.
+- Page origins: 9 → 3 effective (hjd.ai, cartocdn [HTTP/2-coalesced], axiom.hjd.ai).
+
+Audit findings banked for later: CARTO free tiles are tolerated-but-revocable (ToS:
+grant-only, 1M tiles/mo, server-side proxy-caching explicitly forbidden); ready fallback
+= Greater-London PMTiles extract (132MB measured via `pmtiles extract --dry-run`,
+44MB watch-zone) on VPS nginx + protomaps-leaflet (37.7KB gz, light flavour), or
+self-rendered Positron raster via TileServer GL (style is BSD/CC-BY). GitHub Pages is
+unsuitable for PMTiles (100MB file limit + Firefox range-caching bug).
+
 ## Dashboard v2 — 2D-only rewrite: Leaflet + raster (2026-06-10, night)
 
 User retired 3D entirely ("always 2d... how best can we serve 2d?"). With no extrusions,
