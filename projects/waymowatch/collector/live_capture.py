@@ -77,10 +77,11 @@ MAX_BACKLOG = 400     # tier-2 (zone) clip queue cap; overflow drops OLDEST zone
                       # tier-1 and never dropped). Drops are counted + reported — never silent.
 VID_STRIDE = 5        # frame stride for det.track (was 3): 25fps clip -> 5 sampled fps; a passing
                       # car is in view 2-4s = 10-20 samples, plenty for ByteTrack. 1.67x cheaper.
-PROB_TH = 0.86        # digest ELIGIBILITY bar (v0.5.1): candidates >= this are queued for sending.
-                      # Sending is now BUDGETED, not threshold-driven — each day the user receives the
-                      # top DAY_CAP by score; the effective cut floats with volume. 0.86 ~ synthetic-
-                      # positive p80, so the eligibility pool keeps most plausible Waymo views in play.
+PROB_TH = 0.84        # digest ELIGIBILITY bar — RE-ANCHORED 2026-06-10 (v0.6) for the REAL-blended
+                      # centroid (NEW score scale: first confirmed Waymo #2605 re-scores 0.944;
+                      # white-car reference p95 0.826 / max 0.862). Sending stays BUDGETED: each day
+                      # the user receives the top DAY_CAP by score, so a slightly-low bar is safe —
+                      # the pool grows, the ranked cut protects. RE-CHECK vs live tails after 24h.
 DAY_CAP = 1600        # max candidate cells emailed per day (8 pages of PAGE_SIZE) — the user's review
                       # budget IS the constant; the score cut adapts. Unsent overflow is demoted to the
                       # near archive at end of day (retrievable, minable — never silently destroyed).
@@ -89,9 +90,9 @@ NEAR_TH = 0.80        # archive floor (v0.5.1, was 0.86): EVERYTHING >= 0.80 is 
                       # hold the score band real Waymos are PREDICTED to occupy, so bars can be re-cut
                       # retroactively and a confirm's other passes mined. Bounded by NEAR_KEEP_DAYS.
 NEAR_KEEP_DAYS = 7    # near rows + their jpgs are pruned after this many days (mine promptly)
-ALERT_TH = 0.93       # instant-alert bar — above the observed live FP ceiling (24h max 0.921,
-                      # 2026-06-10; n=1,188 live white-car scores). The digest is the primary
-                      # channel until the scorer is re-seeded on real domes.
+ALERT_TH = 0.92       # instant-alert bar (v0.6 scale): synthetic white-car max 0.862 + the ~0.06
+                      # live-tail margin observed on the previous scale. The confirmed real Waymo
+                      # re-scores 0.944 against the new centroid — a repeat sighting SHOULD alert.
 BATCH_SIZE = 5        # (legacy count-trigger; superseded by PAGE_SIZE paging below)
 PAGE_SIZE = 200       # digest paging: the moment this many candidates pile up during the day, email
                       # that full page right away and reset; the remainder (< PAGE_SIZE) goes at
