@@ -80,10 +80,11 @@ MAX_BACKLOG = 400     # tier-2 (zone) clip queue cap; overflow drops OLDEST zone
                       # tier-1 and never dropped). Drops are counted + reported — never silent.
 VID_STRIDE = 5        # frame stride for det.track (was 3): 25fps clip -> 5 sampled fps; a passing
                       # car is in view 2-4s = 10-20 samples, plenty for ByteTrack. 1.67x cheaper.
-PROB_TH = 0.83        # digest ELIGIBILITY bar — 12-REAL scale (v0.7.4, 2026-06-10 night):
-                      # live archive n=3,951 p80 0.828 / p95 0.855 / max 0.907; reals 0.836-0.920
-                      # (#2145 at 0.836 = hardest real view yet — sub-p95, the ranked cut catches
-                      # it via DAY_CAP, not the bar). ~p80 anchoring; DAY_CAP governs sending.
+PROB_TH = 0.83        # digest ELIGIBILITY bar — 14-REAL scale (v0.8.2, 2026-06-10 night):
+                      # live archive n=4,099 p80 0.836 / p95 0.861 / max 0.913; reals 0.834-0.917.
+                      # Set just BELOW the weakest real view (#2145, 0.834) rather than at p80 —
+                      # recall-first: eligibility must cover every known-real strength; DAY_CAP
+                      # (now 4000) governs what is actually sent.
 DAY_CAP = 4000        # max candidate cells emailed per day (20 pages of PAGE_SIZE) — the user's review
                       # budget IS the constant; the score cut adapts. Unsent overflow is demoted to the
                       # near archive at end of day (retrievable, minable — never silently destroyed).
@@ -93,9 +94,9 @@ NEAR_TH = 0.76        # archive floor — the ONLY irrecoverable cut in the funn
                       # 0.013 over the old floor, and the real floor drops with each harder view.
                       # Disk is a non-issue (7-day prune). NEAR_KEEP_DAYS prune.
 NEAR_KEEP_DAYS = 7    # near rows + their jpgs are pruned after this many days (mine promptly)
-ALERT_TH = 0.91       # instant-alert bar (12-real scale): above ALL 3,951 known FPs (max 0.907);
-                      # catches #722-strength views (0.920). Weaker real views reach the sheets
-                      # via ranking. Re-check per re-seed.
+ALERT_TH = 0.92       # instant-alert bar (14-real scale): above ALL 4,099 known FPs (max 0.913;
+                      # 3 FPs sat >=0.90). Top real view re-scores 0.917 — alerts are the
+                      # PRECISION channel, ranked sheets the recall channel. Re-check per re-seed.
 BATCH_SIZE = 5        # (legacy count-trigger; superseded by PAGE_SIZE paging below)
 PAGE_SIZE = 200       # digest paging: the moment this many candidates pile up during the day, email
                       # that full page right away and reset; the remainder (< PAGE_SIZE) goes at
