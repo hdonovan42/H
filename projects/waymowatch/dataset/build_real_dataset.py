@@ -12,6 +12,12 @@ side effect:
                    'near' frames are NEVER used as negatives — no human ever saw them, so one
                    could contain a sub-bar Waymo and we'd train the model to ignore it.
 
+CONTAMINATION SCREEN: a Waymo the user missed on a busy sheet would silently become an
+implicit negative — the worst possible label error. So every implicit negative is screened
+by embedding cosine against ALL confirmed real Waymos: anything >= QUARANTINE_SIM is
+EXCLUDED from the negative pool and printed for human re-review. Explicit rejects are kept
+(the user's verdict stands) but get a warning line if they sit above the bar.
+
 Split is BY CAMERA (whole feeds held out) — the only honest split at small n. With positives
 on very few cameras the val estimate is weak; the script says so loudly rather than hiding it.
 
@@ -26,12 +32,21 @@ import shutil
 import sqlite3
 
 import cv2
+import numpy as np
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VAL_FRACTION = 0.25   # fraction of positive-bearing cameras held out (>=1)
 NEG_RATIO = 4.0       # negatives per positive (hard rejects first, implicit fills the rest)
 IMPLICIT_DAYS = 2     # sent-unflagged older than this = implicit negative
+QUARANTINE_SIM = 0.88  # implicit negative this similar to a confirmed Waymo -> human re-review,
+                       # never a training negative (mining showed top IMPOSTOR similarity ~0.90;
+                       # a missed real should sit at/above that — err toward quarantining)
 SEED = 7
+
+
+def unit(v):
+    v = np.asarray(v, dtype=np.float32)
+    return v / (np.linalg.norm(v) + 1e-8)
 
 
 def yolo_line(bbox, w, h):
@@ -52,17 +67,43 @@ def main():
         "SELECT camera_id, frame_path, bbox FROM candidates WHERE status='waymo' "
         "AND bbox IS NOT NULL AND frame_path IS NOT NULL").fetchall()
         if fp and os.path.exists(fp)]
-    hard = [(cam, fp) for cam, fp in con.execute(
-        "SELECT camera_id, frame_path FROM candidates WHERE status='reject' "
+    hard = [(cam, fp, emb) for cam, fp, emb in con.execute(
+        "SELECT camera_id, frame_path, emb FROM candidates WHERE status='reject' "
         "AND frame_path IS NOT NULL").fetchall() if fp and os.path.exists(fp)]
-    implicit = [(cam, fp) for cam, fp in con.execute(
-        "SELECT camera_id, frame_path FROM candidates WHERE status='new' AND "
+    implicit = [(cam, fp, emb) for cam, fp, emb in con.execute(
+        "SELECT camera_id, frame_path, emb FROM candidates WHERE status='new' AND "
         "COALESCE(sent,0)=1 AND captured_at < datetime('now', ?) AND frame_path IS NOT NULL",
         (f"-{IMPLICIT_DAYS} days",)).fetchall() if fp and os.path.exists(fp)]
 
     if not pos:
         raise SystemExit("no confirmed Waymos in the DB yet — confirm candidates first "
                          "(live_capture.py --confirm <ids>)")
+
+    # contamination screen: similarity of every negative to ALL confirmed real Waymos
+    real_embs = [unit(json.loads(e)) for (e,) in con.execute(
+        "SELECT emb FROM candidates WHERE status='waymo' AND emb IS NOT NULL")]
+
+    def max_sim(emb_json):
+        if not emb_json or not real_embs:
+            return 0.0
+        e = unit(json.loads(emb_json))
+        return max(float(e @ r) for r in real_embs)
+
+    quarantined = [(cam, fp, max_sim(e)) for cam, fp, e in implicit if max_sim(e) >= QUARANTINE_SIM]
+    implicit = [(cam, fp) for cam, fp, e in implicit if max_sim(e) < QUARANTINE_SIM]
+    if quarantined:
+        print(f"QUARANTINED {len(quarantined)} implicit negative(s) too similar to a confirmed "
+              f"Waymo (sim >= {QUARANTINE_SIM}) — EXCLUDED from training; re-review these:")
+        for cam, fp, s in sorted(quarantined, key=lambda q: -q[2])[:20]:
+            print(f"    sim {s:.3f}  {cam}  {fp}")
+    suspect_rejects = [(cam, fp, s) for cam, fp, e in hard
+                       for s in [max_sim(e)] if s >= QUARANTINE_SIM]
+    hard = [(cam, fp) for cam, fp, e in hard]
+    if suspect_rejects:
+        print(f"WARNING: {len(suspect_rejects)} explicit reject(s) sit above the similarity bar "
+              f"(kept — user verdict stands — but worth a second look):")
+        for cam, fp, s in sorted(suspect_rejects, key=lambda q: -q[2])[:10]:
+            print(f"    sim {s:.3f}  {cam}  {fp}")
 
     pos_cams = sorted({c for c, _, _ in pos})
     random.Random(13).shuffle(pos_cams)

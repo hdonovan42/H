@@ -32,6 +32,12 @@ Phase 2 of the roadmap executed same-hour:
   highest-value negative set possible: the closest impostors under the real-seeded scorer,
   human-cleared. They feed build_real_dataset (hard-neg backgrounds) + eval_gate (FP test)
   automatically and permanently suppress on the live sheets.
+- **Contamination screen** (user concern: a missed Waymo poisoning the negatives):
+  build_real_dataset now screens every IMPLICIT negative by embedding cosine vs ALL
+  confirmed Waymos — sim >= 0.88 -> excluded from training + printed for human re-review.
+  Explicit rejects are kept (user verdict stands) but warning-listed above the bar.
+  Live dry-run: 1/298 implicit would quarantine; 24/427 rejects flagged (expected — the
+  mining sheet selected BY similarity). 'near' rows were already never negatives.
 
 ## v0.5.2 — New dashboard UI: tube-map sighting feed (2026-06-10)
 
