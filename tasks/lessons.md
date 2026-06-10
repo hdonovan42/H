@@ -73,3 +73,12 @@ weak channel — delete the weak channel and use only strong labels (human verdi
 grow the strong channel operationally. Label-by-construction beats screening-by-heuristic:
 simpler code, no magic thresholds, and the "dangerous" data flows INTO training once a
 human resolves it (where it's most valuable) instead of being silently dropped.
+
+## 2026-06-10 — Bulk verdicts are provisional, not gold (WaymoWatch #738)
+A real Waymo was bulk-banked into the reject pool when the user declared a 200-cell sheet
+clean — they later re-reviewed and found it (#738, 0.875). One missed cell in 200 ≈ expected
+human error rate; the per-vehicle confirm (#) is gold, the bulk "sheet is clean" is ~99% gold.
+**Pattern**: distinguish label provenance. Bulk-derived labels get a standing re-check —
+re-rank and re-surface the top of the reject pool after every scorer recalibration (cheap:
+one extra contact sheet per re-seed). The fix is process (re-show), not automated screening
+(which the user rejected for routing hard negatives around training).
