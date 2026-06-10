@@ -1,5 +1,21 @@
 # WaymoWatch — Changelog
 
+## v0.8.3 — Confirms 15-16 (#1362, #332) (2026-06-10/11, midnight)
+
+**#1362** (00001.03663 A2 New Cross Rd/St James, 19:42 — the A2 corridor's SECOND confirm,
+fourth east-pointing one; the v0.8 east extension is watching the right roads) and **#332**
+(00001.06650 Holland Rd/Addison Crescent, 21:53 — a new WESTERN camera). **16 confirms /
+16 distinct cameras.**
+
+- Standard cycle: 16-real pure centroid; archive re-scored (n=4,106 non-waymo: p80 0.835 /
+  p95 0.861 / max 0.910; reals 0.838-0.919 — the floor ROSE 0.834→0.838, scale stabilising).
+  41 promoted / 64 demoted.
+- **Bars unchanged** (the new scale lands where the bars already were): PROB_TH **0.83**
+  (still below the weakest real), NEAR_TH **0.76**, ALERT_TH **0.92** (FP max 0.910,
+  margin widened 0.007→0.010).
+- 4 sheets emailed: mining ±45 min around each confirm, top-200 retrospective
+  (0.895..0.836), top-100 rejects re-check (0.910..0.870).
+
 ## v0.8.2 — Confirms 13-14 (#161, #4036) + special hard-negative folders (2026-06-10, night)
 
 Both came off the recovered-58 sheet (the candidates stranded by the old 1600 budget —
