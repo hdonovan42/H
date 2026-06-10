@@ -84,7 +84,7 @@ PROB_TH = 0.83        # digest ELIGIBILITY bar — 12-REAL scale (v0.7.4, 2026-0
                       # live archive n=3,951 p80 0.828 / p95 0.855 / max 0.907; reals 0.836-0.920
                       # (#2145 at 0.836 = hardest real view yet — sub-p95, the ranked cut catches
                       # it via DAY_CAP, not the bar). ~p80 anchoring; DAY_CAP governs sending.
-DAY_CAP = 1600        # max candidate cells emailed per day (8 pages of PAGE_SIZE) — the user's review
+DAY_CAP = 4000        # max candidate cells emailed per day (20 pages of PAGE_SIZE) — the user's review
                       # budget IS the constant; the score cut adapts. Unsent overflow is demoted to the
                       # near archive at end of day (retrievable, minable — never silently destroyed).
 NEAR_TH = 0.76        # archive floor — the ONLY irrecoverable cut in the funnel (below it a
