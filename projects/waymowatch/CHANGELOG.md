@@ -1,5 +1,86 @@
 # WaymoWatch — Changelog
 
+## Day close 2026-06-10 — 9 confirms / 9 cameras / 731 vetted negatives
+
+User reviewed the 9-real sheets: no further Waymos; mining-60 + retro-200 banked as vetted
+negatives (233 new, 731 total — past the 600 lower bound of the training-negative target).
+Day started with 0 all-time confirms and a provably blind scorer; ends with 9 reals across
+9 cameras (incl. two simultaneous vehicles), a pure-real scorer re-anchored after every
+confirm, 731 human-verdicted hard negatives, and the live map showing all nine. Loop runs
+overnight (night captures = the negative pool's known gap). Next milestone: ~100 confirms
+across ≥5 cams -> YOLO26 training run (pipeline built + CPU-tested, waiting on data only).
+
+## v0.7.3 — Ninth confirm (#3620), surfaced BY the re-seed (2026-06-10, night)
+
+**#3620 (00001.04607, 17:50 London)** — found on the 8-real retrospective itself: the
+flywheel's compounding step working as designed (re-seed -> re-rank -> human -> new real ->
+re-seed). 9-real centroid deployed; archive re-scored (n=3,647: p80 0.810 / max 0.900;
+reals 0.871-0.915, floor still rising 0.868->0.871). Bars: PROB_TH **0.81**, NEAR_TH 0.78,
+ALERT_TH **0.91** (margin to FP max back to 0.01). Mining + retro + rejects sheets emailed.
+**9 confirms / 9 distinct cameras in one day.**
+
+## v0.7.2 — Eighth confirm (#1700) (2026-06-10, night)
+
+**#1700 (00001.07389, 17:26 London)** from the 17:45 ranked page. Standard cycle: confirm
+-> 8-real pure centroid -> archive re-scored (n=3,646 non-waymo: p80 0.817 / max 0.907;
+reals 0.868-0.916 — **the real FLOOR is rising with each view**: 0.855 @7 -> 0.868 @8) ->
+bars PROB_TH **0.82** / NEAR_TH 0.78 / ALERT_TH **0.91** (FP max 0.907 — margin thin,
+watching) -> loop restarted -> mining + retro + rejects-re-check sheets emailed.
+8 confirms / 8 cameras in one day.
+
+## v0.7.1 — 7 confirms: TWO SIMULTANEOUS Waymos (2026-06-10, night)
+
+**#722 (00001.07379) and #1338 (00001.03654) — captured 29 seconds apart on different
+cameras (15:56:24 / 15:56:53)**: first direct evidence of two fleet vehicles operating
+concurrently. Both surfaced by the pure-real retrospective (top and bottom of its range —
+0.890 and 0.823 — the ranked-sheet recall channel working at both ends).
+
+- Confirmed -> **7 reals**, centroid re-seeded (pure real), archive re-scored (n=3,486
+  non-waymo: p80 0.814 / p95 0.841 / max 0.904; reals 0.855-0.916).
+- Thresholds (7-real scale): PROB_TH **0.81** (p80), NEAR_TH **0.78** (~p50), ALERT_TH
+  **0.91** (above all known FPs; catches #722/#738-strength views).
+- 4 sheets emailed: mining around both confirms (shared 15:11-16:41 window, per-confirm
+  similarity ranking) + top-200 retrospective + top-100 rejects re-check.
+- Note: #722's id predates its captured_at — best-view dedup UPDATES a row in place
+  (captured_at moves to the better view). Id = insert order of the VEHICLE entry, not the
+  final capture time.
+- **Leave-one-out calibration audit** (user asked what the 7 sightings actually bought):
+  each real scored against a centroid of the OTHER six, ranked vs 3,568 known non-Waymos —
+  **all 7 land on page one of the daily ranked sheets as unseen vehicles** (FPs above:
+  0, 0, 7, 11, 45, 131, 169); LOO within ~0.01 of in-centroid scores = the centroid
+  GENERALISES across views, it doesn't memorise. Per-view variance (0.841-0.916) remains
+  the structural limit: the frozen ImageNet embedding mostly encodes photometrics (dome
+  moves the score only ~+0.07) — scorer is a SURFACER; the trained YOLO26 is the detector.
+- **Nearest-view scoring REJECTED** (same harness): max-cosine over the 7 views loses to
+  the mean centroid on ALL 7 reals (#722: 0 FPs above -> 156) — max gives every impostor
+  seven chances to match one view; the mean cancels view-specific noise and keeps the
+  shared (dome) component. Zero-cost upgrade space is now exhausted by measurement:
+  probe (overfits), hardware centroid (no gain), nearest-view (worse). DAY_CAP 1600 noted
+  as a designed knob (8 pages × 200, sized above expected steady-state as a flood ceiling),
+  not a derived constant — tune to review appetite; ranking decides WHAT, the cap only
+  decides HOW MANY.
+
+## v0.7 — PURE-REAL SCORER: 5 confirms, synthetic blend retired (2026-06-10, night)
+
+Confirms #4 and #5 from the 16:56 ranked page: **#1581** (00001.04250, 15:09 London) and
+**#3310** (00001.03664, 16:41 London — **first FRONTAL view**, new viewpoint for the
+centroid). Five reals = MIN_REAL: `reseed_from_real.py` dropped the synthetic blend — the
+scorer now runs on confirmed real Waymos ALONE. The #491 mining sheet (0 Waymos, user-
+reviewed) banked as 72 more vetted negatives (498 rejects total).
+
+**The pure-real scale is a step change** (archive re-scored, n=3,442):
+- Reals: **#738 0.914 / #1581 0.913 / #491 0.912 / #3310 0.911** / #2605 0.862 — four of
+  five ABOVE every one of 3,437 known non-Waymos (FP max 0.895); #2605 at p99.2.
+- Thresholds (NEW SCALE): PROB_TH **0.80** (live p80, as ever), NEAR_TH **0.76** (≈p50,
+  keeps the silent band's volume), ALERT_TH **0.90** — above ALL known FPs yet below 4/5
+  real views: **the instant-alert channel is precise AND sensitive for the first time**.
+  Watch the live FP tail for a day (always fatter than the archive).
+- 4 sheets emailed: mining for #1581 + #3310 (similarity-ranked, ±45 min), pure-real
+  top-200 retrospective, top-100 rejects re-check (standing process).
+- Confirms now span 5 cameras / 5 distinct views across one day: KX (09:09), depot corridor
+  (11:10), 00001.04250 (15:09), Limehouse (15:26), 00001.03664 frontal (16:41) — enough
+  camera diversity that build_real_dataset's by-camera split is already viable.
+
 ## v0.6.3 — THIRD CONFIRM (#738, King's Cross) rescued FROM THE REJECTS + 3-real re-seed (2026-06-10, late)
 
 **#738, Kings X Rd/Swinton St (00001.03591), 09:09 London** — one of the original 8 KX FOCUS
