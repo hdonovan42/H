@@ -1,5 +1,14 @@
 # WaymoWatch — Changelog
 
+## v0.7.2 — Eighth confirm (#1700) (2026-06-10, night)
+
+**#1700 (00001.07389, 17:26 London)** from the 17:45 ranked page. Standard cycle: confirm
+-> 8-real pure centroid -> archive re-scored (n=3,646 non-waymo: p80 0.817 / max 0.907;
+reals 0.868-0.916 — **the real FLOOR is rising with each view**: 0.855 @7 -> 0.868 @8) ->
+bars PROB_TH **0.82** / NEAR_TH 0.78 / ALERT_TH **0.91** (FP max 0.907 — margin thin,
+watching) -> loop restarted -> mining + retro + rejects-re-check sheets emailed.
+8 confirms / 8 cameras in one day.
+
 ## v0.7.1 — 7 confirms: TWO SIMULTANEOUS Waymos (2026-06-10, night)
 
 **#722 (00001.07379) and #1338 (00001.03654) — captured 29 seconds apart on different
