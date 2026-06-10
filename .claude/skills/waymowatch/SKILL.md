@@ -139,6 +139,12 @@ WaymoWatch work happens on the `waymowatch` branch; the dashboard session works 
    session's main-only commits into waymowatch. Verify with
    `git log waymowatch..origin/main --oneline` → must be empty.
 
+**API contract rule**: the dashboard (separate session, works on main) consumes
+`server/sightings_api.py` — `/api/sightings` fields (id, camera_id, captured_at, score,
+common_name, view, lat, lon) and `/img/<id>[_frame].jpg`. NEVER change or remove existing
+fields/routes without flagging it to the user first (the dashboard session must adapt in
+step). Adding new fields is safe (additive); renames/removals/semantic changes are breaking.
+
 ## Standing user directives
 
 - Fully autonomous detection — the site finds them; no human-triggered capture
