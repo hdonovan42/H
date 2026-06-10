@@ -1,5 +1,25 @@
 # WaymoWatch — Changelog
 
+## v0.6.2 — SECOND CONFIRM (#491, depot corridor) + 2-real re-seed (2026-06-10, late)
+
+**#491, A40/Wales Farm Rd (00001.07308), 11:10 London — the Park Royal depot corridor.**
+Scored 0.841 on the v0.6 scale (bar 0.84): eligible by 0.001. It reached the user's eyes
+via the ranked digest. Phase-2 pattern re-executed:
+
+- Confirm banked (`--confirm 491`); dashboard showed the second dot automatically within
+  its 60s poll — first live test of the auto-update path, no code touched.
+- **Centroid re-seeded with 2 reals** (still 50/50 synthetic blend until 5): reals re-score
+  **#2605 0.933 / #491 0.891**; whole archive re-scored from stored embeddings
+  (3,350 rows; non-waymo n=3,348: p50 0.805 / p80 0.833 / p95 0.857 / max 0.913);
+  133 near→new promoted, 179 new→near demoted.
+- **Thresholds re-anchored (NEW SCALE, v0.6 numbers incomparable)**: PROB_TH **0.83**
+  (≈ live p80, same anchoring as v0.6), NEAR_TH **0.80**, ALERT_TH **0.92** (archive FP
+  max 0.913 — #2605-strength repeats alert; #491-strength reaches sheets via ranking).
+- **Mining sheet emailed**: 155 candidates ±45 min of #491, all cameras, ranked by
+  embedding cosine to #491 (rejects excluded — already vetted); top-72 sheet sent for
+  review. Flagged ones become real training views → re-run reseed.
+- Loop restarted on the new artifact + thresholds.
+
 ## v0.6.1 — Dashboard wired to the real sightings DB (2026-06-10, evening)
 
 The map now shows the real confirm (#2605) instead of demo data — Phase 6 (sighting feed)
