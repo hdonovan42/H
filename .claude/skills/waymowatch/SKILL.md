@@ -127,6 +127,18 @@ ROOF_TOP/BOTTOM/INSET −0.06/0.22/0.28 (single source of truth — eval scripts
 ```
 Then re-anchor PROB_TH/NEAR_TH/ALERT_TH from the live score distribution at the new scale.
 
+## Branch workflow (user-established 2026-06-10)
+
+WaymoWatch work happens on the `waymowatch` branch; the dashboard session works directly on
+`main` (GitHub Pages needs it). The full cycle — never skip step 3:
+1. Commit + push work to `waymowatch`.
+2. When the user agrees: `git checkout main && git pull --ff-only && git merge --no-ff
+   waymowatch && git push` (pull first — the dashboard session pushes to main directly).
+3. **Immediately merge main BACK into waymowatch** (`git checkout waymowatch && git merge
+   origin/main && git push`) so the branches never drift. This also pulls the dashboard
+   session's main-only commits into waymowatch. Verify with
+   `git log waymowatch..origin/main --oneline` → must be empty.
+
 ## Standing user directives
 
 - Fully autonomous detection — the site finds them; no human-triggered capture
