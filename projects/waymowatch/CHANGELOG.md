@@ -1,5 +1,26 @@
 # WaymoWatch — Changelog
 
+## v0.7 — PURE-REAL SCORER: 5 confirms, synthetic blend retired (2026-06-10, night)
+
+Confirms #4 and #5 from the 16:56 ranked page: **#1581** (00001.04250, 15:09 London) and
+**#3310** (00001.03664, 16:41 London — **first FRONTAL view**, new viewpoint for the
+centroid). Five reals = MIN_REAL: `reseed_from_real.py` dropped the synthetic blend — the
+scorer now runs on confirmed real Waymos ALONE. The #491 mining sheet (0 Waymos, user-
+reviewed) banked as 72 more vetted negatives (498 rejects total).
+
+**The pure-real scale is a step change** (archive re-scored, n=3,442):
+- Reals: **#738 0.914 / #1581 0.913 / #491 0.912 / #3310 0.911** / #2605 0.862 — four of
+  five ABOVE every one of 3,437 known non-Waymos (FP max 0.895); #2605 at p99.2.
+- Thresholds (NEW SCALE): PROB_TH **0.80** (live p80, as ever), NEAR_TH **0.76** (≈p50,
+  keeps the silent band's volume), ALERT_TH **0.90** — above ALL known FPs yet below 4/5
+  real views: **the instant-alert channel is precise AND sensitive for the first time**.
+  Watch the live FP tail for a day (always fatter than the archive).
+- 4 sheets emailed: mining for #1581 + #3310 (similarity-ranked, ±45 min), pure-real
+  top-200 retrospective, top-100 rejects re-check (standing process).
+- Confirms now span 5 cameras / 5 distinct views across one day: KX (09:09), depot corridor
+  (11:10), 00001.04250 (15:09), Limehouse (15:26), 00001.03664 frontal (16:41) — enough
+  camera diversity that build_real_dataset's by-camera split is already viable.
+
 ## v0.6.3 — THIRD CONFIRM (#738, King's Cross) rescued FROM THE REJECTS + 3-real re-seed (2026-06-10, late)
 
 **#738, Kings X Rd/Swinton St (00001.03591), 09:09 London** — one of the original 8 KX FOCUS
