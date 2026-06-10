@@ -9,6 +9,9 @@ would have). 12-real centroid; archive re-scored (n=3,951: p80 0.828 / max 0.907
 0.836-0.920 — floor widened as harder views joined, expected and healthy for training
 diversity). Bars: PROB_TH **0.83** / NEAR_TH **0.80** / ALERT_TH **0.91**. 3 mining sheets
 + retro + rejects re-check emailed. **12 confirms / 12 distinct cameras in one day.**
+Sheets reviewed clean by user -> 277 banked: **1,008 vetted negatives**, clearing the TOP of
+the 600-1,000 training target. The negative side of the dataset is now done growing on
+purpose — confirms are the only scarce resource left.
 
 ## Day close 2026-06-10 — 9 confirms / 9 cameras / 731 vetted negatives
 
