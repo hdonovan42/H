@@ -1,5 +1,24 @@
 # WaymoWatch — Changelog
 
+## v0.5.2 — New dashboard UI: tube-map sighting feed (2026-06-10)
+
+Replaced the base-map prototype `index.html` with the new tube-map-styled dashboard
+(user-supplied design, from `temp/`):
+
+- **MapLibre + OpenFreeMap Positron** restyled to TfL paper/ink palette (Hammersmith One
+  display face); corridors drawn as tube lines (City spine red, Westway blue, South circuit
+  dashed green) with click popups + key-row toggles.
+- **Sightings as station-style markers** ringed by recency (past hour = red + pulse,
+  today = blue, week = grey); demo data inline — wire to the real API later (Phase 6).
+- **2D/3D toggle** with pre-mounted building extrusions (opacity fade + animated height
+  rise, no tile pop-in); respects prefers-reduced-motion.
+- **`sw.js` service worker**: cache-first tile/font/CDN persistence (~6k entries),
+  stale-while-revalidate for the style JSON — repeat visits load instantly, works offline.
+  Only active when served over http(s).
+- Tweaks vs the supplied design (user-requested): map defaults to the **British Library**
+  as centre (51.5300, -0.1276, z13.2) instead of a fitted central-London bounds; 2D/3D
+  buttons flattened — two-colour top-stripe accent and box-shadow removed, single colour.
+
 ## v0.5.1 — Recall to human eyes: score-ranked budgeted sending (2026-06-10, later)
 
 User: "some will be waymos — you need to make sure they are sent to me or this is all for
