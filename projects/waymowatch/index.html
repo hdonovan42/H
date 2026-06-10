@@ -376,7 +376,7 @@ map.on("load", () => {
       const rows = (await res.json()).sightings;
       map.getSource("sightings").setData(toFeatureCollection(rows));
       foot.innerHTML = rows.length
-        ? `${rows.length} confirmed sighting${rows.length === 1 ? "" : "s"}<br>` +
+        ? `${rows.length} confirmed sighting${rows.length === 1 ? "" : "s"},<br>` +
           `latest ${fmtDate(rows[0].captured_at)} ${fmtTime(rows[0].captured_at)}`
         : "No confirmed sightings yet";
     } catch (err) {
