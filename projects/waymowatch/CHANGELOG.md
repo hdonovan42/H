@@ -1,5 +1,96 @@
 # WaymoWatch — Changelog
 
+## v0.5.2 — New dashboard UI: tube-map sighting feed (2026-06-10)
+
+Replaced the base-map prototype `index.html` with the new tube-map-styled dashboard
+(user-supplied design, from `temp/`):
+
+- **MapLibre + OpenFreeMap Positron** restyled to TfL paper/ink palette (Hammersmith One
+  display face); corridors drawn as tube lines (City spine red, Westway blue, South circuit
+  dashed green) with click popups + key-row toggles.
+- **Sightings as station-style markers** ringed by recency (past hour = red + pulse,
+  today = blue, week = grey); demo data inline — wire to the real API later (Phase 6).
+- **2D/3D toggle** with pre-mounted building extrusions (opacity fade + animated height
+  rise, no tile pop-in); respects prefers-reduced-motion.
+- **`sw.js` service worker**: cache-first tile/font/CDN persistence (~6k entries),
+  stale-while-revalidate for the style JSON — repeat visits load instantly, works offline.
+  Only active when served over http(s).
+- Tweaks vs the supplied design (user-requested): map defaults to the **British Library**
+  as centre (51.5300, -0.1276, z13.2) instead of a fitted central-London bounds; 2D/3D
+  buttons flattened — two-colour top-stripe accent and box-shadow removed, single colour.
+- **Idle prefetch (first-press 3D lag fix)**: the 3D toggle eases to z14.4, needing z14
+  tiles the opening z13.2 view never loaded — fetching them mid-animation was the visible
+  hitch (the SW only helps on the SECOND request). On first map idle, the z14 tiles for
+  the pitch-padded viewport (±40%) are trickle-fetched (4 lanes, low priority, capped at
+  120) through the service worker, so the rise to 3D never waits on the network — even on
+  the very first visit (sw.js claims the page immediately via skipWaiting+clients.claim).
+
+## v0.5.1 — Recall to human eyes: score-ranked budgeted sending (2026-06-10, later)
+
+User: "some will be waymos — you need to make sure they are sent to me or this is all for
+nothing." The 0.88 threshold failed that test: synthetic-proxy Waymo views score p50 0.836 /
+p90 0.875, so a fixed bar either floods the reviewer or silently bins most real passes (the
+overlap is the frozen-embedding ceiling — no threshold fixes it). Sending is now RANKED, not
+thresholded:
+
+- **DAY_CAP=1600** cells/day (8 pages of 200): the user's review budget is the constant; each
+  page emails the HIGHEST-scoring unsent candidates, so the effective score cut floats with
+  volume and the user always sees the day's most-dome-like vehicles.
+- **PROB_TH 0.88 -> 0.86** = eligibility only (pool for ranking, ~synthetic p80).
+  **NEAR_TH 0.86 -> 0.80**: the silent archive now spans the band real Waymos are PREDICTED
+  to occupy (p10 0.754... most mass >= 0.80) — bars can be re-cut retroactively, confirms
+  mined; nothing above 0.80 is ever unrecoverable (~300MB/day disk, 7-day prune).
+- **Per-row `sent` flag** replaces the last_digest_id high-water mark (set only on successful
+  send -> transient email failures retry). End-of-day: unsent overflow demoted to the near
+  archive (fresh ranking each day) — EXCEPT unsent alert-level rows (>= ALERT_TH), which stay.
+- Migration: 87 already-emailed rows marked sent; 273 near rows >= 0.86 promoted into
+  tonight's ranked pool.
+- **Why this maximises P(Waymo reaches the user):** per-view P(sent) at the floating cut
+  (~0.86-0.87 zone-wide) is ~15-25%, but the fleet generates many scored views/day across 484
+  cams -> P(>=1 view on the user's sheets) ≈ >90%/day, ~certain/week IF the synthetic proxy
+  holds. Residual risk is CORRELATED proxy error (street-level dome templates vs elevated
+  reality) — that is resolved only by the first real confirm, which this design hunts.
+- Tests: ranked paging, budget cap, day reset, EOD demotion + alert-survivor all pass on a
+  scratch DB with a stubbed mailer.
+
+## v0.5 — Reliable zone-wide coverage: 484 cams, telemetered (2026-06-10)
+
+User: "the entire site relies on… reliable coverage" + first digest was drowning in cars.
+Measured before building: 2.7s CPU/clip (torch), one core pegged at 85%, cycles 3-11 min vs
+TfL's 3-8 min refresh (~80% spine catch), 1,188 live candidates ≥0.81 in 24h (max 0.921, all
+FPs), Waymo zone ≈ 484 available cams = 4x the spine load. Changes:
+
+- **OpenVINO INT8 yolo11n** (`dataset/export_openvino.py` -> committed
+  `collector/models/yolo11n_int8_openvino_model/`, 3.2MB), quantisation CALIBRATED on 300 of
+  our own JamCam frames; + **vid_stride 3->5** (5 sampled fps; a passing car = 10-20 samples).
+  VPS-measured: **2.49s -> 0.91s/clip (2.74x)** — and that was benched while the old loop ran.
+  INT8 finds MORE car boxes than torch (49 vs 28 on the parity clip), so no funnel recall risk.
+- **Zone-wide tiered watchlist** (`zone_watchlist()`): tier-1 = the 117-cam spine (processed
+  first, NEVER dropped); tier-2 = every other available cam in the Waymo operating-zone box
+  (lat 51.42-51.58, lon -0.36..-0.02) = **484 cams total** (was 117).
+- **Poll/process split** (`watch_loop()` v2): one threaded conditional-GET pass over all 484
+  cams every **POLL_EVERY=150s** (12 threads, pure I/O, no DB in workers). 150s < TfL's ~180s
+  minimum refresh -> a camera can never publish two clips between polls — **the polling layer
+  misses nothing**. Fresh clips queue per tier (FIFO); zone queue sheds OLDEST beyond
+  MAX_BACKLOG=400, every drop counted. Single process, single DB writer, ~44MB peak queue.
+- **Coverage telemetry**: per-cycle `cycles` row + timestamped log line (polled/fresh/processed/
+  backlog/dropped/secs); per-cam refresh-period EMA (`per:<id>` kv) -> the daily digest now
+  opens with an honest coverage line: processed / fetched / est. published.
+- **Watchdog**: loop writes a heartbeat every iteration; `run_watch.sh` kills a HUNG loop
+  (lock held, heartbeat >10 min stale) — flock alone only catches a dead one.
+- **Thresholds re-anchored to LIVE data** (synthetic calibration was off: 0.83 bar -> 659
+  digest/day): PROB_TH 0.83->**0.88** (~116/day spine, est ~300/day zone, score-sorted),
+  NEAR_TH 0.81->**0.86**, ALERT_TH stays **0.93** (> live 24h max FP 0.921, n=1,188).
+  685 pending sub-0.88 candidates demoted to 'near' (minable, 7-day prune).
+- **Honest recall cost** (recall_eval at the new bar): planted-synthetic recall **8% per pass**
+  @0.88 (was 54% @0.83) — the live FP tail overlaps the synthetic positive distribution; this
+  is the frozen-embedding ceiling, not a regression. Offsets: ~4x more scoring opportunities
+  zone-wide; the 0.86-0.88 near band still archives sub-bar passes for post-confirm mining;
+  scorer upgrade comes from REAL positives (locked strategy), coverage was the binding ask.
+- **What to watch**: dropped count in cycle lines (sustained drops -> shrink zone box or tune
+  conf up); digest volume at 0.88 zone-wide (re-anchor if >>300/day); mem (two extra OpenVINO
+  buffers); per-cam period EMAs converging (~1h) before the coverage % is trustworthy.
+
 ## v0.4 — Autonomous coverage: continuous spine loop (2026-06-09, evening)
 
 User directive: the site finds Waymos itself — no human-triggered capture. Coverage was the

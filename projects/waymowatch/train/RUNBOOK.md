@@ -1,62 +1,62 @@
-# WaymoNet v1 — GPU training runbook
+# WaymoNet — GPU training runbook (REAL data, v2 recipe)
 
-Trains the 1-class (`waymo`) dome detector on a rented GPU. The dataset is already
-de-risked, de-duped, honestly split (by camera), and QA'd. Budget ~$1 and ~1–2 h.
+The synthetic-era recipe is retired. The model trains on what the live system banks:
+user-confirmed Waymos (frame + bbox = detector-grade labels) and user-rejected frames
+(human-vetted hard negatives that fooled the surfacer). No synthetic composites anywhere.
 
-## 0. What you're training on
-- **Positives:** 400 synthetic dome composites (39 deduped real domes pasted onto real
-  London JamCam cars), provenance-tracked.
-- **Negatives:** in-domain real JamCam frames (matched source frames + plain traffic across
-  92 cameras — naturally includes cabs/buses/vans), ~4:1 neg:pos.
-- **Split:** 10 camera feeds fully held out for val (no scene/camera leakage).
+## The roadmap this run sits in
+1. **Find** — the live 484-cam zone loop surfaces candidates; user confirms the first real
+   Waymo(s) from the ranked digests. *(running now)*
+2. **Recalibrate** — `dataset/reseed_from_real.py` re-anchors the cosine scorer + thresholds
+   on the confirmed real crops; mine the near archive (±45 min) for extra passes. The
+   surfacer's precision jumps, so confirms accelerate.
+3. **Collect** — run the recalibrated loop until confirms reach **~100+ across ≥5 cameras**
+   (rejects keep accruing as hard negatives for free). Below that, a detector memorises.
+4. **Train (this runbook)** — YOLO26s-P2 on the real dataset → acceptance gate → prod ONNX.
 
-## 1. Rent a GPU
-RunPod or Vast.ai, a single **RTX 4090 (24 GB)** (~$0.29–0.34/hr). A100 is overkill.
+## 0. Build the dataset (on the VPS — that's where waymo.db and the jpgs live)
+```bash
+cd /home/hq/waymowatch && .venv/bin/python dataset/build_real_dataset.py
+# -> data/dataset_real/  (positives + vetted hard negatives, by-camera split)
+```
 
-## 2. Get the code + data onto the box
+## 1. Pre-flight on CPU — never debug at $0.34/hr
+```bash
+.venv/bin/python train/preflight.py     # exit 0 = dataset + model + forward pass all good
+```
+
+## 2. Rent + setup
+Single RTX 4090 (24 GB), RunPod/Vast (~$0.30/hr; expect 20–40 min wall with cache+704).
 ```bash
 git clone <repo> && cd H && git checkout waymowatch
-# data/ is gitignored — transfer the prepared dataset (or regenerate it, see §6):
-rsync -av projects/waymowatch/data/dataset/ <box>:.../projects/waymowatch/data/dataset/
-rsync -av projects/waymowatch/data/sources/wayve_rack/ <box>:.../wayve_rack/   # for the gate
-rsync -av projects/waymowatch/data/synthetic/manifest.json <box>:.../synthetic/
-python -m venv .venv && .venv/bin/pip install ultralytics torch torchvision  # CUDA build
+python -m venv .venv && .venv/bin/pip install 'ultralytics==8.4.63'   # pinned = reproducible
+rsync -av <vps>:/home/hq/waymowatch/data/dataset_real/ projects/waymowatch/data/dataset_real/
 ```
 
 ## 3. Train
 ```bash
-.venv/bin/python projects/waymowatch/train/train.py --device 0 --epochs 120 --imgsz 1280
+.venv/bin/python projects/waymowatch/train/train.py --device 0
 ```
-Outputs weights + ONNX under `projects/waymowatch/data/runs/waymonet_v1/`.
+Defaults: **yolo26s-p2.yaml + yolo26s.pt transfer, imgsz 704, batch auto, cache=ram,
+mosaic 0.4 / scale 0.15** (mosaic at 1.0 pushed the dome below the measured resolvability
+floor), 150 epochs / patience 30. Why not 1280: source is 352×288 — 1280 is 3× the compute
+spent on interpolation; 704 + the P2 stride-4 head sees the dome at the same effective
+resolution. `yolo11s-p2.yaml` does NOT exist in ultralytics (old runbook bug); yolo26s-p2
+builds and accepts COCO transfer — verified on CPU 2026-06-10.
 
-## 4. Read the eval honestly
-- `train.py` prints **val mAP@50 / mAP@50-95** on the 10 held-out feeds. Note: val positives
-  are still *synthetic* (no real London Waymos yet), so this proves generalisation across
-  unseen cameras, not real-world recall.
-- Pick the confidence operating point for **precision ≥ 0.9** from the PR curve in
-  `data/runs/waymonet_v1/`.
-
-## 5. Run the Waymo-vs-Wayve acceptance gate
+## 4. The ship decision = the gate, not mAP
 ```bash
-.venv/bin/python projects/waymowatch/train/eval_wayve_gate.py \
-    --weights projects/waymowatch/data/runs/waymonet_v1/weights/best.pt --conf 0.25
+.venv/bin/python projects/waymowatch/train/eval_gate.py \
+    --weights projects/waymowatch/data/runs/waymonet_real_v1/weights/best.pt
 ```
-Pastes Wayve roof-racks onto held-out backplates and measures Waymo-recall vs Wayve-false-positive.
-- **≥90% balanced ⇒** Wayve is cleanly separable — promote it to an explicit class in v2.
-- **<90% ⇒** keep Wayve as a hard-negative, restrict confident calls to near-field/large
-  vehicles, and let the human-confirm queue catch the rest (the planned design).
+Held-out-camera recall (IoU-matched to the labelled box — stray detections don't count) vs
+FP rate on held-out human-vetted negatives, swept over confidence. **Ship bar: precision
+≥ 0.9 at usable recall**; below it, the model still serves the human queue, not alerts.
+Real rejected Wayves are inside the negative set, so Wayve discrimination is tested on real
+data automatically.
 
-## 6. (Optional) regenerate the dataset from scratch
-```bash
-.venv/bin/python collector/data_plane.py --cameras 80 --area central   # backplates
-.venv/bin/python dataset/fetch_sources.py && dataset/extract_domes.py   # + crawl_images.py for more
-.venv/bin/python dataset/make_synthetic.py && dataset/build_dataset.py
-```
-
-## 7. Enhancements to try if recall on small domes is low
-- Add a **P2 (stride-4) head** to the model cfg (`--model yolo11s-p2.yaml`) — preserves the
-  high-res feature map a ~10px dome needs. (Not shipped by default; validate it builds first.)
-- **SAHI / tiled inference** at deploy time on candidate frames.
-- Grow real positives via the live-capture loop, then mix real + synthetic and re-eval on real.
+## 5. Deploy
+ONNX exports at the training imgsz; re-export at the serving resolution once Phase-5
+inference (TensorRT) fixes one — accuracy must be validated AT the serving size.
 
 > Powered by TfL Open Data.

@@ -8,7 +8,10 @@ elevated angle/scale. Bootstraps before a good detector exists with a no-GPU, no
   CANDIDATE for human review. You confirm; confirmed crops become gold real positives.
 
 Modes:
-  (default)         one sweep over the Waymo-zone cameras, then rebuild the review sheet
+  --loop            24/7 zone watcher (v0.5): threaded ETag poll of ALL ~480 Waymo-zone cams
+                    every POLL_EVERY s (below TfL's min refresh -> nothing skipped), tiered
+                    queues (spine first, never dropped), per-cycle coverage telemetry
+  (default)         one serial sweep over the FOCUS cameras, then rebuild the review sheet
   --confirm 3,7     promote candidate ids -> data/real_positives/ (status=waymo)
   --reject 4,5      mark candidate ids rejected
   --review          just rebuild the review contact sheet
@@ -21,6 +24,7 @@ import json
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -34,8 +38,10 @@ sys.path.insert(0, os.path.join(BASE, "dataset"))
 import data_plane as dp  # noqa: E402
 from separability_eval import build_embedder, jamcam  # noqa: E402
 
-# central + inner London bounding box (~Waymo's 20 test boroughs) — wide-net fallback
-ZONE = dict(lat0=51.44, lat1=51.57, lon0=-0.27, lon1=0.04)
+# Waymo operating-zone box (v0.5, 2026-06-10): Park Royal depot in the west through
+# central London to KX; cut east of the City (no confirmed Waymo presence). ~484 available
+# cams — ALL of them are tier-2 watch targets; the SPINE below stays tier-1 (never dropped).
+ZONE = dict(lat0=51.42, lat1=51.58, lon0=-0.36, lon1=-0.02)
 # Manual detection phase: King's Cross / British Library / Euston Rd corridor only
 # (user's highest-density Waymo-sighting area) — max hit-rate, min wasted compute.
 FOCUS = {
@@ -63,21 +69,29 @@ SPINE = [
     ((51.5226, -0.1571), 20),    # Marylebone Rd / Baker St
     (KX_CENTRE, 60),             # Euston Rd / King's Cross / St Pancras
 ]
-MIN_CYCLE = 60        # --loop: minimum seconds per cycle (don't hot-spin when feeds are down /
-                      # everything 304s; processing time dominates in steady state anyway)
-PROB_TH = 0.83        # digest bar — RECALIBRATED 2026-06-09 for the tight-crop + re-seeded centroid
-                      # (NEW score scale, incomparable to pre-fix scores): white-car p95 = 0.831
-                      # (export_centroid.py, n=108), so ~5% of white cars pass -> bounded digest volume
-                      # at ~45% synthetic recall (camera-split, reseed_centroid_eval.py).
-NEAR_TH = 0.81        # near-miss archive floor: [NEAR_TH, PROB_TH) candidates are stored SILENTLY
-                      # (status='near' — never emailed, never on sheets) so that once a real Waymo is
-                      # confirmed anywhere, its sub-bar passes at other cameras can be mined as extra
-                      # REAL training views ("train on real images" strategy). Bounded by NEAR_KEEP_DAYS.
+POLL_EVERY = 150      # seconds between full conditional-GET passes over the watchlist. Must stay
+                      # BELOW TfL's minimum refresh (~180s): a cam can then never publish two clips
+                      # between our polls, so ETag polling at this cadence misses NOTHING.
+POLL_THREADS = 12     # concurrent conditional GETs (pure I/O; ~480 cams in ~10s)
+MAX_BACKLOG = 400     # tier-2 (zone) clip queue cap; overflow drops OLDEST zone clips (spine is
+                      # tier-1 and never dropped). Drops are counted + reported — never silent.
+VID_STRIDE = 5        # frame stride for det.track (was 3): 25fps clip -> 5 sampled fps; a passing
+                      # car is in view 2-4s = 10-20 samples, plenty for ByteTrack. 1.67x cheaper.
+PROB_TH = 0.86        # digest ELIGIBILITY bar (v0.5.1): candidates >= this are queued for sending.
+                      # Sending is now BUDGETED, not threshold-driven — each day the user receives the
+                      # top DAY_CAP by score; the effective cut floats with volume. 0.86 ~ synthetic-
+                      # positive p80, so the eligibility pool keeps most plausible Waymo views in play.
+DAY_CAP = 1600        # max candidate cells emailed per day (8 pages of PAGE_SIZE) — the user's review
+                      # budget IS the constant; the score cut adapts. Unsent overflow is demoted to the
+                      # near archive at end of day (retrievable, minable — never silently destroyed).
+NEAR_TH = 0.80        # archive floor (v0.5.1, was 0.86): EVERYTHING >= 0.80 is stored (status='near',
+                      # never emailed). Synthetic Waymo proxy p10=0.754/p50=0.836 — the archive must
+                      # hold the score band real Waymos are PREDICTED to occupy, so bars can be re-cut
+                      # retroactively and a confirm's other passes mined. Bounded by NEAR_KEEP_DAYS.
 NEAR_KEEP_DAYS = 7    # near rows + their jpgs are pruned after this many days (mine promptly)
-ALERT_TH = 0.93       # instant-alert bar — RAISED 0.88->0.93 (2026-06-09 evening): live white-car
-                      # tails are fatter than the 108-sample synthetic calibration suggested (5 FPs
-                      # >=0.886 within 90 min of deploy, max 0.902, all human-rejected). The digest is
-                      # the primary channel until the scorer is re-seeded on elevated-angle/real domes.
+ALERT_TH = 0.93       # instant-alert bar — above the observed live FP ceiling (24h max 0.921,
+                      # 2026-06-10; n=1,188 live white-car scores). The digest is the primary
+                      # channel until the scorer is re-seeded on real domes.
 BATCH_SIZE = 5        # (legacy count-trigger; superseded by PAGE_SIZE paging below)
 PAGE_SIZE = 200       # digest paging: the moment this many candidates pile up during the day, email
                       # that full page right away and reset; the remainder (< PAGE_SIZE) goes at
@@ -100,8 +114,13 @@ def ensure_schema(con):
       score REAL, crop_path TEXT, frame_path TEXT, status TEXT DEFAULT 'new', emb TEXT, bbox TEXT,
       alerted INTEGER DEFAULT 0);
     CREATE INDEX IF NOT EXISTS idx_cand_status ON candidates(status);
-    CREATE INDEX IF NOT EXISTS idx_cand_cam ON candidates(camera_id);""")
-    for col in ("emb TEXT", "bbox TEXT", "alerted INTEGER DEFAULT 0"):   # for pre-existing tables
+    CREATE INDEX IF NOT EXISTS idx_cand_cam ON candidates(camera_id);
+    CREATE TABLE IF NOT EXISTS cycles(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT, secs REAL,
+      polled INTEGER, fresh INTEGER, processed INTEGER, dropped INTEGER,
+      spine_fresh INTEGER, spine_processed INTEGER, new_cands INTEGER, near_cands INTEGER);""")
+    for col in ("emb TEXT", "bbox TEXT", "alerted INTEGER DEFAULT 0",
+                "sent INTEGER DEFAULT 0"):   # for pre-existing tables
         try:
             con.execute(f"ALTER TABLE candidates ADD COLUMN {col}")
         except Exception:
@@ -170,6 +189,81 @@ def kv_set(con, key, value):
     con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES(?,?)", (key, value))
 
 
+def ts():
+    return datetime.now(ZoneInfo("Europe/London")).strftime("%H:%M:%S")
+
+
+def detector():
+    """Live YOLO detector — prefers the committed OpenVINO INT8 export (calibrated on our own
+    JamCam frames; 2.7x vs torch with VID_STRIDE=5 on the 2-vCPU VPS, measured 2026-06-10)."""
+    from ultralytics import YOLO
+    p = os.path.join(HERE, "models", "yolo11n_int8_openvino_model")
+    return YOLO(p if os.path.isdir(p) else "yolo11n.pt", task="detect")
+
+
+def zone_watchlist(cams):
+    """The v0.5 watch set. Tier-1 = depot->KX spine (processed first, never dropped);
+    tier-2 = every other available cam inside the Waymo operating-zone box (~480 total).
+    Returns (tier1_ids, tier2_ids, {short_id: cam})."""
+    avail = [c for c in cams if dp.props(c).get("available") == "true"
+             and dp.props(c).get("videoUrl") and c.get("lat")]
+    idx = {c["id"].replace("JamCams_", ""): c for c in avail}
+    t1 = spine_focus(cams) & set(idx)
+    t2 = {sid for sid, c in idx.items() if in_zone(c)} - t1
+    return t1, t2, idx
+
+
+def poll_cams(con, cam_index, ids):
+    """One conditional-GET pass over the watchlist (threaded, pure HTTP — workers never touch
+    the DB). Returns [(short_id, clip_bytes_or_None, etag)]; None body = 304/error."""
+    etags = {sid: kv_get(con, f"etag:{sid}") for sid in ids}
+
+    def one(sid):
+        try:
+            st, body, hdrs = dp.http_get(dp.props(cam_index[sid]).get("videoUrl"),
+                                         etag=etags.get(sid), retries=1)
+            et = (hdrs.get("ETag") or "").strip() if hdrs else ""
+            return sid, (None if st == 304 else body), et
+        except Exception:
+            return sid, None, ""
+
+    with ThreadPoolExecutor(POLL_THREADS) as ex:
+        return list(ex.map(one, ids))
+
+
+def note_refresh(con, sid, now_t):
+    """Learn each camera's clip-refresh period (EMA over observed ETag-change intervals) —
+    powers the 'est. published clips' coverage denominator in the daily digest."""
+    last = kv_get(con, f"chg:{sid}")
+    if last:
+        iv = now_t - float(last)
+        if 60 <= iv <= 1800:
+            prev = kv_get(con, f"per:{sid}")
+            per = 0.7 * float(prev) + 0.3 * iv if prev else iv
+            kv_set(con, f"per:{sid}", str(round(per, 1)))
+    kv_set(con, f"chg:{sid}", str(round(now_t, 1)))
+
+
+def coverage_line(con, hours=24):
+    """Honest coverage statement for the digest: clips processed vs fetched vs an estimate of
+    what TfL actually published (sum of window/learned-period over watched cams)."""
+    cut = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - hours * 3600))
+    fresh, proc, drop = con.execute(
+        "SELECT COALESCE(SUM(fresh),0), COALESCE(SUM(processed),0), COALESCE(SUM(dropped),0) "
+        "FROM cycles WHERE started_at >= ?", (cut,)).fetchone()
+    if not fresh:
+        return ""
+    exp = 0.0
+    for (v,) in con.execute("SELECT value FROM kv WHERE key LIKE 'per:%'"):
+        try:
+            exp += hours * 3600 / max(120.0, float(v))
+        except Exception:
+            pass
+    est = f", ~{min(100.0, proc / exp * 100):.0f}% of est. {int(exp):,} published" if exp else ""
+    return (f"Coverage last {hours}h: {proc:,}/{fresh:,} fetched clips processed"
+            f" ({drop} dropped){est}.")
+
+
 def is_white(car):
     """Stage-1 cheap colour filter: Waymos are (predominantly) white. Lenient on brightness — also
     passes silver/off-white and white-in-shadow so we don't miss a Waymo; white vans/cabs pass too
@@ -198,11 +292,112 @@ def iou(a, b):
     return inter / ua if ua > 0 else 0.0
 
 
+def scan_clip(det, path):
+    """Within-clip ByteTrack pass: collapse each moving car (many frames) into ONE track and
+    keep its biggest (closest) white, resolvable view. Returns {track_id: (area, frame, bbox)}."""
+    best = {}
+    for r in det.track(path, persist=False, tracker="bytetrack.yaml", classes=[2],
+                       conf=0.30, imgsz=352, vid_stride=VID_STRIDE, stream=True, verbose=False):
+        fr = r.orig_img
+        if r.boxes is None or r.boxes.id is None:
+            continue
+        for b in r.boxes:
+            x1, y1, x2, y2 = map(int, b.xyxy[0].tolist())
+            if (y2 - y1) < MIN_H:
+                continue
+            if not is_white(fr[max(0, y1):y2, max(0, x1):x2]):
+                continue
+            tid = int(b.id[0])
+            area = (x2 - x1) * (y2 - y1)
+            if tid not in best or area > best[tid][0]:
+                best[tid] = (area, fr.copy(), (x1, y1, x2, y2))
+    return best
+
+
+def ingest(con, embed, cen, cam_id, best):
+    """Score each track's best view, dedup against this camera's recent candidates, and
+    insert/update rows + jpgs. Returns (new, near) counts. Caller commits."""
+    short = cam_id.replace("JamCams_", "")
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    stamp = now.replace("-", "").replace(":", "").replace("T", "").replace("Z", "")
+    found, near = 0, 0
+    # recent entries at this camera, for cross-sweep dedup (parked cars = same bbox spot)
+    recent = [[rid, rsc, np.array(json.loads(remb)), st, (json.loads(bb) if bb else None)]
+              for rid, rsc, remb, st, bb in con.execute(
+                  "SELECT id,score,emb,status,bbox FROM candidates WHERE camera_id=? "
+                  "ORDER BY id DESC LIMIT 400", (cam_id,)).fetchall() if remb]
+    for tid, (area, frm, bbox) in best.items():
+        x1, y1, x2, y2 = bbox
+        roof = roof_crop(frm, bbox)
+        if roof.size == 0 or min(roof.shape[:2]) < 6:
+            continue
+        e = embed(jamcam(roof))
+        s = float(e @ cen)
+        if s < NEAR_TH:
+            continue  # below even the near-miss band; discard
+        status = "new" if s >= PROB_TH else "near"        # near = silent archive
+        hd = int((y2 - y1) * 0.12)
+        car = frm[max(0, y1 - hd):y2, max(0, x1):min(frm.shape[1], x2)]
+        # same vehicle if same parked spot (bbox IoU) OR near-identical appearance
+        m = next((c for c in recent if (c[4] and iou(bbox, c[4]) > 0.45)
+                  or float(e @ c[2]) >= DEDUP_TH), None)
+        cp = os.path.join(CAND_DIR, f"{short}_t{tid}_{stamp}.jpg")
+        fpth = os.path.join(CAND_DIR, f"{short}_t{tid}_{stamp}_frame.jpg")
+        if m:
+            promote = m[3] == "near" and status == "new"  # near vehicle crossed the digest bar
+            if m[3] in ("new", "near") and (s > m[1] + 0.01 or promote):  # better view -> update
+                old = con.execute("SELECT crop_path,frame_path FROM candidates WHERE id=?", (m[0],)).fetchone()
+                cv2.imwrite(cp, car); cv2.imwrite(fpth, frm)
+                con.execute("UPDATE candidates SET score=?,crop_path=?,frame_path=?,emb=?,bbox=?,"
+                            "captured_at=?,status=? WHERE id=?",
+                            (s, cp, fpth, json.dumps([round(float(x), 4) for x in e]),
+                             json.dumps(list(bbox)), now, "new" if promote else m[3], m[0]))
+                for f in (old or []):
+                    if f and f not in (cp, fpth) and os.path.exists(f):
+                        try:
+                            os.remove(f)
+                        except Exception:
+                            pass
+                m[1], m[2], m[4] = s, e, list(bbox)
+                if promote:
+                    m[3] = "new"
+                    found += 1
+            continue                                      # same vehicle -> no new row
+        cv2.imwrite(cp, car); cv2.imwrite(fpth, frm)
+        cur = con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb,bbox,status)"
+                          " VALUES(?,?,?,?,?,?,?,?)", (cam_id, now, s, cp, fpth,
+                          json.dumps([round(float(x), 4) for x in e]), json.dumps(list(bbox)), status))
+        recent.insert(0, [cur.lastrowid, s, e, status, list(bbox)])
+        if status == "new":
+            found += 1
+        else:
+            near += 1
+    return found, near
+
+
+def retention(con):
+    """Prune stale candidate rows AND their jpgs (files were previously orphaned forever)."""
+    for status_, days in (("new", 7), ("near", NEAR_KEEP_DAYS)):
+        cut = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - days * 86400))
+        stale = con.execute("SELECT crop_path,frame_path FROM candidates WHERE captured_at < ? "
+                            "AND status=?", (cut, status_)).fetchall()
+        for row in stale:
+            for f in row:
+                if f and os.path.exists(f):
+                    try:
+                        os.remove(f)
+                    except Exception:
+                        pass
+        con.execute("DELETE FROM candidates WHERE captured_at < ? AND status=?", (cut, status_))
+    con.commit()
+
+
 def sweep(con, focus=None, target=None):
-    from ultralytics import YOLO
+    """One serial pass (one-shot modes: default, --wide/--pr, --collect). The 24/7 path is
+    watch_loop(), which shares scan_clip/ingest but polls threaded and queues by tier."""
     embed = build_embedder()
     cen = load_centroid()
-    det = YOLO("yolo11n.pt")
+    det = detector()
     cams = dp.fetch_camera_list()
     dp.upsert_cameras(con, cams)
     foc = focus or FOCUS
@@ -222,101 +417,20 @@ def sweep(con, focus=None, target=None):
             continue            # clip unchanged since last visit — zero download, zero decode
         fresh += 1
         open(tmp, "wb").write(body)
-        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        short = short_id
-        stamp = now.replace("-", "").replace(":", "").replace("T", "").replace("Z", "")
-        # within-clip ByteTrack: collapse each moving car (many frames) into ONE track;
-        # keep its biggest (closest) view as the representative.
-        best = {}  # track id -> (bbox_area, frame, bbox)
         try:
-            for r in det.track(tmp, persist=False, tracker="bytetrack.yaml", classes=[2],
-                               conf=0.30, imgsz=352, vid_stride=3, stream=True, verbose=False):
-                fr = r.orig_img
-                if r.boxes is None or r.boxes.id is None:
-                    continue
-                for b in r.boxes:
-                    x1, y1, x2, y2 = map(int, b.xyxy[0].tolist())
-                    if (y2 - y1) < MIN_H:
-                        continue
-                    if not is_white(fr[max(0, y1):y2, max(0, x1):x2]):
-                        continue
-                    tid = int(b.id[0])
-                    area = (x2 - x1) * (y2 - y1)
-                    if tid not in best or area > best[tid][0]:
-                        best[tid] = (area, fr.copy(), (x1, y1, x2, y2))
+            best = scan_clip(det, tmp)
         except Exception:
             continue
-        # recent entries at this camera, for cross-sweep dedup (parked cars = same bbox spot)
-        recent = [[rid, rsc, np.array(json.loads(remb)), st, (json.loads(bb) if bb else None)]
-                  for rid, rsc, remb, st, bb in con.execute(
-                      "SELECT id,score,emb,status,bbox FROM candidates WHERE camera_id=? "
-                      "ORDER BY id DESC LIMIT 400", (cam["id"],)).fetchall() if remb]
-        for tid, (area, frm, bbox) in best.items():
-            x1, y1, x2, y2 = bbox
-            roof = roof_crop(frm, bbox)
-            if roof.size == 0 or min(roof.shape[:2]) < 6:
-                continue
-            e = embed(jamcam(roof))
-            s = float(e @ cen)
-            if s < NEAR_TH:
-                continue  # below even the near-miss band; discard
-            status = "new" if s >= PROB_TH else "near"        # near = silent archive
-            hd = int((y2 - y1) * 0.12)
-            car = frm[max(0, y1 - hd):y2, max(0, x1):min(frm.shape[1], x2)]
-            # same vehicle if same parked spot (bbox IoU) OR near-identical appearance
-            m = next((c for c in recent if (c[4] and iou(bbox, c[4]) > 0.45)
-                      or float(e @ c[2]) >= DEDUP_TH), None)
-            cp = os.path.join(CAND_DIR, f"{short}_t{tid}_{stamp}.jpg")
-            fpth = os.path.join(CAND_DIR, f"{short}_t{tid}_{stamp}_frame.jpg")
-            if m:
-                promote = m[3] == "near" and status == "new"  # near vehicle crossed the digest bar
-                if m[3] in ("new", "near") and (s > m[1] + 0.01 or promote):  # better view -> update
-                    old = con.execute("SELECT crop_path,frame_path FROM candidates WHERE id=?", (m[0],)).fetchone()
-                    cv2.imwrite(cp, car); cv2.imwrite(fpth, frm)
-                    con.execute("UPDATE candidates SET score=?,crop_path=?,frame_path=?,emb=?,bbox=?,"
-                                "captured_at=?,status=? WHERE id=?",
-                                (s, cp, fpth, json.dumps([round(float(x), 4) for x in e]),
-                                 json.dumps(list(bbox)), now, "new" if promote else m[3], m[0]))
-                    for f in (old or []):
-                        if f and f not in (cp, fpth) and os.path.exists(f):
-                            try:
-                                os.remove(f)
-                            except Exception:
-                                pass
-                    m[1], m[2], m[4] = s, e, list(bbox)
-                    if promote:
-                        m[3] = "new"
-                        found += 1
-                continue                                      # same vehicle -> no new row
-            cv2.imwrite(cp, car); cv2.imwrite(fpth, frm)
-            cur = con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb,bbox,status)"
-                              " VALUES(?,?,?,?,?,?,?,?)", (cam["id"], now, s, cp, fpth,
-                              json.dumps([round(float(x), 4) for x in e]), json.dumps(list(bbox)), status))
-            recent.insert(0, [cur.lastrowid, s, e, status, list(bbox)])
-            if status == "new":
-                found += 1
-            else:
-                near += 1
+        f, n = ingest(con, embed, cen, cam["id"], best)
+        found += f
+        near += n
         et = (hdrs.get("ETag") or "").strip() if hdrs else ""
         if et:
             kv_set(con, f"etag:{short_id}", et)
         con.commit()        # per-camera commit: keep WAL write transactions short
         if target and found >= target:
             break
-    # retention: prune stale rows AND their jpgs (files were previously orphaned forever)
-    for status_, days in (("new", 7), ("near", NEAR_KEEP_DAYS)):
-        cut = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - days * 86400))
-        stale = con.execute("SELECT crop_path,frame_path FROM candidates WHERE captured_at < ? "
-                            "AND status=?", (cut, status_)).fetchall()
-        for row in stale:
-            for f in row:
-                if f and os.path.exists(f):
-                    try:
-                        os.remove(f)
-                    except Exception:
-                        pass
-        con.execute("DELETE FROM candidates WHERE captured_at < ? AND status=?", (cut, status_))
-    con.commit()
+    retention(con)
     print(f"cams checked: {len(chosen)} | fresh clips: {fresh} | vehicles: +{found} new, +{near} near",
           flush=True)
 
@@ -367,58 +481,69 @@ def confirm(con, ids, status):
 
 
 def pending_count(con):
-    """How many high-prob candidates are waiting to be sent (since the last digest/page)."""
-    row = con.execute("SELECT value FROM kv WHERE key='last_digest_id'").fetchone()
-    last_id = int(row[0]) if row else 0
-    return con.execute("SELECT COUNT(*) FROM candidates WHERE id>? AND status='new'",
-                       (last_id,)).fetchone()[0]
+    """How many eligible candidates (status='new') are waiting to be sent."""
+    return con.execute("SELECT COUNT(*) FROM candidates WHERE status='new' "
+                       "AND COALESCE(sent,0)=0").fetchone()[0]
+
+
+def day_budget(con):
+    """Cells still sendable today under DAY_CAP (the user's review budget IS the constant;
+    the effective score cut floats with volume)."""
+    today = datetime.now(ZoneInfo("Europe/London")).strftime("%Y-%m-%d")
+    used = int(kv_get(con, f"sent:{today}") or 0)
+    return max(0, DAY_CAP - used), today, used
 
 
 def send_digest(con, limit=None, reason="digest"):
-    """Email the pending high-prob candidates (id > last_digest_id, status='new'), OLDEST first.
-    If `limit` is given, send only the oldest `limit` of them (one page) and advance the high-water
-    mark past EXACTLY those — so any overflow rolls into the next send and is NEVER lost. The sheet
-    is rendered best-score-first for easier eyeballing. Returns the number sent (0 if none pending)."""
-    row = con.execute("SELECT value FROM kv WHERE key='last_digest_id'").fetchone()
-    last_id = int(row[0]) if row else 0
-    q = "SELECT id,score,crop_path FROM candidates WHERE id>? AND status='new' ORDER BY id ASC"
-    params = [last_id]
-    if limit:
-        q += " LIMIT ?"
-        params.append(int(limit))
-    rows = con.execute(q, params).fetchall()
+    """Email the HIGHEST-SCORING unsent candidates (status='new', sent=0), best first, capped by
+    `limit` and the day's remaining DAY_CAP budget (v0.5.1: score-ranked budgeted sending — the
+    weak scorer means a fixed threshold either floods the user or silently bins Waymos; ranking
+    against a fixed human budget maximises P(a real Waymo reaches human eyes) per review-minute).
+    Rows are flagged sent=1 ONLY on a successful send, so a transient email failure just retries.
+    Returns the number sent."""
+    budget, today, used = day_budget(con)
+    n = min(int(limit), budget) if limit else budget
+    if n <= 0:
+        return 0
+    rows = con.execute("SELECT id,score,crop_path FROM candidates WHERE status='new' AND "
+                       "COALESCE(sent,0)=0 ORDER BY score DESC LIMIT ?", (n,)).fetchall()
     if not rows:
         return 0
-    new_high = max(r[0] for r in rows)                 # advance ONLY past what we actually send
-    sheet_rows = sorted(rows, key=lambda r: -r[1])     # display most-dome-like first
     sheet = os.path.join(BASE, "data/candidates/digest_sheet.jpg")
-    shown = _build_sheet(sheet_rows, sheet, cap=len(sheet_rows))
-    con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_id',?)", (str(new_high),))
-    con.commit()
-    remaining = con.execute("SELECT COUNT(*) FROM candidates WHERE id>? AND status='new'",
-                            (new_high,)).fetchone()[0]
-    note = f" — {remaining} more pending today" if remaining else ""
-    subj = f"WaymoWatch: {len(rows)} possible Waymo(s) — KX + Park Royal"
+    shown = _build_sheet(rows, sheet, cap=len(rows))
+    remaining = pending_count(con) - len(rows)
+    note = f" — {remaining} more pending (lower-scored)" if remaining > 0 else ""
+    subj = f"WaymoWatch: {len(rows)} possible Waymo(s) — top-scored, Waymo zone"
     if reason == "page":
         subj += f" (page; {remaining} more today)"
     elif reason == "end-of-day":
         subj += " (end of day)"
-    html = (f"<p><b>WaymoWatch — King's Cross + Park Royal</b>: {len(rows)} <b>high-probability</b> "
-            f"Waymo candidate(s){note}.</p><p>Reply with the <b>#</b> of any that is a real Waymo "
-            f"(white Jaguar I-PACE with a dark roof dome).</p>")
+    cov = coverage_line(con)
+    html = (f"<p><b>WaymoWatch — Waymo zone (spine + ~480 cams)</b>: the {len(rows)} "
+            f"<b>highest-scoring</b> candidate(s){note}, best first.</p>"
+            f"<p>Reply with the <b>#</b> of any that is a real Waymo "
+            f"(white Jaguar I-PACE with a dark roof dome).</p>"
+            + (f"<p style='color:#888'>{cov}</p>" if cov else ""))
     sys.path.insert(0, HERE)
     from email_alert import send_email
-    send_email(subj, html, attachments=[sheet] if shown else None)
-    print(f"digest emailed: {len(rows)} ({reason}); {remaining} still pending")
+    if not send_email(subj, html, attachments=[sheet] if shown else None):
+        print(f"digest send failed — will retry next tick ({len(rows)} pending)")
+        return 0
+    con.execute("UPDATE candidates SET sent=1 WHERE id IN (%s)"
+                % ",".join(str(int(r[0])) for r in rows))
+    kv_set(con, f"sent:{today}", str(used + len(rows)))
+    con.commit()
+    print(f"digest emailed: {len(rows)} ({reason}); {max(0, remaining)} still pending; "
+          f"day budget {used + len(rows)}/{DAY_CAP}")
     return len(rows)
 
 
 def emit_pages(con):
     """Send a full PAGE_SIZE email each time that many candidates have piled up during the day,
-    'right away' (on the sweep that crosses the threshold). Loops in case a backlog spans several
-    pages; each page advances the high-water mark past exactly its rows, so nothing is lost."""
+    'right away' (on the cycle that crosses the threshold), best-scored first, while the day's
+    budget lasts. Loops in case a backlog spans several pages."""
     total = 0
-    while pending_count(con) >= PAGE_SIZE:
+    while pending_count(con) >= PAGE_SIZE and day_budget(con)[0] > 0:
         n = send_digest(con, limit=PAGE_SIZE, reason="page")
         if n == 0:
             break
@@ -470,30 +595,122 @@ def maybe_send_daily_digest(con):
     if row and row[0] == today:
         return
     emit_pages(con)                          # drain any full pages first
-    send_digest(con, reason="end-of-day")    # then the remainder (sends nothing if 0 pending)
+    send_digest(con, reason="end-of-day")    # then the remainder, up to the day's budget
+    # Overflow the budget couldn't cover is DEMOTED to the near archive (kept NEAR_KEEP_DAYS,
+    # minable, retrievable if bars are re-cut) so each day's ranking starts fresh — except
+    # anything at instant-alert level, which must stay eligible until actually sent.
+    over = con.execute("UPDATE candidates SET status='near' WHERE status='new' AND "
+                       "COALESCE(sent,0)=0 AND score < ?", (ALERT_TH,)).rowcount
+    if over:
+        print(f"end of day: {over} unsent candidates below the budget cut -> near archive")
     con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_date',?)", (today,))
     con.commit()
 
 
 def watch_loop(con):
-    """Continuous watcher (the cron entrypoint since 2026-06-09): each cycle conditional-GETs
-    every SPINE camera and decodes ONLY fresh clips (ETag 304 = skip, ~zero cost), so every
-    published clip on the depot->city corridor is processed — no refresh ever missed, 24/7.
-    Self-pacing: when processing falls behind, the cycle simply lengthens (newest clip per
-    camera still wins); MIN_CYCLE only prevents hot-spinning when the feed is down."""
-    print(f"watch loop starting: spine corridor, 24/7, min cycle {MIN_CYCLE}s", flush=True)
+    """Continuous ZONE watcher (v0.5, the cron entrypoint): every POLL_EVERY seconds one
+    threaded conditional-GET pass over ALL watch cams — tier-1 spine + tier-2 Waymo zone,
+    ~480 cams. POLL_EVERY < TfL's minimum refresh, so no published clip is ever skipped at
+    the polling layer. Fresh clips queue per tier: spine processes first and is never
+    dropped; the zone queue drops OLDEST on backlog (counted, never silent). Single process,
+    single DB writer. Telemetry per poll-cycle -> `cycles` table + timestamped log line;
+    a heartbeat file lets run_watch.sh kill a hung loop (cron restarts within 6 min)."""
+    det, embed, cen = detector(), build_embedder(), load_centroid()
+    os.makedirs(CAND_DIR, exist_ok=True)
+    hb = os.path.join(CAND_DIR, "heartbeat")
+    tmp = os.path.join(CAND_DIR, "_tmp.mp4")
+    tier1, tier2, cam_index, t_cams = set(), set(), {}, 0.0
+    q1, q2 = [], []                       # (t_fetch, short_id, clip_bytes) — FIFO per tier
+    started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    polled = fresh1 = fresh2 = proc1 = proc2 = dropped = newc = nearc = 0
+    cyc_t0, last_poll = time.time(), 0.0
+    print(f"[{ts()}] watch loop v0.5: spine + zone, poll every {POLL_EVERY}s, 24/7", flush=True)
     while True:
-        t0 = time.time()
-        try:
-            if in_collection_window():
-                sweep(con, focus=spine_focus(dp.fetch_camera_list()))
-                review_sheet(con)
-                emit_pages(con)         # page out a full digest the moment 200 pile up
-            maybe_send_instant_alerts(con)
-            maybe_send_daily_digest(con)
-        except Exception as e:
-            print(f"cycle error: {e}", flush=True)
-        time.sleep(max(0, MIN_CYCLE - (time.time() - t0)))
+        open(hb, "w").write(str(time.time()))
+        now = time.time()
+        if now - t_cams > 3600 or not cam_index:       # hourly watchlist refresh
+            try:
+                cams = dp.fetch_camera_list()
+                dp.upsert_cameras(con, cams)
+                con.commit()
+                tier1, tier2, cam_index = zone_watchlist(cams)
+                t_cams = now
+                print(f"[{ts()}] watchlist: {len(tier1)} spine + {len(tier2)} zone cams", flush=True)
+            except Exception as e:
+                print(f"[{ts()}] camera list refresh failed: {e}", flush=True)
+                time.sleep(30)
+                continue
+        if not in_collection_window():
+            try:
+                maybe_send_instant_alerts(con)
+                maybe_send_daily_digest(con)
+            except Exception as e:
+                print(f"[{ts()}] send error: {e}", flush=True)
+            time.sleep(60)
+            continue
+        if now - last_poll >= POLL_EVERY:
+            if last_poll:                              # close + report the finished cycle
+                try:
+                    con.execute("INSERT INTO cycles(started_at,secs,polled,fresh,processed,dropped,"
+                                "spine_fresh,spine_processed,new_cands,near_cands) "
+                                "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                                (started, round(now - cyc_t0, 1), polled, fresh1 + fresh2,
+                                 proc1 + proc2, dropped, fresh1, proc1, newc, nearc))
+                    con.commit()
+                    print(f"[{ts()}] cycle: {polled} polled | +{fresh1 + fresh2} fresh (spine {fresh1})"
+                          f" | processed {proc1 + proc2} | backlog {len(q1) + len(q2)}"
+                          f" | dropped {dropped} | +{newc} new +{nearc} near"
+                          f" | {now - cyc_t0:.0f}s", flush=True)
+                    retention(con)
+                    review_sheet(con)
+                    emit_pages(con)        # page out a full digest the moment PAGE_SIZE pile up
+                    maybe_send_instant_alerts(con)
+                    maybe_send_daily_digest(con)
+                except Exception as e:
+                    print(f"[{ts()}] cycle-close error: {e}", flush=True)
+                started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                polled = fresh1 = fresh2 = proc1 = proc2 = dropped = newc = nearc = 0
+                cyc_t0 = time.time()
+            try:
+                res = poll_cams(con, cam_index, sorted(tier1) + sorted(tier2))
+                polled = len(res)
+                t_poll = time.time()
+                for sid, body, et in res:
+                    if body is None:
+                        continue
+                    if et:
+                        kv_set(con, f"etag:{sid}", et)
+                    note_refresh(con, sid, t_poll)
+                    if sid in tier1:
+                        q1.append((t_poll, sid, body))
+                        fresh1 += 1
+                    else:
+                        q2.append((t_poll, sid, body))
+                        fresh2 += 1
+                con.commit()
+                while len(q2) > MAX_BACKLOG:           # overload: shed OLDEST zone clips
+                    q2.pop(0)
+                    dropped += 1
+            except Exception as e:
+                print(f"[{ts()}] poll error: {e}", flush=True)
+            last_poll = time.time()
+        if q1 or q2:
+            src = q1 if q1 else q2
+            _, sid, body = src.pop(0)
+            try:
+                open(tmp, "wb").write(body)
+                f, n = ingest(con, embed, cen, "JamCams_" + sid, scan_clip(det, tmp))
+                con.commit()
+                newc += f
+                nearc += n
+            except Exception as e:
+                print(f"[{ts()}] clip error {sid}: {e}", flush=True)
+            if src is q1:
+                proc1 += 1
+            else:
+                proc2 += 1
+        else:
+            time.sleep(min(2.0, max(0.1, POLL_EVERY - (time.time() - last_poll))))
 
 
 def main():
@@ -541,7 +758,6 @@ def main():
     elif a.collect:
         # wipe the candidate queue, then collect N distinct white cars from the KX area + email all
         con.execute("DELETE FROM candidates")
-        con.execute("DELETE FROM kv WHERE key='last_digest_id'")
         con.commit()
         for f in glob.glob(os.path.join(CAND_DIR, "*.jpg")):
             try:
@@ -554,8 +770,7 @@ def main():
                            "ORDER BY score DESC").fetchall()
         sheet = os.path.join(BASE, "data/candidates/collect_sheet.jpg")
         shown = _build_sheet(rows, sheet, cap=a.collect + 30)
-        con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_id',?)",
-                    (str(con.execute("SELECT MAX(id) FROM candidates").fetchone()[0] or 0),))
+        con.execute("UPDATE candidates SET sent=1")   # collected set goes out in THIS email
         con.commit()
         sys.path.insert(0, HERE)
         from email_alert import send_email

@@ -1,114 +1,557 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WaymoNet — London base map</title>
-<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@^5/dist/maplibre-gl.css">
-<script src="https://unpkg.com/maplibre-gl@^5/dist/maplibre-gl.js"></script>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WaymoNet · London</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Hammersmith+One&display=swap" rel="stylesheet" />
+<link href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css" rel="stylesheet" />
 <style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  html,body,#map{height:100%;width:100%;background:#e8e6e1}
-  body{font-family:Consolas,'Courier New',monospace;overflow:hidden}
-  .ui{position:absolute;top:12px;left:12px;z-index:10;display:flex;gap:6px}
-  .ui button{background:rgba(255,255,255,.92);color:#3a4046;border:1px solid #c9c4ba;
-    border-radius:6px;padding:8px 13px;font-family:inherit;font-size:11px;cursor:pointer;
-    box-shadow:0 1px 3px rgba(0,0,0,.12)}
-  .ui button.on{color:#fff;background:#2f6fed;border-color:#2f6fed;font-weight:bold}
-  #err{display:none;position:absolute;top:60px;left:12px;right:12px;z-index:20;
-    background:#fde8e8;color:#8a1f2d;border:1px solid #e3a5a5;border-radius:6px;
-    padding:10px 14px;font-size:11px;white-space:pre-wrap}
+  :root {
+    --paper: #FBFAF7;
+    --ink: #16161F;
+    --blue: #000F9F;     /* corporate line blue */
+    --red: #E32017;      /* spine */
+    --picc: #003688;     /* westway */
+    --district: #00782A; /* south circuit */
+    --grey: #6E6E73;
+    --hairline: #D9D7D0;
+    --display: "Hammersmith One", "Gill Sans", sans-serif;
+    --body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: var(--body);
+    color: var(--ink);
+    background: var(--paper);
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  #map { position: absolute; inset: 0; }
+  .maplibregl-canvas:focus-visible { outline: 3px solid var(--red); }
+
+  /* ---------- floating view toggle ---------- */
+  .float-ctl {
+    position: absolute;
+    top: 14px; left: 14px;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .ctl-btn {
+    appearance: none;
+    width: 48px; height: 44px;
+    background: #FFFFFF;
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    font-family: var(--display);
+    font-size: 14px;
+    letter-spacing: 0.06em;
+    color: var(--blue);
+    cursor: pointer;
+  }
+  .ctl-btn:hover:not(.active) { background: #F4F3EE; }
+  .ctl-btn.active {
+    background: var(--blue);
+    color: #fff;
+    border-color: var(--blue);
+  }
+  .ctl-btn:focus-visible { outline: 3px solid var(--red); outline-offset: 2px; }
+
+  /* ---------- key (legend) ---------- */
+  .key {
+    position: absolute;
+    left: 14px; bottom: 26px;
+    z-index: 5;
+    width: 252px;
+    background: #FFFFFF;
+    border: 1px solid var(--hairline);
+    border-top: 4px solid var(--blue);
+    border-radius: 6px;
+    box-shadow: 0 4px 18px rgba(22, 22, 31, 0.10);
+    padding: 12px 14px 10px;
+  }
+  .key h2 {
+    margin: 0 0 8px;
+    font-family: var(--display);
+    font-size: 14px;
+    letter-spacing: 0.08em;
+    color: var(--blue);
+    font-weight: 400;
+  }
+  .key-row {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 5px 2px;
+    font: 13px var(--body);
+    color: var(--ink);
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .key-row:hover { background: #F4F3EE; }
+  .key-row:focus-visible { outline: 2px solid var(--red); }
+  .key-row.off { opacity: 0.35; }
+  .key-bar { width: 30px; height: 6px; border-radius: 3px; flex: none; }
+  .key-bar.dashed {
+    background: repeating-linear-gradient(90deg, var(--district) 0 7px, transparent 7px 12px);
+  }
+  .key-label { flex: 1; text-align: left; }
+  .key-count { font-size: 12px; color: var(--grey); font-variant-numeric: tabular-nums; }
+  .key-divider { border: 0; border-top: 1px solid var(--hairline); margin: 8px 0; }
+  .key-ringrow { display: flex; align-items: center; gap: 10px; padding: 4px 2px; font-size: 13px; }
+  .ring {
+    width: 13px; height: 13px;
+    border-radius: 50%;
+    background: #fff;
+    flex: none;
+    margin-left: 8px;
+  }
+  .ring-hour  { border: 3px solid var(--red); }
+  .ring-today { border: 3px solid var(--blue); }
+  .ring-week  { border: 3px solid #9DA2A6; }
+  .key-foot {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--hairline);
+    font-size: 11px;
+    color: var(--grey);
+    letter-spacing: 0.02em;
+  }
+
+  /* ---------- popups ---------- */
+  .maplibregl-popup-content {
+    font-family: var(--body);
+    border-radius: 8px;
+    border-top: 4px solid var(--blue);
+    padding: 10px 14px 10px;
+    box-shadow: 0 4px 18px rgba(22, 22, 31, 0.18);
+    min-width: 168px;
+  }
+  .pop-title {
+    font-family: var(--display);
+    font-size: 14px;
+    letter-spacing: 0.05em;
+    color: var(--blue);
+    margin: 0 14px 3px 0;
+  }
+  .pop-line { font-size: 12.5px; color: var(--ink); margin: 1px 0; }
+  .pop-chip {
+    display: inline-block;
+    margin-top: 6px;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    color: #fff;
+    padding: 2px 9px;
+    border-radius: 999px;
+  }
+
+  @media (max-width: 560px) {
+    .key { left: 10px; right: 10px; bottom: 18px; width: auto; }
+  }
 </style>
 </head>
 <body>
-<div id="map"></div>
-<div class="ui">
-  <button id="b3">3D</button>
-  <button id="b2" class="on">2D</button>
+
+<div id="map" role="application" aria-label="Map of Waymo sightings in London"></div>
+
+<div class="float-ctl" role="group" aria-label="Map view">
+  <button id="btn-2d" class="ctl-btn active" aria-pressed="true">2D</button>
+  <button id="btn-3d" class="ctl-btn" aria-pressed="false">3D</button>
 </div>
-<div id="err"></div>
+
+<aside class="key" aria-label="Map key">
+  <h2>KEY</h2>
+  <button class="key-row" data-line="spine">
+    <span class="key-bar" style="background:var(--red)"></span>
+    <span class="key-label">City spine</span>
+    <span class="key-count">41/wk</span>
+  </button>
+  <button class="key-row" data-line="westway">
+    <span class="key-bar" style="background:var(--picc)"></span>
+    <span class="key-label">Westway corridor</span>
+    <span class="key-count">18/wk</span>
+  </button>
+  <button class="key-row" data-line="south">
+    <span class="key-bar dashed"></span>
+    <span class="key-label">South circuit</span>
+    <span class="key-count">6/wk</span>
+  </button>
+  <hr class="key-divider" />
+  <div class="key-ringrow"><span class="ring ring-hour"></span> Seen in the past hour</div>
+  <div class="key-ringrow"><span class="ring ring-today"></span> Seen today</div>
+  <div class="key-ringrow"><span class="ring ring-week"></span> Seen this week</div>
+  <div class="key-foot" id="key-foot">Loading…</div>
+</aside>
+
+<script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
 <script>
 /* ============================================================
-   WaymoNet base map
-   Stack: MapLibre GL JS (BSD) + OpenFreeMap "Liberty" vector
-   style (free, no API key, no rate limits) + OSM building
-   heights rendered as 3D extrusions.
+   Tile persistence: register the service worker. Only works
+   over http(s), so it silently no-ops when opened via file://.
+   Serve locally with `python3 -m http.server` to activate it.
    ============================================================ */
-
-const errBox=document.getElementById('err');
-const showErr=m=>{errBox.style.display='block';errBox.textContent+=m+'\n'};
-window.addEventListener('error',e=>showErr('JS error: '+e.message));
-
-if(typeof maplibregl==='undefined'){
-  showErr('MapLibre failed to load from unpkg. Check internet connection / firewall.');
-}else{
-
-const map=new maplibregl.Map({
-  container:'map',
-  style:'https://tiles.openfreemap.org/styles/liberty',
-  center:[-0.0855,51.5095],      // City of London
-  zoom:14.6,
-  pitch:0,
-  bearing:0,
-  antialias:true
-});
-map.addControl(new maplibregl.NavigationControl({visualizePitch:true}),'top-right');
-map.on('error',e=>{if(e&&e.error)showErr('Map error: '+e.error.message)});
-
-let mode3d=false;
-
-/* runs on initial load AND any future setStyle(), so the 3D
-   building layer always survives style changes */
-map.on('style.load',()=>{
-  const style=map.getStyle();
-  const srcId=Object.keys(style.sources).find(k=>style.sources[k].type==='vector');
-  if(!srcId){showErr('No vector source found in style.');return}
-
-  // hide flat footprints; extrusions replace them
-  style.layers.forEach(l=>{
-    if(l['source-layer']==='building')
-      map.setLayoutProperty(l.id,'visibility','none');
-  });
-
-  // insert below the first symbol layer so labels render on top
-  const firstLabel=style.layers.find(l=>l.type==='symbol');
-  map.addLayer({
-    id:'buildings-3d',
-    type:'fill-extrusion',
-    source:srcId,
-    'source-layer':'building',
-    minzoom:13,
-    layout:{visibility:mode3d?'visible':'none'},
-    paint:{
-      'fill-extrusion-height':['coalesce',['get','render_height'],8],
-      'fill-extrusion-base'  :['coalesce',['get','render_min_height'],0],
-      // warm stone ramp, low -> tall, matched to Liberty's palette
-      'fill-extrusion-color' :['interpolate',['linear'],
-        ['coalesce',['get','render_height'],8],
-        0,'#ded6c8', 40,'#cfc4b2', 120,'#b5a994', 310,'#998a72'],
-      'fill-extrusion-opacity':0.92
-    }
-  }, firstLabel?firstLabel.id:undefined);
-});
-
-/* ---- 2D / 3D toggle ---- */
-const b3=document.getElementById('b3'),b2=document.getElementById('b2');
-b3.onclick=()=>{mode3d=true;b3.classList.add('on');b2.classList.remove('on');
-  if(map.getLayer('buildings-3d'))map.setLayoutProperty('buildings-3d','visibility','visible');
-  map.easeTo({pitch:58,bearing:-28,duration:1000})};
-b2.onclick=()=>{mode3d=false;b2.classList.add('on');b3.classList.remove('on');
-  if(map.getLayer('buildings-3d'))map.setLayoutProperty('buildings-3d','visibility','none');
-  map.easeTo({pitch:0,bearing:0,duration:1000})};
+if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
+  navigator.serviceWorker.register("./sw.js").catch(() => {});
+}
 
 /* ============================================================
-   NEXT STEP (when ready): live vehicle layer.
-   1) map.addSource('vehicles',{type:'geojson',data:emptyFC})
-   2) add a circle or symbol layer on that source
-   3) on each WebSocket tick:
-        map.getSource('vehicles').setData(latestFC)
-   MapLibre re-renders at 60fps; thousands of points are fine.
+   Demo data. Replace CORRIDORS and SIGHTINGS with fetches to
+   your tracking API; everything downstream is data-driven.
    ============================================================ */
+const CORRIDOR_META = {
+  spine:   { name: "City spine",       color: "#E32017", count: 41, dashed: false },
+  westway: { name: "Westway corridor", color: "#003688", count: 18, dashed: false },
+  south:   { name: "South circuit",    color: "#00782A", count: 6,  dashed: true  }
+};
+
+const CORRIDORS = {
+  type: "FeatureCollection",
+  features: [
+    { type: "Feature", properties: { line: "spine", dashed: false },
+      geometry: { type: "LineString", coordinates: [
+        [-0.1589, 51.5135], [-0.1500, 51.5145], [-0.1419, 51.5152],
+        [-0.1300, 51.5163], [-0.1201, 51.5172], [-0.1090, 51.5174],
+        [-0.0976, 51.5147], [-0.0886, 51.5133]
+      ] } },
+    { type: "Feature", properties: { line: "westway", dashed: false },
+      geometry: { type: "LineString", coordinates: [
+        [-0.2240, 51.5046], [-0.2100, 51.5070], [-0.1963, 51.5092],
+        [-0.1879, 51.5122], [-0.1759, 51.5154], [-0.1668, 51.5202],
+        [-0.1571, 51.5226], [-0.1466, 51.5250], [-0.1338, 51.5282],
+        [-0.1240, 51.5308]
+      ] } },
+    { type: "Feature", properties: { line: "south", dashed: true },
+      geometry: { type: "LineString", coordinates: [
+        [-0.1230, 51.4861], [-0.1215, 51.4935], [-0.1180, 51.4990],
+        [-0.1132, 51.5036], [-0.1030, 51.5045], [-0.0900, 51.5048],
+        [-0.0865, 51.5060], [-0.0859, 51.5101], [-0.0886, 51.5133]
+      ] } }
+  ]
+};
+
+const S = (id, lng, lat, when, area, time) => ({
+  type: "Feature",
+  properties: { id, when, area, time },
+  geometry: { type: "Point", coordinates: [lng, lat] }
+});
+
+const SIGHTINGS = {
+  type: "FeatureCollection",
+  features: [
+    S("WM-204", -0.1419, 51.5150, "hour", "Oxford Circus", "14:32"),
+    S("WM-117", -0.1189, 51.5175, "hour", "Holborn", "14:21"),
+    S("WM-088", -0.1278, 51.5079, "hour", "Trafalgar Square", "14:08"),
+    S("WM-151", -0.1545, 51.5139, "hour", "Marble Arch", "13:58"),
+    S("WM-093", -0.1352, 51.5159, "today", "Soho", "11:42"),
+    S("WM-042", -0.1284, 51.5166, "today", "Bloomsbury", "10:15"),
+    S("WM-204", -0.1052, 51.5160, "today", "City Thameslink", "09:37"),
+    S("WM-076", -0.0933, 51.5140, "today", "Cheapside", "12:05"),
+    S("WM-117", -0.1963, 51.5095, "today", "Notting Hill Gate", "08:54"),
+    S("WM-130", -0.1759, 51.5157, "today", "Paddington", "12:48"),
+    S("WM-093", -0.1466, 51.5252, "today", "Regent's Park", "07:33"),
+    S("WM-042", -0.1132, 51.5039, "today", "Waterloo", "13:11"),
+    S("WM-165", -0.0775, 51.5235, "today", "Shoreditch", "09:02"),
+    S("WM-088", -0.0886, 51.5130, "week", "Bank", "Mon"),
+    S("WM-130", -0.2200, 51.5050, "week", "Shepherd's Bush", "Sun"),
+    S("WM-076", -0.2080, 51.5068, "week", "Holland Park", "Tue"),
+    S("WM-151", -0.1879, 51.5119, "week", "Bayswater", "Mon"),
+    S("WM-165", -0.1571, 51.5229, "week", "Baker Street", "Wed"),
+    S("WM-042", -0.1338, 51.5279, "week", "Euston", "Tue"),
+    S("WM-093", -0.1240, 51.5305, "week", "King's Cross", "Sat"),
+    S("WM-204", -0.1230, 51.4865, "week", "Vauxhall", "Sun"),
+    S("WM-117", -0.1180, 51.4992, "week", "Lambeth", "Mon"),
+    S("WM-088", -0.0900, 51.5050, "week", "Borough", "Tue"),
+    S("WM-130", -0.0865, 51.5057, "week", "London Bridge", "Wed"),
+    S("WM-076", -0.1607, 51.5018, "week", "Knightsbridge", "Sat"),
+    S("WM-151", -0.0976, 51.5144, "week", "St Paul's", "Thu")
+  ]
+};
+
+/* ============================================================
+   Map setup
+   ============================================================ */
+const noMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const map = new maplibregl.Map({
+  container: "map",
+  style: "https://tiles.openfreemap.org/styles/positron",
+  center: [-0.1276, 51.5300],   /* British Library */
+  zoom: 13.2,
+  antialias: true,
+  maxTileCacheSize: 600,
+  attributionControl: { compact: true }
+});
+map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+
+/* Building height: zoom ramp (13 -> 13.5) masks tile pop-in while
+   zooming; multiplier t animates the rise on the 2D/3D toggle. */
+const heightExpr = (t) => ["*", t,
+  ["interpolate", ["linear"], ["zoom"], 13, 0.05, 13.5, 1],
+  ["coalesce", ["get", "render_height"], ["get", "height"], 8]
+];
+
+let rise = 0.001;
+let riseRaf = null;
+function riseTo(target) {
+  if (!map.getLayer("buildings-3d")) return;
+  if (riseRaf) cancelAnimationFrame(riseRaf);
+  const from = rise;
+  const start = performance.now();
+  const dur = noMotion ? 0 : 800;
+  const step = (now) => {
+    const p = dur ? Math.min(1, (now - start) / dur) : 1;
+    const ease = 1 - Math.pow(1 - p, 3);
+    rise = Math.max(0.001, from + (target - from) * ease);
+    map.setPaintProperty("buildings-3d", "fill-extrusion-height", heightExpr(rise));
+    if (p < 1) riseRaf = requestAnimationFrame(step);
+  };
+  riseRaf = requestAnimationFrame(step);
 }
+
+map.on("load", () => {
+  const style = map.getStyle();
+
+  /* --- restyle the basemap toward tube-map paper --- */
+  for (const layer of style.layers) {
+    const id = layer.id;
+    try {
+      if (layer.type === "background") {
+        map.setPaintProperty(id, "background-color", "#FBFAF7");
+      } else if (layer.type === "fill" && /water|ocean|river/i.test(id)) {
+        map.setPaintProperty(id, "fill-color", "#A9D7E8");
+      } else if (layer.type === "line" && /water|river|canal/i.test(id)) {
+        map.setPaintProperty(id, "line-color", "#A9D7E8");
+      } else if (layer.type === "fill" && /green|park|grass|wood|cemet|pitch|garden|nature/i.test(id)) {
+        map.setPaintProperty(id, "fill-color", "#E3EEE0");
+      }
+    } catch (e) { /* layer didn't accept the override; skip */ }
+  }
+
+  const firstSymbol = (style.layers.find(l => l.type === "symbol") || {}).id;
+  const vectorSrc = Object.keys(style.sources).find(k => style.sources[k].type === "vector");
+
+  /* --- 3D buildings: always mounted, faded out in 2D ---
+     The geometry rides in the same vector tiles as the basemap,
+     so keeping the layer visible at opacity 0 means buckets are
+     built ahead of time and the 3D toggle never hitches. */
+  if (vectorSrc) {
+    map.addLayer({
+      id: "buildings-3d",
+      type: "fill-extrusion",
+      source: vectorSrc,
+      "source-layer": "building",
+      minzoom: 13,
+      paint: {
+        "fill-extrusion-color": [
+          "interpolate", ["linear"],
+          ["coalesce", ["get", "render_height"], ["get", "height"], 0],
+          0, "#EAE8E2", 50, "#D8D4CB", 140, "#C4BFB2"
+        ],
+        "fill-extrusion-height": heightExpr(0.001),
+        "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
+        "fill-extrusion-opacity": 0,
+        "fill-extrusion-opacity-transition": { duration: noMotion ? 0 : 500 },
+        "fill-extrusion-vertical-gradient": true
+      }
+    }, firstSymbol);
+  }
+
+  /* --- corridors, tube-line treatment --- */
+  map.addSource("corridors", { type: "geojson", data: CORRIDORS });
+  const lineColor = ["match", ["get", "line"],
+    "spine", CORRIDOR_META.spine.color,
+    "westway", CORRIDOR_META.westway.color,
+    "south", CORRIDOR_META.south.color,
+    "#6E6E73"];
+
+  map.addLayer({
+    id: "corridors-casing", type: "line", source: "corridors",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": "#FFFFFF", "line-width": 9 }
+  }, firstSymbol);
+
+  map.addLayer({
+    id: "corridors-solid", type: "line", source: "corridors",
+    filter: ["!=", ["get", "dashed"], true],
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": lineColor, "line-width": 5 }
+  }, firstSymbol);
+
+  map.addLayer({
+    id: "corridors-dashed", type: "line", source: "corridors",
+    filter: ["==", ["get", "dashed"], true],
+    layout: { "line-join": "round" },
+    paint: { "line-color": lineColor, "line-width": 5, "line-dasharray": [1.6, 1.4] }
+  }, firstSymbol);
+
+  /* --- sightings as station-style markers --- */
+  map.addSource("sightings", { type: "geojson", data: SIGHTINGS });
+
+  map.addLayer({
+    id: "sightings-pulse", type: "circle", source: "sightings",
+    filter: ["==", ["get", "when"], "hour"],
+    paint: {
+      "circle-color": "#E32017",
+      "circle-radius": 9,
+      "circle-opacity": 0.18
+    }
+  }, firstSymbol);
+
+  map.addLayer({
+    id: "sightings", type: "circle", source: "sightings",
+    paint: {
+      "circle-color": "#FFFFFF",
+      "circle-radius": ["match", ["get", "when"], "hour", 7, "today", 6, 5],
+      "circle-stroke-width": ["match", ["get", "when"], "hour", 3, 2.5],
+      "circle-stroke-color": ["match", ["get", "when"],
+        "hour", "#E32017", "today", "#000F9F", "#9DA2A6"]
+    }
+  }, firstSymbol);
+
+  /* --- pulse animation for past-hour sightings --- */
+  if (!noMotion) {
+    const tick = (t) => {
+      const k = (t % 1700) / 1700;
+      map.setPaintProperty("sightings-pulse", "circle-radius", 7 + 13 * k);
+      map.setPaintProperty("sightings-pulse", "circle-opacity", 0.4 * (1 - k));
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  /* --- popups --- */
+  const WHEN_LABEL = { hour: "Past hour", today: "Today", week: "This week" };
+  const WHEN_COLOR = { hour: "#E32017", today: "#000F9F", week: "#6E6E73" };
+
+  map.on("click", "sightings", (e) => {
+    const p = e.features[0].properties;
+    new maplibregl.Popup({ offset: 12 })
+      .setLngLat(e.features[0].geometry.coordinates)
+      .setHTML(
+        `<p class="pop-title">${p.id}</p>` +
+        `<p class="pop-line">${p.area}</p>` +
+        `<p class="pop-line">Last seen: ${p.time}</p>` +
+        `<span class="pop-chip" style="background:${WHEN_COLOR[p.when]}">${WHEN_LABEL[p.when]}</span>`
+      )
+      .addTo(map);
+  });
+
+  const corridorClick = (e) => {
+    const meta = CORRIDOR_META[e.features[0].properties.line];
+    if (!meta) return;
+    new maplibregl.Popup({ offset: 8 })
+      .setLngLat(e.lngLat)
+      .setHTML(
+        `<p class="pop-title">${meta.name}</p>` +
+        `<p class="pop-line">${meta.count} sightings per week</p>` +
+        `<span class="pop-chip" style="background:${meta.color}">` +
+        `${meta.dashed ? "Unconfirmed corridor" : "Confirmed corridor"}</span>`
+      )
+      .addTo(map);
+  };
+  map.on("click", "corridors-solid", corridorClick);
+  map.on("click", "corridors-dashed", corridorClick);
+
+  for (const lyr of ["sightings", "corridors-solid", "corridors-dashed"]) {
+    map.on("mouseenter", lyr, () => { map.getCanvas().style.cursor = "pointer"; });
+    map.on("mouseleave", lyr, () => { map.getCanvas().style.cursor = ""; });
+  }
+
+  /* --- key wiring: toggle corridors --- */
+  const hidden = new Set();
+  const applyFilters = () => {
+    const h = ["!", ["in", ["get", "line"], ["literal", [...hidden]]]];
+    map.setFilter("corridors-casing", h);
+    map.setFilter("corridors-solid", ["all", ["!=", ["get", "dashed"], true], h]);
+    map.setFilter("corridors-dashed", ["all", ["==", ["get", "dashed"], true], h]);
+  };
+  document.querySelectorAll(".key-row").forEach((row) => {
+    row.addEventListener("click", () => {
+      const key = row.dataset.line;
+      hidden.has(key) ? hidden.delete(key) : hidden.add(key);
+      row.classList.toggle("off", hidden.has(key));
+      applyFilters();
+    });
+  });
+
+  /* --- footer stats --- */
+  const n = SIGHTINGS.features.length;
+  const live = SIGHTINGS.features.filter(f => f.properties.when === "hour").length;
+  document.getElementById("key-foot").textContent =
+    `${n} sightings · past 7 days · ${live} in the last hour · demo data`;
+
+  /* --- idle prefetch: pre-warm the 3D view's tiles ---
+     The 3D toggle eases to zoom 14.4, which needs z14 vector tiles
+     the opening z13.2 view never loaded — fetching them mid-animation
+     is the visible hitch. Once the map first goes idle, trickle-fetch
+     them through the service worker (cache-first, claims the page on
+     first visit) so the rise to 3D never waits on the network. */
+  map.once("idle", () => {
+    const src = vectorSrc && map.getSource(vectorSrc);
+    const tpl = src && src.tiles && src.tiles[0];
+    if (!tpl) return;
+    const z = 14, nTiles = 2 ** z;
+    const tileXY = (lng, lat) => {
+      const r = (lat * Math.PI) / 180;
+      return [
+        Math.floor(((lng + 180) / 360) * nTiles),
+        Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * nTiles)
+      ];
+    };
+    const b = map.getBounds();
+    /* pitching to 57° pulls in ground past the flat viewport edges */
+    const padX = (b.getEast() - b.getWest()) * 0.4;
+    const padY = (b.getNorth() - b.getSouth()) * 0.4;
+    const [x0, y0] = tileXY(b.getWest() - padX, b.getNorth() + padY);
+    const [x1, y1] = tileXY(b.getEast() + padX, b.getSouth() - padY);
+    const urls = [];
+    for (let x = x0; x <= x1; x++)
+      for (let y = y0; y <= y1; y++)
+        urls.push(tpl.replace("{z}", z).replace("{x}", x).replace("{y}", y));
+    if (urls.length > 120) return; /* user zoomed way out before idle; skip */
+    let i = 0;
+    const next = () => {
+      if (i < urls.length) fetch(urls[i++], { priority: "low" }).catch(() => {}).finally(next);
+    };
+    for (let lane = 0; lane < 4; lane++) next();
+  });
+});
+
+/* ============================================================
+   2D / 3D view toggle: opacity fade + height rise, no pop-in
+   ============================================================ */
+const btn2d = document.getElementById("btn-2d");
+const btn3d = document.getElementById("btn-3d");
+
+function setView(mode) {
+  const is3d = mode === "3d";
+  if (map.getLayer("buildings-3d")) {
+    map.setPaintProperty("buildings-3d", "fill-extrusion-opacity", is3d ? 0.88 : 0);
+    riseTo(is3d ? 1 : 0);
+  }
+  map.easeTo({
+    pitch: is3d ? 57 : 0,
+    bearing: is3d ? -12 : 0,
+    zoom: is3d ? Math.max(map.getZoom(), 14.4) : map.getZoom(),
+    duration: noMotion ? 0 : 900
+  });
+  btn2d.classList.toggle("active", !is3d);
+  btn3d.classList.toggle("active", is3d);
+  btn2d.setAttribute("aria-pressed", String(!is3d));
+  btn3d.setAttribute("aria-pressed", String(is3d));
+}
+btn2d.addEventListener("click", () => setView("2d"));
+btn3d.addEventListener("click", () => setView("3d"));
 </script>
 </body>
 </html>
