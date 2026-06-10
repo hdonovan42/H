@@ -77,18 +77,18 @@ MAX_BACKLOG = 400     # tier-2 (zone) clip queue cap; overflow drops OLDEST zone
                       # tier-1 and never dropped). Drops are counted + reported — never silent.
 VID_STRIDE = 5        # frame stride for det.track (was 3): 25fps clip -> 5 sampled fps; a passing
                       # car is in view 2-4s = 10-20 samples, plenty for ByteTrack. 1.67x cheaper.
-PROB_TH = 0.82        # digest ELIGIBILITY bar — 8-REAL scale (v0.7.2, 2026-06-10 night):
-                      # live archive n=3,646 p80 0.817 / p95 0.846 / max 0.907; reals 0.868-0.916
-                      # (floor rising: 0.855 @7 reals -> 0.868 @8). ~p80 anchoring; DAY_CAP governs.
+PROB_TH = 0.81        # digest ELIGIBILITY bar — 9-REAL scale (v0.7.3, 2026-06-10 night):
+                      # live archive n=3,647 p80 0.810 / p95 0.839 / max 0.900; reals 0.871-0.915
+                      # (floor still rising: 0.868 @8 -> 0.871 @9). ~p80 anchoring; DAY_CAP governs.
 DAY_CAP = 1600        # max candidate cells emailed per day (8 pages of PAGE_SIZE) — the user's review
                       # budget IS the constant; the score cut adapts. Unsent overflow is demoted to the
                       # near archive at end of day (retrievable, minable — never silently destroyed).
 NEAR_TH = 0.78        # archive floor (7-real scale ≈ live p50): everything >= this stored
                       # silently for retroactive re-cuts + post-confirm mining. NEAR_KEEP_DAYS prune.
 NEAR_KEEP_DAYS = 7    # near rows + their jpgs are pruned after this many days (mine promptly)
-ALERT_TH = 0.91       # instant-alert bar (8-real scale): above ALL 3,646 known FPs (max 0.907,
-                      # margin thin — watch); catches #722/#738-strength views. Weaker real
-                      # views reach the sheets via ranking. Re-check vs live tail per re-seed.
+ALERT_TH = 0.91       # instant-alert bar (9-real scale): above ALL 3,647 known FPs (max 0.900,
+                      # margin back to 0.01); catches #722/#3620-strength views (0.913-0.915).
+                      # Weaker real views reach the sheets via ranking. Re-check per re-seed.
 BATCH_SIZE = 5        # (legacy count-trigger; superseded by PAGE_SIZE paging below)
 PAGE_SIZE = 200       # digest paging: the moment this many candidates pile up during the day, email
                       # that full page right away and reset; the remainder (< PAGE_SIZE) goes at

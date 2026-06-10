@@ -1,5 +1,14 @@
 # WaymoWatch — Changelog
 
+## v0.7.3 — Ninth confirm (#3620), surfaced BY the re-seed (2026-06-10, night)
+
+**#3620 (00001.04607, 17:50 London)** — found on the 8-real retrospective itself: the
+flywheel's compounding step working as designed (re-seed -> re-rank -> human -> new real ->
+re-seed). 9-real centroid deployed; archive re-scored (n=3,647: p80 0.810 / max 0.900;
+reals 0.871-0.915, floor still rising 0.868->0.871). Bars: PROB_TH **0.81**, NEAR_TH 0.78,
+ALERT_TH **0.91** (margin to FP max back to 0.01). Mining + retro + rejects sheets emailed.
+**9 confirms / 9 distinct cameras in one day.**
+
 ## v0.7.2 — Eighth confirm (#1700) (2026-06-10, night)
 
 **#1700 (00001.07389, 17:26 London)** from the 17:45 ranked page. Standard cycle: confirm
