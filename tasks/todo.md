@@ -116,6 +116,16 @@ catch; 659 digest candidates/day (calibration drifted); zone = ~432 cams = 4× l
 
 ## Review
 
+### 2026-06-10 (evening) — v0.6 FIRST CONFIRMED REAL WAYMO 🎉
+#2605, Limehouse Tunnel/Butcher Row, 15:26 London (white I-PACE, dark dome, user-confirmed).
+Surfaced ONLY because of ranked sending (scored 0.868, under the old 0.88 bar) and zone-wide
+coverage (east London). Phase 2 executed same-hour: confirm banked; centroid re-seeded
+(50/50 real+synthetic — real re-scores 0.944 vs FP ceiling ~0.92); whole archive re-scored
+from stored embeddings (313 promoted); thresholds re-anchored (PROB_TH 0.84 / NEAR_TH 0.80 /
+ALERT_TH 0.92, new scale); ±45 min similarity-ranked mining sheet + top-200 recalibrated
+retrospective of the full dataset emailed for review. Roadmap now in Phase 3 (collect).
+Watch: alert FPs at 0.92 (archive tail 0.919), digest volume at 0.84, 24h live-tail recheck.
+
 ### 2026-06-10 (evening) — real-data training pipeline (Phase-4 tooling)
 User locked the roadmap: find → recalibrate → collect clean → train YOLO for prod; all
 synthetic training retired. Audit of old recipe found: yolo11s-p2.yaml doesn't exist (would
