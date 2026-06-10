@@ -22,6 +22,9 @@ then spent the headroom the measurement revealed:
 - **What to watch**: cycle secs (expect ~190s; sustained >240s = trim the box), dropped count
   on the first post-deploy cycles (~114 no-ETag new cams = one-off fetch burst), near-row
   volume over the week, and whether the new east cams start producing confirms.
+- **DAY_CAP 1600 → 4000** (user, same night): all 8 pages were spent by ~20:30 and the 23:00
+  remainder-flush had nothing left to send (55 unsent demoted to near) — review budget raised
+  to 20 pages/day to match the user's actual appetite + the wider zone's volume.
 
 ## Dashboard v2.1 — serving trims: London-clamped, self-hosted assets (2026-06-10, late night)
 

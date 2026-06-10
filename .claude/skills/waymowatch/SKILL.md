@@ -67,7 +67,7 @@ watch_loop (--loop, VPS, 24/7, single process):
     -> MobileNetV3 embed -> cosine vs dome_centroid_tight.json
   score >=0.86 -> 'new' (eligible) | >=0.80 -> 'near' (silent archive) | else discard
   SENDING IS RANKED, NOT THRESHOLDED: pages of 200 email the HIGHEST-scoring unsent,
-    DAY_CAP 1600 cells/day; EOD demotes unsent overflow -> near (unsent >=ALERT_TH kept)
+    DAY_CAP 4000 cells/day; EOD demotes unsent overflow -> near (unsent >=ALERT_TH kept)
   instant alert >=0.93; daily digest 23:00 London with coverage line
   telemetry: cycles table + timestamped log; heartbeat file; run_watch.sh watchdog
     (cron */6 = supervisor: dead -> restart, hung >10min heartbeat -> kill)
@@ -96,7 +96,7 @@ Rejections (`--reject`) are kept forever and suppress that vehicle/spot permanen
 
 ## Constants that matter (live_capture.py)
 
-PROB_TH 0.83 (eligibility) · DAY_CAP 1600 · NEAR_TH 0.76 (archive floor) · ALERT_TH 0.91 ·
+PROB_TH 0.83 (eligibility) · DAY_CAP 4000 · NEAR_TH 0.76 (archive floor) · ALERT_TH 0.91 ·
 POLL_EVERY 150 · MAX_BACKLOG 400 · VID_STRIDE 5 · MIN_H 44 · DEDUP_TH 0.93 ·
 ROOF_TOP/BOTTOM/INSET −0.06/0.22/0.28 (single source of truth — eval scripts import these)
 
