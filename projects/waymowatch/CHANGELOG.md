@@ -1,5 +1,25 @@
 # WaymoWatch — Changelog
 
+## Dashboard v2 — 2D-only rewrite: Leaflet + raster (2026-06-10, night)
+
+User retired 3D entirely ("always 2d... how best can we serve 2d?"). With no extrusions,
+vector tiles + WebGL + the tile-caching service worker were all dead weight, so the
+serving stack restarts from first principles:
+
+- **Leaflet 1.9 + CARTO Positron raster tiles** replace MapLibre + OpenFreeMap vector:
+  ~42KB JS (was ~300KB + WebGL init), no style/glyph/sprite round-trips — pre-rendered
+  CDN PNGs paint as they arrive and ride the plain HTTP cache. Same paper aesthetic;
+  key panel/popup/footer design carried over (popups restyled onto Leaflet classes,
+  station-dot markers as CSS divIcons, past-hour pulse via CSS animation, honours
+  prefers-reduced-motion).
+- **Service worker deleted** (sw.js removed); the page actively unregisters old workers
+  and clears their caches from returning visitors.
+- **Change-aware polling**: 60s tick rebuilds markers only when the sightings payload
+  (or a dot's recency bucket) changes — an open popup is never yanked by a no-op refresh.
+- 2D/3D buttons gone; default view unchanged (Mayfair, z11). Attribution now includes
+  "Powered by TfL Open Data" (OGL requirement).
+- API contract untouched: same `/api/sightings` + `/img/<id>_frame.jpg` endpoints.
+
 ## v0.7.4 — Confirms 10-12 (#1208, #3696, #2145) (2026-06-10, night)
 
 Three from one ranked page: **#1208** (00001.07369, 19:38), **#3696** (00001.06600, 18:25),

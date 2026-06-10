@@ -6,16 +6,16 @@
 <title>WaymoNet · London</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="preconnect" href="https://a.basemaps.cartocdn.com" />
+<link rel="preconnect" href="https://b.basemaps.cartocdn.com" />
 <link href="https://fonts.googleapis.com/css2?family=Hammersmith+One&display=swap" rel="stylesheet" />
-<link href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css" rel="stylesheet" />
+<link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet" />
 <style>
   :root {
     --paper: #FBFAF7;
     --ink: #16161F;
     --blue: #000F9F;     /* corporate line blue */
-    --red: #E32017;      /* spine */
-    --picc: #003688;     /* westway */
-    --district: #00782A; /* south circuit */
+    --red: #E32017;
     --grey: #6E6E73;
     --hairline: #D9D7D0;
     --display: "Hammersmith One", "Gill Sans", sans-serif;
@@ -31,43 +31,13 @@
     overflow: hidden;
   }
 
-  #map { position: absolute; inset: 0; }
-  .maplibregl-canvas:focus-visible { outline: 3px solid var(--red); }
-
-  /* ---------- floating view toggle ---------- */
-  .float-ctl {
-    position: absolute;
-    top: 14px; left: 14px;
-    z-index: 5;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .ctl-btn {
-    appearance: none;
-    width: 48px; height: 44px;
-    background: #FFFFFF;
-    border: 1px solid var(--hairline);
-    border-radius: 6px;
-    font-family: var(--display);
-    font-size: 14px;
-    letter-spacing: 0.06em;
-    color: var(--blue);
-    cursor: pointer;
-  }
-  .ctl-btn:hover:not(.active) { background: #F4F3EE; }
-  .ctl-btn.active {
-    background: var(--blue);
-    color: #fff;
-    border-color: var(--blue);
-  }
-  .ctl-btn:focus-visible { outline: 3px solid var(--red); outline-offset: 2px; }
+  #map { position: absolute; inset: 0; background: var(--paper); }
 
   /* ---------- key (legend) ---------- */
   .key {
     position: absolute;
     left: 14px; bottom: 26px;
-    z-index: 5;
+    z-index: 500;
     width: 198px;
     background: #FFFFFF;
     border: 1px solid var(--hairline);
@@ -96,17 +66,40 @@
     letter-spacing: 0.02em;
   }
 
-  /* ---------- popups ---------- */
-  /* above the key panel (z-index 5) so an opened sighting is never obscured */
-  .maplibregl-popup { z-index: 6; }
-  .maplibregl-popup-content {
+  /* ---------- station-style sighting dots ---------- */
+  .dot {
+    background: #fff;
+    border-radius: 50%;
+    border: 3px solid var(--grey);
+    box-shadow: 0 1px 4px rgba(22, 22, 31, 0.25);
+  }
+  .dot-week  { border-color: #9DA2A6; }
+  .dot-today { border-color: var(--blue); }
+  .dot-hour  { border-color: var(--red); position: relative; }
+  .dot-hour::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    border: 2px solid var(--red);
+    animation: pulse 1.7s ease-out infinite;
+  }
+  @keyframes pulse {
+    0%   { transform: scale(1);   opacity: 0.6; }
+    100% { transform: scale(2.4); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dot-hour::after { animation: none; display: none; }
+  }
+
+  /* ---------- popups, tube-map paper treatment ---------- */
+  .leaflet-popup-content-wrapper {
     font-family: var(--body);
     border-radius: 8px;
     border-top: 4px solid var(--blue);
-    padding: 10px 14px 10px;
     box-shadow: 0 4px 18px rgba(22, 22, 31, 0.18);
-    min-width: 168px;
   }
+  .leaflet-popup-content { margin: 10px 14px; min-width: 168px; }
   .pop-title {
     font-family: var(--display);
     font-size: 14px;
@@ -134,6 +127,8 @@
     border-radius: 999px;
   }
 
+  .leaflet-control-attribution { font-size: 10px; background: rgba(255,255,255,0.75); }
+
   @media (max-width: 560px) {
     .key { left: 10px; right: 10px; bottom: 18px; width: auto; }
   }
@@ -143,11 +138,6 @@
 
 <div id="map" role="application" aria-label="Map of Waymo sightings in London"></div>
 
-<div class="float-ctl" role="group" aria-label="Map view">
-  <button id="btn-2d" class="ctl-btn active" aria-pressed="true">2D</button>
-  <button id="btn-3d" class="ctl-btn" aria-pressed="false">3D</button>
-</div>
-
 <aside class="key" aria-label="Map key">
   <div class="key-ringrow"><span class="ring ring-hour"></span> Seen in the past hour</div>
   <div class="key-ringrow"><span class="ring ring-today"></span> Seen today</div>
@@ -155,21 +145,22 @@
   <div class="key-foot" id="key-foot">Loading…</div>
 </aside>
 
-<script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-/* ============================================================
-   Tile persistence: register the service worker. Only works
-   over http(s), so it silently no-ops when opened via file://.
-   Serve locally with `python3 -m http.server` to activate it.
-   ============================================================ */
-if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
-  navigator.serviceWorker.register("./sw.js").catch(() => {});
+/* The old MapLibre build installed a tile-caching service worker;
+   it's no longer needed (raster tiles ride the plain HTTP cache),
+   so clean it out of returning visitors' browsers. */
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.getRegistrations()
+    .then(rs => rs.forEach(r => r.unregister())).catch(() => {});
+  if (window.caches) caches.keys().then(ks => ks.forEach(k => caches.delete(k))).catch(() => {});
 }
 
 /* ============================================================
    Live data: confirmed Waymo sightings from waymo.db on the
-   VPS, via the read-only sightings API. The map polls every
-   60s, so new confirms appear without a reload.
+   VPS, via the read-only sightings API. Polls every 60s; the
+   marker layer is only rebuilt when the data actually changes,
+   so an open popup is never yanked away by a no-op refresh.
    ============================================================ */
 const API_BASE = "https://axiom.hjd.ai/waymowatch";
 const POLL_MS = 60000;
@@ -189,235 +180,85 @@ function recency(iso) {
   return day(t) === day(Date.now()) ? "today" : "week";
 }
 
-const toFeatureCollection = rows => ({
-  type: "FeatureCollection",
-  features: rows.map(s => ({
-    type: "Feature",
-    properties: {
-      id: s.id,
-      when: recency(s.captured_at),
-      name: s.common_name,
-      view: s.view,
-      captured_at: s.captured_at,
-      score: s.score
-    },
-    geometry: { type: "Point", coordinates: [s.lon, s.lat] }
-  }))
-});
-
 /* ============================================================
-   Map setup
+   Map: plain 2D raster. Pre-rendered CARTO Positron PNGs off a
+   CDN paint immediately and HTTP-cache for repeat visits — no
+   WebGL, no style/glyph round-trips, no service worker.
    ============================================================ */
-const noMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-const map = new maplibregl.Map({
-  container: "map",
-  style: "https://tiles.openfreemap.org/styles/positron",
-  center: [-0.1470, 51.5095],   /* Mayfair */
+const map = L.map("map", {
+  center: [51.5095, -0.1470],   /* Mayfair */
   zoom: 11,
-  antialias: true,
-  maxTileCacheSize: 600,
-  attributionControl: { compact: true }
+  zoomControl: false,
+  attributionControl: true
 });
-map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+L.control.zoom({ position: "topright" }).addTo(map);
 
-/* compact attribution auto-expands on load — keep it as a minimised
-   ⓘ until the user actually clicks it */
-map.once("load", () => {
-  const attrib = document.querySelector("details.maplibregl-ctrl-attrib");
-  if (attrib) {
-    attrib.removeAttribute("open");
-    attrib.classList.remove("maplibregl-compact-show");
-  }
-});
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+  subdomains: "abcd",
+  maxZoom: 19,
+  keepBuffer: 4,
+  crossOrigin: true,
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> ' +
+    '&copy; <a href="https://carto.com/attributions">CARTO</a> · Powered by TfL Open Data'
+}).addTo(map);
 
-/* Building height: multiplier t animates the rise on the 2D/3D
-   toggle. NB a ["zoom"] ramp can't be nested here — zoom expressions
-   are only valid at the top level of step/interpolate, and an invalid
-   paint property makes addLayer reject the whole layer (silently,
-   behind the getLayer guards). */
-const heightExpr = (t) => ["*", t,
-  ["coalesce", ["get", "render_height"], ["get", "height"], 8]
-];
+const DOT_PX = { hour: 16, today: 14, week: 12 };
+const WHEN_LABEL = { hour: "Past hour", today: "Today", week: "This week" };
+const WHEN_COLOR = { hour: "#E32017", today: "#000F9F", week: "#6E6E73" };
 
-let rise = 0.001;
-let riseRaf = null;
-function riseTo(target) {
-  if (!map.getLayer("buildings-3d")) return;
-  if (riseRaf) cancelAnimationFrame(riseRaf);
-  const from = rise;
-  const start = performance.now();
-  const dur = noMotion ? 0 : 800;
-  const step = (now) => {
-    const p = dur ? Math.min(1, (now - start) / dur) : 1;
-    const ease = 1 - Math.pow(1 - p, 3);
-    rise = Math.max(0.001, from + (target - from) * ease);
-    map.setPaintProperty("buildings-3d", "fill-extrusion-height", heightExpr(rise));
-    if (p < 1) riseRaf = requestAnimationFrame(step);
-  };
-  riseRaf = requestAnimationFrame(step);
+const markers = L.layerGroup().addTo(map);
+
+function sightingMarker(s) {
+  const when = recency(s.captured_at);
+  const px = DOT_PX[when];
+  const m = L.marker([s.lat, s.lon], {
+    icon: L.divIcon({
+      className: `dot dot-${when}`,
+      iconSize: [px, px]
+    }),
+    title: `Waymo #${s.id} — ${s.common_name}`
+  });
+  m.bindPopup(
+    `<p class="pop-title">Waymo · #${s.id}</p>` +
+    `<img class="pop-img" src="${API_BASE}/img/${s.id}_frame.jpg" ` +
+    `alt="JamCam frame of sighting #${s.id}" loading="lazy" />` +
+    `<p class="pop-line"><strong>${s.common_name}</strong>${s.view ? ` (facing ${s.view})` : ""}</p>` +
+    `<p class="pop-line">${fmtDate(s.captured_at)} · ${fmtTime(s.captured_at)}</p>` +
+    `<p class="pop-line">Detector score ${Number(s.score).toFixed(2)}</p>` +
+    `<span class="pop-chip" style="background:${WHEN_COLOR[when]}">${WHEN_LABEL[when]}</span>`,
+    { maxWidth: 300 }
+  );
+  return m;
 }
 
-map.on("load", () => {
-  const style = map.getStyle();
+/* --- live feed: fetch confirmed sightings, poll for new ones --- */
+const foot = document.getElementById("key-foot");
+let lastPayload = "";
 
-  /* --- restyle the basemap toward tube-map paper --- */
-  for (const layer of style.layers) {
-    const id = layer.id;
-    try {
-      if (layer.type === "background") {
-        map.setPaintProperty(id, "background-color", "#FBFAF7");
-      } else if (layer.type === "fill" && /water|ocean|river/i.test(id)) {
-        map.setPaintProperty(id, "fill-color", "#A9D7E8");
-      } else if (layer.type === "line" && /water|river|canal/i.test(id)) {
-        map.setPaintProperty(id, "line-color", "#A9D7E8");
-      } else if (layer.type === "fill" && /green|park|grass|wood|cemet|pitch|garden|nature/i.test(id)) {
-        map.setPaintProperty(id, "fill-color", "#E3EEE0");
-      }
-    } catch (e) { /* layer didn't accept the override; skip */ }
-  }
-
-  const firstSymbol = (style.layers.find(l => l.type === "symbol") || {}).id;
-  const vectorSrc = Object.keys(style.sources).find(k => style.sources[k].type === "vector");
-
-  /* --- 3D buildings: always mounted, faded out in 2D ---
-     The geometry rides in the same vector tiles as the basemap,
-     so keeping the layer visible at opacity 0 means buckets are
-     built ahead of time and the 3D toggle never hitches. */
-  if (vectorSrc) {
-    map.addLayer({
-      id: "buildings-3d",
-      type: "fill-extrusion",
-      source: vectorSrc,
-      "source-layer": "building",
-      minzoom: 13,
-      paint: {
-        "fill-extrusion-color": [
-          "interpolate", ["linear"],
-          ["coalesce", ["get", "render_height"], ["get", "height"], 0],
-          0, "#EAE8E2", 50, "#D8D4CB", 140, "#C4BFB2"
-        ],
-        "fill-extrusion-height": heightExpr(0.001),
-        "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
-        "fill-extrusion-opacity": 0,
-        "fill-extrusion-opacity-transition": { duration: noMotion ? 0 : 500 },
-        "fill-extrusion-vertical-gradient": true
-      }
-    }, firstSymbol);
-  }
-
-  /* --- sightings as station-style markers --- */
-  map.addSource("sightings", {
-    type: "geojson",
-    data: { type: "FeatureCollection", features: [] }
-  });
-
-  map.addLayer({
-    id: "sightings-pulse", type: "circle", source: "sightings",
-    filter: ["==", ["get", "when"], "hour"],
-    paint: {
-      "circle-color": "#E32017",
-      "circle-radius": 9,
-      "circle-opacity": 0.18
+async function refreshSightings() {
+  try {
+    const res = await fetch(`${API_BASE}/api/sightings`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const rows = (await res.json()).sightings;
+    /* recency buckets shift with the clock, so include them in the
+       change check — a dot's ring colour can change without new data */
+    const payload = JSON.stringify(rows.map(s => [s.id, recency(s.captured_at)]));
+    if (payload !== lastPayload) {
+      lastPayload = payload;
+      markers.clearLayers();
+      rows.forEach(s => markers.addLayer(sightingMarker(s)));
     }
-  }, firstSymbol);
-
-  map.addLayer({
-    id: "sightings", type: "circle", source: "sightings",
-    paint: {
-      "circle-color": "#FFFFFF",
-      "circle-radius": ["match", ["get", "when"], "hour", 7, "today", 6, 5],
-      "circle-stroke-width": ["match", ["get", "when"], "hour", 3, 2.5],
-      "circle-stroke-color": ["match", ["get", "when"],
-        "hour", "#E32017", "today", "#000F9F", "#9DA2A6"]
-    }
-  }, firstSymbol);
-
-  /* --- pulse animation for past-hour sightings --- */
-  if (!noMotion) {
-    const tick = (t) => {
-      const k = (t % 1700) / 1700;
-      map.setPaintProperty("sightings-pulse", "circle-radius", 7 + 13 * k);
-      map.setPaintProperty("sightings-pulse", "circle-opacity", 0.4 * (1 - k));
-      requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
+    foot.innerHTML = rows.length
+      ? `${rows.length} confirmed sighting${rows.length === 1 ? "" : "s"},<br>` +
+        `latest ${fmtDate(rows[0].captured_at)} ${fmtTime(rows[0].captured_at)}`
+      : "No confirmed sightings yet";
+  } catch (err) {
+    if (!foot.textContent || foot.textContent === "Loading…")
+      foot.textContent = "Sightings feed unreachable";
   }
-
-  /* --- popups --- */
-  const WHEN_LABEL = { hour: "Past hour", today: "Today", week: "This week" };
-  const WHEN_COLOR = { hour: "#E32017", today: "#000F9F", week: "#6E6E73" };
-
-  map.on("click", "sightings", (e) => {
-    const p = e.features[0].properties;
-    new maplibregl.Popup({ offset: 12, maxWidth: "300px" })
-      .setLngLat(e.features[0].geometry.coordinates)
-      .setHTML(
-        `<p class="pop-title">Waymo · #${p.id}</p>` +
-        `<img class="pop-img" src="${API_BASE}/img/${p.id}_frame.jpg" ` +
-        `alt="JamCam frame of sighting #${p.id}" loading="lazy" />` +
-        `<p class="pop-line"><strong>${p.name}</strong>${p.view ? ` (facing ${p.view})` : ""}</p>` +
-        `<p class="pop-line">${fmtDate(p.captured_at)} · ${fmtTime(p.captured_at)}</p>` +
-        `<p class="pop-line">Detector score ${Number(p.score).toFixed(2)}</p>` +
-        `<span class="pop-chip" style="background:${WHEN_COLOR[p.when]}">${WHEN_LABEL[p.when]}</span>`
-      )
-      .addTo(map);
-  });
-
-  map.on("mouseenter", "sightings", () => { map.getCanvas().style.cursor = "pointer"; });
-  map.on("mouseleave", "sightings", () => { map.getCanvas().style.cursor = ""; });
-
-  /* --- live feed: fetch confirmed sightings, poll for new ones --- */
-  const foot = document.getElementById("key-foot");
-  async function refreshSightings() {
-    try {
-      const res = await fetch(`${API_BASE}/api/sightings`, { cache: "no-store" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const rows = (await res.json()).sightings;
-      map.getSource("sightings").setData(toFeatureCollection(rows));
-      foot.innerHTML = rows.length
-        ? `${rows.length} confirmed sighting${rows.length === 1 ? "" : "s"},<br>` +
-          `latest ${fmtDate(rows[0].captured_at)} ${fmtTime(rows[0].captured_at)}`
-        : "No confirmed sightings yet";
-    } catch (err) {
-      if (!foot.textContent || foot.textContent === "Loading…")
-        foot.textContent = "Sightings feed unreachable";
-    }
-  }
-  refreshSightings();
-  setInterval(refreshSightings, POLL_MS);
-
-  /* (idle tile-prefetch removed: the 3D toggle no longer zooms, so it
-     renders from tiles the current view already has; the service
-     worker still caches everything for repeat visits) */
-});
-
-/* ============================================================
-   2D / 3D view toggle: opacity fade + height rise, no pop-in
-   ============================================================ */
-const btn2d = document.getElementById("btn-2d");
-const btn3d = document.getElementById("btn-3d");
-
-function setView(mode) {
-  const is3d = mode === "3d";
-  if (map.getLayer("buildings-3d")) {
-    map.setPaintProperty("buildings-3d", "fill-extrusion-opacity", is3d ? 0.88 : 0);
-    riseTo(is3d ? 1 : 0);
-  }
-  /* pitch/bearing only — the toggle must never change which area
-     is in view (no zoom change) */
-  map.easeTo({
-    pitch: is3d ? 57 : 0,
-    bearing: is3d ? -12 : 0,
-    duration: noMotion ? 0 : 900
-  });
-  btn2d.classList.toggle("active", !is3d);
-  btn3d.classList.toggle("active", is3d);
-  btn2d.setAttribute("aria-pressed", String(!is3d));
-  btn3d.setAttribute("aria-pressed", String(is3d));
 }
-btn2d.addEventListener("click", () => setView("2d"));
-btn3d.addEventListener("click", () => setView("3d"));
+refreshSightings();
+setInterval(refreshSightings, POLL_MS);
 </script>
 </body>
 </html>
