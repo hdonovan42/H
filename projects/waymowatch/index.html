@@ -221,6 +221,16 @@ const map = new maplibregl.Map({
 });
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
 
+/* compact attribution auto-expands on load — keep it as a minimised
+   ⓘ until the user actually clicks it */
+map.once("load", () => {
+  const attrib = document.querySelector("details.maplibregl-ctrl-attrib");
+  if (attrib) {
+    attrib.removeAttribute("open");
+    attrib.classList.remove("maplibregl-compact-show");
+  }
+});
+
 /* Building height: multiplier t animates the rise on the 2D/3D
    toggle. NB a ["zoom"] ramp can't be nested here — zoom expressions
    are only valid at the top level of step/interpolate, and an invalid
