@@ -62,3 +62,14 @@ scoring on wide in-frame roof crops; the embedding never saw the dome.
 - Embedding similarity is domain-fragile: templates and queries must come from the SAME crop
   geometry/scale/codec. Share the crop function (one source of truth) between seeding and serving.
 - Days of silence from a rare-event detector are NOT evidence it's working. Only a recall number is.
+
+## 2026-06-10 — Don't screen data on heuristics when you can fix the label source (WaymoWatch)
+Built a similarity-quarantine that excluded high-similarity implicit negatives from training
+to prevent a missed Waymo poisoning the negative set. User correctly rejected it: the most
+Waymo-like non-Waymos are the HIGHEST-value negatives, and the screen routed exactly those
+around training — plus added threshold/embedding machinery to the builder.
+**Pattern**: when a data-quality risk comes from weak labels, don't bolt a filter onto the
+weak channel — delete the weak channel and use only strong labels (human verdicts), then
+grow the strong channel operationally. Label-by-construction beats screening-by-heuristic:
+simpler code, no magic thresholds, and the "dangerous" data flows INTO training once a
+human resolves it (where it's most valuable) instead of being silently dropped.
