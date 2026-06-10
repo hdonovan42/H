@@ -1,5 +1,32 @@
 # WaymoWatch — Changelog
 
+## v0.6 — FIRST CONFIRMED REAL WAYMO + real-blended scorer (2026-06-10, evening)
+
+**#2605, Limehouse Tunnel/Butcher Row (00002.00361), 15:26 London — white I-PACE, dark roof
+dome, user-confirmed from the ranked digest.** Two design decisions paid off in one capture:
+it scored 0.868 (below the old 0.88 bar — only the v0.5.1 RANKED sending put it on a sheet),
+and it was in EAST London (only the v0.5 zone-wide expansion was watching there).
+
+Phase 2 of the roadmap executed same-hour:
+- **Confirm banked** (`--confirm 2605` -> data/real_positives/); the 0.926 grey-Mini FP
+  (#2602) rejected — top-of-page score being a FP while the real Waymo sat mid-page is the
+  frozen-embedding ceiling in one image.
+- **Archive mined by SIMILARITY**: 1,082 candidates ±45 min, ranked by embedding cosine to
+  #2605 (not by dome score) -> top-72 sheet emailed for review; any flagged = more reals.
+- **Centroid re-seeded** (`reseed_from_real.py`): 1 real < MIN_REAL=5 -> 50/50 blend with
+  synthetic. Separation jump: real re-scores **0.944** vs white-car reference max 0.862
+  (old scale had the real at 0.868 UNDER the 0.926 FP).
+- **Whole archive re-scored from stored embeddings** (2,865 rows) on the new scale:
+  live p50 0.816 / p95 0.867 / p99 0.884 / max 0.919 (fatter than synthetic reference, as
+  always); 313 promoted to eligible, 375 demoted.
+- **Thresholds re-anchored (NEW SCALE, incomparable to v0.5.x)**: PROB_TH **0.84**
+  (eligibility only — ranked DAY_CAP still governs sending), NEAR_TH **0.80**, ALERT_TH
+  **0.92** (live archive max 0.919 sits just under; the real at 0.944 clears it — a repeat
+  sighting should fire an instant alert). RE-CHECK against 24h of live tails.
+- **What to watch**: alert FP rate at 0.92 (archive tail 0.919 is close); digest volume at
+  0.84 eligibility; flagged vehicles from the mining sheet -> re-run reseed (pure-real at
+  5+ confirms).
+
 ## v0.5.2 — New dashboard UI: tube-map sighting feed (2026-06-10)
 
 Replaced the base-map prototype `index.html` with the new tube-map-styled dashboard
