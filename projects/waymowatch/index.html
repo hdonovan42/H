@@ -230,10 +230,12 @@ const map = new maplibregl.Map({
 });
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
 
-/* Building height: zoom ramp (13 -> 13.5) masks tile pop-in while
-   zooming; multiplier t animates the rise on the 2D/3D toggle. */
+/* Building height: multiplier t animates the rise on the 2D/3D
+   toggle. NB a ["zoom"] ramp can't be nested here — zoom expressions
+   are only valid at the top level of step/interpolate, and an invalid
+   paint property makes addLayer reject the whole layer (silently,
+   behind the getLayer guards). */
 const heightExpr = (t) => ["*", t,
-  ["interpolate", ["linear"], ["zoom"], 13, 0.05, 13.5, 1],
   ["coalesce", ["get", "render_height"], ["get", "height"], 8]
 ];
 
@@ -384,41 +386,9 @@ map.on("load", () => {
   refreshSightings();
   setInterval(refreshSightings, POLL_MS);
 
-  /* --- idle prefetch: pre-warm the 3D view's tiles ---
-     The 3D toggle eases to zoom 14.4, which needs z14 vector tiles
-     the opening z13.2 view never loaded — fetching them mid-animation
-     is the visible hitch. Once the map first goes idle, trickle-fetch
-     them through the service worker (cache-first, claims the page on
-     first visit) so the rise to 3D never waits on the network. */
-  map.once("idle", () => {
-    const src = vectorSrc && map.getSource(vectorSrc);
-    const tpl = src && src.tiles && src.tiles[0];
-    if (!tpl) return;
-    const z = 14, nTiles = 2 ** z;
-    const tileXY = (lng, lat) => {
-      const r = (lat * Math.PI) / 180;
-      return [
-        Math.floor(((lng + 180) / 360) * nTiles),
-        Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * nTiles)
-      ];
-    };
-    const b = map.getBounds();
-    /* pitching to 57° pulls in ground past the flat viewport edges */
-    const padX = (b.getEast() - b.getWest()) * 0.4;
-    const padY = (b.getNorth() - b.getSouth()) * 0.4;
-    const [x0, y0] = tileXY(b.getWest() - padX, b.getNorth() + padY);
-    const [x1, y1] = tileXY(b.getEast() + padX, b.getSouth() - padY);
-    const urls = [];
-    for (let x = x0; x <= x1; x++)
-      for (let y = y0; y <= y1; y++)
-        urls.push(tpl.replace("{z}", z).replace("{x}", x).replace("{y}", y));
-    if (urls.length > 120) return; /* user zoomed way out before idle; skip */
-    let i = 0;
-    const next = () => {
-      if (i < urls.length) fetch(urls[i++], { priority: "low" }).catch(() => {}).finally(next);
-    };
-    for (let lane = 0; lane < 4; lane++) next();
-  });
+  /* (idle tile-prefetch removed: the 3D toggle no longer zooms, so it
+     renders from tiles the current view already has; the service
+     worker still caches everything for repeat visits) */
 });
 
 /* ============================================================
@@ -433,10 +403,11 @@ function setView(mode) {
     map.setPaintProperty("buildings-3d", "fill-extrusion-opacity", is3d ? 0.88 : 0);
     riseTo(is3d ? 1 : 0);
   }
+  /* pitch/bearing only — the toggle must never change which area
+     is in view (no zoom change) */
   map.easeTo({
     pitch: is3d ? 57 : 0,
     bearing: is3d ? -12 : 0,
-    zoom: is3d ? Math.max(map.getZoom(), 14.4) : map.getZoom(),
     duration: noMotion ? 0 : 900
   });
   btn2d.classList.toggle("active", !is3d);
