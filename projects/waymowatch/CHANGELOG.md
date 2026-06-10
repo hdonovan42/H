@@ -1,5 +1,28 @@
 # WaymoWatch — Changelog
 
+## v0.8 — Coverage push: zone extended EAST + archive floor lowered (2026-06-10, night)
+
+User: "what can we do to maximise coverage — we don't want to miss waymos." Measured first,
+then spent the headroom the measurement revealed:
+
+- **Measured poll headroom**: per-cam refresh EMAs (n=507) put the TRUE fleet refresh floor
+  at **267s** (p5 270 / p50 422) — not the ~180s TfL nominal that sized POLL_EVERY=150.
+  Cycles ran ~158s on 494 cams → ~100s of spare cycle time before any clip could be skipped.
+- **Zone box extended east**: lon1 -0.02 → **+0.06** (494 → ~608 cams). Three of the 12
+  confirms hugged the old east edge (#3310 A2 New Cross 0.009°, #2605 Limehouse 0.022°,
+  #1338 Old Kent Rd 0.052°) and both corridors continue east — we were watching the fleet
+  drive out of frame. New coverage: Greenwich, Lewisham/A21, Canary Wharf. Projected cycles
+  ~190s, comfortably under the 267s refresh floor. All-London (778 cams) deliberately NOT
+  taken: ~215-230s cycles = saturation with no burst margin; revisit after a day at 608.
+- **NEAR_TH 0.80 → 0.76** — the archive floor is the funnel's ONLY irrecoverable cut
+  (everything above it is re-rankable forever from stored embeddings on each re-seed).
+  Hardest confirmed real #2145 CAPTURED at 0.813, just 0.013 over the old floor, and the
+  real floor drops as harder views join. Disk trivial (216MB used / 54GB free, 7-day prune).
+- Sending untouched: PROB_TH / DAY_CAP / ALERT_TH unchanged — digest volume should not move.
+- **What to watch**: cycle secs (expect ~190s; sustained >240s = trim the box), dropped count
+  on the first post-deploy cycles (~114 no-ETag new cams = one-off fetch burst), near-row
+  volume over the week, and whether the new east cams start producing confirms.
+
 ## Dashboard v2.1 — serving trims: London-clamped, self-hosted assets (2026-06-10, late night)
 
 Measured audit first (multi-agent: live curl measurements, tile math, licensing research,

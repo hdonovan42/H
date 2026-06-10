@@ -43,7 +43,7 @@ is the only low-res discriminator.
 
 ## The locked roadmap (user, 2026-06-10 — synthetic training RETIRED)
 
-1. **Find** — live 484-cam zone loop + ranked digests surface candidates [RUNNING]
+1. **Find** — live ~608-cam zone loop + ranked digests surface candidates [RUNNING]
 2. **Recalibrate** — first confirm → `dataset/reseed_from_real.py` re-anchors scorer +
    thresholds on real crops; mine near archive ±45 min for more passes
 3. **Collect** — recalibrated loop until **~100+ confirms across ≥5 cameras**
@@ -59,7 +59,7 @@ explicitly rejected scope beyond this roadmap ("too far ahead").
 
 ```
 watch_loop (--loop, VPS, 24/7, single process):
-  every 150s: threaded conditional-GET all 484 cams (117 spine tier-1 + 367 zone tier-2)
+  every 150s: threaded conditional-GET all ~608 cams (117 spine tier-1 + rest of zone tier-2, box east edge lon +0.06)
     150s < TfL min refresh (~180s) -> polling layer can never skip a published clip
   fresh clips -> tiered FIFO queues (spine first, never dropped; zone drops OLDEST >400)
   per clip: OpenVINO INT8 yolo11n det.track (ByteTrack, vid_stride 5, ~0.6s/clip)
@@ -96,7 +96,7 @@ Rejections (`--reject`) are kept forever and suppress that vehicle/spot permanen
 
 ## Constants that matter (live_capture.py)
 
-PROB_TH 0.86 (eligibility) · DAY_CAP 1600 · NEAR_TH 0.80 (archive floor) · ALERT_TH 0.93 ·
+PROB_TH 0.83 (eligibility) · DAY_CAP 1600 · NEAR_TH 0.76 (archive floor) · ALERT_TH 0.91 ·
 POLL_EVERY 150 · MAX_BACKLOG 400 · VID_STRIDE 5 · MIN_H 44 · DEDUP_TH 0.93 ·
 ROOF_TOP/BOTTOM/INSET −0.06/0.22/0.28 (single source of truth — eval scripts import these)
 
