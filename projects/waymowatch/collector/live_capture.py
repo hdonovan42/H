@@ -77,14 +77,17 @@ MAX_BACKLOG = 400     # tier-2 (zone) clip queue cap; overflow drops OLDEST zone
                       # tier-1 and never dropped). Drops are counted + reported — never silent.
 VID_STRIDE = 5        # frame stride for det.track (was 3): 25fps clip -> 5 sampled fps; a passing
                       # car is in view 2-4s = 10-20 samples, plenty for ByteTrack. 1.67x cheaper.
-PROB_TH = 0.88        # digest bar — RECALIBRATED 2026-06-10 from LIVE spine scores (the synthetic
-                      # p95=0.831 bar passed 659/day live; live tails are fatter than the 108-sample
-                      # synthetic calibration). 0.88 = ~116/day on the 117-cam spine -> est ~300/day
-                      # zone-wide, score-sorted for review. Re-derive from reals after first confirm.
-NEAR_TH = 0.86        # near-miss archive floor: [NEAR_TH, PROB_TH) candidates are stored SILENTLY
-                      # (status='near' — never emailed, never on sheets) so that once a real Waymo is
-                      # confirmed anywhere, its sub-bar passes at other cameras can be mined as extra
-                      # REAL training views ("train on real images" strategy). Bounded by NEAR_KEEP_DAYS.
+PROB_TH = 0.86        # digest ELIGIBILITY bar (v0.5.1): candidates >= this are queued for sending.
+                      # Sending is now BUDGETED, not threshold-driven — each day the user receives the
+                      # top DAY_CAP by score; the effective cut floats with volume. 0.86 ~ synthetic-
+                      # positive p80, so the eligibility pool keeps most plausible Waymo views in play.
+DAY_CAP = 1600        # max candidate cells emailed per day (8 pages of PAGE_SIZE) — the user's review
+                      # budget IS the constant; the score cut adapts. Unsent overflow is demoted to the
+                      # near archive at end of day (retrievable, minable — never silently destroyed).
+NEAR_TH = 0.80        # archive floor (v0.5.1, was 0.86): EVERYTHING >= 0.80 is stored (status='near',
+                      # never emailed). Synthetic Waymo proxy p10=0.754/p50=0.836 — the archive must
+                      # hold the score band real Waymos are PREDICTED to occupy, so bars can be re-cut
+                      # retroactively and a confirm's other passes mined. Bounded by NEAR_KEEP_DAYS.
 NEAR_KEEP_DAYS = 7    # near rows + their jpgs are pruned after this many days (mine promptly)
 ALERT_TH = 0.93       # instant-alert bar — above the observed live FP ceiling (24h max 0.921,
                       # 2026-06-10; n=1,188 live white-car scores). The digest is the primary
@@ -116,7 +119,8 @@ def ensure_schema(con):
       id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT, secs REAL,
       polled INTEGER, fresh INTEGER, processed INTEGER, dropped INTEGER,
       spine_fresh INTEGER, spine_processed INTEGER, new_cands INTEGER, near_cands INTEGER);""")
-    for col in ("emb TEXT", "bbox TEXT", "alerted INTEGER DEFAULT 0"):   # for pre-existing tables
+    for col in ("emb TEXT", "bbox TEXT", "alerted INTEGER DEFAULT 0",
+                "sent INTEGER DEFAULT 0"):   # for pre-existing tables
         try:
             con.execute(f"ALTER TABLE candidates ADD COLUMN {col}")
         except Exception:
@@ -477,60 +481,69 @@ def confirm(con, ids, status):
 
 
 def pending_count(con):
-    """How many high-prob candidates are waiting to be sent (since the last digest/page)."""
-    row = con.execute("SELECT value FROM kv WHERE key='last_digest_id'").fetchone()
-    last_id = int(row[0]) if row else 0
-    return con.execute("SELECT COUNT(*) FROM candidates WHERE id>? AND status='new'",
-                       (last_id,)).fetchone()[0]
+    """How many eligible candidates (status='new') are waiting to be sent."""
+    return con.execute("SELECT COUNT(*) FROM candidates WHERE status='new' "
+                       "AND COALESCE(sent,0)=0").fetchone()[0]
+
+
+def day_budget(con):
+    """Cells still sendable today under DAY_CAP (the user's review budget IS the constant;
+    the effective score cut floats with volume)."""
+    today = datetime.now(ZoneInfo("Europe/London")).strftime("%Y-%m-%d")
+    used = int(kv_get(con, f"sent:{today}") or 0)
+    return max(0, DAY_CAP - used), today, used
 
 
 def send_digest(con, limit=None, reason="digest"):
-    """Email the pending high-prob candidates (id > last_digest_id, status='new'), OLDEST first.
-    If `limit` is given, send only the oldest `limit` of them (one page) and advance the high-water
-    mark past EXACTLY those — so any overflow rolls into the next send and is NEVER lost. The sheet
-    is rendered best-score-first for easier eyeballing. Returns the number sent (0 if none pending)."""
-    row = con.execute("SELECT value FROM kv WHERE key='last_digest_id'").fetchone()
-    last_id = int(row[0]) if row else 0
-    q = "SELECT id,score,crop_path FROM candidates WHERE id>? AND status='new' ORDER BY id ASC"
-    params = [last_id]
-    if limit:
-        q += " LIMIT ?"
-        params.append(int(limit))
-    rows = con.execute(q, params).fetchall()
+    """Email the HIGHEST-SCORING unsent candidates (status='new', sent=0), best first, capped by
+    `limit` and the day's remaining DAY_CAP budget (v0.5.1: score-ranked budgeted sending — the
+    weak scorer means a fixed threshold either floods the user or silently bins Waymos; ranking
+    against a fixed human budget maximises P(a real Waymo reaches human eyes) per review-minute).
+    Rows are flagged sent=1 ONLY on a successful send, so a transient email failure just retries.
+    Returns the number sent."""
+    budget, today, used = day_budget(con)
+    n = min(int(limit), budget) if limit else budget
+    if n <= 0:
+        return 0
+    rows = con.execute("SELECT id,score,crop_path FROM candidates WHERE status='new' AND "
+                       "COALESCE(sent,0)=0 ORDER BY score DESC LIMIT ?", (n,)).fetchall()
     if not rows:
         return 0
-    new_high = max(r[0] for r in rows)                 # advance ONLY past what we actually send
-    sheet_rows = sorted(rows, key=lambda r: -r[1])     # display most-dome-like first
     sheet = os.path.join(BASE, "data/candidates/digest_sheet.jpg")
-    shown = _build_sheet(sheet_rows, sheet, cap=len(sheet_rows))
-    con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_id',?)", (str(new_high),))
-    con.commit()
-    remaining = con.execute("SELECT COUNT(*) FROM candidates WHERE id>? AND status='new'",
-                            (new_high,)).fetchone()[0]
-    note = f" — {remaining} more pending today" if remaining else ""
-    subj = f"WaymoWatch: {len(rows)} possible Waymo(s) — KX + Park Royal"
+    shown = _build_sheet(rows, sheet, cap=len(rows))
+    remaining = pending_count(con) - len(rows)
+    note = f" — {remaining} more pending (lower-scored)" if remaining > 0 else ""
+    subj = f"WaymoWatch: {len(rows)} possible Waymo(s) — top-scored, Waymo zone"
     if reason == "page":
         subj += f" (page; {remaining} more today)"
     elif reason == "end-of-day":
         subj += " (end of day)"
     cov = coverage_line(con)
-    html = (f"<p><b>WaymoWatch — Waymo zone (spine + ~480 cams)</b>: {len(rows)} <b>high-probability</b> "
-            f"Waymo candidate(s){note}.</p><p>Reply with the <b>#</b> of any that is a real Waymo "
+    html = (f"<p><b>WaymoWatch — Waymo zone (spine + ~480 cams)</b>: the {len(rows)} "
+            f"<b>highest-scoring</b> candidate(s){note}, best first.</p>"
+            f"<p>Reply with the <b>#</b> of any that is a real Waymo "
             f"(white Jaguar I-PACE with a dark roof dome).</p>"
             + (f"<p style='color:#888'>{cov}</p>" if cov else ""))
     sys.path.insert(0, HERE)
     from email_alert import send_email
-    send_email(subj, html, attachments=[sheet] if shown else None)
-    print(f"digest emailed: {len(rows)} ({reason}); {remaining} still pending")
+    if not send_email(subj, html, attachments=[sheet] if shown else None):
+        print(f"digest send failed — will retry next tick ({len(rows)} pending)")
+        return 0
+    con.execute("UPDATE candidates SET sent=1 WHERE id IN (%s)"
+                % ",".join(str(int(r[0])) for r in rows))
+    kv_set(con, f"sent:{today}", str(used + len(rows)))
+    con.commit()
+    print(f"digest emailed: {len(rows)} ({reason}); {max(0, remaining)} still pending; "
+          f"day budget {used + len(rows)}/{DAY_CAP}")
     return len(rows)
 
 
 def emit_pages(con):
     """Send a full PAGE_SIZE email each time that many candidates have piled up during the day,
-    'right away' (on the sweep that crosses the threshold). Loops in case a backlog spans several
-    pages; each page advances the high-water mark past exactly its rows, so nothing is lost."""
+    'right away' (on the cycle that crosses the threshold), best-scored first, while the day's
+    budget lasts. Loops in case a backlog spans several pages."""
     total = 0
-    while pending_count(con) >= PAGE_SIZE:
+    while pending_count(con) >= PAGE_SIZE and day_budget(con)[0] > 0:
         n = send_digest(con, limit=PAGE_SIZE, reason="page")
         if n == 0:
             break
@@ -582,7 +595,14 @@ def maybe_send_daily_digest(con):
     if row and row[0] == today:
         return
     emit_pages(con)                          # drain any full pages first
-    send_digest(con, reason="end-of-day")    # then the remainder (sends nothing if 0 pending)
+    send_digest(con, reason="end-of-day")    # then the remainder, up to the day's budget
+    # Overflow the budget couldn't cover is DEMOTED to the near archive (kept NEAR_KEEP_DAYS,
+    # minable, retrievable if bars are re-cut) so each day's ranking starts fresh — except
+    # anything at instant-alert level, which must stay eligible until actually sent.
+    over = con.execute("UPDATE candidates SET status='near' WHERE status='new' AND "
+                       "COALESCE(sent,0)=0 AND score < ?", (ALERT_TH,)).rowcount
+    if over:
+        print(f"end of day: {over} unsent candidates below the budget cut -> near archive")
     con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_date',?)", (today,))
     con.commit()
 
@@ -738,7 +758,6 @@ def main():
     elif a.collect:
         # wipe the candidate queue, then collect N distinct white cars from the KX area + email all
         con.execute("DELETE FROM candidates")
-        con.execute("DELETE FROM kv WHERE key='last_digest_id'")
         con.commit()
         for f in glob.glob(os.path.join(CAND_DIR, "*.jpg")):
             try:
@@ -751,8 +770,7 @@ def main():
                            "ORDER BY score DESC").fetchall()
         sheet = os.path.join(BASE, "data/candidates/collect_sheet.jpg")
         shown = _build_sheet(rows, sheet, cap=a.collect + 30)
-        con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_digest_id',?)",
-                    (str(con.execute("SELECT MAX(id) FROM candidates").fetchone()[0] or 0),))
+        con.execute("UPDATE candidates SET sent=1")   # collected set goes out in THIS email
         con.commit()
         sys.path.insert(0, HERE)
         from email_alert import send_email

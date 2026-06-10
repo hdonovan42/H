@@ -1,5 +1,33 @@
 # WaymoWatch — Changelog
 
+## v0.5.1 — Recall to human eyes: score-ranked budgeted sending (2026-06-10, later)
+
+User: "some will be waymos — you need to make sure they are sent to me or this is all for
+nothing." The 0.88 threshold failed that test: synthetic-proxy Waymo views score p50 0.836 /
+p90 0.875, so a fixed bar either floods the reviewer or silently bins most real passes (the
+overlap is the frozen-embedding ceiling — no threshold fixes it). Sending is now RANKED, not
+thresholded:
+
+- **DAY_CAP=1600** cells/day (8 pages of 200): the user's review budget is the constant; each
+  page emails the HIGHEST-scoring unsent candidates, so the effective score cut floats with
+  volume and the user always sees the day's most-dome-like vehicles.
+- **PROB_TH 0.88 -> 0.86** = eligibility only (pool for ranking, ~synthetic p80).
+  **NEAR_TH 0.86 -> 0.80**: the silent archive now spans the band real Waymos are PREDICTED
+  to occupy (p10 0.754... most mass >= 0.80) — bars can be re-cut retroactively, confirms
+  mined; nothing above 0.80 is ever unrecoverable (~300MB/day disk, 7-day prune).
+- **Per-row `sent` flag** replaces the last_digest_id high-water mark (set only on successful
+  send -> transient email failures retry). End-of-day: unsent overflow demoted to the near
+  archive (fresh ranking each day) — EXCEPT unsent alert-level rows (>= ALERT_TH), which stay.
+- Migration: 87 already-emailed rows marked sent; 273 near rows >= 0.86 promoted into
+  tonight's ranked pool.
+- **Why this maximises P(Waymo reaches the user):** per-view P(sent) at the floating cut
+  (~0.86-0.87 zone-wide) is ~15-25%, but the fleet generates many scored views/day across 484
+  cams -> P(>=1 view on the user's sheets) ≈ >90%/day, ~certain/week IF the synthetic proxy
+  holds. Residual risk is CORRELATED proxy error (street-level dome templates vs elevated
+  reality) — that is resolved only by the first real confirm, which this design hunts.
+- Tests: ranked paging, budget cap, day reset, EOD demotion + alert-survivor all pass on a
+  scratch DB with a stubbed mailer.
+
 ## v0.5 — Reliable zone-wide coverage: 484 cams, telemetered (2026-06-10)
 
 User: "the entire site relies on… reliable coverage" + first digest was drowning in cars.

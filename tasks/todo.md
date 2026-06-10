@@ -113,6 +113,15 @@ catch; 659 digest candidates/day (calibration drifted); zone = ~432 cams = 4× l
 
 ## Review
 
+### 2026-06-10 (later) — v0.5.1 ranked budgeted sending
+User: recall to their eyes is everything ("make sure they are sent to me"). Fixed thresholds
+can't deliver that with an overlapping scorer, so sending flipped to score-RANKED within a
+fixed daily review budget (DAY_CAP 1600 = 8 pages, sent flag per row, EOD overflow → archive,
+alert-level survivors kept). Eligibility 0.86, archive floor 0.80 (predicted real-Waymo band
+stored, re-cuttable). Tested on scratch DB (ranking, cap, reset, demotion). Deployed + loop
+restarted. Aggregation maths: ~15-25%/view at the floating cut × many fleet views/day →
+>90%/day that a real Waymo hits the sheets, if the synthetic proxy holds.
+
 ### 2026-06-10 — v0.5 reliable zone-wide coverage
 User: coverage is existential for the site; first digest also drowning in cars. Measured first
 (2.7s/clip torch, 1 core pegged, ~80% spine catch, 1,188 live FPs ≥0.81/24h, zone = 484 cams),
