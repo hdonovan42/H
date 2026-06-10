@@ -38,10 +38,13 @@ sys.path.insert(0, os.path.join(BASE, "dataset"))
 import data_plane as dp  # noqa: E402
 from separability_eval import build_embedder, jamcam  # noqa: E402
 
-# Waymo operating-zone box (v0.5, 2026-06-10): Park Royal depot in the west through
-# central London to KX; cut east of the City (no confirmed Waymo presence). ~484 available
-# cams — ALL of them are tier-2 watch targets; the SPINE below stays tier-1 (never dropped).
-ZONE = dict(lat0=51.42, lat1=51.58, lon0=-0.36, lon1=-0.02)
+# Waymo operating-zone box (v0.8, 2026-06-10): Park Royal depot in the west, extended EAST
+# past the old -0.02 cut (3 of the first 12 confirms hugged that edge — #3310 A2 New Cross
+# 0.009 deg from it; the A2 + Limehouse corridors continue east) to cover Greenwich /
+# Lewisham A21 / Canary Wharf. ~608 available cams — ALL tier-2 watch targets; SPINE stays
+# tier-1 (never dropped). Cycle headroom is real: measured per-cam refresh floor is 267s
+# (EMA n=507), so ~190s projected cycles still skip nothing.
+ZONE = dict(lat0=51.42, lat1=51.58, lon0=-0.36, lon1=0.06)
 # Manual detection phase: King's Cross / British Library / Euston Rd corridor only
 # (user's highest-density Waymo-sighting area) — max hit-rate, min wasted compute.
 FOCUS = {
@@ -84,8 +87,11 @@ PROB_TH = 0.83        # digest ELIGIBILITY bar — 12-REAL scale (v0.7.4, 2026-0
 DAY_CAP = 1600        # max candidate cells emailed per day (8 pages of PAGE_SIZE) — the user's review
                       # budget IS the constant; the score cut adapts. Unsent overflow is demoted to the
                       # near archive at end of day (retrievable, minable — never silently destroyed).
-NEAR_TH = 0.80        # archive floor (12-real scale ≈ live p50): everything >= this stored
-                      # silently for retroactive re-cuts + post-confirm mining. NEAR_KEEP_DAYS prune.
+NEAR_TH = 0.76        # archive floor — the ONLY irrecoverable cut in the funnel (below it a
+                      # vehicle is discarded forever; above it, re-seeds re-rank from stored embs).
+                      # Widened 0.80->0.76 (v0.8): hardest real view #2145 CAPTURED at 0.813, only
+                      # 0.013 over the old floor, and the real floor drops with each harder view.
+                      # Disk is a non-issue (7-day prune). NEAR_KEEP_DAYS prune.
 NEAR_KEEP_DAYS = 7    # near rows + their jpgs are pruned after this many days (mine promptly)
 ALERT_TH = 0.91       # instant-alert bar (12-real scale): above ALL 3,951 known FPs (max 0.907);
                       # catches #722-strength views (0.920). Weaker real views reach the sheets
