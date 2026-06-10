@@ -1,5 +1,15 @@
 # WaymoWatch — Changelog
 
+## v0.7.4 — Confirms 10-12 (#1208, #3696, #2145) (2026-06-10, night)
+
+Three from one ranked page: **#1208** (00001.07369, 19:38), **#3696** (00001.06600, 18:25),
+**#2145** (00001.07326, 19:27 — original capture score 0.813, re-scores 0.836: the hardest
+real view yet, below non-waymo p95 — the ranked DAY_CAP channel caught what no fixed bar
+would have). 12-real centroid; archive re-scored (n=3,951: p80 0.828 / max 0.907; reals
+0.836-0.920 — floor widened as harder views joined, expected and healthy for training
+diversity). Bars: PROB_TH **0.83** / NEAR_TH **0.80** / ALERT_TH **0.91**. 3 mining sheets
++ retro + rejects re-check emailed. **12 confirms / 12 distinct cameras in one day.**
+
 ## Day close 2026-06-10 — 9 confirms / 9 cameras / 731 vetted negatives
 
 User reviewed the 9-real sheets: no further Waymos; mining-60 + retro-200 banked as vetted
