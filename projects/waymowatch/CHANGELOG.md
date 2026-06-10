@@ -1,5 +1,22 @@
 # WaymoWatch — Changelog
 
+## v0.7.1 — 7 confirms: TWO SIMULTANEOUS Waymos (2026-06-10, night)
+
+**#722 (00001.07379) and #1338 (00001.03654) — captured 29 seconds apart on different
+cameras (15:56:24 / 15:56:53)**: first direct evidence of two fleet vehicles operating
+concurrently. Both surfaced by the pure-real retrospective (top and bottom of its range —
+0.890 and 0.823 — the ranked-sheet recall channel working at both ends).
+
+- Confirmed -> **7 reals**, centroid re-seeded (pure real), archive re-scored (n=3,486
+  non-waymo: p80 0.814 / p95 0.841 / max 0.904; reals 0.855-0.916).
+- Thresholds (7-real scale): PROB_TH **0.81** (p80), NEAR_TH **0.78** (~p50), ALERT_TH
+  **0.91** (above all known FPs; catches #722/#738-strength views).
+- 4 sheets emailed: mining around both confirms (shared 15:11-16:41 window, per-confirm
+  similarity ranking) + top-200 retrospective + top-100 rejects re-check.
+- Note: #722's id predates its captured_at — best-view dedup UPDATES a row in place
+  (captured_at moves to the better view). Id = insert order of the VEHICLE entry, not the
+  final capture time.
+
 ## v0.7 — PURE-REAL SCORER: 5 confirms, synthetic blend retired (2026-06-10, night)
 
 Confirms #4 and #5 from the 16:56 ranked page: **#1581** (00001.04250, 15:09 London) and

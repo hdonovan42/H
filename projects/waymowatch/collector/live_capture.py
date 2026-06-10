@@ -77,23 +77,18 @@ MAX_BACKLOG = 400     # tier-2 (zone) clip queue cap; overflow drops OLDEST zone
                       # tier-1 and never dropped). Drops are counted + reported — never silent.
 VID_STRIDE = 5        # frame stride for det.track (was 3): 25fps clip -> 5 sampled fps; a passing
                       # car is in view 2-4s = 10-20 samples, plenty for ByteTrack. 1.67x cheaper.
-PROB_TH = 0.80        # digest ELIGIBILITY bar — PURE-REAL scale (v0.7, 2026-06-10, 5 confirms,
-                      # synthetic blend retired): live archive n=3,437 p80 0.802 / p95 0.833 /
-                      # max 0.895; reals #738 0.914 / #1581 0.913 / #491 0.912 / #3310 0.911 /
-                      # #2605 0.862 — four of five ABOVE every known FP. ~p80 anchoring as ever;
-                      # sending stays BUDGETED (top DAY_CAP by score), the ranked cut protects.
+PROB_TH = 0.81        # digest ELIGIBILITY bar — 7-REAL scale (v0.7.1, 2026-06-10 night):
+                      # live archive n=3,486 p80 0.814 / p95 0.841 / max 0.904; reals 0.855-0.916
+                      # (#722 0.916, #1338 0.855). ~p80 anchoring; ranked DAY_CAP still governs.
 DAY_CAP = 1600        # max candidate cells emailed per day (8 pages of PAGE_SIZE) — the user's review
                       # budget IS the constant; the score cut adapts. Unsent overflow is demoted to the
                       # near archive at end of day (retrievable, minable — never silently destroyed).
-NEAR_TH = 0.76        # archive floor (v0.7 scale ≈ live p50): everything >= this is stored
-                      # (status='near', never emailed) so bars can be re-cut retroactively and a
-                      # confirm's sub-bar passes mined. Lowered with PROB_TH so the silent band
-                      # [0.76, 0.80) keeps ~its previous volume. Bounded by NEAR_KEEP_DAYS.
+NEAR_TH = 0.78        # archive floor (7-real scale ≈ live p50): everything >= this stored
+                      # silently for retroactive re-cuts + post-confirm mining. NEAR_KEEP_DAYS prune.
 NEAR_KEEP_DAYS = 7    # near rows + their jpgs are pruned after this many days (mine promptly)
-ALERT_TH = 0.90       # instant-alert bar (PURE-REAL scale): above ALL 3,437 known FPs
-                      # (max 0.895) yet BELOW four of five real views (0.911-0.914) — the alert
-                      # channel is now both precise AND sensitive for the first time. Watch the
-                      # live FP tail for a day (it always runs fatter than the archive).
+ALERT_TH = 0.91       # instant-alert bar (7-real scale): above ALL 3,486 known FPs (max 0.904);
+                      # catches #722/#738-strength views (0.914-0.916); weaker real views reach
+                      # the sheets via ranking. Re-check vs live tail after each re-seed.
 BATCH_SIZE = 5        # (legacy count-trigger; superseded by PAGE_SIZE paging below)
 PAGE_SIZE = 200       # digest paging: the moment this many candidates pile up during the day, email
                       # that full page right away and reset; the remainder (< PAGE_SIZE) goes at
