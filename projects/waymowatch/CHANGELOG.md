@@ -1,5 +1,15 @@
 # WaymoWatch — Changelog
 
+## Day close 2026-06-10 — 9 confirms / 9 cameras / 731 vetted negatives
+
+User reviewed the 9-real sheets: no further Waymos; mining-60 + retro-200 banked as vetted
+negatives (233 new, 731 total — past the 600 lower bound of the training-negative target).
+Day started with 0 all-time confirms and a provably blind scorer; ends with 9 reals across
+9 cameras (incl. two simultaneous vehicles), a pure-real scorer re-anchored after every
+confirm, 731 human-verdicted hard negatives, and the live map showing all nine. Loop runs
+overnight (night captures = the negative pool's known gap). Next milestone: ~100 confirms
+across ≥5 cams -> YOLO26 training run (pipeline built + CPU-tested, waiting on data only).
+
 ## v0.7.3 — Ninth confirm (#3620), surfaced BY the re-seed (2026-06-10, night)
 
 **#3620 (00001.04607, 17:50 London)** — found on the 8-real retrospective itself: the
