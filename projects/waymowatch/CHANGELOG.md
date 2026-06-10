@@ -26,6 +26,12 @@ Phase 2 of the roadmap executed same-hour:
 - **What to watch**: alert FP rate at 0.92 (archive tail 0.919 is close); digest volume at
   0.84 eligibility; flagged vehicles from the mining sheet -> re-run reseed (pure-real at
   5+ confirms).
+- **Record settled (same evening)**: user reviewed the similarity-mined 72 AND the re-scored
+  top-200 of the entire archive — **no other Waymos; dataset is one-Waymo clean**. All
+  reviewed vehicles banked as vetted hard negatives (427 total rejects now) — the
+  highest-value negative set possible: the closest impostors under the real-seeded scorer,
+  human-cleared. They feed build_real_dataset (hard-neg backgrounds) + eval_gate (FP test)
+  automatically and permanently suppress on the live sheets.
 
 ## v0.5.2 — New dashboard UI: tube-map sighting feed (2026-06-10)
 
