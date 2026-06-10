@@ -1,5 +1,44 @@
 # WaymoWatch — Changelog
 
+## v0.8.3 — Confirms 15-16 (#1362, #332) (2026-06-10/11, midnight)
+
+**#1362** (00001.03663 A2 New Cross Rd/St James, 19:42 — the A2 corridor's SECOND confirm,
+fourth east-pointing one; the v0.8 east extension is watching the right roads) and **#332**
+(00001.06650 Holland Rd/Addison Crescent, 21:53 — a new WESTERN camera). **16 confirms /
+16 distinct cameras.**
+
+- Standard cycle: 16-real pure centroid; archive re-scored (n=4,106 non-waymo: p80 0.835 /
+  p95 0.861 / max 0.910; reals 0.838-0.919 — the floor ROSE 0.834→0.838, scale stabilising).
+  41 promoted / 64 demoted.
+- **Bars unchanged** (the new scale lands where the bars already were): PROB_TH **0.83**
+  (still below the weakest real), NEAR_TH **0.76**, ALERT_TH **0.92** (FP max 0.910,
+  margin widened 0.007→0.010).
+- 4 sheets emailed: mining ±45 min around each confirm, top-200 retrospective
+  (0.895..0.836), top-100 rejects re-check (0.910..0.870).
+
+## v0.8.2 — Confirms 13-14 (#161, #4036) + special hard-negative folders (2026-06-10, night)
+
+Both came off the recovered-58 sheet (the candidates stranded by the old 1600 budget —
+the recovery run earned its keep immediately): **#161** (00001.07364 Marylebone Rd/Osnaburgh
+St, 19:41 — the SPINE) and **#4036** (00001.02252 Commercial Rd/Gowers Walk, 20:42 — east
+again, third confirm pointing at/past the old zone edge). **14 confirms / 14 distinct
+cameras in one day.**
+
+- Standard cycle: 14-real pure centroid re-seeded; whole archive re-scored from stored
+  embeddings (n=4,099 non-waymo: p80 0.836 / p95 0.861 / max 0.913; reals 0.834-0.917,
+  #2145 still the floor). 206 near→new promoted, 0 demoted.
+- **Bars (14-real scale)**: PROB_TH **0.83** — now anchored just BELOW the weakest real
+  view (0.834) rather than at p80 (recall-first: eligibility covers every known-real
+  strength; the 4000 DAY_CAP governs sending). NEAR_TH **0.76** unchanged. ALERT_TH
+  **0.92** (above all 4,099 known FPs, max 0.913).
+- 4 sheets emailed: mining ±45 min around each confirm (cosine-to-confirm ranked),
+  top-200 retrospective (0.892..0.837), top-100 rejects re-check (0.913..0.871).
+- **`data/special/` hard-negative gallery (user-curated, VPS)**: `roof-box/` = #4014 +
+  #4015 (two white cars with black roof boxes, SAME clip on 00001.06549 — brilliant dome
+  impostors) and `i-pac/` = #4034 (a non-Waymo I-PACE — potentially the hardest negative
+  in the pool). All three also banked as normal rejects (suppression + training); the
+  folders preserve them against the 7-day prune for special attention at training time.
+
 ## v0.8.1 — Hourly candidate backup to GitHub (2026-06-10, night)
 
 User created a private repo (`hdonovan42/waymo`) for off-VPS preservation of the Phase-3
