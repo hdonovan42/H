@@ -1,5 +1,30 @@
 # WaymoWatch — Changelog
 
+## v0.6.3 — THIRD CONFIRM (#738, King's Cross) rescued FROM THE REJECTS + 3-real re-seed (2026-06-10, late)
+
+**#738, Kings X Rd/Swinton St (00001.03591), 09:09 London** — one of the original 8 KX FOCUS
+cams; the user's "I've seen them in King's Cross" intel, finally vindicated by the data.
+Found by the user RE-REVIEWING the 16:06 retrospective… **after it had been bulk-banked into
+the reject pool** — a real Waymo sat in the training negatives. The poisoning scenario was
+real; the defence that worked was process (re-show + re-review on each recalibration), not
+the deleted similarity quarantine.
+
+- v0.6.2 (UX session's work) AUDITED: #491 banked correctly, 2-real centroid deployed both
+  sides, thresholds consistent, archive re-scored, loop healthy. No corrections needed.
+- #738 confirmed (`--confirm 738`) -> 3 reals; centroid re-seeded (still 50/50 blend <5).
+- **Whole archive re-scored on the 3-real scale** (3,397 rows): reals **#2605 0.920 /
+  #491 0.902 / #738 0.898** (tight cluster); non-waymo n=3,394 p80 0.829 / p95 0.856 /
+  max 0.916. 201 promoted, 3 demoted.
+- **Thresholds unchanged** (anchoring landed where they already were): PROB_TH 0.83 (~p80),
+  NEAR_TH 0.80, ALERT_TH 0.92 (one FP outlier at 0.916 still outranks two reals — alerts
+  stay the precision channel, ranked sheets the recall channel).
+- **Retrospective email, 2 sheets**: top-200 unconfirmed (0.901..0.845) + **top-100 REJECTS
+  re-ranked** (0.916..0.852) — bulk-cleared verdicts now get a standing re-check after every
+  re-seed. Both #491-class facts hold: all 3 reals captured by the SPINE/KX cams hours
+  before the zone expansion; ids are insert-order (low id = earlier same-day, not old).
+- **Lesson banked**: a bulk "sheet is clean" verdict is weaker than a per-vehicle verdict;
+  treat mass-banked rejects as provisional and re-surface the top of them on each new scale.
+
 ## v0.6.2 — SECOND CONFIRM (#491, depot corridor) + 2-real re-seed (2026-06-10, late)
 
 **#491, A40/Wales Farm Rd (00001.07308), 11:10 London — the Park Royal depot corridor.**

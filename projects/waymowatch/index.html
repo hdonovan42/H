@@ -105,6 +105,8 @@
   }
 
   /* ---------- popups ---------- */
+  /* above the key panel (z-index 5) so an opened sighting is never obscured */
+  .maplibregl-popup { z-index: 6; }
   .maplibregl-popup-content {
     font-family: var(--body);
     border-radius: 8px;
