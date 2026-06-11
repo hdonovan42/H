@@ -813,7 +813,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
     border: 1px solid var(--hairline);
     background: #fff;
     color: var(--grey);
-    font: italic bold 13px/1 Georgia, "Times New Roman", serif;
+    font: 600 13px/1 var(--body);
     cursor: pointer;
     box-shadow: 0 1px 4px rgba(22, 22, 31, 0.18);
   }
@@ -830,14 +830,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
   }
   .attrib-ctl.open .attrib-text { display: inline-block; }
   .attrib-text a { color: #0078A8; }
-
-  /* ---------- north needle / reset-view ---------- */
-  .north-ctl a {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .north-ctl svg { display: block; }
 
   @media (max-width: 560px) {
     .key { left: 10px; right: 10px; bottom: 18px; width: auto; }
@@ -903,30 +895,9 @@ const map = L.map("map", {
   maxZoom: 16,
   maxBounds: [[51.25, -0.60], [51.75, 0.45]],   /* Greater London + margin */
   maxBoundsViscosity: 1.0,
-  zoomControl: false,
+  zoomControl: false,         /* no corner buttons — scroll/pinch/dbl-click zoom only */
   attributionControl: false   /* replaced by the collapsed ⓘ control below */
 });
-L.control.zoom({ position: "topright" }).addTo(map);
-
-/* north needle (Leaflet can't rotate, so it's honestly static) that
-   doubles as a reset-view button */
-const NorthControl = L.Control.extend({
-  options: { position: "topright" },
-  onAdd() {
-    const div = L.DomUtil.create("div", "leaflet-bar north-ctl");
-    div.innerHTML =
-      '<a href="#" title="Reset view (north is up)" aria-label="Reset view">' +
-      '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">' +
-      '<path d="M12 2.5 L15.2 12 H8.8 Z" fill="#E32017"/>' +
-      '<path d="M12 21.5 L8.8 12 H15.2 Z" fill="#9DA2A6"/></svg></a>';
-    div.firstChild.addEventListener("click", (e) => {
-      e.preventDefault();
-      map.setView([51.5095, -0.1470], 11);
-    });
-    return div;
-  }
-});
-map.addControl(new NorthControl());
 
 /* attribution as a collapsed ⓘ — Leaflet's own control is an
    always-open strip; this keeps the licence text one click away */
