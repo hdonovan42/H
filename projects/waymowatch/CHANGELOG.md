@@ -1,5 +1,17 @@
 # WaymoWatch — Changelog
 
+## v0.8.23 — Confirms 39-42; first auto-retro fires (2026-06-11, late night)
+
+**#11124** (Park Lane/North Row, 19:48, 0.915 — THIRD Park Lane cam), **#1919** (Old Kent
+Rd/Hendre Rd, 21:41 — THIRD Old Kent Rd cam; corridor at 5 confirms / 3 cams), **#9349**
+(A2 New Cross/Florence Rd REPEAT, 19:40), **#9887** (Kennington Pk Rd REPEAT, 21:34).
+**42 confirms / 37 distinct cameras.**
+
+- Consolidated cycle: 42-real centroid; n=11,273: p80 0.848 / max 0.919; reals 0.812-0.919.
+  Bars unchanged (0.80/0.76/0.93; floor margin 0.012). 502 promoted / 17 demoted.
+- TWO emails as designed: the 4-echo cycle mail + the FIRST trigger-fired auto-retro
+  (8 confirms since last; counter reset at 42). Rejcheck skipped (same week).
+
 ## v0.8.22 — Quota-failure hardening: every send retries, nothing marked unseen (2026-06-11, night)
 
 Resend free tier hit 80% of its 100/day cap; audited every send path for what happens at
