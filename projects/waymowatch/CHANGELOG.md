@@ -1,5 +1,17 @@
 # WaymoWatch — Changelog
 
+## v0.8.20 — Confirm 37 (#10823): FIRST east-extension confirm (2026-06-11, evening)
+
+**#10823** (00001.03760 Shooters Hill Rd/Prince of Wales Rd, 18:26 — Blackheath, lon
+**+0.015**, past the old -0.02 east edge): the first confirm from a v0.8 east-extension
+camera. The emerging "fleet boundary = old east edge" hypothesis is weakened — operations
+reach at least Blackheath. **37 confirms / 34 distinct cameras.** **#10772** (A10/Downham
+Rd) filed to roof-box (8th specimen) with the special tag set at filing time.
+
+- Consolidated cycle: 37-real centroid; n=10,982: p80 0.844 / max 0.914; reals 0.815-0.918.
+  Bars unchanged (0.80/0.76/0.93). 11 promoted / 221 demoted. One email (echo + 72-row
+  new-to-you sheet); retro skipped (3/5), rejcheck skipped.
+
 ## v0.8.19 — Time-fenced merges: stop destroying distinct sightings (2026-06-11, night)
 
 User asked how many Waymos the in-place best-view overwrites were costing. Measured from
