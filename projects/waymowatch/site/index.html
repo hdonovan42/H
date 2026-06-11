@@ -973,7 +973,6 @@ function popupHTML(group, i) {
         `${i === group.length - 1 ? " disabled" : ""}>&#8250;</button></div>`
       : img) +
     `<p class="pop-line">${fmtDate(s.captured_at)} · ${fmtTime(s.captured_at)}</p>` +
-    `<p class="pop-line">Detector score ${Number(s.score).toFixed(2)}</p>` +
     (multi ? `<p class="pop-pos">${i + 1} / ${group.length}</p>` : "")
   );
 }
