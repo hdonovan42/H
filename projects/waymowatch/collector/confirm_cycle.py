@@ -123,16 +123,13 @@ def consolidated_email(con, ids):
     rows = sorted(cand.values(), reverse=True)[:72]
 
     shown = 0
+    shown_ids = []
     sheet = os.path.join(CAND_DIR, "cycle_sheet.jpg")
     if len(rows) >= MIN_SHEET:
         shown = _build_sheet([(rid, s, cp) for s, rid, cp in rows], sheet, cap=72)
         if shown:
             atts.append(sheet)
             shown_ids = [rid for _, rid, _ in rows[:shown]]
-            con.execute("UPDATE candidates SET sent=1 WHERE id IN (%s)"
-                        % ",".join(map(str, shown_ids)))
-            con.commit()
-            record_shown(shown_ids)
     note = (f"<p>Below: <b>{shown}</b> never-before-sent candidates within "
             f"{MINE_WINDOW_MIN} min of the confirm(s), most-similar first. "
             f"Reply with the # of any real Waymo.</p>") if shown else \
@@ -143,6 +140,15 @@ def consolidated_email(con, ids):
     n = len(ids)
     ok = send_email(f"WaymoWatch: confirm cycle — {n} banked ({', '.join('#'+str(i) for i in ids)})"
                     f" — VERIFY first image(s)", html, attachments=atts)
+    if ok and shown_ids:
+        # mark shown/sent ONLY on a successful send (v0.8.22): a quota-failed email must
+        # never record rows as user-reviewed — bank_shown would poison negatives unseen.
+        con.execute("UPDATE candidates SET sent=1 WHERE id IN (%s)"
+                    % ",".join(map(str, shown_ids)))
+        con.commit()
+        record_shown(shown_ids)
+    elif not ok:
+        print("SEND FAILED — nothing marked shown; re-run confirm_cycle to retry the email")
     print(f"consolidated email: {n} echo(s) + {shown}-row new-to-you sheet, sent={ok}")
 
 
@@ -160,6 +166,9 @@ def maybe_retro(con, force):
                     f"({rows[0][1]:.3f}..{rows[-1][1]:.3f})",
                     "<p>Whole archive re-ranked on the current scale; top 200 unconfirmed. "
                     "Reply with the # of any real Waymo.</p>", attachments=[sheet])
+    if not ok:
+        print("retro SEND FAILED — nothing marked; trigger stays armed for next cycle")
+        return
     con.execute("UPDATE candidates SET sent=1 WHERE id IN (%s)"
                 % ",".join(str(r[0]) for r in rows[:shown]))
     con.commit()
@@ -184,6 +193,9 @@ def maybe_rejcheck(con, force):
                     "<p>Top-100 of the reject pool on the current scale — standing check for "
                     "bulk-verdict misses. Reply with the # of any real Waymo.</p>",
                     attachments=[sheet])
+    if not ok:
+        print("rejcheck SEND FAILED — trigger stays armed for next cycle")
+        return
     kv_set(con, "cycle:last_rejcheck", today)
     con.commit()
     print(f"rejects re-check: {shown} rows, sent={ok}")
