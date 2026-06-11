@@ -1,5 +1,17 @@
 # WaymoWatch — Changelog
 
+## v0.8.6 — Confirm 25 (#7511 Jamaica Road) + roof-box #4 (2026-06-11, midday)
+
+**#7511** (00002.00434 A200 Jamaica Road, 10:46 — Bermondsey, new cam, the south-east
+corridor again). **25 confirms / 22 distinct cameras.** **#2126** (Clapham Rd, 06:11)
+added to `data/special/roof-box/` (4th roof-box specimen, 3rd distinct camera) + rejected.
+
+- Standard cycle: 25-real centroid; archive re-scored (n=7,742: p80 0.844 / max 0.914;
+  reals 0.824-0.914). Bars unchanged: PROB_TH 0.82 / NEAR_TH 0.76 / ALERT_TH 0.92
+  (no FP >=0.92). 5 promoted / 188 demoted.
+- 3 sheets emailed: echo-mining around #7511 (772 in window) + top-200 retro
+  (0.889..0.853) + top-100 rejects re-check (0.914..0.884).
+
 ## v0.8.5 — Confirms 21-24 (2026-06-11, midday)
 
 **#7361** (Park Lane/Upper Grosvenor St, 10:25 — Mayfair, new cam), **#5083** (Victoria
