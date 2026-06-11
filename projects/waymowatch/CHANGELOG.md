@@ -1,5 +1,27 @@
 # WaymoWatch — Changelog
 
+## v0.8.14 — Email consolidation: one mail per confirm batch (2026-06-11, evening)
+
+User: "after each sighting i get multiple emails that have returned nothing the last 5
+sightings." Investigated channel yield across all 34 confirms: ranked pages ~82%;
+retro/mining/rejcheck = 0 in the last ~10 cycles (measured: ~90% of recent mining-sheet
+rows had ALREADY been sent on pages — 48/67/70 of the last three top-72s). Structural:
+at 34 reals each confirm barely moves the centroid, and the 10k DAY_CAP means pages
+already deliver everything eligible.
+
+- **`collector/confirm_cycle.py`** (new, runs on VPS): the whole post-confirm flow in one
+  command — re-score archive -> re-bucket -> ONE consolidated email (echo images of every
+  confirm in the batch + a combined NEW-TO-YOU sheet: never-sent rows ±45 min of any
+  confirm, max-cosine ranked, skipped if <6 rows) -> trigger-based retro (every >=5
+  confirms or --force-retro after bar changes) -> rejects re-check (every >=7 days or
+  --force-rejcheck). Warns if the floor real drops below PROB_TH.
+- **`collector/bank_shown.py`** (new): every sheet's shown ids are recorded in
+  data/candidates/cycle_shown.json; a "no waymos" verdict banks EXACTLY those ids —
+  replaces the fragile reproduce-by-query + mtime-cutoff banking.
+- Triggers seeded (retro@34, rejcheck@2026-06-11). Pages + instant alerts untouched.
+- Effect: a 2-confirm reply now produces 1 email instead of 4; last 5 sightings would
+  have been 5 emails instead of 16, with measured loss of nothing.
+
 ## v0.8.13 — Confirm 34 (#10213, 3rd A2 New Cross cam) + funny/ gallery (2026-06-11, evening)
 
 **#10213** (00001.03672 A2 New Cross Rd/Avonley Rd, 16:28) — the THIRD distinct A2 New

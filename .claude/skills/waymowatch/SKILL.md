@@ -158,7 +158,11 @@ step). Adding new fields is safe (additive); renames/removals/semantic changes a
 - No API costs (no VLM gating); one-off GPU rental ~$1 is fine
 - Real data only for training; "make sure they are sent to me" — recall to human eyes
   beats precision; the ranked DAY_CAP digest embodies this
-- **Confirm-echo (2026-06-11)**: every mining email leads with the confirmed vehicle's OWN
-  crop+frame + an "if NOT a Waymo, reply 'undo #id'" line — id typos must never silently
-  bank a non-Waymo into the positives
+- **Confirm-echo (2026-06-11)**: every confirm-cycle email leads with the confirmed
+  vehicle's OWN crop+frame + an "if NOT a Waymo, reply 'undo #id'" line — id typos must
+  never silently bank a non-Waymo into the positives
+- **Consolidated cycle (v0.8.14)**: per confirm batch run `collector/confirm_cycle.py
+  <ids>` on the VPS (after --confirm + centroid rsync) — ONE email (echoes + new-to-you
+  sheet), retro every >=5 confirms or --force-retro after bar changes, rejcheck weekly.
+  "No waymos" verdict -> `collector/bank_shown.py` (banks exactly the recorded shown ids)
 - Auto-commit + CHANGELOG + push to `waymowatch` branch for any major revision
