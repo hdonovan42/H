@@ -1,5 +1,18 @@
 # WaymoWatch — Changelog
 
+## v0.8.12 — Confirms 32-33 (#4948, #6131) (2026-06-11, late afternoon)
+
+**#4948** (00001.07365 A501 W of Park Sq East, 15:02 — the Euston Rd spine, new cam) and
+**#6131** (00001.03656 Old Kent Rd/St James Rd, 14:18 — a SECOND Old Kent Rd camera; that
+corridor has now produced 4 confirms across 2 cams). **33 confirms / 30 distinct cameras.**
+
+- Standard cycle: 33-real centroid; archive re-scored (n=9,848: p80 0.847 / max 0.918;
+  reals 0.815-0.915, floor margin 0.015). Bars unchanged: PROB_TH 0.80 / NEAR_TH 0.76 /
+  ALERT_TH 0.93 (FP max back under 0.92; holding 0.93 rather than flip-flopping).
+  2 promoted / 271 demoted.
+- 4 sheets emailed: echo-mining around each confirm (1,052 + 1,037 in window) + top-200
+  retro (0.912..0.847) + top-100 rejects re-check (0.918..0.888).
+
 ## v0.8.11 — DAY_CAP 4000 → 10000 + queue flush (2026-06-11, afternoon)
 
 Second budget exhaustion in two days: 4,000 spent by mid-afternoon (608-cam zone + the
