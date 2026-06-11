@@ -1,5 +1,12 @@
 # WaymoWatch — Changelog
 
+## v0.8.11 — DAY_CAP 4000 → 10000 + queue flush (2026-06-11, afternoon)
+
+Second budget exhaustion in two days: 4,000 spent by mid-afternoon (608-cam zone + the
+bar dropping 0.83→0.80 through the day + ~1,900 one-off re-bucket promotions flooding the
+ranked pages). User raised the cap to **10,000 (50 pages/day)** and asked for the queue now:
+**956 queued candidates flushed immediately** in 5 pages (4,956/10,000 after flush).
+
 ## Dashboard v2.3 — camera grouping: one dot per camera, paged popup (2026-06-11)
 
 Cameras with repeat sightings (Old Kent Rd ×3, A2 New Cross ×2) stacked identical

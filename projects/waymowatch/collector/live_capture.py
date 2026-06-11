@@ -86,7 +86,7 @@ PROB_TH = 0.80        # digest ELIGIBILITY bar — 31-REAL scale (v0.8.10, 2026-
                       # dropped a notch, margin now 0.016). Set just BELOW the weakest real view —
                       # recall-first: eligibility must cover every known-real strength; DAY_CAP
                       # (4000) governs what is actually sent.
-DAY_CAP = 4000        # max candidate cells emailed per day (20 pages of PAGE_SIZE) — the user's review
+DAY_CAP = 10000       # max candidate cells emailed per day (50 pages of PAGE_SIZE) — the user's review
                       # budget IS the constant; the score cut adapts. Unsent overflow is demoted to the
                       # near archive at end of day (retrievable, minable — never silently destroyed).
 NEAR_TH = 0.76        # archive floor — the ONLY irrecoverable cut in the funnel (below it a
