@@ -799,10 +799,49 @@ svg.leaflet-image-layer.leaflet-interactive path {
     border-radius: 999px;
   }
 
-  .leaflet-control-attribution { font-size: 10px; background: rgba(255,255,255,0.75); }
+  /* ---------- collapsed attribution (ⓘ, expands on click) ---------- */
+  .attrib-ctl {
+    display: flex;
+    align-items: center;
+    flex-direction: row-reverse;   /* ⓘ stays pinned right of the text */
+    gap: 6px;
+  }
+  .attrib-toggle {
+    appearance: none;
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    border: 1px solid var(--hairline);
+    background: #fff;
+    color: var(--grey);
+    font: italic bold 13px/1 Georgia, "Times New Roman", serif;
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(22, 22, 31, 0.18);
+  }
+  .attrib-toggle:hover { color: var(--ink); }
+  .attrib-text {
+    display: none;
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid var(--hairline);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 10px;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  .attrib-ctl.open .attrib-text { display: inline-block; }
+  .attrib-text a { color: #0078A8; }
+
+  /* ---------- north needle / reset-view ---------- */
+  .north-ctl a {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .north-ctl svg { display: block; }
 
   @media (max-width: 560px) {
     .key { left: 10px; right: 10px; bottom: 18px; width: auto; }
+    .attrib-text { white-space: normal; max-width: 60vw; }
   }
 </style>
 </head>
@@ -865,17 +904,55 @@ const map = L.map("map", {
   maxBounds: [[51.25, -0.60], [51.75, 0.45]],   /* Greater London + margin */
   maxBoundsViscosity: 1.0,
   zoomControl: false,
-  attributionControl: true
+  attributionControl: false   /* replaced by the collapsed ⓘ control below */
 });
 L.control.zoom({ position: "topright" }).addTo(map);
+
+/* north needle (Leaflet can't rotate, so it's honestly static) that
+   doubles as a reset-view button */
+const NorthControl = L.Control.extend({
+  options: { position: "topright" },
+  onAdd() {
+    const div = L.DomUtil.create("div", "leaflet-bar north-ctl");
+    div.innerHTML =
+      '<a href="#" title="Reset view (north is up)" aria-label="Reset view">' +
+      '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">' +
+      '<path d="M12 2.5 L15.2 12 H8.8 Z" fill="#E32017"/>' +
+      '<path d="M12 21.5 L8.8 12 H15.2 Z" fill="#9DA2A6"/></svg></a>';
+    div.firstChild.addEventListener("click", (e) => {
+      e.preventDefault();
+      map.setView([51.5095, -0.1470], 11);
+    });
+    return div;
+  }
+});
+map.addControl(new NorthControl());
+
+/* attribution as a collapsed ⓘ — Leaflet's own control is an
+   always-open strip; this keeps the licence text one click away */
+const AttribControl = L.Control.extend({
+  options: { position: "bottomright" },
+  onAdd() {
+    const div = L.DomUtil.create("div", "attrib-ctl");
+    div.innerHTML =
+      '<button class="attrib-toggle" aria-label="Map attributions" aria-expanded="false">i</button>' +
+      '<span class="attrib-text">&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> ' +
+      '&copy; <a href="https://carto.com/attributions">CARTO</a> · Powered by TfL Open Data</span>';
+    const btn = div.querySelector(".attrib-toggle");
+    btn.addEventListener("click", () => {
+      btn.setAttribute("aria-expanded", String(div.classList.toggle("open")));
+    });
+    L.DomEvent.disableClickPropagation(div);
+    return div;
+  }
+});
+map.addControl(new AttribControl());
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   subdomains: "abcd",
   maxZoom: 16,
   keepBuffer: 4,
-  crossOrigin: true,
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> ' +
-    '&copy; <a href="https://carto.com/attributions">CARTO</a> · Powered by TfL Open Data'
+  crossOrigin: true
 }).addTo(map);
 
 const DOT_PX = { hour: 16, today: 14, week: 12 };
