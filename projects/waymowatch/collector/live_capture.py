@@ -80,10 +80,10 @@ MAX_BACKLOG = 400     # tier-2 (zone) clip queue cap; overflow drops OLDEST zone
                       # tier-1 and never dropped). Drops are counted + reported — never silent.
 VID_STRIDE = 5        # frame stride for det.track (was 3): 25fps clip -> 5 sampled fps; a passing
                       # car is in view 2-4s = 10-20 samples, plenty for ByteTrack. 1.67x cheaper.
-PROB_TH = 0.81        # digest ELIGIBILITY bar — 29-REAL scale (v0.8.9, 2026-06-11 afternoon):
-                      # live archive n=8,678 p80 0.846 / p95 0.870 / max 0.915; reals 0.819-0.915
-                      # (#4574 floor, 0.009 margin over the bar — three reals cluster 0.819-0.821,
-                      # watch the margin each re-seed). Set just BELOW the weakest real view —
+PROB_TH = 0.80        # digest ELIGIBILITY bar — 31-REAL scale (v0.8.10, 2026-06-11 afternoon):
+                      # live archive n=9,037 p80 0.849 / p95 0.873 / max 0.920; reals 0.816-0.914
+                      # (floor slid 0.819->0.816, margin over the old 0.81 bar down to 0.006 ->
+                      # dropped a notch, margin now 0.016). Set just BELOW the weakest real view —
                       # recall-first: eligibility must cover every known-real strength; DAY_CAP
                       # (4000) governs what is actually sent.
 DAY_CAP = 4000        # max candidate cells emailed per day (20 pages of PAGE_SIZE) — the user's review
@@ -95,9 +95,9 @@ NEAR_TH = 0.76        # archive floor — the ONLY irrecoverable cut in the funn
                       # 0.013 over the old floor, and the real floor drops with each harder view.
                       # Disk is a non-issue (7-day prune). NEAR_KEEP_DAYS prune.
 NEAR_KEEP_DAYS = 7    # near rows + their jpgs are pruned after this many days (mine promptly)
-ALERT_TH = 0.92       # instant-alert bar (29-real scale): above ALL 8,678 known FPs (max 0.915,
-                      # none >=0.92). Top real re-scores 0.914 — alerts are the
-                      # PRECISION channel, ranked sheets the recall channel. Re-check per re-seed.
+ALERT_TH = 0.93       # instant-alert bar (31-real scale): one FP reached 0.920, breaking the old
+                      # 0.92 bar -> raised. Above ALL 9,037 known FPs (max 0.920); top real 0.914 —
+                      # alerts are the PRECISION channel, ranked sheets the recall channel.
 BATCH_SIZE = 5        # (legacy count-trigger; superseded by PAGE_SIZE paging below)
 PAGE_SIZE = 200       # digest paging: the moment this many candidates pile up during the day, email
                       # that full page right away and reset; the remainder (< PAGE_SIZE) goes at
