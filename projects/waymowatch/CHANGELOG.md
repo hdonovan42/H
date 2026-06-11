@@ -1,5 +1,20 @@
 # WaymoWatch — Changelog
 
+## v0.8.9 — Confirms 28-29 (#8435, #4574) + roof-box #5 (2026-06-11, afternoon)
+
+**#8435** (00001.07393 Baker St/Marylebone Rd, 12:42 — a second Marylebone-area spine cam)
+and **#4574** (00001.07590 Southampton Row/Vernon Place, 13:04 — Holborn, new cam; captured
+0.812, now the FLOOR real at 0.819). **29 confirms / 26 distinct cameras.** **#8604**
+(Battersea Rise/Northcote Rd) added to `data/special/roof-box/` (5th specimen, 4th distinct
+camera) + rejected.
+
+- Standard cycle: 29-real centroid; archive re-scored (n=8,678: p80 0.846 / max 0.915;
+  reals 0.819-0.915 — three reals cluster 0.819-0.821 just over the bar; margin 0.009,
+  watch per re-seed). Bars unchanged: PROB_TH 0.81 / NEAR_TH 0.76 / ALERT_TH 0.92
+  (no FP >=0.92). 232 promoted / 20 demoted.
+- 4 sheets emailed: echo-mining around each confirm (827 + 673 in window) + top-200 retro
+  (0.885..0.848) + top-100 rejects re-check (0.915..0.887).
+
 ## v0.8.8 — Confirm 27 (#4362 Harrow Rd) (2026-06-11, afternoon)
 
 **#4362** (00001.07376 Harrow Rd/Kilburn Lane, 12:28 — NW London, new cam; captured at
