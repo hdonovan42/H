@@ -978,6 +978,16 @@ function popupHTML(group, i) {
   );
 }
 
+/* warm the browser cache for the frames either side of the one on
+   show, so paging never flashes the grey placeholder (images are
+   served with max-age=86400, so this costs one fetch each, once) */
+function prefetchFrames(group, i) {
+  [i - 1, i + 1].forEach(j => {
+    if (j >= 0 && j < group.length)
+      new Image().src = `${API_BASE}/img/${group[j].id}_frame.jpg`;
+  });
+}
+
 /* ONE marker per camera: ring colour + size from the NEWEST sighting,
    count in the dot when a camera has several */
 function cameraMarker(group) {
@@ -1001,11 +1011,18 @@ function cameraMarker(group) {
   m.on("popupopen", (e) => {
     let idx = 0;
     e.popup.setContent(popupHTML(group, idx));   /* always reopen at newest */
+    prefetchFrames(group, idx);
     e.popup.getElement().addEventListener("click", (ev) => {
       const btn = ev.target.closest(".pop-arrow");
       if (!btn || btn.disabled) return;
+      /* the content swap detaches the clicked button mid-dispatch;
+         Leaflet's "click was inside a popup" check walks the target's
+         ancestors, finds none, and treats it as a map click — which
+         closes the popup. Stop the event before it reaches the map. */
+      ev.stopPropagation();
       idx += Number(btn.dataset.d);
       e.popup.setContent(popupHTML(group, idx)); /* setContent updates an open popup itself */
+      prefetchFrames(group, idx);
     });
   });
   return m;
