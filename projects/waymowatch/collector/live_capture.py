@@ -60,6 +60,11 @@ FOCUS = {
 TOPK_PER_CAM = 3      # (legacy; superseded by per-vehicle dedup below)
 SCORE_FLOOR = 0.50
 DEDUP_TH = 0.93       # cosine >= this => same vehicle: one entry, crop updated to the best view
+MERGE_WINDOW_MIN = 10 # appearance (cosine) merges only join captures <= this many minutes apart —
+                      # a genuine multi-clip pass. MEASURED (v0.8.19, backup-snapshot diff): 289
+                      # in-place merges/hr, 94% joining captures >30 min apart (median gap 4 HOURS)
+                      # = distinct sightings destroyed, est. 5-10 real Waymo views/day. Beyond the
+                      # fence a match becomes a NEW row. Parked-spot (IoU) matches stay unfenced.
 KX_CENTRE = (51.5310, -0.1255)   # King's Cross / British Library centre (for --collect area)
 PARK_ROYAL = (51.5235, -0.2830)  # Waymo's London depot (NW10) — cars start/end runs here; the
                                  # ring of cams covers the depot + its arterials (A40, A406, Hanger Ln)
@@ -125,7 +130,10 @@ def ensure_schema(con):
       polled INTEGER, fresh INTEGER, processed INTEGER, dropped INTEGER,
       spine_fresh INTEGER, spine_processed INTEGER, new_cands INTEGER, near_cands INTEGER);""")
     for col in ("emb TEXT", "bbox TEXT", "alerted INTEGER DEFAULT 0",
-                "sent INTEGER DEFAULT 0"):   # for pre-existing tables
+                "sent INTEGER DEFAULT 0",
+                "special TEXT"):   # for pre-existing tables; special = curated gallery
+                                   # (roof-box/i-pac/funny) -> EXCLUDED from training negs,
+                                   # reserved for manual model eval (user, 2026-06-11)
         try:
             con.execute(f"ALTER TABLE candidates ADD COLUMN {col}")
         except Exception:
@@ -325,12 +333,12 @@ def ingest(con, embed, cen, cam_id, best):
     short = cam_id.replace("JamCams_", "")
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     stamp = now.replace("-", "").replace(":", "").replace("T", "").replace("Z", "")
-    found, near = 0, 0
+    found, near, merged = 0, 0, 0
     # recent entries at this camera, for cross-sweep dedup (parked cars = same bbox spot)
-    recent = [[rid, rsc, np.array(json.loads(remb)), st, (json.loads(bb) if bb else None)]
-              for rid, rsc, remb, st, bb in con.execute(
-                  "SELECT id,score,emb,status,bbox FROM candidates WHERE camera_id=? "
-                  "ORDER BY id DESC LIMIT 400", (cam_id,)).fetchall() if remb]
+    recent = [[rid, rsc, np.array(json.loads(remb)), st, (json.loads(bb) if bb else None), sn, at]
+              for rid, rsc, remb, st, bb, sn, at in con.execute(
+                  "SELECT id,score,emb,status,bbox,COALESCE(sent,0),captured_at FROM candidates "
+                  "WHERE camera_id=? ORDER BY id DESC LIMIT 400", (cam_id,)).fetchall() if remb]
     for tid, (area, frm, bbox) in best.items():
         x1, y1, x2, y2 = bbox
         roof = roof_crop(frm, bbox)
@@ -349,35 +357,49 @@ def ingest(con, embed, cen, cam_id, best):
         cp = os.path.join(CAND_DIR, f"{short}_t{tid}_{stamp}.jpg")
         fpth = os.path.join(CAND_DIR, f"{short}_t{tid}_{stamp}_frame.jpg")
         if m:
+            # VERDICT INTEGRITY (v0.8.17, after #9310): once a row has been SENT, its image
+            # is frozen evidence — the user's reply refers to what they saw.
+            # TIME FENCE (v0.8.19): an appearance (cosine) match may only MERGE a genuine
+            # multi-clip pass — captures <= MERGE_WINDOW_MIN apart. Measured before the fence:
+            # 94% of merges joined captures >30 min apart (median 4 h) = distinct sightings
+            # silently destroyed. Older/sent appearance-matches become NEW rows.
+            # Parked-spot (IoU) matches stay unfenced (same parked car across sweeps).
+            parked = bool(m[4]) and iou(bbox, m[4]) > 0.45
+            if m[3] in ("new", "near") and not parked:
+                try:
+                    gap_min = abs(time.time() - time.mktime(
+                        time.strptime(m[6], "%Y-%m-%dT%H:%M:%SZ"))) / 60.0
+                except Exception:
+                    gap_min = 1e9
+                if m[5] or gap_min > MERGE_WINDOW_MIN:
+                    m = None                               # fall through to INSERT below
+        if m:
             promote = m[3] == "near" and status == "new"  # near vehicle crossed the digest bar
-            if m[3] in ("new", "near") and (s > m[1] + 0.01 or promote):  # better view -> update
-                old = con.execute("SELECT crop_path,frame_path FROM candidates WHERE id=?", (m[0],)).fetchone()
+            if (m[3] in ("new", "near") and not m[5]
+                    and (s > m[1] + 0.01 or promote)):    # better view of an UNSEEN pass -> update
                 cv2.imwrite(cp, car); cv2.imwrite(fpth, frm)
                 con.execute("UPDATE candidates SET score=?,crop_path=?,frame_path=?,emb=?,bbox=?,"
                             "captured_at=?,status=? WHERE id=?",
                             (s, cp, fpth, json.dumps([round(float(x), 4) for x in e]),
                              json.dumps(list(bbox)), now, "new" if promote else m[3], m[0]))
-                for f in (old or []):
-                    if f and f not in (cp, fpth) and os.path.exists(f):
-                        try:
-                            os.remove(f)
-                        except Exception:
-                            pass
-                m[1], m[2], m[4] = s, e, list(bbox)
+                # superseded files are KEPT (v0.8.19) — evidence is never destroyed;
+                # the 7-day retention prune handles disk.
+                merged += 1
+                m[1], m[2], m[4], m[6] = s, e, list(bbox), now
                 if promote:
                     m[3] = "new"
                     found += 1
-            continue                                      # same vehicle -> no new row
+            continue                                      # same pass/spot -> no new row
         cv2.imwrite(cp, car); cv2.imwrite(fpth, frm)
         cur = con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb,bbox,status)"
                           " VALUES(?,?,?,?,?,?,?,?)", (cam_id, now, s, cp, fpth,
                           json.dumps([round(float(x), 4) for x in e]), json.dumps(list(bbox)), status))
-        recent.insert(0, [cur.lastrowid, s, e, status, list(bbox)])
+        recent.insert(0, [cur.lastrowid, s, e, status, list(bbox), 0, now])
         if status == "new":
             found += 1
         else:
             near += 1
-    return found, near
+    return found, near, merged
 
 
 def retention(con):
@@ -426,7 +448,7 @@ def sweep(con, focus=None, target=None):
             best = scan_clip(det, tmp)
         except Exception:
             continue
-        f, n = ingest(con, embed, cen, cam["id"], best)
+        f, n, _ = ingest(con, embed, cen, cam["id"], best)
         found += f
         near += n
         et = (hdrs.get("ETag") or "").strip() if hdrs else ""
@@ -627,7 +649,7 @@ def watch_loop(con):
     tier1, tier2, cam_index, t_cams = set(), set(), {}, 0.0
     q1, q2 = [], []                       # (t_fetch, short_id, clip_bytes) — FIFO per tier
     started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    polled = fresh1 = fresh2 = proc1 = proc2 = dropped = newc = nearc = 0
+    polled = fresh1 = fresh2 = proc1 = proc2 = dropped = newc = nearc = mrgc = 0
     cyc_t0, last_poll = time.time(), 0.0
     print(f"[{ts()}] watch loop v0.5: spine + zone, poll every {POLL_EVERY}s, 24/7", flush=True)
     while True:
@@ -664,7 +686,7 @@ def watch_loop(con):
                     con.commit()
                     print(f"[{ts()}] cycle: {polled} polled | +{fresh1 + fresh2} fresh (spine {fresh1})"
                           f" | processed {proc1 + proc2} | backlog {len(q1) + len(q2)}"
-                          f" | dropped {dropped} | +{newc} new +{nearc} near"
+                          f" | dropped {dropped} | +{newc} new +{nearc} near ~{mrgc} merged"
                           f" | {now - cyc_t0:.0f}s", flush=True)
                     retention(con)
                     review_sheet(con)
@@ -674,7 +696,7 @@ def watch_loop(con):
                 except Exception as e:
                     print(f"[{ts()}] cycle-close error: {e}", flush=True)
                 started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                polled = fresh1 = fresh2 = proc1 = proc2 = dropped = newc = nearc = 0
+                polled = fresh1 = fresh2 = proc1 = proc2 = dropped = newc = nearc = mrgc = 0
                 cyc_t0 = time.time()
             try:
                 res = poll_cams(con, cam_index, sorted(tier1) + sorted(tier2))
@@ -704,10 +726,11 @@ def watch_loop(con):
             _, sid, body = src.pop(0)
             try:
                 open(tmp, "wb").write(body)
-                f, n = ingest(con, embed, cen, "JamCams_" + sid, scan_clip(det, tmp))
+                f, n, mg = ingest(con, embed, cen, "JamCams_" + sid, scan_clip(det, tmp))
                 con.commit()
                 newc += f
                 nearc += n
+                mrgc += mg
             except Exception as e:
                 print(f"[{ts()}] clip error {sid}: {e}", flush=True)
             if src is q1:

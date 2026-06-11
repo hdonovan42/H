@@ -1,5 +1,108 @@
 # WaymoWatch — Changelog
 
+## v0.8.19 — Time-fenced merges: stop destroying distinct sightings (2026-06-11, night)
+
+User asked how many Waymos the in-place best-view overwrites were costing. Measured from
+backup-repo snapshot diffs: **289 in-place merges in one hour, 94% joining captures more
+than 30 min apart (median gap 4 HOURS, p90 24h)** — overwhelmingly distinct sightings (and
+often distinct vehicles, per #9310) being silently merged, with the losing image DELETED.
+Estimated cost: ~5-10 real Waymo views/day — the largest known recall leak.
+
+- **MERGE_WINDOW_MIN = 10**: an appearance (cosine) match may only merge captures <= 10 min
+  apart (a genuine multi-clip pass). Anything older becomes a NEW candidate row.
+  Parked-spot (IoU) matches stay unfenced (same parked car across sweeps — the original
+  and still-valid dedup case).
+- **Superseded files are never deleted** — evidence is immutable; the 7-day prune handles disk.
+- **Merges are now counted**: ingest returns (new, near, merged); the cycle log line gains
+  "~N merged" so this behaviour is never invisible again.
+- Architecture note (changelog as design record): this moves storage to append-mostly —
+  rows are only ever merged within a provable single pass; everything else accumulates.
+  Volume increase expected on pages (distinct sightings no longer collapse); DAY_CAP 10k
+  absorbs it.
+
+## v0.8.18 — #9310 adjudicated: "first only" — positive swapped, impostor re-filed (2026-06-11, night)
+
+User verdict on the v0.8.17 mismatch: the CONFIRMED 17:17 capture is the Waymo; the
+17:57 capture that best-view dedup banked is NOT.
+
+- Row #9310 restored to the t11/17:17 view (files recovered from the backup repo; emb
+  recomputed from frame+bbox exactly as ingest does). Re-scores 0.833 on the corrected
+  centroid — comfortably real-range.
+- The 17:57 impostor re-filed as its OWN row (#10808), status reject, sent=1 — a
+  human-reviewed hard negative (it fooled both the scorer AND the dedup; exactly the
+  kind training needs).
+- real_positives corrected (still 36 reals); centroid re-seeded; archive re-scored
+  (n=10,772: p80 0.846 / max 0.915); bars unchanged (0.80/0.76/0.93); 22 promoted /
+  180 demoted; loop restarted.
+- Net effect of the incident: zero data lost, one extra vetted hard negative gained,
+  and the in-place-overwrite bug that caused it is already fixed (v0.8.17).
+
+## v0.8.17 — Verdict integrity: sent rows are frozen evidence (2026-06-11, night)
+
+User caught it via the confirm-echo rule (working exactly as designed): the #9310 image
+in the cycle email was NOT the image they had confirmed from the ranked page. Root cause:
+best-view dedup UPDATES rows in place — between page-send (17:17 view) and --confirm, the
+loop merged a later capture (17:57, cosine >=0.93) into the row, so the banked positive
+was a different image (possibly a different vehicle) than the one the verdict referred to.
+
+- **Fix (ingest)**: once a row has been SENT, its image is frozen — a later appearance-
+  match (cosine) becomes a NEW candidate row instead of an overwrite. Parked-spot (IoU)
+  matches to sent rows stay suppressed (else parked cars would mint a row per sweep).
+  Unseen rows keep the existing best-view merge.
+- **#9310 adjudication pending**: both versions emailed (17:17 confirmed vs 17:57 banked,
+  recovered from the append-only backup repo — its first save). #1065 verified unaffected.
+- 36-real centroid currently includes the suspect #9310 crop — corrected per the user's
+  adjudication verdict.
+
+## v0.8.16 — Confirms 35-36 (#1065, #9310); consolidated cycle's first live run (2026-06-11, evening)
+
+**#1065** (00001.08950 Portman Square/Orchard St, 17:14 — Marylebone, new cam) and
+**#9310** (00001.01301 Gt Eastern St/Curtain Rd, 17:57 — SHOREDITCH, first east-central
+confirm, new cam). **36 confirms / 33 distinct cameras.**
+
+- First live run of `confirm_cycle.py`: ONE email (2 echoes + 72-row new-to-you sheet)
+  vs the old 4; retro auto-skipped (2/5 confirms since last), rejcheck auto-skipped
+  (same day). 36-real centroid; archive n=10,747: p80 0.848 / max 0.917; reals
+  0.813-0.916. Bars unchanged: PROB_TH 0.80 / NEAR_TH 0.76 / ALERT_TH 0.93.
+  110 promoted / 16 demoted.
+
+## v0.8.15 — Special cases held OUT of training (manual eval set) (2026-06-11, evening)
+
+User: the curated specials become a held-out manual evaluation set for the trained model —
+they must not appear in the training data.
+
+- New `special TEXT` column on candidates (live_capture ensure_schema + VPS ALTER);
+  all 12 filed gallery vehicles tagged: roof-box 7 (#2126 #4014 #4015 #5701 #8604 #9688
+  #10169), i-pac 2 (#4034 #9947), funny 3 (#5543 #8858 #10239).
+- `build_real_dataset.py` negatives query now requires `special IS NULL` — specials can
+  never enter training; suppression behaviour unchanged (they stay status='reject', never
+  resurface on sheets).
+- Filing protocol from now on: copy images to data/special/<gallery>/ + status='reject'
+  + special='<gallery>'.
+- Training-negative pool after exclusion: 3,356.
+
+## v0.8.14 — Email consolidation: one mail per confirm batch (2026-06-11, evening)
+
+User: "after each sighting i get multiple emails that have returned nothing the last 5
+sightings." Investigated channel yield across all 34 confirms: ranked pages ~82%;
+retro/mining/rejcheck = 0 in the last ~10 cycles (measured: ~90% of recent mining-sheet
+rows had ALREADY been sent on pages — 48/67/70 of the last three top-72s). Structural:
+at 34 reals each confirm barely moves the centroid, and the 10k DAY_CAP means pages
+already deliver everything eligible.
+
+- **`collector/confirm_cycle.py`** (new, runs on VPS): the whole post-confirm flow in one
+  command — re-score archive -> re-bucket -> ONE consolidated email (echo images of every
+  confirm in the batch + a combined NEW-TO-YOU sheet: never-sent rows ±45 min of any
+  confirm, max-cosine ranked, skipped if <6 rows) -> trigger-based retro (every >=5
+  confirms or --force-retro after bar changes) -> rejects re-check (every >=7 days or
+  --force-rejcheck). Warns if the floor real drops below PROB_TH.
+- **`collector/bank_shown.py`** (new): every sheet's shown ids are recorded in
+  data/candidates/cycle_shown.json; a "no waymos" verdict banks EXACTLY those ids —
+  replaces the fragile reproduce-by-query + mtime-cutoff banking.
+- Triggers seeded (retro@34, rejcheck@2026-06-11). Pages + instant alerts untouched.
+- Effect: a 2-confirm reply now produces 1 email instead of 4; last 5 sightings would
+  have been 5 emails instead of 16, with measured loss of nothing.
+
 ## v0.8.13 — Confirm 34 (#10213, 3rd A2 New Cross cam) + funny/ gallery (2026-06-11, evening)
 
 **#10213** (00001.03672 A2 New Cross Rd/Avonley Rd, 16:28) — the THIRD distinct A2 New
