@@ -1,5 +1,25 @@
 # WaymoWatch — Changelog
 
+## v0.8.4 — Confirms 17-20 + confirm-echo verification in mining emails (2026-06-11, morning)
+
+Four overnight/early-morning confirms off the first two digests of the new day: **#4382**
+(Old Kent Rd, 05:28 — REPEAT camera, #1338's site), **#4752** (Camberwell New Rd, 05:09 —
+new cam), **#4539** (Stamford St, 04:32 — new cam), **#3424** (A2 New Cross Rd/Florence Rd,
+07:33 — REPEAT camera, #3310's site). **20 confirms / 18 distinct cameras.** First repeat
+cameras = the SE corridor (A2/Old Kent Rd) is a regular route; first 04:00-05:00 captures
+chip at the night-data gap.
+
+- **NEW STANDING RULE (user)**: every mining email now leads with the confirmed vehicle's
+  OWN crop + frame and an "if this is NOT a Waymo, reply 'undo #id'" line — an id typo can
+  no longer silently bank a non-Waymo into the training positives.
+- Standard cycle: 20-real pure centroid; archive re-scored — **n=7,364 non-waymo (nearly
+  doubled overnight: the 608-cam zone producing)**: p80 0.841 / p95 0.866 / max 0.913;
+  reals 0.829-0.915. 1,085 promoted / 0 demoted.
+- **Bars**: PROB_TH **0.83 → 0.82** (the floor real #2145 re-scores 0.829; eligibility
+  stays below the weakest known real), NEAR_TH **0.76**, ALERT_TH **0.92** (no FP ≥0.92).
+- 6 sheets emailed: 4 mining (each with confirm echo) + top-200 retro (0.910..0.862) +
+  top-100 rejects re-check (0.913..0.875).
+
 ## v0.8.3 — Confirms 15-16 (#1362, #332) (2026-06-10/11, midnight)
 
 **#1362** (00001.03663 A2 New Cross Rd/St James, 19:42 — the A2 corridor's SECOND confirm,
