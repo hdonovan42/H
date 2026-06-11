@@ -1,5 +1,15 @@
 # WaymoWatch — Changelog
 
+## v0.8.21 — Confirm 38 (#9927, Hanger Lane — depot ring) (2026-06-11, evening)
+
+**#9927** (00001.07317 A40/Hanger Lane Tunnel, 19:09 — the Park Royal depot ring, new cam)
+— and notably the FIRST confirm sourced from the consolidated cycle's new-to-you sheet
+(the never-sent near-band channel earning its place). **38 confirms / 35 distinct cameras.**
+
+- Consolidated cycle: 38-real centroid; n=10,984: p80 0.844 / max 0.913; reals 0.817-0.918
+  (floor ROSE 0.815→0.817). Bars unchanged (0.80/0.76/0.93). One email; retro skipped
+  (4/5 — next confirm triggers it), rejcheck skipped.
+
 ## v0.8.20 — Confirm 37 (#10823): FIRST east-extension confirm (2026-06-11, evening)
 
 **#10823** (00001.03760 Shooters Hill Rd/Prince of Wales Rd, 18:26 — Blackheath, lon
