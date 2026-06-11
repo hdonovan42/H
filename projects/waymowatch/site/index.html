@@ -1004,7 +1004,10 @@ function cameraMarker(group) {
     title: n > 1 ? `${n} Waymo sightings — ${newest.common_name}`
                  : `Waymo #${newest.id} — ${newest.common_name}`
   });
-  m.bindPopup(popupHTML(group, 0), { maxWidth: 300, autoPanPadding: L.point(28, 28) });
+  /* maxWidth = the photo's width: long road names wrap rather than
+     stretching the box past the image (which pushed the right arrow
+     outside the photo) — box hugs the picture, arrows symmetric */
+  m.bindPopup(popupHTML(group, 0), { maxWidth: 264, autoPanPadding: L.point(28, 28) });
   /* ONE delegated listener on the popup container — setContent
      re-renders the inner nodes (which killed per-button listeners),
      but the container survives, so delegation keeps working */
