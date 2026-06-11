@@ -1,5 +1,21 @@
 # WaymoWatch — Changelog
 
+## v0.8.5 — Confirms 21-24 (2026-06-11, midday)
+
+**#7361** (Park Lane/Upper Grosvenor St, 10:25 — Mayfair, new cam), **#5083** (Victoria
+St/Bressenden Place, 07:14 — new cam), **#2669** (Old Kent Rd/Glengall Rd, 09:22 — that
+camera's THIRD confirm: #1338, #4382, #2669), **#1329** (Vauxhall Brd Rd/Drummond Gt,
+05:12 — new cam, another night capture). **24 confirms / 21 distinct cameras.**
+
+- Standard cycle with confirm-echo emails (each mining mail leads with the banked
+  vehicle's own crop+frame for id verification).
+- 24-real pure centroid; archive re-scored (n=7,413 non-waymo: p80 0.846 / p95 0.870 /
+  max 0.916; reals 0.824-0.913 — #2145 floor 0.824, #1329 second-weakest 0.830).
+- **Bars unchanged**: PROB_TH **0.82** (still below the weakest real), NEAR_TH **0.76**,
+  ALERT_TH **0.92** (no FP ≥0.92; 28 sat 0.90-0.916). 435 promoted / 12 demoted.
+- 6 sheets emailed: 4 echo-mining + top-200 retro (0.916..0.867) + top-100 rejects
+  re-check (0.913..0.881).
+
 ## v0.8.4 — Confirms 17-20 + confirm-echo verification in mining emails (2026-06-11, morning)
 
 Four overnight/early-morning confirms off the first two digests of the new day: **#4382**
