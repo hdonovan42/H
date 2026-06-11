@@ -1,5 +1,23 @@
 # WaymoWatch — Changelog
 
+## v0.8.22 — Quota-failure hardening: every send retries, nothing marked unseen (2026-06-11, night)
+
+Resend free tier hit 80% of its 100/day cap; audited every send path for what happens at
+quota exhaustion:
+
+- **Ranked pages**: already correct — sent flag only on success, retry every cycle. At the
+  1am UTC quota reset the backlog flows automatically. (Resend doesn't document the reset
+  time; UTC calendar-day is the dashboard convention.)
+- **23:00 end-of-day flush FIXED**: previously closed the day unconditionally — a quota-
+  failed remainder send demoted everything to the archive, never delivered. Now: if the
+  flush fails with rows pending and budget left, the day stays OPEN and retries each cycle.
+- **confirm_cycle.py FIXED**: new-to-you/retro sheets marked rows sent + recorded them as
+  user-shown BEFORE the send — a quota-failed email could have recorded rows as reviewed
+  unseen (and bank_shown would then reject them unseen). All marking now happens only
+  after Resend accepts; failed retro/rejcheck leave their triggers armed.
+
+Net: quota exhaustion now degrades to "delayed", never "lost" or "silently mis-recorded".
+
 ## v0.8.21 — Confirm 38 (#9927, Hanger Lane — depot ring) (2026-06-11, evening)
 
 **#9927** (00001.07317 A40/Hanger Lane Tunnel, 19:09 — the Park Royal depot ring, new cam)

@@ -622,7 +622,13 @@ def maybe_send_daily_digest(con):
     if row and row[0] == today:
         return
     emit_pages(con)                          # drain any full pages first
-    send_digest(con, reason="end-of-day")    # then the remainder, up to the day's budget
+    sent = send_digest(con, reason="end-of-day")  # then the remainder, up to the day's budget
+    if pending_count(con) and not sent and day_budget(con)[0] > 0:
+        # Send FAILED with rows still pending and budget available (e.g. Resend daily
+        # quota exhausted) — do NOT close the day or demote: leave everything queued so
+        # the retry-every-cycle loop delivers it the moment quota resets (v0.8.22).
+        print("end-of-day flush failed with rows pending — day left open for retry")
+        return
     # Overflow the budget couldn't cover is DEMOTED to the near archive (kept NEAR_KEEP_DAYS,
     # minable, retrievable if bars are re-cut) so each day's ranking starts fresh — except
     # anything at instant-alert level, which must stay eligible until actually sent.
