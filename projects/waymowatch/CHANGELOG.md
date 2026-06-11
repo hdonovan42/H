@@ -1,5 +1,25 @@
 # WaymoWatch — Changelog
 
+## v0.8.19 — Time-fenced merges: stop destroying distinct sightings (2026-06-11, night)
+
+User asked how many Waymos the in-place best-view overwrites were costing. Measured from
+backup-repo snapshot diffs: **289 in-place merges in one hour, 94% joining captures more
+than 30 min apart (median gap 4 HOURS, p90 24h)** — overwhelmingly distinct sightings (and
+often distinct vehicles, per #9310) being silently merged, with the losing image DELETED.
+Estimated cost: ~5-10 real Waymo views/day — the largest known recall leak.
+
+- **MERGE_WINDOW_MIN = 10**: an appearance (cosine) match may only merge captures <= 10 min
+  apart (a genuine multi-clip pass). Anything older becomes a NEW candidate row.
+  Parked-spot (IoU) matches stay unfenced (same parked car across sweeps — the original
+  and still-valid dedup case).
+- **Superseded files are never deleted** — evidence is immutable; the 7-day prune handles disk.
+- **Merges are now counted**: ingest returns (new, near, merged); the cycle log line gains
+  "~N merged" so this behaviour is never invisible again.
+- Architecture note (changelog as design record): this moves storage to append-mostly —
+  rows are only ever merged within a provable single pass; everything else accumulates.
+  Volume increase expected on pages (distinct sightings no longer collapse); DAY_CAP 10k
+  absorbs it.
+
 ## v0.8.18 — #9310 adjudicated: "first only" — positive swapped, impostor re-filed (2026-06-11, night)
 
 User verdict on the v0.8.17 mismatch: the CONFIRMED 17:17 capture is the Waymo; the
