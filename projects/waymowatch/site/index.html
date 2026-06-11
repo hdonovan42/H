@@ -4,6 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>WaymoNet · London</title>
+<link rel="icon" type="image/png" href="assets/favicon.png" />
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
 <link rel="preconnect" href="https://a.basemaps.cartocdn.com" />
 <link rel="preconnect" href="https://b.basemaps.cartocdn.com" />
 <link rel="preload" href="assets/hammersmith-one-latin.woff2" as="font" type="font/woff2" crossorigin />
@@ -748,6 +750,17 @@ svg.leaflet-image-layer.leaflet-interactive path {
   @media (prefers-reduced-motion: reduce) {
     .dot-hour::after { animation: none; display: none; }
   }
+  /* cameras with >1 sighting: one dot, count in the centre,
+     ring colour from the NEWEST sighting */
+  .dot-multi {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .dot-multi span { font: 700 11px/1 var(--body); }
+  .dot-hour.dot-multi span  { color: var(--red); }
+  .dot-today.dot-multi span { color: var(--blue); }
+  .dot-week.dot-multi span  { color: #6E6E73; }
 
   /* ---------- popups, tube-map paper treatment ---------- */
   .leaflet-popup-content-wrapper {
@@ -778,6 +791,28 @@ svg.leaflet-image-layer.leaflet-interactive path {
     margin: 4px 0 7px;
     background: #F4F3EE;
   }
+  /* arrows for paging through a camera's sightings */
+  .pop-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 7px;
+    padding-top: 6px;
+    border-top: 1px solid var(--hairline);
+  }
+  .pop-arrow {
+    appearance: none;
+    width: 28px; height: 22px;
+    border: 1px solid var(--hairline);
+    border-radius: 4px;
+    background: #fff;
+    color: var(--blue);
+    font: 700 14px/1 var(--body);
+    cursor: pointer;
+  }
+  .pop-arrow:hover:not(:disabled) { background: #F4F3EE; }
+  .pop-arrow:disabled { opacity: 0.3; cursor: default; }
+  .pop-pos { font-size: 11px; color: var(--grey); }
   /* ---------- collapsed attribution (ⓘ, expands on click) ---------- */
   .attrib-ctl {
     display: flex;
@@ -906,30 +941,68 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
 }).addTo(map);
 
 const DOT_PX = { hour: 16, today: 14, week: 12 };
+const MULTI_PX = 20;   /* numbered dots need room for the count */
 
 const markers = L.layerGroup().addTo(map);
 
-function sightingMarker(s) {
-  const when = recency(s.captured_at);
-  const px = DOT_PX[when];
-  const m = L.marker([s.lat, s.lon], {
-    icon: L.divIcon({
-      className: `dot dot-${when}`,
-      iconSize: [px, px]
-    }),
-    title: `Waymo #${s.id} — ${s.common_name}`
-  });
-  /* camera data above the picture so the image is never pushed out
-     of view; recency chip dropped — the ring colour + timestamp say it */
-  m.bindPopup(
+/* camera data above the picture so the image is never pushed out
+   of view; recency chip dropped — the ring colour + timestamp say it.
+   `group` = all sightings at one camera, newest first; arrows page
+   through them when there's more than one. */
+function popupHTML(group, i) {
+  const s = group[i];
+  const nav = group.length > 1
+    ? `<div class="pop-nav">` +
+      `<button class="pop-arrow" data-d="-1" aria-label="Newer sighting"` +
+      `${i === 0 ? " disabled" : ""}>&#8249;</button>` +
+      `<span class="pop-pos">${i + 1} / ${group.length}</span>` +
+      `<button class="pop-arrow" data-d="1" aria-label="Older sighting"` +
+      `${i === group.length - 1 ? " disabled" : ""}>&#8250;</button>` +
+      `</div>`
+    : "";
+  return (
     `<p class="pop-title">Waymo · #${s.id}</p>` +
     `<p class="pop-line"><strong>${s.common_name}</strong>${s.view ? ` (facing ${s.view})` : ""}</p>` +
     `<img class="pop-img" src="${API_BASE}/img/${s.id}_frame.jpg" ` +
     `alt="JamCam frame of sighting #${s.id}" />` +
     `<p class="pop-line">${fmtDate(s.captured_at)} · ${fmtTime(s.captured_at)}</p>` +
-    `<p class="pop-line">Detector score ${Number(s.score).toFixed(2)}</p>`,
-    { maxWidth: 300, autoPanPadding: L.point(28, 28) }
+    `<p class="pop-line">Detector score ${Number(s.score).toFixed(2)}</p>` +
+    nav
   );
+}
+
+function wireNav(popup, group, i) {
+  popup.getElement().querySelectorAll(".pop-arrow").forEach(btn =>
+    btn.addEventListener("click", () => {
+      const next = i + Number(btn.dataset.d);
+      popup.setContent(popupHTML(group, next));   /* replaces nodes */
+      wireNav(popup, group, next);                /* so re-wire */
+      popup.update();
+    }));
+}
+
+/* ONE marker per camera: ring colour + size from the NEWEST sighting,
+   count in the dot when a camera has several */
+function cameraMarker(group) {
+  const newest = group[0];
+  const when = recency(newest.captured_at);
+  const n = group.length;
+  const px = n > 1 ? MULTI_PX : DOT_PX[when];
+  const m = L.marker([newest.lat, newest.lon], {
+    icon: L.divIcon({
+      className: `dot dot-${when}${n > 1 ? " dot-multi" : ""}`,
+      html: n > 1 ? `<span>${n}</span>` : "",
+      iconSize: [px, px]
+    }),
+    title: n > 1 ? `${n} Waymo sightings — ${newest.common_name}`
+                 : `Waymo #${newest.id} — ${newest.common_name}`
+  });
+  m.bindPopup(popupHTML(group, 0), { maxWidth: 300, autoPanPadding: L.point(28, 28) });
+  m.on("popupopen", (e) => {   /* always (re)open at the newest */
+    e.popup.setContent(popupHTML(group, 0));
+    wireNav(e.popup, group, 0);
+    e.popup.update();
+  });
   return m;
 }
 
@@ -948,7 +1021,14 @@ async function refreshSightings() {
     if (payload !== lastPayload) {
       lastPayload = payload;
       markers.clearLayers();
-      rows.forEach(s => markers.addLayer(sightingMarker(s)));
+      /* group by camera; rows arrive newest-first from the API, so
+         each group is already ordered newest -> oldest */
+      const byCam = new Map();
+      rows.forEach(s => {
+        if (!byCam.has(s.camera_id)) byCam.set(s.camera_id, []);
+        byCam.get(s.camera_id).push(s);
+      });
+      byCam.forEach(g => markers.addLayer(cameraMarker(g)));
     }
     foot.innerHTML = rows.length
       ? `${rows.length} confirmed sighting${rows.length === 1 ? "" : "s"},<br>` +

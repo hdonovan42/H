@@ -1,5 +1,18 @@
 # WaymoWatch — Changelog
 
+## Dashboard v2.3 — camera grouping: one dot per camera, paged popup (2026-06-11)
+
+Cameras with repeat sightings (Old Kent Rd ×3, A2 New Cross ×2) stacked identical
+dots on the same coordinates — unselectable. Now:
+
+- **One marker per camera**: ring colour/size from the NEWEST sighting; when a camera
+  has more than one, the dot grows to 20px and shows the count in the centre
+  (number tinted to match the ring).
+- **Paged popup**: opens on the newest sighting with ‹ › arrows + "1 / N" to walk
+  every sighting at that camera (newest → oldest); every record stays live on the
+  dash. Arrows disabled at the ends; popup always reopens at the newest.
+- Same popup layout per page (reserved image box → no resize while paging).
+
 ## Dashboard v2.2 — moved to https://waymonet.com (2026-06-11)
 
 The public dashboard moves off GitHub Pages onto its own domain (Namecheap),
