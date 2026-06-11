@@ -151,4 +151,7 @@ step). Adding new fields is safe (additive); renames/removals/semantic changes a
 - No API costs (no VLM gating); one-off GPU rental ~$1 is fine
 - Real data only for training; "make sure they are sent to me" — recall to human eyes
   beats precision; the ranked DAY_CAP digest embodies this
+- **Confirm-echo (2026-06-11)**: every mining email leads with the confirmed vehicle's OWN
+  crop+frame + an "if NOT a Waymo, reply 'undo #id'" line — id typos must never silently
+  bank a non-Waymo into the positives
 - Auto-commit + CHANGELOG + push to `waymowatch` branch for any major revision

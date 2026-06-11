@@ -1,5 +1,41 @@
 # WaymoWatch — Changelog
 
+## v0.8.5 — Confirms 21-24 (2026-06-11, midday)
+
+**#7361** (Park Lane/Upper Grosvenor St, 10:25 — Mayfair, new cam), **#5083** (Victoria
+St/Bressenden Place, 07:14 — new cam), **#2669** (Old Kent Rd/Glengall Rd, 09:22 — that
+camera's THIRD confirm: #1338, #4382, #2669), **#1329** (Vauxhall Brd Rd/Drummond Gt,
+05:12 — new cam, another night capture). **24 confirms / 21 distinct cameras.**
+
+- Standard cycle with confirm-echo emails (each mining mail leads with the banked
+  vehicle's own crop+frame for id verification).
+- 24-real pure centroid; archive re-scored (n=7,413 non-waymo: p80 0.846 / p95 0.870 /
+  max 0.916; reals 0.824-0.913 — #2145 floor 0.824, #1329 second-weakest 0.830).
+- **Bars unchanged**: PROB_TH **0.82** (still below the weakest real), NEAR_TH **0.76**,
+  ALERT_TH **0.92** (no FP ≥0.92; 28 sat 0.90-0.916). 435 promoted / 12 demoted.
+- 6 sheets emailed: 4 echo-mining + top-200 retro (0.916..0.867) + top-100 rejects
+  re-check (0.913..0.881).
+
+## v0.8.4 — Confirms 17-20 + confirm-echo verification in mining emails (2026-06-11, morning)
+
+Four overnight/early-morning confirms off the first two digests of the new day: **#4382**
+(Old Kent Rd, 05:28 — REPEAT camera, #1338's site), **#4752** (Camberwell New Rd, 05:09 —
+new cam), **#4539** (Stamford St, 04:32 — new cam), **#3424** (A2 New Cross Rd/Florence Rd,
+07:33 — REPEAT camera, #3310's site). **20 confirms / 18 distinct cameras.** First repeat
+cameras = the SE corridor (A2/Old Kent Rd) is a regular route; first 04:00-05:00 captures
+chip at the night-data gap.
+
+- **NEW STANDING RULE (user)**: every mining email now leads with the confirmed vehicle's
+  OWN crop + frame and an "if this is NOT a Waymo, reply 'undo #id'" line — an id typo can
+  no longer silently bank a non-Waymo into the training positives.
+- Standard cycle: 20-real pure centroid; archive re-scored — **n=7,364 non-waymo (nearly
+  doubled overnight: the 608-cam zone producing)**: p80 0.841 / p95 0.866 / max 0.913;
+  reals 0.829-0.915. 1,085 promoted / 0 demoted.
+- **Bars**: PROB_TH **0.83 → 0.82** (the floor real #2145 re-scores 0.829; eligibility
+  stays below the weakest known real), NEAR_TH **0.76**, ALERT_TH **0.92** (no FP ≥0.92).
+- 6 sheets emailed: 4 mining (each with confirm echo) + top-200 retro (0.910..0.862) +
+  top-100 rejects re-check (0.913..0.875).
+
 ## v0.8.3 — Confirms 15-16 (#1362, #332) (2026-06-10/11, midnight)
 
 **#1362** (00001.03663 A2 New Cross Rd/St James, 19:42 — the A2 corridor's SECOND confirm,
