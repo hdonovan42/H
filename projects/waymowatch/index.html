@@ -770,6 +770,10 @@ svg.leaflet-image-layer.leaflet-interactive path {
     display: block;
     width: 264px;
     max-width: 100%;
+    /* JamCam frames are always 352x288 — reserving the box up front
+       means the popup opens at its final size, so Leaflet's auto-pan
+       brings the WHOLE popup (image included) into view first time */
+    aspect-ratio: 352 / 288;
     border-radius: 4px;
     border: 1px solid var(--hairline);
     margin: 4px 0 7px;
@@ -922,10 +926,10 @@ function sightingMarker(s) {
     `<p class="pop-title">Waymo · #${s.id}</p>` +
     `<p class="pop-line"><strong>${s.common_name}</strong>${s.view ? ` (facing ${s.view})` : ""}</p>` +
     `<img class="pop-img" src="${API_BASE}/img/${s.id}_frame.jpg" ` +
-    `alt="JamCam frame of sighting #${s.id}" loading="lazy" />` +
+    `alt="JamCam frame of sighting #${s.id}" />` +
     `<p class="pop-line">${fmtDate(s.captured_at)} · ${fmtTime(s.captured_at)}</p>` +
     `<p class="pop-line">Detector score ${Number(s.score).toFixed(2)}</p>`,
-    { maxWidth: 300 }
+    { maxWidth: 300, autoPanPadding: L.point(28, 28) }
   );
   return m;
 }
