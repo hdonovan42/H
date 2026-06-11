@@ -792,27 +792,34 @@ svg.leaflet-image-layer.leaflet-interactive path {
     background: #F4F3EE;
   }
   /* arrows for paging through a camera's sightings */
-  .pop-nav {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+  /* arrows overlaid on the image sides; position counter at the bottom */
+  .pop-imgwrap { position: relative; }
+  .pop-arrow {
+    appearance: none;
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 26px; height: 32px;
+    border: 1px solid var(--hairline);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.88);
+    color: var(--blue);
+    font: 700 16px/1 var(--body);
+    cursor: pointer;
+  }
+  .pop-arrow[data-d="-1"] { left: 7px; }
+  .pop-arrow[data-d="1"]  { right: 7px; }
+  .pop-arrow:hover:not(:disabled) { background: #fff; }
+  .pop-arrow:disabled { opacity: 0.3; cursor: default; }
+  .pop-pos {
+    display: block;
+    text-align: center;
     margin-top: 7px;
     padding-top: 6px;
     border-top: 1px solid var(--hairline);
+    font-size: 11px;
+    color: var(--grey);
   }
-  .pop-arrow {
-    appearance: none;
-    width: 28px; height: 22px;
-    border: 1px solid var(--hairline);
-    border-radius: 4px;
-    background: #fff;
-    color: var(--blue);
-    font: 700 14px/1 var(--body);
-    cursor: pointer;
-  }
-  .pop-arrow:hover:not(:disabled) { background: #F4F3EE; }
-  .pop-arrow:disabled { opacity: 0.3; cursor: default; }
-  .pop-pos { font-size: 11px; color: var(--grey); }
   /* ---------- collapsed attribution (ⓘ, expands on click) ---------- */
   .attrib-ctl {
     display: flex;
@@ -951,34 +958,24 @@ const markers = L.layerGroup().addTo(map);
    through them when there's more than one. */
 function popupHTML(group, i) {
   const s = group[i];
-  const nav = group.length > 1
-    ? `<div class="pop-nav">` +
-      `<button class="pop-arrow" data-d="-1" aria-label="Newer sighting"` +
-      `${i === 0 ? " disabled" : ""}>&#8249;</button>` +
-      `<span class="pop-pos">${i + 1} / ${group.length}</span>` +
-      `<button class="pop-arrow" data-d="1" aria-label="Older sighting"` +
-      `${i === group.length - 1 ? " disabled" : ""}>&#8250;</button>` +
-      `</div>`
-    : "";
+  const multi = group.length > 1;
+  const img =
+    `<img class="pop-img" src="${API_BASE}/img/${s.id}_frame.jpg" ` +
+    `alt="JamCam frame of sighting #${s.id}" />`;
   return (
     `<p class="pop-title">Waymo · #${s.id}</p>` +
     `<p class="pop-line"><strong>${s.common_name}</strong>${s.view ? ` (facing ${s.view})` : ""}</p>` +
-    `<img class="pop-img" src="${API_BASE}/img/${s.id}_frame.jpg" ` +
-    `alt="JamCam frame of sighting #${s.id}" />` +
+    (multi
+      ? `<div class="pop-imgwrap">${img}` +
+        `<button class="pop-arrow" data-d="-1" aria-label="Newer sighting"` +
+        `${i === 0 ? " disabled" : ""}>&#8249;</button>` +
+        `<button class="pop-arrow" data-d="1" aria-label="Older sighting"` +
+        `${i === group.length - 1 ? " disabled" : ""}>&#8250;</button></div>`
+      : img) +
     `<p class="pop-line">${fmtDate(s.captured_at)} · ${fmtTime(s.captured_at)}</p>` +
     `<p class="pop-line">Detector score ${Number(s.score).toFixed(2)}</p>` +
-    nav
+    (multi ? `<p class="pop-pos">${i + 1} / ${group.length}</p>` : "")
   );
-}
-
-function wireNav(popup, group, i) {
-  popup.getElement().querySelectorAll(".pop-arrow").forEach(btn =>
-    btn.addEventListener("click", () => {
-      const next = i + Number(btn.dataset.d);
-      popup.setContent(popupHTML(group, next));   /* replaces nodes */
-      wireNav(popup, group, next);                /* so re-wire */
-      popup.update();
-    }));
 }
 
 /* ONE marker per camera: ring colour + size from the NEWEST sighting,
@@ -998,10 +995,18 @@ function cameraMarker(group) {
                  : `Waymo #${newest.id} — ${newest.common_name}`
   });
   m.bindPopup(popupHTML(group, 0), { maxWidth: 300, autoPanPadding: L.point(28, 28) });
-  m.on("popupopen", (e) => {   /* always (re)open at the newest */
-    e.popup.setContent(popupHTML(group, 0));
-    wireNav(e.popup, group, 0);
-    e.popup.update();
+  /* ONE delegated listener on the popup container — setContent
+     re-renders the inner nodes (which killed per-button listeners),
+     but the container survives, so delegation keeps working */
+  m.on("popupopen", (e) => {
+    let idx = 0;
+    e.popup.setContent(popupHTML(group, idx));   /* always reopen at newest */
+    e.popup.getElement().addEventListener("click", (ev) => {
+      const btn = ev.target.closest(".pop-arrow");
+      if (!btn || btn.disabled) return;
+      idx += Number(btn.dataset.d);
+      e.popup.setContent(popupHTML(group, idx)); /* setContent updates an open popup itself */
+    });
   });
   return m;
 }
