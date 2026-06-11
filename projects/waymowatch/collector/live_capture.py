@@ -80,9 +80,9 @@ MAX_BACKLOG = 400     # tier-2 (zone) clip queue cap; overflow drops OLDEST zone
                       # tier-1 and never dropped). Drops are counted + reported — never silent.
 VID_STRIDE = 5        # frame stride for det.track (was 3): 25fps clip -> 5 sampled fps; a passing
                       # car is in view 2-4s = 10-20 samples, plenty for ByteTrack. 1.67x cheaper.
-PROB_TH = 0.80        # digest ELIGIBILITY bar — 33-REAL scale (v0.8.12, 2026-06-11 late aft):
-                      # live archive n=9,848 p80 0.847 / p95 0.870 / max 0.918; reals 0.815-0.915
-                      # (floor #1329 0.815, margin 0.015). Set just BELOW the weakest real view —
+PROB_TH = 0.80        # digest ELIGIBILITY bar — 34-REAL scale (v0.8.13, 2026-06-11 evening):
+                      # live archive n=10,411 p80 0.847 / max 0.917; reals 0.817-0.916
+                      # (floor #1329 0.817, margin 0.017). Set just BELOW the weakest real view —
                       # recall-first: eligibility must cover every known-real strength; DAY_CAP
                       # (4000) governs what is actually sent.
 DAY_CAP = 10000       # max candidate cells emailed per day (50 pages of PAGE_SIZE) — the user's review
@@ -94,7 +94,7 @@ NEAR_TH = 0.76        # archive floor — the ONLY irrecoverable cut in the funn
                       # 0.013 over the old floor, and the real floor drops with each harder view.
                       # Disk is a non-issue (7-day prune). NEAR_KEEP_DAYS prune.
 NEAR_KEEP_DAYS = 7    # near rows + their jpgs are pruned after this many days (mine promptly)
-ALERT_TH = 0.93       # instant-alert bar (33-real scale): above ALL 9,848 known FPs (max 0.918 —
+ALERT_TH = 0.93       # instant-alert bar (34-real scale): above ALL 10,411 known FPs (max 0.917 —
                       # back under 0.92, but holding 0.93 rather than flip-flopping); top real
                       # 0.915 — alerts are the PRECISION channel, sheets the recall channel.
 BATCH_SIZE = 5        # (legacy count-trigger; superseded by PAGE_SIZE paging below)

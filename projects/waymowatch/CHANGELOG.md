@@ -1,5 +1,21 @@
 # WaymoWatch — Changelog
 
+## v0.8.13 — Confirm 34 (#10213, 3rd A2 New Cross cam) + funny/ gallery (2026-06-11, evening)
+
+**#10213** (00001.03672 A2 New Cross Rd/Avonley Rd, 16:28) — the THIRD distinct A2 New
+Cross camera with a confirm; the A2/Old Kent Rd corridor now accounts for 7 of 34.
+**34 confirms / 31 distinct cameras.**
+
+- Specials filed (all also rejected): **roof-box** +#9688 (A20 Lee High Rd — first
+  special from an east-extension cam) +#10169 (Angel) = 7 specimens; **i-pac** +#9947
+  (Putney) = 2; **NEW `data/special/funny/`** gallery: #5543 (Lwr Clapton) + #10239
+  (Grays Inn Rd).
+- Standard cycle: 34-real centroid; archive re-scored (n=10,411: p80 0.847 / max 0.917;
+  reals 0.817-0.916 — floor ROSE 0.815→0.817). Bars unchanged: PROB_TH 0.80 / NEAR_TH
+  0.76 / ALERT_TH 0.93. 56 promoted / 94 demoted.
+- 3 sheets emailed: echo-mining around #10213 (888 in window) + top-200 retro
+  (0.903..0.845) + top-100 rejects re-check (0.917..0.888).
+
 ## v0.8.12 — Confirms 32-33 (#4948, #6131) (2026-06-11, late afternoon)
 
 **#4948** (00001.07365 A501 W of Park Sq East, 15:02 — the Euston Rd spine, new cam) and
