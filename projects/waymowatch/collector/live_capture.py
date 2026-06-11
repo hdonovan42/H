@@ -80,8 +80,8 @@ MAX_BACKLOG = 400     # tier-2 (zone) clip queue cap; overflow drops OLDEST zone
                       # tier-1 and never dropped). Drops are counted + reported — never silent.
 VID_STRIDE = 5        # frame stride for det.track (was 3): 25fps clip -> 5 sampled fps; a passing
                       # car is in view 2-4s = 10-20 samples, plenty for ByteTrack. 1.67x cheaper.
-PROB_TH = 0.82        # digest ELIGIBILITY bar — 24-REAL scale (v0.8.5, 2026-06-11 midday):
-                      # live archive n=7,413 p80 0.846 / p95 0.870 / max 0.916; reals 0.824-0.913.
+PROB_TH = 0.82        # digest ELIGIBILITY bar — 25-REAL scale (v0.8.6, 2026-06-11 midday):
+                      # live archive n=7,742 p80 0.844 / p95 0.868 / max 0.914; reals 0.824-0.914.
                       # Set just BELOW the weakest real view (#2145, 0.824) rather than at p80 —
                       # recall-first: eligibility must cover every known-real strength; DAY_CAP
                       # (4000) governs what is actually sent.
@@ -94,8 +94,8 @@ NEAR_TH = 0.76        # archive floor — the ONLY irrecoverable cut in the funn
                       # 0.013 over the old floor, and the real floor drops with each harder view.
                       # Disk is a non-issue (7-day prune). NEAR_KEEP_DAYS prune.
 NEAR_KEEP_DAYS = 7    # near rows + their jpgs are pruned after this many days (mine promptly)
-ALERT_TH = 0.92       # instant-alert bar (24-real scale): above ALL 7,413 known FPs (max 0.916;
-                      # 28 FPs sat >=0.90, none >=0.92). Top real re-scores 0.913 — alerts are the
+ALERT_TH = 0.92       # instant-alert bar (25-real scale): above ALL 7,742 known FPs (max 0.914,
+                      # none >=0.92). Top real re-scores 0.914 — alerts are the
                       # PRECISION channel, ranked sheets the recall channel. Re-check per re-seed.
 BATCH_SIZE = 5        # (legacy count-trigger; superseded by PAGE_SIZE paging below)
 PAGE_SIZE = 200       # digest paging: the moment this many candidates pile up during the day, email
