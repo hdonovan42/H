@@ -1,5 +1,19 @@
 # WaymoWatch — Changelog
 
+## v0.8.7 — Confirm 26 (#8075 Park Lane) + PROB_TH 0.81 (2026-06-11, afternoon)
+
+**#8075** (00001.08751 Park Lane Opp Stanhope Gate, 11:54) — a SECOND Park Lane camera
+~90 min after #7361's sighting there: likely the same vehicle working Mayfair.
+**26 confirms / 23 distinct cameras.**
+
+- Standard cycle: 26-real centroid; archive re-scored (n=8,163: p80 0.843 / max 0.914;
+  reals 0.821-0.914). **PROB_TH 0.82 → 0.81**: floor real #2145 slid again
+  (0.824 → 0.821), leaving a 0.001 margin that the next re-seed would likely break —
+  dropped a notch to restore the recall buffer. NEAR_TH 0.76 / ALERT_TH 0.92 unchanged
+  (no FP ≥0.92). 10+786 promoted (re-bucket at 0.82 then widened to 0.81), 126 demoted.
+- 3 sheets emailed: echo-mining around #8075 (661 in window) + top-200 retro
+  (0.897..0.855) + top-100 rejects re-check (0.914..0.883).
+
 ## v0.8.6 — Confirm 25 (#7511 Jamaica Road) + roof-box #4 (2026-06-11, midday)
 
 **#7511** (00002.00434 A200 Jamaica Road, 10:46 — Bermondsey, new cam, the south-east
