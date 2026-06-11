@@ -1,5 +1,22 @@
 # WaymoWatch — Changelog
 
+## v0.8.18 — #9310 adjudicated: "first only" — positive swapped, impostor re-filed (2026-06-11, night)
+
+User verdict on the v0.8.17 mismatch: the CONFIRMED 17:17 capture is the Waymo; the
+17:57 capture that best-view dedup banked is NOT.
+
+- Row #9310 restored to the t11/17:17 view (files recovered from the backup repo; emb
+  recomputed from frame+bbox exactly as ingest does). Re-scores 0.833 on the corrected
+  centroid — comfortably real-range.
+- The 17:57 impostor re-filed as its OWN row (#10808), status reject, sent=1 — a
+  human-reviewed hard negative (it fooled both the scorer AND the dedup; exactly the
+  kind training needs).
+- real_positives corrected (still 36 reals); centroid re-seeded; archive re-scored
+  (n=10,772: p80 0.846 / max 0.915); bars unchanged (0.80/0.76/0.93); 22 promoted /
+  180 demoted; loop restarted.
+- Net effect of the incident: zero data lost, one extra vetted hard negative gained,
+  and the in-place-overwrite bug that caused it is already fixed (v0.8.17).
+
 ## v0.8.17 — Verdict integrity: sent rows are frozen evidence (2026-06-11, night)
 
 User caught it via the confirm-echo rule (working exactly as designed): the #9310 image
