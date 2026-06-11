@@ -1,5 +1,17 @@
 # WaymoWatch — Changelog
 
+## v0.8.8 — Confirm 27 (#4362 Harrow Rd) (2026-06-11, afternoon)
+
+**#4362** (00001.07376 Harrow Rd/Kilburn Lane, 12:28 — NW London, new cam; captured at
+0.828, below non-waymo p80: the ranked channel surfacing what no fixed bar would).
+**27 confirms / 24 distinct cameras.**
+
+- Standard cycle: 27-real centroid; archive re-scored (n=8,402: p80 0.844 / max 0.914;
+  reals 0.822-0.915 — floor margin over PROB_TH back to a healthy 0.012). Bars unchanged:
+  PROB_TH 0.81 / NEAR_TH 0.76 / ALERT_TH 0.92 (no FP >=0.92). 66 promoted / 55 demoted.
+- 3 sheets emailed: echo-mining around #4362 (615 in window) + top-200 retro
+  (0.904..0.849) + top-100 rejects re-check (0.914..0.884).
+
 ## v0.8.7 — Confirm 26 (#8075 Park Lane) + PROB_TH 0.81 (2026-06-11, afternoon)
 
 **#8075** (00001.08751 Park Lane Opp Stanhope Gate, 11:54) — a SECOND Park Lane camera
