@@ -1,5 +1,22 @@
 # WaymoWatch — Changelog
 
+## v0.8.17 — Verdict integrity: sent rows are frozen evidence (2026-06-11, night)
+
+User caught it via the confirm-echo rule (working exactly as designed): the #9310 image
+in the cycle email was NOT the image they had confirmed from the ranked page. Root cause:
+best-view dedup UPDATES rows in place — between page-send (17:17 view) and --confirm, the
+loop merged a later capture (17:57, cosine >=0.93) into the row, so the banked positive
+was a different image (possibly a different vehicle) than the one the verdict referred to.
+
+- **Fix (ingest)**: once a row has been SENT, its image is frozen — a later appearance-
+  match (cosine) becomes a NEW candidate row instead of an overwrite. Parked-spot (IoU)
+  matches to sent rows stay suppressed (else parked cars would mint a row per sweep).
+  Unseen rows keep the existing best-view merge.
+- **#9310 adjudication pending**: both versions emailed (17:17 confirmed vs 17:57 banked,
+  recovered from the append-only backup repo — its first save). #1065 verified unaffected.
+- 36-real centroid currently includes the suspect #9310 crop — corrected per the user's
+  adjudication verdict.
+
 ## v0.8.16 — Confirms 35-36 (#1065, #9310); consolidated cycle's first live run (2026-06-11, evening)
 
 **#1065** (00001.08950 Portman Square/Orchard St, 17:14 — Marylebone, new cam) and

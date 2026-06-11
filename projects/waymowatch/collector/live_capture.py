@@ -330,9 +330,9 @@ def ingest(con, embed, cen, cam_id, best):
     stamp = now.replace("-", "").replace(":", "").replace("T", "").replace("Z", "")
     found, near = 0, 0
     # recent entries at this camera, for cross-sweep dedup (parked cars = same bbox spot)
-    recent = [[rid, rsc, np.array(json.loads(remb)), st, (json.loads(bb) if bb else None)]
-              for rid, rsc, remb, st, bb in con.execute(
-                  "SELECT id,score,emb,status,bbox FROM candidates WHERE camera_id=? "
+    recent = [[rid, rsc, np.array(json.loads(remb)), st, (json.loads(bb) if bb else None), sn]
+              for rid, rsc, remb, st, bb, sn in con.execute(
+                  "SELECT id,score,emb,status,bbox,COALESCE(sent,0) FROM candidates WHERE camera_id=? "
                   "ORDER BY id DESC LIMIT 400", (cam_id,)).fetchall() if remb]
     for tid, (area, frm, bbox) in best.items():
         x1, y1, x2, y2 = bbox
@@ -352,8 +352,18 @@ def ingest(con, embed, cen, cam_id, best):
         cp = os.path.join(CAND_DIR, f"{short}_t{tid}_{stamp}.jpg")
         fpth = os.path.join(CAND_DIR, f"{short}_t{tid}_{stamp}_frame.jpg")
         if m:
+            # VERDICT INTEGRITY (v0.8.17, after #9310): once a row has been SENT, its image
+            # is frozen evidence — the user's reply refers to what they saw. A later
+            # appearance-match becomes a NEW candidate instead of an in-place overwrite.
+            # Parked-spot (IoU) matches to sent rows stay suppressed (else every sweep of a
+            # parked car would mint a fresh row).
+            parked = bool(m[4]) and iou(bbox, m[4]) > 0.45
+            if m[3] in ("new", "near") and m[5] and not parked:
+                m = None                                   # fall through to INSERT below
+        if m:
             promote = m[3] == "near" and status == "new"  # near vehicle crossed the digest bar
-            if m[3] in ("new", "near") and (s > m[1] + 0.01 or promote):  # better view -> update
+            if (m[3] in ("new", "near") and not m[5]
+                    and (s > m[1] + 0.01 or promote)):    # better view of an UNSEEN row -> update
                 old = con.execute("SELECT crop_path,frame_path FROM candidates WHERE id=?", (m[0],)).fetchone()
                 cv2.imwrite(cp, car); cv2.imwrite(fpth, frm)
                 con.execute("UPDATE candidates SET score=?,crop_path=?,frame_path=?,emb=?,bbox=?,"
@@ -375,7 +385,7 @@ def ingest(con, embed, cen, cam_id, best):
         cur = con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb,bbox,status)"
                           " VALUES(?,?,?,?,?,?,?,?)", (cam_id, now, s, cp, fpth,
                           json.dumps([round(float(x), 4) for x in e]), json.dumps(list(bbox)), status))
-        recent.insert(0, [cur.lastrowid, s, e, status, list(bbox)])
+        recent.insert(0, [cur.lastrowid, s, e, status, list(bbox), 0])
         if status == "new":
             found += 1
         else:
