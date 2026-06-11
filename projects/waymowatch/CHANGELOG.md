@@ -1,5 +1,20 @@
 # WaymoWatch — Changelog
 
+## v0.8.10 — Confirms 30-31 (#8770, #8818) + both bars moved (2026-06-11, afternoon)
+
+**#8770** (00001.06608 A4 Cromwell Rd/Gloucester Rd, 13:30 — new cam, near #3696's
+Cromwell Rd territory) and **#8818** (00001.09702 Angel Islington, 13:49 — new cam,
+pushing NORTH). **31 confirms / 28 distinct cameras.**
+
+- Standard cycle: 31-real centroid; archive re-scored (n=9,037: p80 0.849 / p95 0.873 /
+  max 0.920; reals 0.816-0.914).
+- **PROB_TH 0.81 → 0.80**: floor reals slid again (0.819 → 0.816, margin 0.006) —
+  restored to 0.016. 1,091 promoted / 0 demoted at the wider bar.
+- **ALERT_TH 0.92 → 0.93**: one FP reached 0.920, breaking the old bar — raised back
+  above all known FPs. NEAR_TH 0.76 unchanged (floor real comfortably above).
+- 4 sheets emailed: echo-mining around each confirm (851 + 705 in window) + top-200 retro
+  (0.907..0.849) + top-100 rejects re-check (0.920..0.889).
+
 ## v0.8.9 — Confirms 28-29 (#8435, #4574) + roof-box #5 (2026-06-11, afternoon)
 
 **#8435** (00001.07393 Baker St/Marylebone Rd, 12:42 — a second Marylebone-area spine cam)
