@@ -125,7 +125,10 @@ def ensure_schema(con):
       polled INTEGER, fresh INTEGER, processed INTEGER, dropped INTEGER,
       spine_fresh INTEGER, spine_processed INTEGER, new_cands INTEGER, near_cands INTEGER);""")
     for col in ("emb TEXT", "bbox TEXT", "alerted INTEGER DEFAULT 0",
-                "sent INTEGER DEFAULT 0"):   # for pre-existing tables
+                "sent INTEGER DEFAULT 0",
+                "special TEXT"):   # for pre-existing tables; special = curated gallery
+                                   # (roof-box/i-pac/funny) -> EXCLUDED from training negs,
+                                   # reserved for manual model eval (user, 2026-06-11)
         try:
             con.execute(f"ALTER TABLE candidates ADD COLUMN {col}")
         except Exception:

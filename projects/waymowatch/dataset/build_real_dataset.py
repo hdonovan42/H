@@ -53,8 +53,11 @@ def main():
         "SELECT camera_id, frame_path, bbox FROM candidates WHERE status='waymo' "
         "AND bbox IS NOT NULL AND frame_path IS NOT NULL").fetchall()
         if fp and os.path.exists(fp)]
+    # special IS NULL: user-curated gallery cases (roof-box/i-pac/funny) are held OUT of
+    # training entirely — they are the manual post-train evaluation set (user, 2026-06-11)
     rejects = [(cam, fp) for cam, fp in con.execute(
         "SELECT camera_id, frame_path FROM candidates WHERE status='reject' "
+        "AND special IS NULL "
         "AND frame_path IS NOT NULL ORDER BY score DESC").fetchall()
         if fp and os.path.exists(fp)]
 

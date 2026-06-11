@@ -1,5 +1,20 @@
 # WaymoWatch — Changelog
 
+## v0.8.15 — Special cases held OUT of training (manual eval set) (2026-06-11, evening)
+
+User: the curated specials become a held-out manual evaluation set for the trained model —
+they must not appear in the training data.
+
+- New `special TEXT` column on candidates (live_capture ensure_schema + VPS ALTER);
+  all 12 filed gallery vehicles tagged: roof-box 7 (#2126 #4014 #4015 #5701 #8604 #9688
+  #10169), i-pac 2 (#4034 #9947), funny 3 (#5543 #8858 #10239).
+- `build_real_dataset.py` negatives query now requires `special IS NULL` — specials can
+  never enter training; suppression behaviour unchanged (they stay status='reject', never
+  resurface on sheets).
+- Filing protocol from now on: copy images to data/special/<gallery>/ + status='reject'
+  + special='<gallery>'.
+- Training-negative pool after exclusion: 3,356.
+
 ## v0.8.14 — Email consolidation: one mail per confirm batch (2026-06-11, evening)
 
 User: "after each sighting i get multiple emails that have returned nothing the last 5
