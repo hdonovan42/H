@@ -130,7 +130,13 @@ Then re-anchor PROB_TH/NEAR_TH/ALERT_TH from the live score distribution at the 
 ## Branch workflow (user-established 2026-06-10)
 
 WaymoWatch work happens on the `waymowatch` branch; the dashboard session works directly on
-`main` (GitHub Pages needs it). The full cycle — never skip step 3:
+`main`. **Since 2026-06-11 the public site lives at https://waymonet.com** (VPS nginx, NOT
+GitHub Pages): source = `projects/waymowatch/site/`, deploy =
+`rsync -az projects/waymowatch/site/ root@89.167.4.126:/var/www/waymonet/` — dashboard
+changes no longer need a merge to main to publish. The old
+`projects/waymowatch/index.html` is a redirect stub to waymonet.com (that one IS
+GitHub-Pages-served, as is projects/projects.html, link text "WaymoNet").
+The full cycle — never skip step 3:
 1. Commit + push work to `waymowatch`.
 2. When the user agrees: `git checkout main && git pull --ff-only && git merge --no-ff
    waymowatch && git push` (pull first — the dashboard session pushes to main directly).
@@ -139,7 +145,8 @@ WaymoWatch work happens on the `waymowatch` branch; the dashboard session works 
    session's main-only commits into waymowatch. Verify with
    `git log waymowatch..origin/main --oneline` → must be empty.
 
-**API contract rule**: the dashboard (separate session, works on main) consumes
+**API contract rule**: the dashboard (separate session; site source in
+`projects/waymowatch/site/`, served at https://waymonet.com same-origin) consumes
 `server/sightings_api.py` — `/api/sightings` fields (id, camera_id, captured_at, score,
 common_name, view, lat, lon) and `/img/<id>[_frame].jpg`. NEVER change or remove existing
 fields/routes without flagging it to the user first (the dashboard session must adapt in
