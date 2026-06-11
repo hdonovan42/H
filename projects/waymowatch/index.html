@@ -775,16 +775,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
     margin: 4px 0 7px;
     background: #F4F3EE;
   }
-  .pop-chip {
-    display: inline-block;
-    margin-top: 6px;
-    font-size: 11px;
-    letter-spacing: 0.04em;
-    color: #fff;
-    padding: 2px 9px;
-    border-radius: 999px;
-  }
-
   /* ---------- collapsed attribution (ⓘ, expands on click) ---------- */
   .attrib-ctl {
     display: flex;
@@ -913,8 +903,6 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
 }).addTo(map);
 
 const DOT_PX = { hour: 16, today: 14, week: 12 };
-const WHEN_LABEL = { hour: "Past hour", today: "Today", week: "This week" };
-const WHEN_COLOR = { hour: "#E32017", today: "#000F9F", week: "#6E6E73" };
 
 const markers = L.layerGroup().addTo(map);
 
@@ -928,14 +916,15 @@ function sightingMarker(s) {
     }),
     title: `Waymo #${s.id} — ${s.common_name}`
   });
+  /* camera data above the picture so the image is never pushed out
+     of view; recency chip dropped — the ring colour + timestamp say it */
   m.bindPopup(
     `<p class="pop-title">Waymo · #${s.id}</p>` +
+    `<p class="pop-line"><strong>${s.common_name}</strong>${s.view ? ` (facing ${s.view})` : ""}</p>` +
     `<img class="pop-img" src="${API_BASE}/img/${s.id}_frame.jpg" ` +
     `alt="JamCam frame of sighting #${s.id}" loading="lazy" />` +
-    `<p class="pop-line"><strong>${s.common_name}</strong>${s.view ? ` (facing ${s.view})` : ""}</p>` +
     `<p class="pop-line">${fmtDate(s.captured_at)} · ${fmtTime(s.captured_at)}</p>` +
-    `<p class="pop-line">Detector score ${Number(s.score).toFixed(2)}</p>` +
-    `<span class="pop-chip" style="background:${WHEN_COLOR[when]}">${WHEN_LABEL[when]}</span>`,
+    `<p class="pop-line">Detector score ${Number(s.score).toFixed(2)}</p>`,
     { maxWidth: 300 }
   );
   return m;
