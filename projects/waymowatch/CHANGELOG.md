@@ -1,5 +1,17 @@
 # WaymoWatch — Changelog
 
+## v0.8.24 — Confirms 43-44 rescued from the junk-folder retro (2026-06-11, late night)
+
+The 42-real auto-retro landed in the user's JUNK folder; their "nothing in the follow ups"
+bulk-banked its 200 rows — including TWO real Waymos the user then found re-reviewing:
+**#1642** (A2 New Cross Rd/Nettleton Rd, 18:08, 0.902 — the FOURTH distinct A2 New Cross
+camera) and **#9944** (A3 Clapham Rd/Elias Place, 17:35 — new cam). Per-id confirms
+override bulk verdicts (the #738 lesson, working again). **44 confirms / 39 cameras.**
+
+- Consolidated cycle: 44-real centroid; n=11,271: p80 0.848 / max 0.919; reals 0.809-0.920
+  — floor margin down to 0.009 (watch; next slide drops PROB_TH to 0.79). Bars unchanged.
+- NB the A2/Old Kent Rd SE corridor now stands at 8 confirms across 7 cameras.
+
 ## v0.8.23 — Confirms 39-42; first auto-retro fires (2026-06-11, late night)
 
 **#11124** (Park Lane/North Row, 19:48, 0.915 — THIRD Park Lane cam), **#1919** (Old Kent
