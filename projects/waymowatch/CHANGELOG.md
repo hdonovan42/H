@@ -1,5 +1,17 @@
 # WaymoWatch — Changelog
 
+## v0.8.16 — Confirms 35-36 (#1065, #9310); consolidated cycle's first live run (2026-06-11, evening)
+
+**#1065** (00001.08950 Portman Square/Orchard St, 17:14 — Marylebone, new cam) and
+**#9310** (00001.01301 Gt Eastern St/Curtain Rd, 17:57 — SHOREDITCH, first east-central
+confirm, new cam). **36 confirms / 33 distinct cameras.**
+
+- First live run of `confirm_cycle.py`: ONE email (2 echoes + 72-row new-to-you sheet)
+  vs the old 4; retro auto-skipped (2/5 confirms since last), rejcheck auto-skipped
+  (same day). 36-real centroid; archive n=10,747: p80 0.848 / max 0.917; reals
+  0.813-0.916. Bars unchanged: PROB_TH 0.80 / NEAR_TH 0.76 / ALERT_TH 0.93.
+  110 promoted / 16 demoted.
+
 ## v0.8.15 — Special cases held OUT of training (manual eval set) (2026-06-11, evening)
 
 User: the curated specials become a held-out manual evaluation set for the trained model —
