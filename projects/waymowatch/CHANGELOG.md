@@ -1,5 +1,25 @@
 # WaymoWatch — Changelog
 
+## Dashboard v2.2 — moved to https://waymonet.com (2026-06-11)
+
+The public dashboard moves off GitHub Pages onto its own domain (Namecheap),
+served by the VPS nginx that already hosts the sightings API:
+
+- **Dashboard source relocated** to `projects/waymowatch/site/` (index.html +
+  assets); the old `projects/waymowatch/index.html` is now an instant-redirect
+  stub to waymonet.com (bookmarks keep working).
+- **nginx vhost `waymonet`** (VPS): serves the static site and proxies `/api/`
+  + `/img/` to the sightings API on 127.0.0.1:3104 — the page is now
+  SAME-ORIGIN (`API_BASE = ""`); the axiom.hjd.ai preconnect + CORS dependency
+  are gone from the page. The `axiom.hjd.ai/waymowatch/` route stays up for
+  any cached old pages.
+- **Deploy**: `rsync -az site/ root@89.167.4.126:/var/www/waymonet/` —
+  dashboard changes no longer need a merge to main to publish (only the
+  redirect stub and projects.html live on GitHub Pages).
+- **projects.html**: link renamed WaymoWatch → WaymoNet, points at
+  https://waymonet.com.
+- SSL via certbot (waymonet.com + www.waymonet.com), DNS A record → 89.167.4.126.
+
 ## v0.8.10 — Confirms 30-31 (#8770, #8818) + both bars moved (2026-06-11, afternoon)
 
 **#8770** (00001.06608 A4 Cromwell Rd/Gloucester Rd, 13:30 — new cam, near #3696's
