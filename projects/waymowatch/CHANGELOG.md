@@ -1,5 +1,20 @@
 # WaymoWatch — Changelog
 
+## v0.8.25 — Confirms 45-49: the dawn shift (2026-06-12, morning)
+
+Five from the overnight pages, four captured 05:17-05:57 — the pre-6am operating pattern
+is now unmistakable: **#11809** (Old Kent Rd/Glengall Rd — that camera's FOURTH confirm),
+**#11449** (A2 New Cross/St James, repeat), **#9732** (Baylis Rd/Westminster Bridge Rd,
+Waterloo — new cam), **#11953** (Shooters Hill Rd/Charlton Way — SECOND east-extension
+confirm, new cam), **#12507** (A4 Cromwell Rd/Gloucester Rd repeat, **0.929 — highest
+capture score yet**, a whisker under the 0.93 alert bar). **49 confirms / 41 cameras.**
+
+- Specials: #12200 (Jamaica Rd) + #12973 (Kennington Lane) -> roof-box (11 specimens);
+  #2812 (A2 New Cross/Besson St) -> funny. All special-tagged, training-excluded.
+- Consolidated cycle: 49-real centroid; n=13,089: p80 0.847 / max 0.919; reals 0.814-0.931
+  (floor ROSE 0.809→0.814, margin back to 0.014). Bars unchanged (0.80/0.76/0.93).
+- Auto-retro fired on schedule at 49 (next at 54). Two emails total.
+
 ## v0.8.24 — Confirms 43-44 rescued from the junk-folder retro (2026-06-11, late night)
 
 The 42-real auto-retro landed in the user's JUNK folder; their "nothing in the follow ups"
