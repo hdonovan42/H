@@ -1,5 +1,17 @@
 # WaymoWatch — Changelog
 
+## v0.8.27 — Confirm 51 (#216, Regent St): a two-day-old junk-folder rescue (2026-06-12)
+
+User swept their junk folder and found an unnoticed sheet with **#216** (00001.07451
+Regent St/Conduit St, captured 2026-06-10 13:03 — a NEW camera, West End). It had sat
+unconfirmed as status='new' for two days, dodging every bulk-reject selection — and its
+captured_at proves no pre-freeze overwrite ever touched it: the banked image is exactly
+what the June 10 page showed. **51 confirms / 43 distinct cameras.**
+
+- Consolidated cycle: 51-real centroid; n=13,097: p80 0.851 / max 0.922; reals 0.810-0.932
+  (floor margin 0.010 — one more slide and PROB_TH drops to 0.79). 3 FPs >=0.92, none at
+  the 0.93 alert bar. Bars unchanged. 194 promoted.
+
 ## v0.8.26 — CONFIRM 50: halfway to WaymoNet (2026-06-12, morning)
 
 **#11757** (00001.03657 Old Kent Rd/Peckham Pk Rd, 06:39, 0.895) — the FOURTH distinct
