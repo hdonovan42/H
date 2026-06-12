@@ -1,5 +1,14 @@
 # WaymoWatch — Changelog
 
+## v0.8.29 — Confirm 53 (#12975, Camberwell) (2026-06-12, midday)
+
+**#12975** (00001.04333 Camberwell New Rd/Foxley Rd, 11:14 — new cam, Camberwell's second).
+**53 confirms / 45 cameras.** **#13535** (Major Rd/Crownfield Rd, Stratford) -> funny.
+
+- 53-real centroid; n=13,752: p80 0.853 / max 0.925; reals 0.808-0.933 (floor margin
+  0.018 on the new 0.79 bar). Bars unchanged (0.79/0.76/0.93). Retro fires on the
+  NEXT confirm (#54).
+
 ## v0.8.28 — Confirm 52: FIRST DEEP-NIGHT WAYMO (Parliament Sq, 02:33) + PROB_TH 0.79 (2026-06-12)
 
 **#11559** (00001.06501 Parliament Square, **02:33** — a NEW camera and the first confirm
