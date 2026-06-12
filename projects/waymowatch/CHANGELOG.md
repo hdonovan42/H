@@ -1,5 +1,19 @@
 # WaymoWatch — Changelog
 
+## v0.8.28 — Confirm 52: FIRST DEEP-NIGHT WAYMO (Parliament Sq, 02:33) + PROB_TH 0.79 (2026-06-12)
+
+**#11559** (00001.06501 Parliament Square, **02:33** — a NEW camera and the first confirm
+in the previously-empty 00:00-04:30 window): the night-ops question flips — Waymo DOES
+run in true darkness, at least occasionally. Captured at 0.807 through a funnel with ~10x
+degraded night sensitivity; the per-view luck implies meaningfully more night activity
+than our sample shows. **52 confirms / 44 cameras.** **#13081** (Angel) -> roof-box (12).
+
+- 52-real centroid; n=13,148: p80 0.854 / max 0.925 (3 FPs >=0.92; 0.93 alert bar holds);
+  reals 0.807-0.933 — three reals cluster 0.807-0.810, so **PROB_TH 0.80 → 0.79** (stay
+  ahead of the ~0.002/re-seed floor slide). 250+828 promoted across the two re-buckets.
+- Night-data note: the night gap in the negative pool matters more now — night sheets
+  deserve priority review; the trained YOLO26 will lift night recall properly.
+
 ## v0.8.27 — Confirm 51 (#216, Regent St): a two-day-old junk-folder rescue (2026-06-12)
 
 User swept their junk folder and found an unnoticed sheet with **#216** (00001.07451
