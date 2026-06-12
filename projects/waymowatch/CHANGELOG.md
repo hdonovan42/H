@@ -1,5 +1,15 @@
 # WaymoWatch — Changelog
 
+## v0.8.26 — CONFIRM 50: halfway to WaymoNet (2026-06-12, morning)
+
+**#11757** (00001.03657 Old Kent Rd/Peckham Pk Rd, 06:39, 0.895) — the FOURTH distinct
+Old Kent Rd camera; the OKR/A2 corridor alone now accounts for 11 of 50 confirms.
+**50 confirms / 42 distinct cameras — half the training target in ~47 hours.**
+
+- Consolidated cycle: 50-real centroid; n=13,089: p80 0.850 / max 0.921; reals 0.811-0.931
+  (floor margin 0.011; 2 FPs back above 0.92, none at 0.93). Bars unchanged.
+- 209 promoted. Retro skipped (1/5), rejcheck skipped (1/7).
+
 ## v0.8.25 — Confirms 45-49: the dawn shift (2026-06-12, morning)
 
 Five from the overnight pages, four captured 05:17-05:57 — the pre-6am operating pattern
