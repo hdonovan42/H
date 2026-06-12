@@ -1,5 +1,13 @@
 # WaymoWatch — Changelog
 
+## v0.8.32 — Confirm 57 (#14686, City Rd/Old Street) (2026-06-12, evening)
+
+**#14686** (00001.07350 City Road/Old Street, 20:28 — new cam, extending the Shoreditch
+cluster). **57 confirms / 47 distinct cameras.**
+
+- 57-real centroid; n=15,318: p80 0.850 / max 0.923; reals 0.807-0.931 (floor margin
+  0.017). Bars unchanged (0.79/0.76/0.93). Retro at 59.
+
 ## v0.8.31 — Confirms 55-56: TWO WAYMOS IN ONE FRAME (2026-06-12, afternoon)
 
 **#14502 + #14504** — same clip, 00001.07385 A40 Marylebone Rd, 14:25:12: two Waymos
