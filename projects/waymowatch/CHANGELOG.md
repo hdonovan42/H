@@ -1,5 +1,28 @@
 # WaymoWatch — Changelog
 
+## v0.8.31 — Confirms 55-56: TWO WAYMOS IN ONE FRAME (2026-06-12, afternoon)
+
+**#14502 + #14504** — same clip, 00001.07385 A40 Marylebone Rd, 14:25:12: two Waymos
+captured simultaneously in a SINGLE frame (second-ever simultaneous pair, first in one
+image), with roof-box impostor #14503 between them — that frame alone is a gift to
+training (two positives + a hard negative). **56 confirms / 46 distinct cameras.**
+
+- Specials: #14503 + #13240 (Chalkers Corner, Richmond — far SW, 0.902) -> roof-box (16);
+  #14468 (Whitechapel) + #14515 (Finchley Rd — NORTH) -> funny (7).
+- 56-real centroid; n=14,587: p80 0.851 / max 0.922; reals 0.807-0.930. Bars unchanged
+  (0.79/0.76/0.93). Retro at 59.
+
+## v0.8.30 — Confirm 54 (#14130, Regent St repeat) + van_roof gallery (2026-06-12, afternoon)
+
+**#14130** (Regent St/Conduit St, 13:04 — #216's camera at the SAME MINUTE of day two days
+later: first hard evidence of schedule regularity on a route). **54 confirms / 45 cameras.**
+
+- Specials: NEW `data/special/van_roof/` gallery — #14212 (Shooters Hill repeat cam) +
+  #14362 (Tooting High St); #14350 (Bow Rd) -> i-pac (3 specimens). Galleries now:
+  roof-box 14, i-pac 3, funny 5, van_roof 2 vehicles.
+- 54-real centroid; n=14,360: p80 0.853 / max 0.925; reals 0.807-0.933. Bars unchanged
+  (0.79/0.76/0.93). Auto-retro fired at 54 (next at 59); two emails sent.
+
 ## v0.8.29 — Confirm 53 (#12975, Camberwell) (2026-06-12, midday)
 
 **#12975** (00001.04333 Camberwell New Rd/Foxley Rd, 11:14 — new cam, Camberwell's second).
