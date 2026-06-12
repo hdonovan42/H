@@ -1,5 +1,16 @@
 # WaymoWatch — Changelog
 
+## v0.8.30 — Confirm 54 (#14130, Regent St repeat) + van_roof gallery (2026-06-12, afternoon)
+
+**#14130** (Regent St/Conduit St, 13:04 — #216's camera at the SAME MINUTE of day two days
+later: first hard evidence of schedule regularity on a route). **54 confirms / 45 cameras.**
+
+- Specials: NEW `data/special/van_roof/` gallery — #14212 (Shooters Hill repeat cam) +
+  #14362 (Tooting High St); #14350 (Bow Rd) -> i-pac (3 specimens). Galleries now:
+  roof-box 14, i-pac 3, funny 5, van_roof 2 vehicles.
+- 54-real centroid; n=14,360: p80 0.853 / max 0.925; reals 0.807-0.933. Bars unchanged
+  (0.79/0.76/0.93). Auto-retro fired at 54 (next at 59); two emails sent.
+
 ## v0.8.29 — Confirm 53 (#12975, Camberwell) (2026-06-12, midday)
 
 **#12975** (00001.04333 Camberwell New Rd/Foxley Rd, 11:14 — new cam, Camberwell's second).
