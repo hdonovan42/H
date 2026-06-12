@@ -1,5 +1,31 @@
 # WaymoWatch — Changelog
 
+## v0.8.28 — Confirm 52: FIRST DEEP-NIGHT WAYMO (Parliament Sq, 02:33) + PROB_TH 0.79 (2026-06-12)
+
+**#11559** (00001.06501 Parliament Square, **02:33** — a NEW camera and the first confirm
+in the previously-empty 00:00-04:30 window): the night-ops question flips — Waymo DOES
+run in true darkness, at least occasionally. Captured at 0.807 through a funnel with ~10x
+degraded night sensitivity; the per-view luck implies meaningfully more night activity
+than our sample shows. **52 confirms / 44 cameras.** **#13081** (Angel) -> roof-box (12).
+
+- 52-real centroid; n=13,148: p80 0.854 / max 0.925 (3 FPs >=0.92; 0.93 alert bar holds);
+  reals 0.807-0.933 — three reals cluster 0.807-0.810, so **PROB_TH 0.80 → 0.79** (stay
+  ahead of the ~0.002/re-seed floor slide). 250+828 promoted across the two re-buckets.
+- Night-data note: the night gap in the negative pool matters more now — night sheets
+  deserve priority review; the trained YOLO26 will lift night recall properly.
+
+## v0.8.27 — Confirm 51 (#216, Regent St): a two-day-old junk-folder rescue (2026-06-12)
+
+User swept their junk folder and found an unnoticed sheet with **#216** (00001.07451
+Regent St/Conduit St, captured 2026-06-10 13:03 — a NEW camera, West End). It had sat
+unconfirmed as status='new' for two days, dodging every bulk-reject selection — and its
+captured_at proves no pre-freeze overwrite ever touched it: the banked image is exactly
+what the June 10 page showed. **51 confirms / 43 distinct cameras.**
+
+- Consolidated cycle: 51-real centroid; n=13,097: p80 0.851 / max 0.922; reals 0.810-0.932
+  (floor margin 0.010 — one more slide and PROB_TH drops to 0.79). 3 FPs >=0.92, none at
+  the 0.93 alert bar. Bars unchanged. 194 promoted.
+
 ## v0.8.26 — CONFIRM 50: halfway to WaymoNet (2026-06-12, morning)
 
 **#11757** (00001.03657 Old Kent Rd/Peckham Pk Rd, 06:39, 0.895) — the FOURTH distinct
