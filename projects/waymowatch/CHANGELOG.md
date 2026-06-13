@@ -1,5 +1,24 @@
 # WaymoWatch — Changelog
 
+## v0.8.33 — Confirms 58-59 (#11826 Curtain Rd/Old St + #15922 Baker St rear-view) + PROB_TH 0.78 (2026-06-13, morning)
+
+Two confirms. **#11826** (00001.01252 Curtain Rd / Old Street, 07:11 — a NEW camera, the
+48th, deepening the Shoreditch/Old St cluster alongside confirm 57's City Rd/Old St one
+junction away). **#15922** (00001.07393 Baker St / Marylebone Rd, 07:08 — a REPEAT spine
+camera, #8435's) — found by the user in the consolidated new-to-you sheet: a REAR view the
+dome scorer rated only 0.786, so it sat silently in 'near' (below the old 0.79 eligibility
+bar) and was surfaced ONLY by the cosine-ranked mining sheet. Textbook recall save.
+**59 confirms / 48 distinct cameras.**
+
+- 59-real pure centroid; rescored n=16,228: non-waymo p80 0.851 / max 0.924 (3 FPs >=0.92,
+  none at the 0.93 alert bar); reals 0.793-0.930 — new floor real #15922 0.793, margin over
+  the old 0.79 bar just 0.003.
+- **PROB_TH 0.79 -> 0.78** (rear aspects score low — the dome is near-invisible from behind;
+  set just below the weakest real, new margin 0.013). NEAR_TH 0.76 / ALERT_TH 0.93 unchanged;
+  NEAR_TH 0.76 flagged as the next backstop. 822 near->new re-bucketed at the new bar.
+- Consolidated cycles: 2 echoes + new-to-you sheets (72 then 12 rows). Auto-retro FIRED at 59
+  (top-200, 0.914..0.853); rejcheck skipped (2/7d).
+
 ## v0.8.32 — Confirm 57 (#14686, City Rd/Old Street) (2026-06-12, evening)
 
 **#14686** (00001.07350 City Road/Old Street, 20:28 — new cam, extending the Shoreditch
