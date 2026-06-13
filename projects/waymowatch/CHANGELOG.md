@@ -1,5 +1,19 @@
 # WaymoWatch — Changelog
 
+## v0.8.34 — Confirms 60-62 (#13484, #12717, #13754 — three new cameras) (2026-06-13, midday)
+
+Three confirms, all on NEW cameras: **#13484** (00001.07375 Harrow Rd/Gt Western Rd, 08:23,
+0.835 — NW), **#12717** (00001.06592 Piccadilly/St James St, 12 Jun 08:11, 0.789 — West
+End), **#13754** (00001.06660 Bayswater Rd/Lancaster Terrace, 12 Jun 11:51, 0.786). The last
+sat at 0.786 — BELOW the old 0.79 bar — and was eligible only because of v0.8.33's
+PROB_TH→0.78 drop: the bar move paid off inside one cycle. **62 confirms / 51 cameras.**
+
+- 62-real pure centroid; rescored n=16,248: non-waymo p80 0.853 / max 0.925 (3 FPs >=0.92,
+  none at the 0.93 alert bar); reals 0.794-0.928 — floor real #13754 0.794, three lowest
+  cluster 0.794-0.797. Bars unchanged (PROB_TH 0.78 / NEAR_TH 0.76 / ALERT_TH 0.93), floor
+  margin 0.014. 197 near->new re-bucketed. Consolidated cycle: 3 echoes + 72-row new-to-you
+  sheet. Retro skipped (3/5 since last — fires at 64); rejcheck skipped (2/7d).
+
 ## v0.8.33 — Confirms 58-59 (#11826 Curtain Rd/Old St + #15922 Baker St rear-view) + PROB_TH 0.78 (2026-06-13, morning)
 
 Two confirms. **#11826** (00001.01252 Curtain Rd / Old Street, 07:11 — a NEW camera, the
