@@ -105,10 +105,24 @@ ROOF_TOP/BOTTOM/INSET −0.06/0.22/0.28 (single source of truth — eval scripts
 - **sqlite3 CLI absent on VPS** — query via `.venv/bin/python` + sqlite3 module; column is
   `captured_at` (not created_at); connect with `timeout=60`
 - **pkill self-match**: `ssh host "pkill -f 'live_capture.py --loop'"` kills your own ssh.
-  Use `pkill -f 'live_capture.py --[l]oop'` (bracket trick); then `rm -f /tmp/waymowatch.lock`
-- Restart flow: kill loop → cron restarts within 6 min (don't start it manually)
-- Deploy = `rsync -az collector/<files> hq@89.167.4.126:/home/hq/waymowatch/collector/`
-  then kill loop. Never hand-edit code on the VPS.
+  Use `pkill -f 'live_capture.py --[l]oop'` (bracket trick). Do NOT `rm` the lock file —
+  run_watch.sh uses `flock`, which auto-releases on process death; removing it risks an
+  inode race. The kill ssh often returns exit 255 as the session drops — verify separately.
+- **RESTART ONLY ON A BAR CHANGE (user, 2026-06-13)**: restart the loop (bracket-pkill →
+  cron supervisor restarts ≤6 min; don't start it manually) ONLY when PROB_TH/NEAR_TH/
+  ALERT_TH actually change. Centroid-only reseed (bars held): rsync + commit the new
+  centroid but DO NOT restart — the loop reloads it at the next bar-change restart. Each
+  restart costs one ~70-100-clip catch-up burst (downtime backlog); a 1-real centroid shift
+  moves live scores <0.001, and confirm_cycle re-scores the whole archive from the file
+  regardless, so deferral is safe. (PROB_TH slides a notch every ~5 confirms, so a real
+  restart still lands often enough to bound centroid drift.)
+- Verify a restart by the proc's `etimes` (`ps -eo etimes,args | awk '/live_capture.py --loop/
+  && !/awk/ && !/bash -c/'`), NOT the heartbeat — the heartbeat lingers ~160s after a clean
+  exit, so a stale heartbeat reads as false-alive.
+- Deploy code = `rsync -az collector/<files> hq@89.167.4.126:/home/hq/waymowatch/collector/`,
+  then bracket-pkill ONLY if a bar/threshold changed. Never hand-edit code on the VPS.
+- First poll after a restart = a one-time heavy catch-up cycle (clips published during the
+  downtime), expect `dropped` >0 for ~1 cycle, then back to `dropped 0`.
 - First poll after ETag wipe = ~480-clip burst (no etags) — expect 1-2 heavy cycles + drops
 - Score scales are NOT comparable across centroid re-seeds — recalibrate thresholds from
   the LIVE distribution every time (synthetic calibration underestimates live FP tails)
