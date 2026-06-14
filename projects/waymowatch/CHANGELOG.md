@@ -1,5 +1,21 @@
 # WaymoWatch — Changelog
 
+## v0.8.36 — Confirms 64-65 (#17445 Chelsea Embankment + #18688 A501) (2026-06-14)
+
+**#17445** (00001.06549 Chelsea Embankment/Albert Bridge, 13:25, 0.885 — a NEW camera, SW by
+the river; this cam's roof-box specials #4014/#4015 live here, now its first real Waymo).
+**#18688** (00001.07365 A501 W of Park Sq East, 13:19, 0.860 — REPEAT A501 spine cam). Both
+captured today ~13:20, 6 min apart. **65 confirms / 52 cameras.**
+
+- 65-real pure centroid; rescored n=18,823: non-waymo p80 0.850 / max 0.925 (3 FPs >=0.92,
+  none at the 0.93 alert bar); reals 0.793-0.928 — floor real #13754 0.793, margin 0.013
+  (floor stable). Bars unchanged (0.78/0.76/0.93). 68 near->new re-bucketed.
+- No bar moved -> **NO loop restart** (restart-only-on-a-bar-change). Loop now runs real(62)
+  in memory, 3 reals behind the deployed real(65); live-score impact <0.002 and confirm_cycle
+  re-scores the whole archive on real(65) regardless, so safe — converges at next restart.
+- Consolidated cycle: 2 echoes + 71-row new-to-you sheet. Auto-retro FIRED at 65 (top-200,
+  0.914..0.866); next at 70. Rejcheck skipped (3/7d).
+
 ## v0.8.35 — Confirm 63 (#17549, Parliament Sq) + #6354 funny gallery; first no-restart cycle (2026-06-14)
 
 **#17549** (00001.06501 Parliament Square, 13 Jun 19:26, 0.921 — a REPEAT camera, #11559's;
