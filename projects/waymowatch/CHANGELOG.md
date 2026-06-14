@@ -1,5 +1,22 @@
 # WaymoWatch — Changelog
 
+## v0.8.35 — Confirm 63 (#17549, Parliament Sq) + #6354 funny gallery; first no-restart cycle (2026-06-14)
+
+**#17549** (00001.06501 Parliament Square, 13 Jun 19:26, 0.921 — a REPEAT camera, #11559's;
+a clean white I-PACE crossing the square). **63 confirms / 51 cameras.**
+
+- Special: **#6354** (00001.04303 Kennington Lane/Kennington Rd, 13 Jun 19:34, 0.916 — a
+  white VAN whose roof box reads dome-like) -> `data/special/funny/`. Galleries now:
+  roof-box 16, funny 9, i-pac 3, van_roof 2 (all training-excluded, held-out eval set).
+- 63-real pure centroid; rescored n=18,198: non-waymo p80 0.850 / max 0.924 (3 FPs >=0.92,
+  none at the 0.93 alert bar); reals 0.793-0.928 — floor real #13754 0.793, margin 0.013.
+  Bars unchanged (0.78/0.76/0.93). 3 near->new re-bucketed.
+- **First cycle under RESTART-ONLY-ON-A-BAR-CHANGE (user, 2026-06-13): no bar moved, so NO
+  loop restart** — centroid deployed + committed, loop stays on real(62) and reloads real(63)
+  at the next bar-change restart. Saves the ~70-100-clip post-restart catch-up burst.
+- Consolidated cycle: 1 echo + 34-row new-to-you sheet. Retro skipped (4/5 — fires at 64);
+  rejcheck skipped (3/7d).
+
 ## v0.8.34 — Confirms 60-62 (#13484, #12717, #13754 — three new cameras) (2026-06-13, midday)
 
 Three confirms, all on NEW cameras: **#13484** (00001.07375 Harrow Rd/Gt Western Rd, 08:23,
