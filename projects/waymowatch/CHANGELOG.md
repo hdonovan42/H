@@ -1,5 +1,20 @@
 # WaymoWatch — Changelog
 
+## v0.8.38 — Confirm 67 (#19406, Blackheath Rd) + 3 specials (2026-06-14)
+
+**#19406** (00001.03670 Blackheath Rd/Wickes Store, 17:58, 0.831 — a NEW camera, SE/Greenwich).
+**67 confirms / 54 cameras.**
+
+- Specials: **#19175 + #19321** (A205 Dulwich Common/College Rd — two roof-box cars in ONE
+  clip, 17:19:13) -> `roof-box` (18); **#19385** (Twr Bridge Rd/Grange Rd, white van, 0.895)
+  -> `funny` (12). Galleries: roof-box 18, funny 12, i-pac 3, van_roof 2 (training-excluded).
+- 67-real pure centroid; rescored n=19,493: non-waymo p80 0.849 / max 0.924 (3 FPs >=0.92,
+  none at the 0.93 alert bar); reals 0.793-0.928 — floor real #13754 0.793, margin 0.013.
+  Bars unchanged (0.78/0.76/0.93). 31 near->new re-bucketed.
+- No bar moved -> **NO loop restart**. Loop on real(62), now 5 reals behind deployed real(67)
+  (drift <0.003; the floor has been stable at #13754 since v0.8.34 so no bar-change restart has
+  triggered — one-off resync planned if drift reaches ~8 behind). Retro skipped (2/5 — at 70).
+
 ## v0.8.37 — Confirm 66 (#17469, Tower Bridge Rd) + 2 funny specials incl. an aeroplane (2026-06-14)
 
 **#17469** (00001.03488 Tower Bridge Rd/Rothsay St, 13 Jun 18:53, 0.902 — a NEW camera,
