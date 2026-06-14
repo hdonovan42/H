@@ -1,5 +1,20 @@
 # WaymoWatch — Changelog
 
+## v0.8.37 — Confirm 66 (#17469, Tower Bridge Rd) + 2 funny specials incl. an aeroplane (2026-06-14)
+
+**#17469** (00001.03488 Tower Bridge Rd/Rothsay St, 13 Jun 18:53, 0.902 — a NEW camera,
+Bermondsey/SE). **66 confirms / 53 cameras.**
+
+- Specials -> `data/special/funny/` (now 11): **#18745** (Deptford Broadway, white van, 0.762)
+  and **#15352** (Connaught Bridge/Connaught Rd, 12 Jun 20:24, 0.914 — the nose of a British
+  Airways aircraft on the London City Airport runway; the scorer's funniest false positive
+  yet). Galleries: roof-box 16, funny 11, i-pac 3, van_roof 2 (training-excluded eval set).
+- 66-real pure centroid; rescored n=18,846: non-waymo p80 0.850 / max 0.924 (3 FPs >=0.92,
+  none at the 0.93 alert bar); reals 0.794-0.928 — floor real #13754 0.794, margin 0.014.
+  Bars unchanged (0.78/0.76/0.93). 29 near->new re-bucketed.
+- No bar moved -> **NO loop restart**. Loop on real(62), now 4 reals behind deployed real(66)
+  (drift <0.003, safe). Retro skipped (1/5 — fires at 70); rejcheck skipped (3/7d).
+
 ## v0.8.36 — Confirms 64-65 (#17445 Chelsea Embankment + #18688 A501) (2026-06-14)
 
 **#17445** (00001.06549 Chelsea Embankment/Albert Bridge, 13:25, 0.885 — a NEW camera, SW by
