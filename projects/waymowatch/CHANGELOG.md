@@ -1,5 +1,86 @@
 # WaymoWatch — Changelog
 
+## v0.8.37 — Confirm 66 (#17469, Tower Bridge Rd) + 2 funny specials incl. an aeroplane (2026-06-14)
+
+**#17469** (00001.03488 Tower Bridge Rd/Rothsay St, 13 Jun 18:53, 0.902 — a NEW camera,
+Bermondsey/SE). **66 confirms / 53 cameras.**
+
+- Specials -> `data/special/funny/` (now 11): **#18745** (Deptford Broadway, white van, 0.762)
+  and **#15352** (Connaught Bridge/Connaught Rd, 12 Jun 20:24, 0.914 — the nose of a British
+  Airways aircraft on the London City Airport runway; the scorer's funniest false positive
+  yet). Galleries: roof-box 16, funny 11, i-pac 3, van_roof 2 (training-excluded eval set).
+- 66-real pure centroid; rescored n=18,846: non-waymo p80 0.850 / max 0.924 (3 FPs >=0.92,
+  none at the 0.93 alert bar); reals 0.794-0.928 — floor real #13754 0.794, margin 0.014.
+  Bars unchanged (0.78/0.76/0.93). 29 near->new re-bucketed.
+- No bar moved -> **NO loop restart**. Loop on real(62), now 4 reals behind deployed real(66)
+  (drift <0.003, safe). Retro skipped (1/5 — fires at 70); rejcheck skipped (3/7d).
+
+## v0.8.36 — Confirms 64-65 (#17445 Chelsea Embankment + #18688 A501) (2026-06-14)
+
+**#17445** (00001.06549 Chelsea Embankment/Albert Bridge, 13:25, 0.885 — a NEW camera, SW by
+the river; this cam's roof-box specials #4014/#4015 live here, now its first real Waymo).
+**#18688** (00001.07365 A501 W of Park Sq East, 13:19, 0.860 — REPEAT A501 spine cam). Both
+captured today ~13:20, 6 min apart. **65 confirms / 52 cameras.**
+
+- 65-real pure centroid; rescored n=18,823: non-waymo p80 0.850 / max 0.925 (3 FPs >=0.92,
+  none at the 0.93 alert bar); reals 0.793-0.928 — floor real #13754 0.793, margin 0.013
+  (floor stable). Bars unchanged (0.78/0.76/0.93). 68 near->new re-bucketed.
+- No bar moved -> **NO loop restart** (restart-only-on-a-bar-change). Loop now runs real(62)
+  in memory, 3 reals behind the deployed real(65); live-score impact <0.002 and confirm_cycle
+  re-scores the whole archive on real(65) regardless, so safe — converges at next restart.
+- Consolidated cycle: 2 echoes + 71-row new-to-you sheet. Auto-retro FIRED at 65 (top-200,
+  0.914..0.866); next at 70. Rejcheck skipped (3/7d).
+
+## v0.8.35 — Confirm 63 (#17549, Parliament Sq) + #6354 funny gallery; first no-restart cycle (2026-06-14)
+
+**#17549** (00001.06501 Parliament Square, 13 Jun 19:26, 0.921 — a REPEAT camera, #11559's;
+a clean white I-PACE crossing the square). **63 confirms / 51 cameras.**
+
+- Special: **#6354** (00001.04303 Kennington Lane/Kennington Rd, 13 Jun 19:34, 0.916 — a
+  white VAN whose roof box reads dome-like) -> `data/special/funny/`. Galleries now:
+  roof-box 16, funny 9, i-pac 3, van_roof 2 (all training-excluded, held-out eval set).
+- 63-real pure centroid; rescored n=18,198: non-waymo p80 0.850 / max 0.924 (3 FPs >=0.92,
+  none at the 0.93 alert bar); reals 0.793-0.928 — floor real #13754 0.793, margin 0.013.
+  Bars unchanged (0.78/0.76/0.93). 3 near->new re-bucketed.
+- **First cycle under RESTART-ONLY-ON-A-BAR-CHANGE (user, 2026-06-13): no bar moved, so NO
+  loop restart** — centroid deployed + committed, loop stays on real(62) and reloads real(63)
+  at the next bar-change restart. Saves the ~70-100-clip post-restart catch-up burst.
+- Consolidated cycle: 1 echo + 34-row new-to-you sheet. Retro skipped (4/5 — fires at 64);
+  rejcheck skipped (3/7d).
+
+## v0.8.34 — Confirms 60-62 (#13484, #12717, #13754 — three new cameras) (2026-06-13, midday)
+
+Three confirms, all on NEW cameras: **#13484** (00001.07375 Harrow Rd/Gt Western Rd, 08:23,
+0.835 — NW), **#12717** (00001.06592 Piccadilly/St James St, 12 Jun 08:11, 0.789 — West
+End), **#13754** (00001.06660 Bayswater Rd/Lancaster Terrace, 12 Jun 11:51, 0.786). The last
+sat at 0.786 — BELOW the old 0.79 bar — and was eligible only because of v0.8.33's
+PROB_TH→0.78 drop: the bar move paid off inside one cycle. **62 confirms / 51 cameras.**
+
+- 62-real pure centroid; rescored n=16,248: non-waymo p80 0.853 / max 0.925 (3 FPs >=0.92,
+  none at the 0.93 alert bar); reals 0.794-0.928 — floor real #13754 0.794, three lowest
+  cluster 0.794-0.797. Bars unchanged (PROB_TH 0.78 / NEAR_TH 0.76 / ALERT_TH 0.93), floor
+  margin 0.014. 197 near->new re-bucketed. Consolidated cycle: 3 echoes + 72-row new-to-you
+  sheet. Retro skipped (3/5 since last — fires at 64); rejcheck skipped (2/7d).
+
+## v0.8.33 — Confirms 58-59 (#11826 Curtain Rd/Old St + #15922 Baker St rear-view) + PROB_TH 0.78 (2026-06-13, morning)
+
+Two confirms. **#11826** (00001.01252 Curtain Rd / Old Street, 07:11 — a NEW camera, the
+48th, deepening the Shoreditch/Old St cluster alongside confirm 57's City Rd/Old St one
+junction away). **#15922** (00001.07393 Baker St / Marylebone Rd, 07:08 — a REPEAT spine
+camera, #8435's) — found by the user in the consolidated new-to-you sheet: a REAR view the
+dome scorer rated only 0.786, so it sat silently in 'near' (below the old 0.79 eligibility
+bar) and was surfaced ONLY by the cosine-ranked mining sheet. Textbook recall save.
+**59 confirms / 48 distinct cameras.**
+
+- 59-real pure centroid; rescored n=16,228: non-waymo p80 0.851 / max 0.924 (3 FPs >=0.92,
+  none at the 0.93 alert bar); reals 0.793-0.930 — new floor real #15922 0.793, margin over
+  the old 0.79 bar just 0.003.
+- **PROB_TH 0.79 -> 0.78** (rear aspects score low — the dome is near-invisible from behind;
+  set just below the weakest real, new margin 0.013). NEAR_TH 0.76 / ALERT_TH 0.93 unchanged;
+  NEAR_TH 0.76 flagged as the next backstop. 822 near->new re-bucketed at the new bar.
+- Consolidated cycles: 2 echoes + new-to-you sheets (72 then 12 rows). Auto-retro FIRED at 59
+  (top-200, 0.914..0.853); rejcheck skipped (2/7d).
+
 ## v0.8.32 — Confirm 57 (#14686, City Rd/Old Street) (2026-06-12, evening)
 
 **#14686** (00001.07350 City Road/Old Street, 20:28 — new cam, extending the Shoreditch
