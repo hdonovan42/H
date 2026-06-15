@@ -1,5 +1,20 @@
 # WaymoWatch — Changelog
 
+## v0.8.39 — Confirm 68 (#19977, Bayswater Rd 04:06 night) + 2 specials (2026-06-15)
+
+**#19977** (00001.06660 Bayswater Rd/Lancaster Terrace, **04:06** — a deep-night confirm and the
+2nd on this camera after #13754/confirm 62; 0.862). **68 confirms / 54 cameras.**
+
+- Specials: **#18204** (Denmark Hill/Champion Pk, roof box, 0.840) -> `roof-box` (19); **#20374**
+  (Shooters Hill Rd/Charlton Pk Ln, white van, 0.894) -> `funny`. Galleries (eval-only,
+  training-excluded): roof-box 19, funny 14, i-pac 3, van_roof 2.
+- 68-real pure centroid; rescored n=20,903: non-waymo p80 0.848 / max 0.924 (3 FPs >=0.92,
+  none at the 0.93 alert bar); reals 0.793-0.927 — floor real #13754 0.793, margin 0.013.
+  Bars unchanged (0.78/0.76/0.93). 45 near->new re-bucketed.
+- No bar moved -> **NO loop restart**. Loop on real(62), now 6 reals behind deployed real(68)
+  (drift negligible — cos(real62,real68) ~>0.999); one-off resync restart planned at ~8 behind.
+  Retro skipped (3/5 — at 70).
+
 ## v0.8.38 — Confirm 67 (#19406, Blackheath Rd) + 3 specials (2026-06-14)
 
 **#19406** (00001.03670 Blackheath Rd/Wickes Store, 17:58, 0.831 — a NEW camera, SE/Greenwich).
