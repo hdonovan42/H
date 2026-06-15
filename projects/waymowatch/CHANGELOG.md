@@ -1,5 +1,23 @@
 # WaymoWatch — Changelog
 
+## v0.8.41 — Confirm 71 (#23121) + top-200 retro banked as negatives (2026-06-15)
+
+**#23121** (00001.03662 A2 New Cross Rd/Nettleton Rd, 19:49, 0.822 — a repeat A2 New Cross cam;
+a MID-scoring real surfaced by the cosine new-to-you sheet, NOT the score-ranked retro).
+**71 confirms / 56 cameras.**
+
+- **Top-200 retrospective banked as negatives** (user verdict: zero Waymos). Reproduced the exact
+  retro set (top-200 by score among recorded-shown rows, range 0.871-0.905) and rejected them ->
+  reject pool 5014->5214. **Scoped deliberately**: cycle_shown.json had accumulated 865 ids across
+  ~8 cycles (never cleared this session), so `bank_shown.py` would have rejected all 861 — but
+  #23121 (0.822) was ITSELF in that accumulated shown set, proof that mid-scoring reals hide there
+  and the rejcheck (top-100 by SCORE) would never resurface a 0.822 real. So banked ONLY the 200
+  the user actually reviewed; 660 older shown rows left in place.
+- 71-real centroid; rescored n=23,179: non-waymo p80 0.847 / max 0.931 (#21882, now a reject;
+  1 row >=0.93, below ALERT_TH 0.94); reals 0.793-0.926 — floor real #15922 0.793, margin 0.013.
+  Bars unchanged (0.78/0.76/0.94). No bar moved -> **NO restart** (loop real(70), deployed real(71),
+  1 behind). Retro skipped (1/5 — at 75).
+
 ## v0.8.40 — Confirms 69-70 + ALERT_TH 0.94 (frozen-embedding ceiling) + #21882 the hardest negative (2026-06-15)
 
 **#23022** (00001.06641 Kensington High St/Church St, 19:10, 0.902 — NEW cam, W) + **#22981**

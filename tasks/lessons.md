@@ -2,6 +2,25 @@
 
 ## WaymoWatch
 
+### bank_shown.py banks the WHOLE accumulated cycle_shown.json — scope bulk-bank to what was reviewed (2026-06-15)
+`confirm_cycle.py` appends every sheet's shown ids to `data/candidates/cycle_shown.json` and only
+`bank_shown.py` clears it (on a "no waymos" verdict). If it isn't run for several cycles the file
+accumulates ALL shown ids (865 across ~8 cycles in one case). So `bank_shown.py` rejects far more
+than the latest sheet the user just gave a verdict on.
+
+**Why this is dangerous:** the rejcheck safety net re-surfaces only the TOP-100 rejects BY SCORE.
+Mid-scoring real Waymos (e.g. #23121 at 0.822, found via the cosine new-to-you sheet) would be
+banked and then NEVER resurface — permanently buried. Confirmed reals are routinely mid-scoring.
+
+**How to apply:**
+- When the user gives a verdict on a specific sheet ("the top-200 retro had zero waymos"), bank
+  EXACTLY that sheet, not the whole accumulated record. Reproduce the retro precisely as
+  `id IN (cycle_shown) AND status NOT IN ('waymo','reject') ORDER BY score DESC LIMIT 200`
+  (verify count + score range match the retro email before committing).
+- Always `--confirm` any reals the user flagged BEFORE banking (bank skips status='waymo').
+- Only use blanket `bank_shown.py` when the user has actually reviewed the full accumulated
+  backlog, or explicitly says to clear everything.
+
 ### Special/gallery cases are EVAL-ONLY — never training data (user, 2026-06-15)
 Gallery rows (the `special` column set: roof-box / i-pac / funny / van_roof) are reserved for
 MANUAL POST-TRAIN EVALUATION and are excluded from the training set in BOTH directions. Enforced
