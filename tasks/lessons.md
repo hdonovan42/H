@@ -2,6 +2,22 @@
 
 ## WaymoWatch
 
+### Special/gallery cases are EVAL-ONLY — never training data (user, 2026-06-15)
+Gallery rows (the `special` column set: roof-box / i-pac / funny / van_roof) are reserved for
+MANUAL POST-TRAIN EVALUATION and are excluded from the training set in BOTH directions. Enforced
+by `build_real_dataset.py`: positives = `status='waymo'` only; negatives = `status='reject' AND
+special IS NULL`. A gallery row therefore carries `status='reject'` but its `special` tag holds it
+out of the negative pool. This has been the design since 2026-06-11 (memory v0.8.15).
+
+**How to apply:**
+- Treat eval-exclusion as the DEFAULT — it's established, not a per-filing decision; don't present
+  it as a choice I'm making.
+- Report training pools PRECISELY: training negatives = `reject AND special IS NULL`, NOT the raw
+  reject count (which includes the eval-only specials — 37 as of 67 confirms).
+- Filing a special = `status='reject'` + `special='<gallery>'` + copy crop+frame to
+  `data/special/<gallery>/`. The DB `special` tag (not the folder) is what enforces exclusion;
+  keep the folder in sync for the visual eval set, but a missing folder image never causes a leak.
+
 ### Surfacer false-positive pattern (2026-06-05)
 The bootstrap surfacer (frozen MobileNetV3 embedding → cosine to the 39-dome centroid) at
 `PROB_TH=0.83` produces mostly **shape-confusion false positives**, not real Waymos:
