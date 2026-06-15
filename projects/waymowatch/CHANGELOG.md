@@ -12,7 +12,12 @@ a MID-scoring real surfaced by the cosine new-to-you sheet, NOT the score-ranked
   ~8 cycles (never cleared this session), so `bank_shown.py` would have rejected all 861 — but
   #23121 (0.822) was ITSELF in that accumulated shown set, proof that mid-scoring reals hide there
   and the rejcheck (top-100 by SCORE) would never resurface a 0.822 real. So banked ONLY the 200
-  the user actually reviewed; 660 older shown rows left in place.
+  the user actually reviewed first.
+- **Backlog then surfaced + cleared**: the remaining older shown rows were emailed as 4
+  score-ranked review sheets (732 rows, 0.754-0.871, incl. the #23121 cycle's new-to-you).
+  User reviewed all — ZERO Waymos — so banked via `bank_shown.py`: 732 -> rejects (pool
+  5214->5946), `cycle_shown.json` cleared. 71 waymos intact. Shown backlog fully resolved,
+  no mid-scoring reals buried.
 - 71-real centroid; rescored n=23,179: non-waymo p80 0.847 / max 0.931 (#21882, now a reject;
   1 row >=0.93, below ALERT_TH 0.94); reals 0.793-0.926 — floor real #15922 0.793, margin 0.013.
   Bars unchanged (0.78/0.76/0.94). No bar moved -> **NO restart** (loop real(70), deployed real(71),
