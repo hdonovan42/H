@@ -1,5 +1,31 @@
 # WaymoWatch — Changelog
 
+## v0.8.40 — Confirms 69-70 + ALERT_TH 0.94 (frozen-embedding ceiling) + #21882 the hardest negative (2026-06-15)
+
+**#23022** (00001.06641 Kensington High St/Church St, 19:10, 0.902 — NEW cam, W) + **#22981**
+(00001.03611 London Rd/Thomas Doyle St, 18:55, 0.808 — NEW cam, Elephant & Castle).
+**70 confirms / 56 cameras.**
+
+- **#21882** (00001.04235 Horseferry Rd/Marsham St, 17:57) — a WHITE VAN that scored **0.933**
+  and tripped a FALSE instant-alert. On the real(70) rescore it sits at 0.931, ABOVE the top
+  real (0.927): the **frozen-embedding ceiling is reached** — the scorer can no longer separate
+  top reals from van-class FPs. Banked as a **PLAIN reject (training negative), NOT a held-out
+  special** — it's the single hardest negative, so build_real_dataset's hardest-first selection
+  makes it the #1 training example; the van-confuser CLASS is already eval-covered by the
+  funny/van_roof galleries (multiple held-out instances). Train on the hardest case; measure
+  generalisation on the held-out rest.
+- **ALERT_TH 0.93 -> 0.94**: reals have capped ~0.927 for several scales, so 0.93 already caught
+  ZERO reals and only ever fired on van FPs. Raised to stop the recurring false alarms; the
+  instant-alert channel is now effectively DORMANT until WaymoNet ships. The SHEETS (recall
+  channel) still surface every high-scorer — nothing lost.
+- Specials -> `funny` (17): **#22865** (Marylebone Rd/Osnaburgh St), **#22223** (Battersea
+  Bridge/Cheyne Wk), **#22211** (Camden Rd). Galleries: roof-box 19, funny 17, i-pac 3, van_roof 2.
+- 70-real centroid; rescored n=23,155: non-waymo p80 0.847 / max 0.931 (4 >=0.92, 1 >=0.93 =
+  #21882); reals 0.793-0.927 — floor real #15922 0.793, margin 0.013. PROB_TH 0.78 / NEAR_TH 0.76
+  unchanged. Training pools: 70 positives / negatives = reject AND special IS NULL.
+- Bar change (ALERT_TH) -> loop **RESTARTED** (also clears the real(62)->real(70) drift, which had
+  reached 8 behind). Auto-retro FIRED at 70 (top-200, 0.905..0.871); next at 75.
+
 ## v0.8.39 — Confirm 68 (#19977, Bayswater Rd 04:06 night) + 2 specials (2026-06-15)
 
 **#19977** (00001.06660 Bayswater Rd/Lancaster Terrace, **04:06** — a deep-night confirm and the

@@ -100,9 +100,14 @@ NEAR_TH = 0.76        # archive floor — the ONLY irrecoverable cut in the funn
                       # 0.013 over the old floor, and the real floor drops with each harder view.
                       # Disk is a non-issue (7-day prune). NEAR_KEEP_DAYS prune.
 NEAR_KEEP_DAYS = 7    # near rows + their jpgs are pruned after this many days (mine promptly)
-ALERT_TH = 0.93       # instant-alert bar (34-real scale): above ALL 10,411 known FPs (max 0.917 —
-                      # back under 0.92, but holding 0.93 rather than flip-flopping); top real
-                      # 0.915 — alerts are the PRECISION channel, sheets the recall channel.
+ALERT_TH = 0.94       # instant-alert bar — raised 0.93->0.94 (v0.8.40, 2026-06-15). The frozen-
+                      # embedding CEILING is now reached: on the real(70) scale the hardest FP, white
+                      # van #21882 (Horseferry Rd), scores 0.931 — ABOVE the top real (0.927). The
+                      # reals have capped ~0.927 for several scales, so 0.93 already caught ZERO reals
+                      # and its first fire in ages was that FP false alarm. No threshold can separate
+                      # top reals from van-class FPs anymore -> the alert channel is effectively DORMANT
+                      # until the trained YOLO ships; 0.94 just stops the recurring false alarms. The
+                      # SHEETS (recall channel) still surface every high-scorer, so nothing is lost.
 BATCH_SIZE = 5        # (legacy count-trigger; superseded by PAGE_SIZE paging below)
 PAGE_SIZE = 200       # digest paging: the moment this many candidates pile up during the day, email
                       # that full page right away and reset; the remainder (< PAGE_SIZE) goes at
