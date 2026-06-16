@@ -137,6 +137,7 @@ def ensure_schema(con):
       spine_fresh INTEGER, spine_processed INTEGER, new_cands INTEGER, near_cands INTEGER);""")
     for col in ("emb TEXT", "bbox TEXT", "alerted INTEGER DEFAULT 0",
                 "sent INTEGER DEFAULT 0",
+                "recovered INTEGER DEFAULT 0",   # shown in a daily targeted-recovery sheet (v0.8.43)
                 "special TEXT"):   # for pre-existing tables; special = curated gallery
                                    # (roof-box/i-pac/funny) -> EXCLUDED from training negs,
                                    # reserved for manual model eval (user, 2026-06-11)
@@ -646,6 +647,70 @@ def maybe_send_daily_digest(con):
     con.commit()
 
 
+def send_recovery(con, limit=200):
+    """Daily TARGETED RECOVERY (v0.8.43, user 2026-06-16) — replaces the old bulk digest.
+    Emails the `limit` UNACTIONED candidates most similar to the confirmed reals (dome score =
+    cosine to the real centroid — the validated-best zero-cost ranker; max-over-individual-reals
+    was tested and rejected, it inflates the FP tail). The `recovered` flag walks DOWN the pool
+    over days so the same rows never repeat, and rows emailed before (sent=1) but never flagged
+    get a fresh, focused look. One reviewable sheet/day instead of ~13 noisy pages. Disk stays
+    bounded by retention()'s 7-day prune, so no demotion is needed. recovered=1 is set ONLY on a
+    successful send (quota-safe). Returns the count shown.
+    NOTE: a top-`limit` cut sits at the high-similarity band (~0.86+); mid-scoring reals
+    (~0.78-0.86, e.g. #23145/#23121) rely on the confirm-cycle cosine mining + on-request
+    backlog reviews, not this sheet."""
+    rows = con.execute("SELECT id,score,crop_path FROM candidates WHERE status NOT IN ('waymo','reject') "
+                       "AND COALESCE(recovered,0)=0 AND crop_path IS NOT NULL "
+                       "ORDER BY score DESC LIMIT ?", (limit * 4,)).fetchall()
+    rows = [(i, s, c) for i, s, c in rows if c and os.path.exists(c)][:limit]
+    if not rows:
+        print("recovery: nothing unrecovered to send")
+        return 0
+    reals = con.execute("SELECT COUNT(*) FROM candidates WHERE status='waymo'").fetchone()[0]
+    sheet = os.path.join(CAND_DIR, "recovery.jpg")
+    shown = _build_sheet(rows, sheet, cap=limit)
+    if not shown:
+        return 0
+    hi, lo = rows[0][1], rows[shown - 1][1]
+    cov = coverage_line(con)
+    html = (f"<p><b>WaymoWatch — daily targeted recovery</b>: the {shown} unactioned candidate(s) "
+            f"most similar to the {reals} confirmed Waymos (dome score = cosine to the real "
+            f"centroid), best first ({hi:.3f}..{lo:.3f}).</p>"
+            f"<p>Reply with the <b>#</b> of any real Waymo (white Jaguar I-PACE, dark roof dome).</p>"
+            + (f"<p style='color:#888'>{cov}</p>" if cov else ""))
+    sys.path.insert(0, HERE)
+    from email_alert import send_email
+    if not send_email(f"WaymoWatch: daily recovery — top {shown} by real-similarity "
+                      f"({hi:.3f}..{lo:.3f})", html, attachments=[sheet]):
+        print(f"recovery send failed — will retry next tick ({len(rows)} pending)")
+        return 0
+    ids = [int(r[0]) for r in rows[:shown]]
+    con.execute("UPDATE candidates SET recovered=1, sent=1 WHERE id IN (%s)" % ",".join(map(str, ids)))
+    con.commit()
+    print(f"recovery emailed: {shown} ({hi:.3f}..{lo:.3f})")
+    return shown
+
+
+def maybe_send_daily_recovery(con):
+    """Once per day at/after DIGEST_HOUR (London): send ONE targeted-recovery sheet (replaces the
+    bulk digest, user 2026-06-16). Marks the day done only on a successful send so a quota failure
+    just retries next tick (v0.8.22 pattern)."""
+    now = datetime.now(ZoneInfo("Europe/London"))
+    if now.hour < DIGEST_HOUR:
+        return
+    today = now.strftime("%Y-%m-%d")
+    row = con.execute("SELECT value FROM kv WHERE key='last_recovery_date'").fetchone()
+    if row and row[0] == today:
+        return
+    pending = con.execute("SELECT COUNT(*) FROM candidates WHERE status NOT IN ('waymo','reject') "
+                          "AND COALESCE(recovered,0)=0").fetchone()[0]
+    if send_recovery(con) == 0 and pending > 0:
+        print("recovery failed with rows pending — day left open for retry")
+        return
+    con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_recovery_date',?)", (today,))
+    con.commit()
+
+
 def watch_loop(con):
     """Continuous ZONE watcher (v0.5, the cron entrypoint): every POLL_EVERY seconds one
     threaded conditional-GET pass over ALL watch cams — tier-1 spine + tier-2 Waymo zone,
@@ -682,7 +747,7 @@ def watch_loop(con):
         if not in_collection_window():
             try:
                 maybe_send_instant_alerts(con)
-                maybe_send_daily_digest(con)
+                maybe_send_daily_recovery(con)
             except Exception as e:
                 print(f"[{ts()}] send error: {e}", flush=True)
             time.sleep(60)
@@ -702,9 +767,9 @@ def watch_loop(con):
                           f" | {now - cyc_t0:.0f}s", flush=True)
                     retention(con)
                     review_sheet(con)
-                    emit_pages(con)        # page out a full digest the moment PAGE_SIZE pile up
                     maybe_send_instant_alerts(con)
-                    maybe_send_daily_digest(con)
+                    maybe_send_daily_recovery(con)  # ONE targeted-recovery sheet/day at 23:00 (v0.8.43;
+                                                    # replaces intraday bulk paging + EOD digest)
                 except Exception as e:
                     print(f"[{ts()}] cycle-close error: {e}", flush=True)
                 started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -768,6 +833,8 @@ def main():
     ap.add_argument("--pr", type=int, default=0, help="ALSO watch the N nearest cameras to Park Royal depot")
     ap.add_argument("--confirm", default="")
     ap.add_argument("--reject", default="")
+    ap.add_argument("--recovery", action="store_true",
+                    help="send ONE targeted-recovery sheet now (top-200 by real-similarity; manual/test)")
     a = ap.parse_args()
     con = dp.db_connect(dp.DEFAULT_DB)
     ensure_schema(con)
@@ -777,6 +844,8 @@ def main():
         confirm(con, [int(x) for x in a.confirm.split(",") if x], "waymo")
     elif a.reject:
         confirm(con, [int(x) for x in a.reject.split(",") if x], "reject")
+    elif a.recovery:
+        send_recovery(con)
     elif a.review:
         review_sheet(con)
     elif a.digest:

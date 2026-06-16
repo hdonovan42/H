@@ -1,5 +1,27 @@
 # WaymoWatch — Changelog
 
+## v0.8.43 — Daily targeted recovery replaces the bulk digest (2026-06-16)
+
+User directive: the 23:00 daily email is now ONE **targeted-recovery sheet** — the top-200
+UNACTIONED candidates by real-similarity — instead of the old bulk digest (~13 noisy intraday
+pages + a 23:00 remainder flush).
+
+- **Why**: the dome score IS cosine-similarity to the 74 reals (the validated-best zero-cost
+  ranker — max-over-individual-reals was tested and rejected, it inflates the FP tail). The old
+  digest emailed everything eligible daily (unreviewable in bulk → reals buried). The recovery
+  is one reviewable sheet/day of the likeliest reals, drawn from the WHOLE pool incl. rows
+  emailed before but never flagged (the ~17.5k sent=1 `new` accumulation).
+- **How**: new `recovered` flag (schema migration) walks the pool DOWN over days so rows never
+  repeat. `send_recovery()` + `maybe_send_daily_recovery()` (once/day at DIGEST_HOUR, quota-safe
+  — marks recovered=1 only on a successful send). The loop no longer calls `emit_pages` (intraday
+  paging) or `maybe_send_daily_digest`; disk stays bounded by `retention()`'s existing 7-day
+  prune (new + near), so no EOD demotion is needed. New `--recovery` CLI flag (manual/test).
+- **Tradeoff (flagged)**: a top-200/day cut sits at the high-similarity band (~0.86+), so
+  mid-scoring reals (~0.78-0.86, e.g. #23145/#23121/#15922) won't appear in this sheet — they
+  rely on the confirm-cycle cosine mining (±45 min of confirms) + on-request backlog reviews.
+  Focus over breadth — the user's choice. Legacy one-shot modes (--email-digest, default sweep)
+  still use the old digest. Confirms unchanged (74 / 58 cameras). Deployed + loop restarted.
+
 ## v0.8.42 — Confirms 72-74 (#23223, #23145, #20160) + PROB_TH 0.77 (2026-06-16)
 
 **#23223** (00001.07600 Kingsway/High Holborn, 21:13, 0.870 — NEW cam, night) + **#23145**
