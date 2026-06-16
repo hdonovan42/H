@@ -786,9 +786,11 @@ def watch_loop(con):
                           f" | {now - cyc_t0:.0f}s", flush=True)
                     retention(con)
                     review_sheet(con)
+                    emit_pages(con)        # intraday: page out a full PAGE_SIZE email the moment that
+                                           # many pile up (restored AS WAS — v0.8.45)
                     maybe_send_instant_alerts(con)
-                    maybe_send_daily_recovery(con)  # ONE targeted-recovery sheet/day at 23:00 (v0.8.43;
-                                                    # replaces intraday bulk paging + EOD digest)
+                    maybe_send_daily_recovery(con)  # the ONLY change vs original: the scheduled 23:00
+                                                    # email is now the stratified recovery, not the digest
                 except Exception as e:
                     print(f"[{ts()}] cycle-close error: {e}", flush=True)
                 started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

@@ -1,5 +1,20 @@
 # WaymoWatch — Changelog
 
+## v0.8.45 — Restore intraday paging; only the 23:00 scheduled email is the recovery (2026-06-16)
+
+Correction to v0.8.43-44: those removed BOTH the intraday 200-pile-up pages AND the 23:00 digest.
+The user wanted ONLY the scheduled 23:00 email replaced. **Restored `emit_pages` in the loop**
+(intraday paging AS IT WAS — sends a PAGE_SIZE email the moment that many candidates pile up,
+top-by-score, marks sent=1); the stratified **recovery remains the 23:00 scheduled email**
+(replacing the old bulk remainder-flush digest). So the only change vs the original is the 23:00
+email's content.
+
+- The old EOD demotion stays dropped — it was vestigial (budget is non-binding, so emit_pages
+  drains sent=0 intraday; `retention()`'s 7-day prune on new+near bounds disk).
+- NB the 23:00 recovery re-surfaces (in its head) high-scorers already paged intraday — the
+  intended safety-net re-sweep across the whole pool (incl. emailed-but-unflagged rows).
+- Deployed + loop restarted. Confirms 74 / 58.
+
 ## v0.8.44 — Stratified daily recovery + 10:03 test-set banked (2026-06-16)
 
 - **Recovery is now STRATIFIED** (user): the daily 23:00 sheet = top-**140** by real-similarity
