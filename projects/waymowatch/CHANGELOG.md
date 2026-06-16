@@ -1,5 +1,22 @@
 # WaymoWatch — Changelog
 
+## v0.8.42 — Confirms 72-74 (#23223, #23145, #20160) + PROB_TH 0.77 (2026-06-16)
+
+**#23223** (00001.07600 Kingsway/High Holborn, 21:13, 0.870 — NEW cam, night) + **#23145**
+(00001.03760 Shooters Hill Rd/Prince of Wales Rd, 20:04, 0.785 — REPEAT Shooters Hill cam;
+another mid-scoring real) + **#20160** (00001.04680 Borough High St/Gt Dover St, 05:13 dawn,
+0.837 — NEW cam). **74 confirms / 58 cameras.**
+
+- **PROB_TH 0.78 -> 0.77**: #23145 (captured 0.785) rescored to 0.789 = the new floor real,
+  dropping the floor from 0.793; margin over the 0.78 bar fell to 0.009 -> dropped a notch
+  (recall-first: set just below the weakest real). 894 near->new re-bucketed at 0.77. NEAR_TH
+  0.76 now only 0.01 below the bar (the irrecoverable backstop — watch). ALERT_TH 0.94 held.
+- 74-real centroid; rescored n=24,184: non-waymo p80 0.847 / max 0.930 (#21882 reject, below
+  ALERT_TH 0.94); reals 0.789-0.928 — floor real #23145 0.789.
+- Bar change -> loop **RESTARTED** (also clears the real(70)->real(74) drift). Retro skipped
+  (4/5 — at 75). NB 'new' eligible pool ~17.5k (large + growing — EOD demotion/sending may not
+  be bounding it; flagged for a separate look).
+
 ## v0.8.41 — Confirm 71 (#23121) + top-200 retro banked as negatives (2026-06-15)
 
 **#23121** (00001.03662 A2 New Cross Rd/Nettleton Rd, 19:49, 0.822 — a repeat A2 New Cross cam;

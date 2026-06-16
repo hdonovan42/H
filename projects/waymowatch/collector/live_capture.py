@@ -85,12 +85,12 @@ MAX_BACKLOG = 400     # tier-2 (zone) clip queue cap; overflow drops OLDEST zone
                       # tier-1 and never dropped). Drops are counted + reported — never silent.
 VID_STRIDE = 5        # frame stride for det.track (was 3): 25fps clip -> 5 sampled fps; a passing
                       # car is in view 2-4s = 10-20 samples, plenty for ByteTrack. 1.67x cheaper.
-PROB_TH = 0.78        # digest ELIGIBILITY bar — 59-REAL scale (v0.8.33, 2026-06-13): confirm 59
-                      # #15922 is a REAR-view real, captured 0.786 (sat silently in 'near', surfaced
-                      # only by the cosine mining sheet) and rescored 0.793 in-sample = the new floor
-                      # real. Margin over the old 0.79 bar fell to 0.003, so dropped a notch (rear
-                      # aspects score low — the dome is near-invisible from behind). Set just BELOW
-                      # the weakest real; DAY_CAP governs sending. NEAR_TH 0.76 = next backstop to watch.
+PROB_TH = 0.77        # digest ELIGIBILITY bar — 74-REAL scale (v0.8.42, 2026-06-16): confirm 73
+                      # #23145 (Shooters Hill Rd) captured 0.785, rescored 0.789 in-sample = the new
+                      # floor real, dropping the floor from 0.793. Margin over the old 0.78 bar fell to
+                      # 0.009, so dropped a notch (recall-first: set just BELOW the weakest real).
+                      # Mid-scoring reals keep arriving ~0.785-0.79; DAY_CAP governs sending. NEAR_TH
+                      # 0.76 = the irrecoverable backstop, now only 0.01 below the bar — watch it.
 DAY_CAP = 10000       # max candidate cells emailed per day (50 pages of PAGE_SIZE) — the user's review
                       # budget IS the constant; the score cut adapts. Unsent overflow is demoted to the
                       # near archive at end of day (retrievable, minable — never silently destroyed).
