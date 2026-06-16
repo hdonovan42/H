@@ -1,5 +1,20 @@
 # WaymoWatch — Changelog
 
+## v0.8.44 — Stratified daily recovery + 10:03 test-set banked (2026-06-16)
+
+- **Recovery is now STRATIFIED** (user): the daily 23:00 sheet = top-**140** by real-similarity
+  (head) + an even score-spread sample of **60** across the mid band [0.77, head-floor), so
+  mid-scoring reals (~0.78-0.86, e.g. #23145/#23121/#15922) get daily coverage instead of being
+  permanently outranked by the high head. The `recovered` flag walks BOTH bands down over days.
+  Tunable constants `RECOVERY_HIGH=140 / RECOVERY_MID=60 / RECOVERY_MID_FLOOR=0.77`. Validated via
+  `--recovery`: "140 top + 60 mid-band (0.861..0.774)". CAVEAT: the mid band is large (~15k), so
+  60/day is a SLOW secondary net — the confirm-cycle cosine mining remains the PRIMARY mid-real
+  mechanism; bump RECOVERY_MID if more mid budget is wanted.
+- **10:03 test sheet banked** (user verdict: zero Waymos): reproduced its exact top-200
+  (0.861-0.910) and rejected them -> reject pool now **6147**. All high-score (rejcheck-covered),
+  so safe; 74 waymos intact.
+- Deployed + loop restarted (stratified code live for tonight's 23:00 fire). Confirms 74 / 58.
+
 ## v0.8.43 — Daily targeted recovery replaces the bulk digest (2026-06-16)
 
 User directive: the 23:00 daily email is now ONE **targeted-recovery sheet** — the top-200

@@ -647,47 +647,66 @@ def maybe_send_daily_digest(con):
     con.commit()
 
 
-def send_recovery(con, limit=200):
-    """Daily TARGETED RECOVERY (v0.8.43, user 2026-06-16) — replaces the old bulk digest.
-    Emails the `limit` UNACTIONED candidates most similar to the confirmed reals (dome score =
-    cosine to the real centroid — the validated-best zero-cost ranker; max-over-individual-reals
-    was tested and rejected, it inflates the FP tail). The `recovered` flag walks DOWN the pool
-    over days so the same rows never repeat, and rows emailed before (sent=1) but never flagged
-    get a fresh, focused look. One reviewable sheet/day instead of ~13 noisy pages. Disk stays
-    bounded by retention()'s 7-day prune, so no demotion is needed. recovered=1 is set ONLY on a
-    successful send (quota-safe). Returns the count shown.
-    NOTE: a top-`limit` cut sits at the high-similarity band (~0.86+); mid-scoring reals
-    (~0.78-0.86, e.g. #23145/#23121) rely on the confirm-cycle cosine mining + on-request
-    backlog reviews, not this sheet."""
-    rows = con.execute("SELECT id,score,crop_path FROM candidates WHERE status NOT IN ('waymo','reject') "
-                       "AND COALESCE(recovered,0)=0 AND crop_path IS NOT NULL "
-                       "ORDER BY score DESC LIMIT ?", (limit * 4,)).fetchall()
-    rows = [(i, s, c) for i, s, c in rows if c and os.path.exists(c)][:limit]
+RECOVERY_HIGH = 140        # daily recovery: rows from the high-similarity head
+RECOVERY_MID = 60          # + an even sample across the mid band so mid-scoring Waymos get seen
+RECOVERY_MID_FLOOR = 0.77  # mid-band bottom (~PROB_TH): covers reals down to ~0.785 (#23145/#15922)
+
+
+def send_recovery(con, n_high=RECOVERY_HIGH, n_mid=RECOVERY_MID):
+    """Daily STRATIFIED targeted recovery (v0.8.44, user 2026-06-16) — replaces the old bulk digest
+    with ONE reviewable sheet/day:
+      - HEAD: the top `n_high` UNACTIONED candidates by real-similarity (dome score = cosine to the
+        real centroid — the validated-best zero-cost ranker; max-over-individual-reals was tested +
+        rejected, it inflates the FP tail).
+      - MID: an even score-spread sample of `n_mid` across the mid band [RECOVERY_MID_FLOOR,
+        head-floor), so mid-scoring reals (~0.78-0.86, e.g. #23145/#23121/#15922) get daily
+        coverage instead of being permanently outranked by the high head.
+    The `recovered` flag walks BOTH down over days so rows never repeat, and rows emailed before
+    (sent=1) but never flagged get a fresh look. Disk stays bounded by retention()'s 7-day prune,
+    so no demotion is needed. recovered=1 is set ONLY on a successful send (quota-safe)."""
+    def valid(rows):
+        return [(i, s, c) for i, s, c in rows if c and os.path.exists(c)]
+    head = valid(con.execute(
+        "SELECT id,score,crop_path FROM candidates WHERE status NOT IN ('waymo','reject') "
+        "AND COALESCE(recovered,0)=0 AND crop_path IS NOT NULL ORDER BY score DESC LIMIT ?",
+        (n_high * 2,)).fetchall())[:n_high]
+    head_ids = {r[0] for r in head}
+    floor = head[-1][1] if len(head) >= n_high else RECOVERY_MID_FLOOR
+    midpool = [r for r in valid(con.execute(
+        "SELECT id,score,crop_path FROM candidates WHERE status NOT IN ('waymo','reject') "
+        "AND COALESCE(recovered,0)=0 AND crop_path IS NOT NULL AND score >= ? AND score < ? "
+        "ORDER BY score DESC", (RECOVERY_MID_FLOOR, floor)).fetchall()) if r[0] not in head_ids]
+    step = max(1, len(midpool) // n_mid) if midpool else 1
+    mid = midpool[::step][:n_mid]                       # even score-spread across the mid band
+    rows = head + mid
     if not rows:
         print("recovery: nothing unrecovered to send")
         return 0
     reals = con.execute("SELECT COUNT(*) FROM candidates WHERE status='waymo'").fetchone()[0]
     sheet = os.path.join(CAND_DIR, "recovery.jpg")
-    shown = _build_sheet(rows, sheet, cap=limit)
+    shown = _build_sheet(rows, sheet, cap=len(rows))
     if not shown:
         return 0
-    hi, lo = rows[0][1], rows[shown - 1][1]
+    shown_rows = rows[:shown]
+    hi = shown_rows[0][1]
+    mlo = mid[-1][1] if mid else (head[-1][1] if head else 0.0)
     cov = coverage_line(con)
-    html = (f"<p><b>WaymoWatch — daily targeted recovery</b>: the {shown} unactioned candidate(s) "
-            f"most similar to the {reals} confirmed Waymos (dome score = cosine to the real "
-            f"centroid), best first ({hi:.3f}..{lo:.3f}).</p>"
+    html = (f"<p><b>WaymoWatch — daily targeted recovery</b> ({reals} confirmed Waymos): "
+            f"<b>{len(head)}</b> highest by real-similarity (dome score = cosine to the real "
+            f"centroid) + <b>{len(mid)}</b> sampled across the mid-similarity band, so mid-scoring "
+            f"Waymos aren't missed. Range {hi:.3f}..{mlo:.3f}.</p>"
             f"<p>Reply with the <b>#</b> of any real Waymo (white Jaguar I-PACE, dark roof dome).</p>"
             + (f"<p style='color:#888'>{cov}</p>" if cov else ""))
     sys.path.insert(0, HERE)
     from email_alert import send_email
-    if not send_email(f"WaymoWatch: daily recovery — top {shown} by real-similarity "
-                      f"({hi:.3f}..{lo:.3f})", html, attachments=[sheet]):
+    if not send_email(f"WaymoWatch: daily recovery — {len(head)} top + {len(mid)} mid-band "
+                      f"({hi:.3f}..{mlo:.3f})", html, attachments=[sheet]):
         print(f"recovery send failed — will retry next tick ({len(rows)} pending)")
         return 0
-    ids = [int(r[0]) for r in rows[:shown]]
+    ids = [int(r[0]) for r in shown_rows]
     con.execute("UPDATE candidates SET recovered=1, sent=1 WHERE id IN (%s)" % ",".join(map(str, ids)))
     con.commit()
-    print(f"recovery emailed: {shown} ({hi:.3f}..{lo:.3f})")
+    print(f"recovery emailed: {len(head)} head + {len(mid)} mid ({hi:.3f}..{mlo:.3f})")
     return shown
 
 
