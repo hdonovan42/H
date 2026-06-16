@@ -1,5 +1,16 @@
 # WaymoWatch — Changelog
 
+## v0.8.46 — Confirm 75 (#24685, Baker St/Marylebone Rd) (2026-06-16)
+
+**#24685** (00001.07369 Baker St/Marylebone Rd, 12:58, 0.889 — repeat cam). **75 confirms /
+58 cameras** — three-quarters of the ~100 training target.
+
+- 75-real centroid; rescored n=24,907: non-waymo p80 0.847 / max 0.931 (#21882 reject, below
+  ALERT_TH 0.94); reals 0.790-0.927 — floor real #23145 0.790, margin 0.020. Bars unchanged
+  (0.77/0.76/0.94). No bar moved -> **NO restart** (loop real(74), deployed real(75), 1 behind).
+- Auto-retro FIRED at 75 (top-200, 0.896..0.853); next at 80. NB the confirm-cycle retro now
+  overlaps heavily with the daily stratified recovery (both top-by-score) — candidate to retire.
+
 ## v0.8.45 — Restore intraday paging; only the 23:00 scheduled email is the recovery (2026-06-16)
 
 Correction to v0.8.43-44: those removed BOTH the intraday 200-pile-up pages AND the 23:00 digest.
