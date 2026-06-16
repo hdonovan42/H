@@ -1,5 +1,15 @@
 # WaymoWatch — Changelog
 
+## v0.8.47 — Confirm 76 (#24926, Jamaica Rd) (2026-06-16)
+
+**#24926** (00001.03555 Jamaica Rd W of Lower Rd, 16:19, 0.848 — NEW camera, SE/Bermondsey).
+**76 confirms / 59 cameras.**
+
+- 76-real centroid; rescored n=25,308: non-waymo p80 0.847 / max 0.931 (#21882 reject, below
+  ALERT_TH 0.94); reals 0.791-0.928 — floor real #23145 0.791, margin 0.021. Bars unchanged
+  (0.77/0.76/0.94). No bar moved -> **NO restart** (loop real(74), deployed real(76), 2 behind).
+  Retro skipped (1/5 — at 80).
+
 ## v0.8.46 — Confirm 75 (#24685, Baker St/Marylebone Rd) (2026-06-16)
 
 **#24685** (00001.07369 Baker St/Marylebone Rd, 12:58, 0.889 — repeat cam). **75 confirms /
