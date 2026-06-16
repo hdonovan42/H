@@ -1,5 +1,15 @@
 # WaymoWatch — Changelog
 
+## v0.8.48 — Confirm 77 (#25808, Euston Rd/Conway St) (2026-06-16)
+
+**#25808** (00001.07387 Euston Rd/Conway St, 20:07, 0.868 — NEW camera, the Euston Rd spine).
+**77 confirms / 60 distinct cameras.**
+
+- 77-real centroid; rescored n=25,875: non-waymo p80 0.848 / max 0.931 (#21882 reject, below
+  ALERT_TH 0.94); reals 0.792-0.927 — floor real #23145 0.792 (rising), margin 0.022. Bars
+  unchanged (0.77/0.76/0.94). No bar moved -> **NO restart** (loop real(74), deployed real(77),
+  3 behind). Retro skipped (2/5 — at 80).
+
 ## v0.8.47 — Confirm 76 (#24926, Jamaica Rd) (2026-06-16)
 
 **#24926** (00001.03555 Jamaica Rd W of Lower Rd, 16:19, 0.848 — NEW camera, SE/Bermondsey).
