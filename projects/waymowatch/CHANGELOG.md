@@ -1,5 +1,30 @@
 # WaymoWatch — Changelog
 
+## v0.8.49 — Confirms 78-81 + funnel lowered 0.01 (restart + centroid resync) (2026-06-17)
+
+**Confirms 78-80**: #26168 (00001.06521, 0.870), **#26680 (00001.07374, 0.776 — the low one)**,
+#27044 (00001.06512, 0.886) — all THREE new cameras. **Confirm 81**: #24969 (00001.03657, 0.865,
+repeat cam) surfaced in the top-200 retro. **81 confirms / 63 distinct cameras.**
+
+- **Bars LOWERED a notch (user-approved) — first bar move since real(74):** PROB_TH 0.77->0.76,
+  NEAR_TH 0.76->0.75, RECOVERY_MID_FLOOR 0.77->0.76; ALERT_TH holds 0.94. Driver: #26680 captured
+  0.776 and rescored to the **floor real at 0.776** (in-sample), dropping the floor 0.792->0.776 —
+  margin over the old 0.77 bar fell to 0.007, and since the floor real is in-sample a fresh
+  look-alike scores BELOW it out-of-sample (right at/under 0.77). Lowering restores ~0.016
+  eligibility margin and keeps low reals recoverable (recovery mid-band now floors at 0.76).
+- **Restart performed** (bar change) — loop reloads real(81) centroid + new bars, also resyncing
+  the **6-confirm drift** (loop had been on real(74) for 147h; deployed had reached real(80)).
+- real(81) rescore n=27,044: reals 0.776-0.926 (floor #26680 0.776, next #23145 0.789); non-waymo
+  p80 0.847 / p95 0.871 / max 0.932 (#21882 reject, 0.008 below ALERT_TH 0.94). Rebucket at 0.76:
+  **623 promoted, 0 demoted** (the 0.76-0.77 near-band lifted into 'new'; bounded by 7-day prune).
+- Auto-retro FIRED at 80 (top-200, 0.932..0.852); **#24969 the lone real in it, other 199 banked
+  as negatives** (scoped to exactly the retro 200 via top-200-by-score, NOT the 643-id accumulated
+  cycle_shown). Next retro at 85.
+- **funny/ gallery +2** (eval-only, excluded from training): #25980 (00001.01503), #18510
+  (00001.01685) — both ~0.77 floor-band confusers. Gallery now 20.
+- 23:00 daily recovery (200: 140 top + 60 mid-band) reviewed -> 0 waymos -> banked as negatives.
+- **Training negatives: 6,903** (reject AND special IS NULL).
+
 ## v0.8.48 — Confirm 77 (#25808, Euston Rd/Conway St) (2026-06-16)
 
 **#25808** (00001.07387 Euston Rd/Conway St, 20:07, 0.868 — NEW camera, the Euston Rd spine).
