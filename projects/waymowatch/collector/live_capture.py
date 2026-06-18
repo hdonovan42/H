@@ -85,19 +85,19 @@ MAX_BACKLOG = 400     # tier-2 (zone) clip queue cap; overflow drops OLDEST zone
                       # tier-1 and never dropped). Drops are counted + reported — never silent.
 VID_STRIDE = 5        # frame stride for det.track (was 3): 25fps clip -> 5 sampled fps; a passing
                       # car is in view 2-4s = 10-20 samples, plenty for ByteTrack. 1.67x cheaper.
-PROB_TH = 0.76        # digest ELIGIBILITY bar — 80-REAL scale (v0.8.49, 2026-06-17): confirm 79
-                      # #26680 (cam 07374) captured 0.776, rescored 0.777 in-sample = the new floor
-                      # real, dropping the floor from 0.792. It is IN-SAMPLE, so a fresh look-alike
-                      # scores BELOW 0.777 out-of-sample — right at/under the old 0.77 bar. Dropped a
-                      # notch (recall-first: set just BELOW the weakest real) so low reals stay
-                      # eligible + recoverable. NEAR_TH 0.75 = the irrecoverable backstop below.
+PROB_TH = 0.75        # digest ELIGIBILITY bar — 88-REAL scale (v0.8.50, 2026-06-18): confirms 86-87
+                      # #30789 (0.765) + #30973 (0.768) were HARD views in the 0.76-0.77 band — only
+                      # surfaced BECAUSE v0.8.49 dropped the bar to 0.76; now in-sample they are the
+                      # floor (0.769/0.771), so a fresh hard look-alike scores under 0.76. Dropped
+                      # another notch (recall-first: set just BELOW the weakest real) — the hard views
+                      # the user keeps confirming prove this band is real. NEAR_TH 0.74 = backstop.
 DAY_CAP = 10000       # max candidate cells emailed per day (50 pages of PAGE_SIZE) — the user's review
                       # budget IS the constant; the score cut adapts. Unsent overflow is demoted to the
                       # near archive at end of day (retrievable, minable — never silently destroyed).
-NEAR_TH = 0.75        # archive floor — the ONLY irrecoverable cut in the funnel (below it a
+NEAR_TH = 0.74        # archive floor — the ONLY irrecoverable cut in the funnel (below it a
                       # vehicle is discarded forever; above it, re-seeds re-rank from stored embs).
-                      # Lowered 0.76->0.75 (v0.8.49) tracking PROB_TH down: floor real #26680 at 0.777
-                      # is in-sample, so out-of-sample look-alikes can dip below 0.77 — keep 0.017
+                      # Lowered 0.75->0.74 (v0.8.50) tracking PROB_TH down: floor real #30789 at 0.769
+                      # is in-sample, so out-of-sample hard views can dip below 0.75 — keep ~0.019
                       # backstop margin so they land in 'near' (recoverable) not the bin.
                       # Disk is a non-issue (7-day prune). NEAR_KEEP_DAYS prune.
 NEAR_KEEP_DAYS = 7    # near rows + their jpgs are pruned after this many days (mine promptly)
@@ -650,7 +650,7 @@ def maybe_send_daily_digest(con):
 
 RECOVERY_HIGH = 140        # daily recovery: rows from the high-similarity head
 RECOVERY_MID = 60          # + an even sample across the mid band so mid-scoring Waymos get seen
-RECOVERY_MID_FLOOR = 0.76  # mid-band bottom (~PROB_TH): covers reals down to ~0.777 (#26680/#23145)
+RECOVERY_MID_FLOOR = 0.75  # mid-band bottom (~PROB_TH): covers reals down to ~0.769 (#30789/#30973)
 
 
 def send_recovery(con, n_high=RECOVERY_HIGH, n_mid=RECOVERY_MID):

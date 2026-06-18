@@ -1,5 +1,30 @@
 # WaymoWatch — Changelog
 
+## v0.8.50 — Confirms 82-88 + funnel lowered another 0.01 (restart + resync) (2026-06-18)
+
+**Confirms 82-88** (7): #29727 (03656, 0.897, repeat), #29632 (02351, 0.857), #29895 (06607,
+0.829), #29132 (04633, 0.821), #29238 (06594, 0.811), **#30789 (03553, 0.765)**, **#30973
+(04223, 0.768)** — six NEW cameras + one repeat. **88 confirms / 69 distinct cameras.**
+
+- **v0.8.49's bar drop vindicated immediately**: #30789 (0.765) and #30973 (0.768) sat in the
+  0.76-0.77 band — under the old 0.77 bar they'd have been archived as 'near' and pruned unseen.
+  At PROB_TH 0.76 they surfaced as 'new' and were confirmed.
+- **Bars LOWERED another notch (user-approved):** PROB_TH 0.76->0.75, NEAR_TH 0.75->0.74,
+  RECOVERY_MID_FLOOR 0.76->0.75; ALERT_TH holds 0.94. Those two hard views are now the in-sample
+  floor (0.769/0.771), leaving only 0.009 over the 0.76 bar; in-sample, so fresh hard look-alikes
+  dip under 0.76. Lowering restores ~0.019 margin and keeps the hard-view band surfaced+recoverable.
+- **Restart performed** (bar change) — loop reloads real(88) centroid + new bars, resyncing the
+  **7-confirm drift** (loop had been on real(81) since the 17 Jun restart).
+- real(88) rescore n=27,742: reals 0.769-0.928 (floor #30789 0.769, next #30973 0.771, #26680
+  0.776); non-waymo p80 0.849 / p95 0.874 / max 0.932 (#21882 reject, 0.008 below ALERT_TH).
+  Rebucket at 0.76: 77 promoted, 7 demoted.
+- Retro FIRED at 88 (top-200, 0.907..0.854); weekly rejcheck FIRED (top-100, 0.932..0.901) — both
+  out for review. Next retro at 93.
+- **funny/ +2** (#28946 07458, #30294 06584) -> 22; **roof-box/ +2** (#26521 04529, #30119 06515)
+  -> 22. All eval-only (excluded from training).
+- 17 Jun 23:00 recovery (200) reviewed -> 0 waymos -> 186 banked as negatives.
+- **Training negatives: 7,089** (reject AND special IS NULL).
+
 ## v0.8.49 — Confirms 78-81 + funnel lowered 0.01 (restart + centroid resync) (2026-06-17)
 
 **Confirms 78-80**: #26168 (00001.06521, 0.870), **#26680 (00001.07374, 0.776 — the low one)**,
