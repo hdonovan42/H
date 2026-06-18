@@ -1,5 +1,20 @@
 # WaymoWatch — Changelog
 
+## v0.8.53 — Confirm 90 (#32467) + fix: eval positives must not drive bars (2026-06-18)
+
+**#32467** (00001.02352, 15:49, 0.827 — NEW camera). **90 training confirms / 71 cameras** (91
+total sightings incl. the eval-only #31037).
+
+- **Bug fix (from v0.8.52's new convention):** `confirm_cycle.py rescore()` selected the floor real
+  as `status='waymo'` — which now includes the eval-only `edge_positive` #31037 (0.752, NOT in the
+  centroid). Left unfixed it would have posed as the floor real (margin 0.002 over PROB_TH 0.75) and
+  spuriously triggered a bar drop. Now the floor/bar stats use `status='waymo' AND special IS NULL`
+  (training reals only). Non-waymo quantiles already excluded it (it's status='waymo').
+- 90-real centroid; rescored n=27,523: non-waymo p80 0.848 / max 0.932 (#21882 reject, below
+  ALERT_TH 0.94); reals 0.771-0.927 — floor real #30789 0.771 (margin 0.021 over PROB_TH 0.75).
+  Bars unchanged (0.75/0.74/0.94) -> **NO restart** (loop real(88), deployed real(90), 2 behind).
+  Rebucket at 0.75: 6 promoted, 29 demoted. Retro skipped (3/5 — at 93).
+
 ## v0.8.52 — New convention: eval-only special POSITIVES (#31037) (2026-06-18)
 
 First confirmed-real Waymo held OUT of training/centroid. **#31037** (00001.07500 Northumberland
