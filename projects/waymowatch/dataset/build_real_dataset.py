@@ -51,10 +51,14 @@ def main():
 
     pos = [(cam, fp, json.loads(bb)) for cam, fp, bb in con.execute(
         "SELECT camera_id, frame_path, bbox FROM candidates WHERE status='waymo' "
+        "AND special IS NULL "
         "AND bbox IS NOT NULL AND frame_path IS NOT NULL").fetchall()
         if fp and os.path.exists(fp)]
-    # special IS NULL: user-curated gallery cases (roof-box/i-pac/funny) are held OUT of
-    # training entirely — they are the manual post-train evaluation set (user, 2026-06-11)
+    # special IS NULL on BOTH classes: user-curated gallery cases are held OUT of training —
+    # they are the manual post-train evaluation set (user, 2026-06-11). Negatives = hard confusers
+    # (roof-box/i-pac/funny/van_roof); positives = confirmed-real but low-SNR/partial views
+    # (edge_positive, 2026-06-18) that would dilute dome-specificity and manufacture FPs if trained
+    # on — kept as eval-only true-positives for recall testing.
     rejects = [(cam, fp) for cam, fp in con.execute(
         "SELECT camera_id, frame_path FROM candidates WHERE status='reject' "
         "AND special IS NULL "

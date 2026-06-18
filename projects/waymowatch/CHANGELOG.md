@@ -1,5 +1,29 @@
 # WaymoWatch — Changelog
 
+## v0.8.52 — New convention: eval-only special POSITIVES (#31037) (2026-06-18)
+
+First confirmed-real Waymo held OUT of training/centroid. **#31037** (00001.07500 Northumberland
+Ave/Victoria Emb, 18 Jun 11:24) is a genuine Waymo (user saw the dome edge + rear-quarter sensor)
+but **~75% out of frame**: bbox [0,224,80,286] in a 352x288 frame — left edge clipped (x1=0),
+bottom nearly clipped (y2=286/288). Score 0.752.
+
+- **Why held out (FP risk):** the dome (our only discriminator) is a sliver here; the crop mostly
+  contributes generic "white I-PACE rear" features shared with Wayve/private I-PACEs. Averaging it
+  into the centroid dilutes dome-specificity -> raises FPs on non-Waymo I-PACEs. As a YOLO positive
+  it teaches firing on minimal evidence (and the rear sensor is occluded by the "North..." overlay
+  text). It would also become the new floor real (~0.75) and force another bar drop.
+- **New `special` value `edge_positive`**: until now all `special` rows were hard NEGATIVES
+  (roof-box/i-pac/funny/van_roof, status=reject). `edge_positive` is the first special POSITIVE —
+  status=waymo (ground-truth + countable as a sighting) but special-flagged.
+- **build_real_dataset.py**: POSITIVES query now `status='waymo' AND special IS NULL` (mirrors the
+  negatives rule) so special positives are excluded from YOLO training. Crop NOT copied to
+  real_positives/, so the centroid reseed (filesystem-based) never sees it.
+- **Counts now split**: TRAINING confirms = 89 (waymo AND special IS NULL); TOTAL confirmed
+  sightings = 90 (waymo); eval-only positives = 1. Centroid UNCHANGED (real 89), no reseed, no bar
+  change, no restart. Role: hard true-positive for recall eval on partial/edge views.
+- **NB dashboard**: sightings_api serves all status='waymo' (no special filter), so #31037 would
+  appear publicly — flagged to user; not filtered yet.
+
 ## v0.8.51 — Confirm 89 (#31216, cam 03118) (2026-06-18)
 
 **#31216** (00001.03118, 11:18, 0.850 — NEW camera). **89 confirms / 70 distinct cameras.**

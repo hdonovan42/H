@@ -22,20 +22,38 @@ banked and then NEVER resurface — permanently buried. Confirmed reals are rout
   backlog, or explicitly says to clear everything.
 
 ### Special/gallery cases are EVAL-ONLY — never training data (user, 2026-06-15)
-Gallery rows (the `special` column set: roof-box / i-pac / funny / van_roof) are reserved for
-MANUAL POST-TRAIN EVALUATION and are excluded from the training set in BOTH directions. Enforced
-by `build_real_dataset.py`: positives = `status='waymo'` only; negatives = `status='reject' AND
-special IS NULL`. A gallery row therefore carries `status='reject'` but its `special` tag holds it
-out of the negative pool. This has been the design since 2026-06-11 (memory v0.8.15).
+Gallery rows (the `special` column set) are reserved for MANUAL POST-TRAIN EVALUATION and are
+excluded from the training set in BOTH directions. Enforced by `build_real_dataset.py`:
+positives = `status='waymo' AND special IS NULL`; negatives = `status='reject' AND special IS NULL`.
+A gallery NEGATIVE carries `status='reject'` (confusers: roof-box/i-pac/funny/van_roof); a gallery
+POSITIVE carries `status='waymo'` (`edge_positive`, see below). The `special` tag holds either out
+of the relevant training pool. Design since 2026-06-11 (memory v0.8.15); positives added 2026-06-18.
 
 **How to apply:**
 - Treat eval-exclusion as the DEFAULT — it's established, not a per-filing decision; don't present
   it as a choice I'm making.
-- Report training pools PRECISELY: training negatives = `reject AND special IS NULL`, NOT the raw
-  reject count (which includes the eval-only specials — 37 as of 67 confirms).
-- Filing a special = `status='reject'` + `special='<gallery>'` + copy crop+frame to
-  `data/special/<gallery>/`. The DB `special` tag (not the folder) is what enforces exclusion;
-  keep the folder in sync for the visual eval set, but a missing folder image never causes a leak.
+- Report training pools PRECISELY: training negatives = `reject AND special IS NULL`; TRAINING
+  confirms = `waymo AND special IS NULL` (NOT raw `waymo`, which now includes eval-only positives).
+  Report both when they differ (e.g. "89 training / 90 total sightings").
+- Filing a special NEGATIVE = `status='reject'` + `special='<gallery>'` + copy crop+frame to
+  `data/special/<gallery>/`. The DB `special` tag (not the folder) enforces exclusion.
+
+### Eval-only special POSITIVES — confirmed reals that would HURT the scorer (user, 2026-06-18)
+A genuine Waymo can still be poison for the centroid/trainer. #31037 was a confirmed dome but
+~75% out of frame (bbox x1=0, dome a sliver, rear sensor occluded by the camera's text overlay,
+score 0.752). The discriminator IS the dome; a crop with almost no dome signal contributes mostly
+generic "white I-PACE body" features SHARED with Wayve/private I-PACEs — averaging it into the
+centroid dilutes dome-specificity and MANUFACTURES false positives, and as a YOLO positive it
+teaches firing on minimal evidence. It would also become the new floor real and force another bar
+drop.
+**Pattern**: judge a confirmed positive on its SIGNAL, not just its label. If the discriminating
+feature is barely present / occluded / frame-clipped, file it `status='waymo' special='edge_positive'`
+(NOT copied to `real_positives/`, so the filesystem-based centroid reseed never sees it; excluded
+from YOLO by the `special IS NULL` positives filter). It stays a countable sighting and a valuable
+hard true-positive for RECALL eval — just kept out of the thing that has to make the call. We don't
+need it in training to catch its kind live (the live scorer already surfaced it). NB the public
+sightings_api serves all `status='waymo'` with no special filter, so an `edge_positive` leaks to the
+dashboard unless filtered — flag this when filing one.
 
 ### Surfacer false-positive pattern (2026-06-05)
 The bootstrap surfacer (frozen MobileNetV3 embedding → cosine to the 39-dome centroid) at
