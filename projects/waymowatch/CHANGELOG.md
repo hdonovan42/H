@@ -1,5 +1,17 @@
 # WaymoWatch — Changelog
 
+## v0.8.54 — Confirm 91 (#33357) + 23:00 recovery banked (2026-06-18)
+
+**#33357** (00001.02352, 21:34, 0.879 — repeat cam, from the 23:00 recovery). **91 training
+confirms / 71 cameras** (92 total sightings). It was the lone Waymo in tonight's recovery — the
+other **199 banked as negatives**.
+
+- 91-real centroid; rescored n=27,445: non-waymo p80 0.849 / max 0.932 (#21882 reject, below
+  ALERT_TH 0.94); reals 0.769-0.928 — floor real #30789 0.769 (margin 0.019 over PROB_TH 0.75; eval
+  #31037 correctly excluded). Bars unchanged (0.75/0.74/0.94) -> **NO restart** (loop real(88),
+  deployed real(91), 3 behind). Rebucket at 0.75: 14 promoted, 17 demoted. Retro skipped (4/5 — at
+  93). Training negatives: 7,288.
+
 ## v0.8.53 — Confirm 90 (#32467) + fix: eval positives must not drive bars (2026-06-18)
 
 **#32467** (00001.02352, 15:49, 0.827 — NEW camera). **90 training confirms / 71 cameras** (91
