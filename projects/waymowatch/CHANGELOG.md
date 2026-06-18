@@ -1,5 +1,15 @@
 # WaymoWatch — Changelog
 
+## v0.8.51 — Confirm 89 (#31216, cam 03118) (2026-06-18)
+
+**#31216** (00001.03118, 11:18, 0.850 — NEW camera). **89 confirms / 70 distinct cameras.**
+
+- 89-real centroid; rescored n=27,664: non-waymo p80 0.849 / max 0.932 (#21882 reject, below
+  ALERT_TH 0.94); reals 0.771-0.928 — floor real #30789 ROSE 0.769->0.771 (a mid-high real nudged
+  the centroid up), margin 0.021 over PROB_TH 0.75. Bars unchanged (0.75/0.74/0.94) -> **NO
+  restart** (loop real(88) since 12:00, deployed real(89), 1 behind). Rebucket at 0.75: 183
+  promoted, 1 demoted. Retro skipped (1/5 — at 93).
+
 ## v0.8.50 — Confirms 82-88 + funnel lowered another 0.01 (restart + resync) (2026-06-18)
 
 **Confirms 82-88** (7): #29727 (03656, 0.897, repeat), #29632 (02351, 0.857), #29895 (06607,
