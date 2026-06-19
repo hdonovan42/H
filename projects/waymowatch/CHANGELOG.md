@@ -11,8 +11,10 @@ banked v0.8.54 — skipped.) **93 training confirms / 73 cameras** (94 total sig
   #31037 excluded), top real now 0.935 (#35078 in-sample, first real above the 0.932 van FP). Bars
   unchanged (0.75/0.74/0.94) -> **NO restart** (loop real(88), deployed real(93), 5 behind —
   nearing the ~8 resync trigger). Rebucket at 0.75: 5 promoted, 93 demoted.
-- Auto-retro FIRED at 94 (top-200, 0.910..0.854) — out for review. Next retro at 99.
+- Auto-retro FIRED at 94 (top-200, 0.910..0.854) — reviewed -> 0 waymos -> 200 banked as negatives
+  (range 0.910..0.854, exact match to the retro set). Next retro at 99.
 - funny/ +2 (#34249 04651, #33737 03590) -> 24; roof-box/ +1 (#35123 09726) -> 23. Eval-only.
+- Training negatives: 7,488 (reject AND special IS NULL).
 
 ## v0.8.54 — Confirm 91 (#33357) + 23:00 recovery banked (2026-06-18)
 
