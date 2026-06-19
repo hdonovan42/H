@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import StockChart from './StockChart';
-import { WORKER_URL, EST, EARNINGS_DATE } from '../utils/config';
+import { WORKER_URL, EST, EARNINGS_DATE, SETTLE_POLL_INTERVAL_MS, SETTLE_STABLE_K, SETTLE_TIMEOUT_MS, SETTLE_COLD_WINDOW_MIN } from '../utils/config';
 import { dayjs, getMarketState, getTodayEST, MarketState } from '../utils/marketState';
 import { getCachedData, setCachedData, clearCaches } from '../utils/cache';
 import { fetchPriceData, fetchMarketClock } from '../utils/api';
+import { PHASE, determineInitialPhase, isStable, resolvePrice } from '../utils/pricePhase';
 import '../styles/stock-tracker.css';
 
 export default function StockTracker() {
@@ -30,11 +31,23 @@ export default function StockTracker() {
   const [clockData, setClockData] = useState(null);
   const [clockLoaded, setClockLoaded] = useState(false);
 
+  // Close-settle state machine: live → settling → settled (see utils/pricePhase.js).
+  // The single source of truth all views read from, so box/spreadsheet/light agree.
+  const [phase, setPhase] = useState(() => determineInitialPhase({ marketState: getMarketState(), coldWindowMin: SETTLE_COLD_WINDOW_MIN }));
+  const [settlingValue, setSettlingValue] = useState(null);
+  const [settledValue, setSettledValue] = useState(null);
+
   const lastPriceRef = useRef(null);
   const wsRef = useRef(null);
   const isConnectingRef = useRef(false);
   const clockDataRef = useRef(null);
   const fetchAbortRef = useRef(null);
+  const settleIntervalRef = useRef(null);   // close-settle poll interval id
+  const settleStartRef = useRef(0);          // ms timestamp settling began (timeout backstop)
+  const settleReadingsRef = useRef([]);      // recent cent-rounded reads for stability test
+  const clockFirstLoadRef = useRef(false);   // gate: fetchStockData only on first clock load
+  const prevIsOpenRef = useRef(null);        // previous Alpaca isOpen, for close-edge detection
+  const tickerRef = useRef(ticker);          // current ticker, so in-flight settle polls can bail
   const [wsAvailable, setWsAvailable] = useState(true);
   const [currency, setCurrency] = useState('USD');
   const [exchangeRate, setExchangeRate] = useState(null);
@@ -417,14 +430,68 @@ export default function StockTracker() {
     }
   }, []);
 
+  // ── Close-settle machine ───────────────────────────────────────────────
+  // Stop any running settle poll and clear its reading buffer.
+  const stopSettlePoll = useCallback(() => {
+    if (settleIntervalRef.current) {
+      clearInterval(settleIntervalRef.current);
+      settleIntervalRef.current = null;
+    }
+    settleReadingsRef.current = [];
+  }, []);
+
+  // Poll the official close (cache-bypassed) until it stabilises, then lock every
+  // view to it. Bails if the ticker changes mid-flight; backstop-locks on timeout.
+  const startSettlePoll = useCallback((activeTicker) => {
+    stopSettlePoll();
+    settleStartRef.current = Date.now();
+    settleReadingsRef.current = [];
+    setSettlingValue(null);
+    setPhase(PHASE.SETTLING);
+    console.log(`[settle] ${activeTicker} market closed — settling official close…`);
+
+    const pollOnce = async () => {
+      if (tickerRef.current !== activeTicker) { stopSettlePoll(); return; }
+      try {
+        const { data: pd } = await fetchPriceData(activeTicker, clockDataRef.current, { noCache: true });
+        if (tickerRef.current !== activeTicker) return;
+        const v = pd?.currentPrice;
+        if (v == null) return;
+
+        setSettlingValue(v);
+        const reads = [...settleReadingsRef.current, v];
+        settleReadingsRef.current = reads;
+
+        if (isStable(reads, SETTLE_STABLE_K)) {
+          console.log(`[settle] ${activeTicker} official close locked at $${v.toFixed(2)} (${reads.length} reads)`);
+          setSettledValue(v);
+          setPhase(PHASE.SETTLED);
+          stopSettlePoll();
+        } else if (Date.now() - settleStartRef.current > SETTLE_TIMEOUT_MS) {
+          console.warn(`[settle] ${activeTicker} close did not stabilise in time; locking last value $${v.toFixed(2)}`);
+          setSettledValue(v);
+          setPhase(PHASE.SETTLED);
+          stopSettlePoll();
+        }
+      } catch (error) {
+        console.error('Settle poll error:', error);
+      }
+    };
+
+    pollOnce();
+    settleIntervalRef.current = setInterval(pollOnce, SETTLE_POLL_INTERVAL_MS);
+  }, [stopSettlePoll]);
+
   // Initial load and ticker changes
   useEffect(() => {
     document.title = ticker;
+    tickerRef.current = ticker;
     if (fetchAbortRef.current) fetchAbortRef.current.abort();
     fetchAbortRef.current = new AbortController();
     clearCaches(ticker);
     setChartCache({});
     lastPriceRef.current = null;
+    clockFirstLoadRef.current = false;
     setHasMoreHistory(true);
     setIsFetchingMore(false);
     setFullHistoryLoaded(false);
@@ -435,15 +502,60 @@ export default function StockTracker() {
     setWeeklyData([]);
     setMonthlyData([]);
     setQuote(null);
+
+    // Reset the close-settle machine for the new ticker, then re-derive its phase.
+    stopSettlePoll();
+    setSettlingValue(null);
+    setSettledValue(null);
+    prevIsOpenRef.current = clockDataRef.current ? clockDataRef.current.isOpen : null;
+    const initialPhase = determineInitialPhase({
+      marketState: getMarketState(clockDataRef.current),
+      coldWindowMin: SETTLE_COLD_WINDOW_MIN
+    });
+    setPhase(initialPhase);
+
     fetchStockData(ticker, true);
+
+    // Cold load within the post-close window: start settling straight away.
+    if (initialPhase === PHASE.SETTLING) startSettlePoll(ticker);
   }, [ticker]);
 
-  // Re-fetch when clock data first loads (fixes race condition)
+  // Re-fetch once when clock data first loads (fixes race condition). Gated to the
+  // first load only — the 30s clock refreshes must NOT keep re-pulling and
+  // overwriting quote.c after close (that was the migrating-number bug).
   useEffect(() => {
-    if (clockData && ticker) {
+    if (clockData && ticker && !clockFirstLoadRef.current) {
+      clockFirstLoadRef.current = true;
       fetchStockData(ticker);
     }
   }, [clockData]);
+
+  // Detect the genuine market close via Alpaca's isOpen edge (works for regular and
+  // half-days; never false-fires on holidays, where isOpen is never true today). On
+  // close: reconcile the stale cache and settle to the official close.
+  useEffect(() => {
+    if (!clockData) return;
+    const prevIsOpen = prevIsOpenRef.current;
+    prevIsOpenRef.current = clockData.isOpen;
+    if (prevIsOpen === true && clockData.isOpen === false) {
+      clearCaches(ticker);
+      fetchStockData(ticker);
+      startSettlePoll(ticker);
+    }
+  }, [clockData, ticker]);
+
+  // Back to a live regular session — release any settle lock immediately.
+  useEffect(() => {
+    if (currentMarketState.isRegularHours && phase !== PHASE.LIVE) {
+      stopSettlePoll();
+      setSettlingValue(null);
+      setSettledValue(null);
+      setPhase(PHASE.LIVE);
+    }
+  }, [currentMarketState.isRegularHours]);
+
+  // Stop the settle poll on unmount.
+  useEffect(() => () => stopSettlePoll(), [stopSettlePoll]);
 
   useEffect(() => {
     if (ticker) {
@@ -812,6 +924,17 @@ export default function StockTracker() {
     return () => observer.disconnect();
   }, [hasMoreHistory, sortConfig.key, fetchMoreHistory]);
 
+  // Single resolved price — the one number the box, spreadsheet today-close and
+  // chart all read, so they can never contradict each other. Post-close this is the
+  // settling/settled official close, never the frozen last live tick.
+  const currentPrice = resolvePrice({
+    phase,
+    quote,
+    settlingValue,
+    settledValue,
+    dataLastClose: data[data.length - 1]?.close
+  });
+
   // Spreadsheet data processing
   const processSpreadsheetData = useMemo(() => {
     const dataWithToday = [...data];
@@ -824,32 +947,32 @@ export default function StockTracker() {
     const toDateStr = (d) => d ? dayjs(d).format('YYYY-MM-DD') : null;
     const historicalDataHasToday = toDateStr(data[data.length - 1]?.date) === todayEST;
 
-    if (shouldProcessTodayRow && quote?.c) {
+    if (shouldProcessTodayRow && currentPrice) {
       if (historicalDataHasToday) {
         const todayIndex = dataWithToday.findIndex(d => toDateStr(d.date) === todayEST);
         if (todayIndex !== -1) {
           dataWithToday[todayIndex] = {
             ...dataWithToday[todayIndex],
-            open: quote.o ?? dataWithToday[todayIndex].open,
-            high: quote.h ?? dataWithToday[todayIndex].high,
-            low: quote.l ?? dataWithToday[todayIndex].low,
-            close: quote.c,
-            volume: quote.volume || dataWithToday[todayIndex].volume,
+            open: quote?.o ?? dataWithToday[todayIndex].open,
+            high: quote?.h ?? dataWithToday[todayIndex].high,
+            low: quote?.l ?? dataWithToday[todayIndex].low,
+            close: currentPrice,
+            volume: quote?.volume || dataWithToday[todayIndex].volume,
           };
         }
       } else {
         dataWithToday.push({
           date: todayEST,
-          open: quote.o ?? quote.c,
-          high: quote.h ?? quote.c,
-          low: quote.l ?? quote.c,
-          close: quote.c,
-          volume: quote.volume || 0,
+          open: quote?.o ?? currentPrice,
+          high: quote?.h ?? currentPrice,
+          low: quote?.l ?? currentPrice,
+          close: currentPrice,
+          volume: quote?.volume || 0,
         });
       }
     }
 
-    // Deduplicate by date — last occurrence wins (quote-enriched row overrides stale historical)
+    // Deduplicate by date — last occurrence wins (resolved-price row overrides stale historical)
     const seen = new Map();
     for (const row of dataWithToday) seen.set(toDateStr(row.date), row);
     const deduped = [...seen.values()].sort((a, b) => dayjs(a.date).unix() - dayjs(b.date).unix());
@@ -860,7 +983,7 @@ export default function StockTracker() {
     }));
 
     return dataWithChange;
-  }, [data, quote, currentMarketState, clockLoaded]);
+  }, [data, quote, currentMarketState, clockLoaded, currentPrice]);
 
   const sortedData = useMemo(() => {
     return [...processSpreadsheetData].sort((a, b) => {
@@ -871,7 +994,6 @@ export default function StockTracker() {
   }, [processSpreadsheetData, sortConfig]);
 
   // Derived values
-  const currentPrice = quote?.c || data[data.length - 1]?.close || 0;
   const lastTwo = processSpreadsheetData.slice(-2);
   const todayChange = lastTwo.length === 2 ? lastTwo[1].close - lastTwo[0].close : 0;
   const todayChangePercent = lastTwo.length === 2 ? (todayChange / lastTwo[0].close) * 100 : 0;
@@ -956,7 +1078,10 @@ export default function StockTracker() {
                     {todayChange >= 0 ? '+' : ''}{todayChange.toFixed(2)} ({todayChange >= 0 ? '+' : ''}{todayChangePercent.toFixed(2)}%)
                   </span>
                 </div>
-                <div className={`status-dot ${currentMarketState.isRegularHours ? 'open' : 'closed'}`}></div>
+                <div style={{display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px'}}>
+                  <div className={`status-dot ${phase === PHASE.SETTLING ? 'settling' : (currentMarketState.isRegularHours ? 'open' : 'closed')}`}></div>
+                  {phase === PHASE.SETTLING && <span className="settling-label">settling…</span>}
+                </div>
               </div>
             </div>
 
@@ -1023,7 +1148,9 @@ export default function StockTracker() {
                 {sortedData.map((row) => {
                   const shares = parseInt(sharesCount) || 0;
                   const value = shares > 0 ? Math.round(shares * row.close) : null;
-                  const isLivePrice = row.date === getTodayEST() && currentMarketState.isRegularHours;
+                  const isToday = row.date === getTodayEST();
+                  const isLivePrice = isToday && currentMarketState.isRegularHours;
+                  const isSettlingClose = isToday && phase === PHASE.SETTLING;
 
                   return (
                     <div key={row.date} className="spreadsheet-row">
@@ -1031,7 +1158,7 @@ export default function StockTracker() {
                       <div className="spreadsheet-cell">${row.open.toFixed(2)}</div>
                       <div className="spreadsheet-cell">${row.high.toFixed(2)}</div>
                       <div className="spreadsheet-cell">${row.low.toFixed(2)}</div>
-                      <div className={`spreadsheet-cell ${isLivePrice ? 'live-price' : ''}`}>${row.close.toFixed(2)}</div>
+                      <div className={`spreadsheet-cell ${isLivePrice ? 'live-price' : ''}${isSettlingClose ? ' settling-close' : ''}`}>${row.close.toFixed(2)}</div>
                       <div className="spreadsheet-cell">{row.volume > 500000 ? (row.volume / 1000000).toFixed(1) + 'M' : '—'}</div>
                       <div className={`spreadsheet-cell ${row.chg !== null ? (row.chg >= 0 ? 'positive' : 'negative') : ''}`}>{row.chg !== null ? `${row.chg >= 0 ? '+' : ''}${row.chg.toFixed(2)}` : '—'}</div>
                       <div className="spreadsheet-cell value-cell">{value !== null && <><span className="currency-toggle" onClick={handleCurrencyToggle} title={`Click to show in ${currency === 'USD' ? 'GBP' : 'USD'}`}>{currencySymbol}</span>{convertValue(value).toLocaleString()}{row.chg !== null && <span className={row.chg >= 0 ? 'positive' : 'negative'}> | {row.chg >= 0 ? '+' : ''}<span className="currency-toggle" onClick={handleCurrencyToggle}>{currencySymbol}</span>{convertValue(Math.round(row.chg * shares)).toLocaleString()}</span>}</>}</div>

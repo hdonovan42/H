@@ -73,9 +73,12 @@ export const fetchSharesOutstanding = async (symbol) => {
   }
 };
 
-export const fetchYahooQuote = async (symbol) => {
+export const fetchYahooQuote = async (symbol, { noCache = false } = {}) => {
   try {
-    const response = await fetchWithTimeout(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=1m&includePrePost=true`);
+    // Cache-buster for the close-settle poll: the worker leaves range=1d uncached,
+    // so this only defeats browser heuristic caching and guarantees a fresh read.
+    const bust = noCache ? `&_=${Date.now()}` : '';
+    const response = await fetchWithTimeout(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=1m&includePrePost=true${bust}`);
     if (!response.ok) return null;
     const data = await response.json();
 
@@ -137,9 +140,9 @@ export const fetchYahooQuote = async (symbol) => {
   }
 };
 
-export const fetchMarketOpenData = async (symbol) => {
+export const fetchMarketOpenData = async (symbol, opts = {}) => {
   const [yahooData, finnhubData] = await Promise.all([
-    fetchYahooQuote(symbol),
+    fetchYahooQuote(symbol, opts),
     fetchSharesOutstanding(symbol)
   ]);
   if (!yahooData) return null;
@@ -162,9 +165,9 @@ export const fetchMarketOpenData = async (symbol) => {
   };
 };
 
-export const fetchMarketClosedData = async (symbol, marketState) => {
+export const fetchMarketClosedData = async (symbol, marketState, opts = {}) => {
   const [yahooData, finnhubData] = await Promise.all([
-    fetchYahooQuote(symbol),
+    fetchYahooQuote(symbol, opts),
     fetchSharesOutstanding(symbol)
   ]);
   if (!yahooData) return null;
@@ -200,18 +203,18 @@ export const fetchMarketClosedData = async (symbol, marketState) => {
   };
 };
 
-export const fetchPriceData = async (symbol, clockData = null) => {
+export const fetchPriceData = async (symbol, clockData = null, opts = {}) => {
   const marketState = getMarketState(clockData);
 
   try {
     if (marketState.isRegularHours) {
       return {
-        data: await fetchMarketOpenData(symbol),
+        data: await fetchMarketOpenData(symbol, opts),
         marketState
       };
     } else {
       return {
-        data: await fetchMarketClosedData(symbol, marketState),
+        data: await fetchMarketClosedData(symbol, marketState, opts),
         marketState
       };
     }
