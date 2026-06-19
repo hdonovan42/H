@@ -1,5 +1,19 @@
 # WaymoWatch — Changelog
 
+## v0.8.55 — Confirms 92-93 (#34343, #35078) (2026-06-19)
+
+**#34343** (00001.04245, 07:53, 0.861) + **#35078** (00001.04339, 11:30, 0.932 — strong, finally
+above the white-van FP ceiling) — both NEW cameras. (#33357 re-listed by the user but already
+banked v0.8.54 — skipped.) **93 training confirms / 73 cameras** (94 total sightings).
+
+- 93-real centroid; rescored n=27,035: non-waymo p80 0.849 / max 0.932 (#21882 reject, below
+  ALERT_TH 0.94); reals 0.769-0.935 — floor real #30789 0.769 (margin 0.019 over PROB_TH 0.75; eval
+  #31037 excluded), top real now 0.935 (#35078 in-sample, first real above the 0.932 van FP). Bars
+  unchanged (0.75/0.74/0.94) -> **NO restart** (loop real(88), deployed real(93), 5 behind —
+  nearing the ~8 resync trigger). Rebucket at 0.75: 5 promoted, 93 demoted.
+- Auto-retro FIRED at 94 (top-200, 0.910..0.854) — out for review. Next retro at 99.
+- funny/ +2 (#34249 04651, #33737 03590) -> 24; roof-box/ +1 (#35123 09726) -> 23. Eval-only.
+
 ## v0.8.54 — Confirm 91 (#33357) + 23:00 recovery banked (2026-06-18)
 
 **#33357** (00001.02352, 21:34, 0.879 — repeat cam, from the 23:00 recovery). **91 training
