@@ -1,5 +1,16 @@
 # WaymoWatch — Changelog
 
+## v0.8.56 — Confirm 94 (#36842) (2026-06-19)
+
+**#36842** (00001.07379, 20:48, 0.893 — repeat cam). **94 training confirms / 73 cameras** (95
+total sightings).
+
+- 94-real centroid; rescored n=27,429: non-waymo p80 0.850 / max 0.933 (#21882 reject, below
+  ALERT_TH 0.94); reals 0.768-0.934 — floor real #30789 0.768 (margin 0.018 over PROB_TH 0.75; eval
+  #31037 excluded). Bars unchanged (0.75/0.74/0.94) -> **NO restart** (loop real(88), deployed
+  real(94), **6 behind — resync due at ~8**). Rebucket at 0.75: 85 promoted, 15 demoted. Retro
+  skipped (1/5 — at 99).
+
 ## v0.8.55 — Confirms 92-93 (#34343, #35078) (2026-06-19)
 
 **#34343** (00001.04245, 07:53, 0.861) + **#35078** (00001.04339, 11:30, 0.932 — strong, finally
