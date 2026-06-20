@@ -70,12 +70,17 @@ def record_shown(ids):
 
 
 def rescore(con, cen):
-    rows = con.execute("SELECT id, emb, status FROM candidates WHERE emb IS NOT NULL").fetchall()
-    ups = [(float(unit(json.loads(emb)) @ cen), cid) for cid, emb, _ in rows]
+    rows = con.execute("SELECT id, emb, status, special FROM candidates WHERE emb IS NOT NULL").fetchall()
+    ups = [(float(unit(json.loads(emb)) @ cen), cid) for cid, emb, _, _ in rows]
     con.executemany("UPDATE candidates SET score=? WHERE id=?", ups)
     con.commit()
-    sts = {cid: st for cid, _, st in rows}
-    reals = sorted((s, cid) for s, cid in ups if sts[cid] == "waymo")
+    sts = {cid: st for cid, _, st, _ in rows}
+    spc = {cid: sp for cid, _, _, sp in rows}
+    # TRAINING reals only drive the floor/bar decision: eval-only special positives (edge_positive)
+    # are NOT in the centroid, so their out-of-sample score must not pose as the floor real and
+    # trip the bar-drop logic (status='waymo' AND special IS NULL). They are also absent from `non`
+    # below since that excludes all status='waymo'.
+    reals = sorted((s, cid) for s, cid in ups if sts[cid] == "waymo" and spc[cid] is None)
     non = np.array(sorted(s for s, cid in ups if sts[cid] != "waymo"))
     n = len(non)
     print(f"rescored {len(rows)} | reals {reals[0][0]:.3f}-{reals[-1][0]:.3f} "

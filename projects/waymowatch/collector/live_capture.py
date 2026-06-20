@@ -85,24 +85,30 @@ MAX_BACKLOG = 400     # tier-2 (zone) clip queue cap; overflow drops OLDEST zone
                       # tier-1 and never dropped). Drops are counted + reported — never silent.
 VID_STRIDE = 5        # frame stride for det.track (was 3): 25fps clip -> 5 sampled fps; a passing
                       # car is in view 2-4s = 10-20 samples, plenty for ByteTrack. 1.67x cheaper.
-PROB_TH = 0.78        # digest ELIGIBILITY bar — 59-REAL scale (v0.8.33, 2026-06-13): confirm 59
-                      # #15922 is a REAR-view real, captured 0.786 (sat silently in 'near', surfaced
-                      # only by the cosine mining sheet) and rescored 0.793 in-sample = the new floor
-                      # real. Margin over the old 0.79 bar fell to 0.003, so dropped a notch (rear
-                      # aspects score low — the dome is near-invisible from behind). Set just BELOW
-                      # the weakest real; DAY_CAP governs sending. NEAR_TH 0.76 = next backstop to watch.
+PROB_TH = 0.75        # digest ELIGIBILITY bar — 88-REAL scale (v0.8.50, 2026-06-18): confirms 86-87
+                      # #30789 (0.765) + #30973 (0.768) were HARD views in the 0.76-0.77 band — only
+                      # surfaced BECAUSE v0.8.49 dropped the bar to 0.76; now in-sample they are the
+                      # floor (0.769/0.771), so a fresh hard look-alike scores under 0.76. Dropped
+                      # another notch (recall-first: set just BELOW the weakest real) — the hard views
+                      # the user keeps confirming prove this band is real. NEAR_TH 0.74 = backstop.
 DAY_CAP = 10000       # max candidate cells emailed per day (50 pages of PAGE_SIZE) — the user's review
                       # budget IS the constant; the score cut adapts. Unsent overflow is demoted to the
                       # near archive at end of day (retrievable, minable — never silently destroyed).
-NEAR_TH = 0.76        # archive floor — the ONLY irrecoverable cut in the funnel (below it a
+NEAR_TH = 0.74        # archive floor — the ONLY irrecoverable cut in the funnel (below it a
                       # vehicle is discarded forever; above it, re-seeds re-rank from stored embs).
-                      # Widened 0.80->0.76 (v0.8): hardest real view #2145 CAPTURED at 0.813, only
-                      # 0.013 over the old floor, and the real floor drops with each harder view.
+                      # Lowered 0.75->0.74 (v0.8.50) tracking PROB_TH down: floor real #30789 at 0.769
+                      # is in-sample, so out-of-sample hard views can dip below 0.75 — keep ~0.019
+                      # backstop margin so they land in 'near' (recoverable) not the bin.
                       # Disk is a non-issue (7-day prune). NEAR_KEEP_DAYS prune.
 NEAR_KEEP_DAYS = 7    # near rows + their jpgs are pruned after this many days (mine promptly)
-ALERT_TH = 0.93       # instant-alert bar (34-real scale): above ALL 10,411 known FPs (max 0.917 —
-                      # back under 0.92, but holding 0.93 rather than flip-flopping); top real
-                      # 0.915 — alerts are the PRECISION channel, sheets the recall channel.
+ALERT_TH = 0.94       # instant-alert bar — raised 0.93->0.94 (v0.8.40, 2026-06-15). The frozen-
+                      # embedding CEILING is now reached: on the real(70) scale the hardest FP, white
+                      # van #21882 (Horseferry Rd), scores 0.931 — ABOVE the top real (0.927). The
+                      # reals have capped ~0.927 for several scales, so 0.93 already caught ZERO reals
+                      # and its first fire in ages was that FP false alarm. No threshold can separate
+                      # top reals from van-class FPs anymore -> the alert channel is effectively DORMANT
+                      # until the trained YOLO ships; 0.94 just stops the recurring false alarms. The
+                      # SHEETS (recall channel) still surface every high-scorer, so nothing is lost.
 BATCH_SIZE = 5        # (legacy count-trigger; superseded by PAGE_SIZE paging below)
 PAGE_SIZE = 200       # digest paging: the moment this many candidates pile up during the day, email
                       # that full page right away and reset; the remainder (< PAGE_SIZE) goes at
@@ -132,9 +138,18 @@ def ensure_schema(con):
       spine_fresh INTEGER, spine_processed INTEGER, new_cands INTEGER, near_cands INTEGER);""")
     for col in ("emb TEXT", "bbox TEXT", "alerted INTEGER DEFAULT 0",
                 "sent INTEGER DEFAULT 0",
-                "special TEXT"):   # for pre-existing tables; special = curated gallery
-                                   # (roof-box/i-pac/funny) -> EXCLUDED from training negs,
-                                   # reserved for manual model eval (user, 2026-06-11)
+                "recovered INTEGER DEFAULT 0",   # shown in a daily targeted-recovery sheet (v0.8.43)
+                "special TEXT",   # for pre-existing tables; special = curated gallery
+                                  # (roof-box/i-pac/funny) -> EXCLUDED from training negs,
+                                  # reserved for manual model eval (user, 2026-06-11)
+                # WaymoNet (trained YOLO) verdict layer — scored by collector/waymonet_worker.py
+                # via the homebox /api/infer endpoint (v0.8.63). The model is the new candidate
+                # GENERATOR; wn_hit=1 rows go to the human review email (waymonet_digest.py).
+                "wn_conf REAL",                    # max conf of a WaymoNet box matching this candidate
+                "wn_bbox TEXT",                    # that box [x1,y1,x2,y2] (WaymoNet's own detection)
+                "wn_scored INTEGER DEFAULT 0",     # 1 once the worker has run inference on this row
+                "wn_hit INTEGER DEFAULT 0",        # 1 if wn_conf >= COLLECT_FLOOR (model flagged it)
+                "wn_sent INTEGER DEFAULT 0"):      # 1 once shown in a WaymoNet review email
         try:
             con.execute(f"ALTER TABLE candidates ADD COLUMN {col}")
         except Exception:
@@ -347,9 +362,12 @@ def ingest(con, embed, cen, cam_id, best):
             continue
         e = embed(jamcam(roof))
         s = float(e @ cen)
-        if s < NEAR_TH:
-            continue  # below even the near-miss band; discard
-        status = "new" if s >= PROB_TH else "near"        # near = silent archive
+        # GATE = white-vehicle detection only (yolo11n car + is_white above). The cosine cut was
+        # DROPPED (v0.8.65, 2026-06-20, user): the weak dome scorer was gating what the trained
+        # WaymoNet ever saw, capping end-to-end recall at the funnel's recall. Now EVERY white-
+        # vehicle frame becomes a candidate and waymonet_worker scores it full-frame; the cosine s
+        # is kept ONLY for the legacy 'new'/'near' bucketing + dedup, not as a gate.
+        status = "new" if s >= PROB_TH else "near"        # near = silent archive (now incl. low-cosine)
         hd = int((y2 - y1) * 0.12)
         car = frm[max(0, y1 - hd):y2, max(0, x1):min(frm.shape[1], x2)]
         # same vehicle if same parked spot (bbox IoU) OR near-identical appearance
@@ -392,10 +410,15 @@ def ingest(con, embed, cen, cam_id, best):
                     found += 1
             continue                                      # same pass/spot -> no new row
         cv2.imwrite(cp, car); cv2.imwrite(fpth, frm)
-        cur = con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb,bbox,status)"
-                          " VALUES(?,?,?,?,?,?,?,?)", (cam_id, now, s, cp, fpth,
-                          json.dumps([round(float(x), 4) for x in e]), json.dumps(list(bbox)), status))
-        recent.insert(0, [cur.lastrowid, s, e, status, list(bbox), 0, now])
+        con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb,bbox,status)"
+                    " VALUES(?,?,?,?,?,?,?,?)", (cam_id, now, s, cp, fpth,
+                    json.dumps([round(float(x), 4) for x in e]), json.dumps(list(bbox)), status))
+        # DO NOT add this clip's own inserts to `recent` (v0.8.58): tracks from ONE clip are
+        # distinct vehicles BY CONSTRUCTION (ByteTrack gives one id per object), yet two white
+        # Waymo I-PACEs have near-identical dome roof-crops (cosine >= DEDUP_TH) — so feeding a
+        # fresh insert back into the matcher made a 2nd same-frame Waymo merge into the 1st and
+        # vanish (Piccadilly/Whitehorse St, 2026-06-20). Dedup only against PRE-EXISTING rows
+        # (loaded from the DB before this loop = genuine same-car-across-sweeps / parked cars).
         if status == "new":
             found += 1
         else:
@@ -641,6 +664,89 @@ def maybe_send_daily_digest(con):
     con.commit()
 
 
+RECOVERY_HIGH = 140        # daily recovery: rows from the high-similarity head
+RECOVERY_MID = 60          # + an even sample across the mid band so mid-scoring Waymos get seen
+RECOVERY_MID_FLOOR = 0.75  # mid-band bottom (~PROB_TH): covers reals down to ~0.769 (#30789/#30973)
+
+
+def send_recovery(con, n_high=RECOVERY_HIGH, n_mid=RECOVERY_MID):
+    """Daily STRATIFIED targeted recovery (v0.8.44, user 2026-06-16) — replaces the old bulk digest
+    with ONE reviewable sheet/day:
+      - HEAD: the top `n_high` UNACTIONED candidates by real-similarity (dome score = cosine to the
+        real centroid — the validated-best zero-cost ranker; max-over-individual-reals was tested +
+        rejected, it inflates the FP tail).
+      - MID: an even score-spread sample of `n_mid` across the mid band [RECOVERY_MID_FLOOR,
+        head-floor), so mid-scoring reals (~0.78-0.86, e.g. #23145/#23121/#15922) get daily
+        coverage instead of being permanently outranked by the high head.
+    The `recovered` flag walks BOTH down over days so rows never repeat, and rows emailed before
+    (sent=1) but never flagged get a fresh look. Disk stays bounded by retention()'s 7-day prune,
+    so no demotion is needed. recovered=1 is set ONLY on a successful send (quota-safe)."""
+    def valid(rows):
+        return [(i, s, c) for i, s, c in rows if c and os.path.exists(c)]
+    head = valid(con.execute(
+        "SELECT id,score,crop_path FROM candidates WHERE status NOT IN ('waymo','reject') "
+        "AND COALESCE(recovered,0)=0 AND crop_path IS NOT NULL ORDER BY score DESC LIMIT ?",
+        (n_high * 2,)).fetchall())[:n_high]
+    head_ids = {r[0] for r in head}
+    floor = head[-1][1] if len(head) >= n_high else RECOVERY_MID_FLOOR
+    midpool = [r for r in valid(con.execute(
+        "SELECT id,score,crop_path FROM candidates WHERE status NOT IN ('waymo','reject') "
+        "AND COALESCE(recovered,0)=0 AND crop_path IS NOT NULL AND score >= ? AND score < ? "
+        "ORDER BY score DESC", (RECOVERY_MID_FLOOR, floor)).fetchall()) if r[0] not in head_ids]
+    step = max(1, len(midpool) // n_mid) if midpool else 1
+    mid = midpool[::step][:n_mid]                       # even score-spread across the mid band
+    rows = head + mid
+    if not rows:
+        print("recovery: nothing unrecovered to send")
+        return 0
+    reals = con.execute("SELECT COUNT(*) FROM candidates WHERE status='waymo'").fetchone()[0]
+    sheet = os.path.join(CAND_DIR, "recovery.jpg")
+    shown = _build_sheet(rows, sheet, cap=len(rows))
+    if not shown:
+        return 0
+    shown_rows = rows[:shown]
+    hi = shown_rows[0][1]
+    mlo = mid[-1][1] if mid else (head[-1][1] if head else 0.0)
+    cov = coverage_line(con)
+    html = (f"<p><b>WaymoWatch — daily targeted recovery</b> ({reals} confirmed Waymos): "
+            f"<b>{len(head)}</b> highest by real-similarity (dome score = cosine to the real "
+            f"centroid) + <b>{len(mid)}</b> sampled across the mid-similarity band, so mid-scoring "
+            f"Waymos aren't missed. Range {hi:.3f}..{mlo:.3f}.</p>"
+            f"<p>Reply with the <b>#</b> of any real Waymo (white Jaguar I-PACE, dark roof dome).</p>"
+            + (f"<p style='color:#888'>{cov}</p>" if cov else ""))
+    sys.path.insert(0, HERE)
+    from email_alert import send_email
+    if not send_email(f"WaymoWatch: daily recovery — {len(head)} top + {len(mid)} mid-band "
+                      f"({hi:.3f}..{mlo:.3f})", html, attachments=[sheet]):
+        print(f"recovery send failed — will retry next tick ({len(rows)} pending)")
+        return 0
+    ids = [int(r[0]) for r in shown_rows]
+    con.execute("UPDATE candidates SET recovered=1, sent=1 WHERE id IN (%s)" % ",".join(map(str, ids)))
+    con.commit()
+    print(f"recovery emailed: {len(head)} head + {len(mid)} mid ({hi:.3f}..{mlo:.3f})")
+    return shown
+
+
+def maybe_send_daily_recovery(con):
+    """Once per day at/after DIGEST_HOUR (London): send ONE targeted-recovery sheet (replaces the
+    bulk digest, user 2026-06-16). Marks the day done only on a successful send so a quota failure
+    just retries next tick (v0.8.22 pattern)."""
+    now = datetime.now(ZoneInfo("Europe/London"))
+    if now.hour < DIGEST_HOUR:
+        return
+    today = now.strftime("%Y-%m-%d")
+    row = con.execute("SELECT value FROM kv WHERE key='last_recovery_date'").fetchone()
+    if row and row[0] == today:
+        return
+    pending = con.execute("SELECT COUNT(*) FROM candidates WHERE status NOT IN ('waymo','reject') "
+                          "AND COALESCE(recovered,0)=0").fetchone()[0]
+    if send_recovery(con) == 0 and pending > 0:
+        print("recovery failed with rows pending — day left open for retry")
+        return
+    con.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('last_recovery_date',?)", (today,))
+    con.commit()
+
+
 def watch_loop(con):
     """Continuous ZONE watcher (v0.5, the cron entrypoint): every POLL_EVERY seconds one
     threaded conditional-GET pass over ALL watch cams — tier-1 spine + tier-2 Waymo zone,
@@ -677,7 +783,7 @@ def watch_loop(con):
         if not in_collection_window():
             try:
                 maybe_send_instant_alerts(con)
-                maybe_send_daily_digest(con)
+                maybe_send_daily_recovery(con)
             except Exception as e:
                 print(f"[{ts()}] send error: {e}", flush=True)
             time.sleep(60)
@@ -697,9 +803,11 @@ def watch_loop(con):
                           f" | {now - cyc_t0:.0f}s", flush=True)
                     retention(con)
                     review_sheet(con)
-                    emit_pages(con)        # page out a full digest the moment PAGE_SIZE pile up
+                    emit_pages(con)        # intraday: page out a full PAGE_SIZE email the moment that
+                                           # many pile up (restored AS WAS — v0.8.45)
                     maybe_send_instant_alerts(con)
-                    maybe_send_daily_digest(con)
+                    maybe_send_daily_recovery(con)  # the ONLY change vs original: the scheduled 23:00
+                                                    # email is now the stratified recovery, not the digest
                 except Exception as e:
                     print(f"[{ts()}] cycle-close error: {e}", flush=True)
                 started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -763,6 +871,8 @@ def main():
     ap.add_argument("--pr", type=int, default=0, help="ALSO watch the N nearest cameras to Park Royal depot")
     ap.add_argument("--confirm", default="")
     ap.add_argument("--reject", default="")
+    ap.add_argument("--recovery", action="store_true",
+                    help="send ONE targeted-recovery sheet now (top-200 by real-similarity; manual/test)")
     a = ap.parse_args()
     con = dp.db_connect(dp.DEFAULT_DB)
     ensure_schema(con)
@@ -772,6 +882,8 @@ def main():
         confirm(con, [int(x) for x in a.confirm.split(",") if x], "waymo")
     elif a.reject:
         confirm(con, [int(x) for x in a.reject.split(",") if x], "reject")
+    elif a.recovery:
+        send_recovery(con)
     elif a.review:
         review_sheet(con)
     elif a.digest:

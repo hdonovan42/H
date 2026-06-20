@@ -2,6 +2,75 @@
 
 ## WaymoWatch
 
+### YOLO inference: one frame per predict() call — `predict(list)` OOMs the box (2026-06-20)
+Scoring a batch with `model.predict(list_of_paths, stream=True)` does NOT stream — it grew to
+**15.4 GB RSS / 31.7 GB VM** on a 16 GB machine, the OOM-killer killed python, and the memory
+pressure took down WSL2 *and the Claude Code session*. It took THREE "your session crashed" resumes
+before the cause was found — `dmesg`/`journalctl -k | grep -i oom` showed the kill. Per-frame
+`model.predict(path)` in a Python loop with `del res` holds RSS flat at **~0.6 GB**. Measured cost:
+**~0.18 s/frame** @704 on CPU (956 frames in 175 s).
+
+**How to apply:**
+- Never hand a list/dir to `predict()` for a large batch on a memory-bound box. Loop one frame at a
+  time, `del` the result, `gc.collect()` periodically, and checkpoint to CSV so a kill is resumable.
+- Have long-running local jobs raise their own `/proc/self/oom_score_adj` (e.g. 800) so the kernel
+  kills the JOB, never the surrounding agent session.
+- **If the agent session keeps "crashing" mid-compute, suspect OOM FIRST** (`free -h`,
+  `dmesg | grep -i oom`) before re-running — don't burn cycles relaunching a job that's killing the host.
+
+### bank_shown.py banks the WHOLE accumulated cycle_shown.json — scope bulk-bank to what was reviewed (2026-06-15)
+`confirm_cycle.py` appends every sheet's shown ids to `data/candidates/cycle_shown.json` and only
+`bank_shown.py` clears it (on a "no waymos" verdict). If it isn't run for several cycles the file
+accumulates ALL shown ids (865 across ~8 cycles in one case). So `bank_shown.py` rejects far more
+than the latest sheet the user just gave a verdict on.
+
+**Why this is dangerous:** the rejcheck safety net re-surfaces only the TOP-100 rejects BY SCORE.
+Mid-scoring real Waymos (e.g. #23121 at 0.822, found via the cosine new-to-you sheet) would be
+banked and then NEVER resurface — permanently buried. Confirmed reals are routinely mid-scoring.
+
+**How to apply:**
+- When the user gives a verdict on a specific sheet ("the top-200 retro had zero waymos"), bank
+  EXACTLY that sheet, not the whole accumulated record. Reproduce the retro precisely as
+  `id IN (cycle_shown) AND status NOT IN ('waymo','reject') ORDER BY score DESC LIMIT 200`
+  (verify count + score range match the retro email before committing).
+- Always `--confirm` any reals the user flagged BEFORE banking (bank skips status='waymo').
+- Only use blanket `bank_shown.py` when the user has actually reviewed the full accumulated
+  backlog, or explicitly says to clear everything.
+
+### Special/gallery cases are EVAL-ONLY — never training data (user, 2026-06-15)
+Gallery rows (the `special` column set) are reserved for MANUAL POST-TRAIN EVALUATION and are
+excluded from the training set in BOTH directions. Enforced by `build_real_dataset.py`:
+positives = `status='waymo' AND special IS NULL`; negatives = `status='reject' AND special IS NULL`.
+A gallery NEGATIVE carries `status='reject'` (confusers: roof-box/i-pac/funny/van_roof); a gallery
+POSITIVE carries `status='waymo'` (`edge_positive`, see below). The `special` tag holds either out
+of the relevant training pool. Design since 2026-06-11 (memory v0.8.15); positives added 2026-06-18.
+
+**How to apply:**
+- Treat eval-exclusion as the DEFAULT — it's established, not a per-filing decision; don't present
+  it as a choice I'm making.
+- Report training pools PRECISELY: training negatives = `reject AND special IS NULL`; TRAINING
+  confirms = `waymo AND special IS NULL` (NOT raw `waymo`, which now includes eval-only positives).
+  Report both when they differ (e.g. "89 training / 90 total sightings").
+- Filing a special NEGATIVE = `status='reject'` + `special='<gallery>'` + copy crop+frame to
+  `data/special/<gallery>/`. The DB `special` tag (not the folder) enforces exclusion.
+
+### Eval-only special POSITIVES — confirmed reals that would HURT the scorer (user, 2026-06-18)
+A genuine Waymo can still be poison for the centroid/trainer. #31037 was a confirmed dome but
+~75% out of frame (bbox x1=0, dome a sliver, rear sensor occluded by the camera's text overlay,
+score 0.752). The discriminator IS the dome; a crop with almost no dome signal contributes mostly
+generic "white I-PACE body" features SHARED with Wayve/private I-PACEs — averaging it into the
+centroid dilutes dome-specificity and MANUFACTURES false positives, and as a YOLO positive it
+teaches firing on minimal evidence. It would also become the new floor real and force another bar
+drop.
+**Pattern**: judge a confirmed positive on its SIGNAL, not just its label. If the discriminating
+feature is barely present / occluded / frame-clipped, file it `status='waymo' special='edge_positive'`
+(NOT copied to `real_positives/`, so the filesystem-based centroid reseed never sees it; excluded
+from YOLO by the `special IS NULL` positives filter). It stays a countable sighting and a valuable
+hard true-positive for RECALL eval — just kept out of the thing that has to make the call. We don't
+need it in training to catch its kind live (the live scorer already surfaced it). NB the public
+sightings_api serves all `status='waymo'` with no special filter, so an `edge_positive` leaks to the
+dashboard unless filtered — flag this when filing one.
+
 ### Surfacer false-positive pattern (2026-06-05)
 The bootstrap surfacer (frozen MobileNetV3 embedding → cosine to the 39-dome centroid) at
 `PROB_TH=0.83` produces mostly **shape-confusion false positives**, not real Waymos:
@@ -82,3 +151,32 @@ human error rate; the per-vehicle confirm (#) is gold, the bulk "sheet is clean"
 re-rank and re-surface the top of the reject pool after every scorer recalibration (cheap:
 one extra contact sheet per re-seed). The fix is process (re-show), not automated screening
 (which the user rejected for routing hard negatives around training).
+
+## 2026-06-20 — Appearance-dedup must never merge objects from the SAME frame (WaymoWatch #37666)
+Two Waymos in one frame (Piccadilly/Whitehorse St) collapsed to one candidate: `ingest()` added each
+fresh INSERT back into the `recent` dedup pool, so the 2nd track in the clip appearance-matched the
+1st (cosine >= DEDUP_TH 0.93 — two white I-PACE dome crops are near-identical) and merged in. The
+time-fence meant to stop cross-time merges read the 0-min same-clip gap as "same vehicle, same pass."
+**Pattern**: tracks from one detector pass are distinct objects BY CONSTRUCTION (the tracker gives
+one id per object) — appearance/IoU dedup must run ONLY against state that existed BEFORE this pass,
+never against same-pass siblings. Whenever a dedup pool is mutated mid-loop by the loop's own
+inserts, ask "can two genuinely-distinct same-frame objects now match each other?"
+**Second-order (worse) effect — silent training poison**: even with one candidate kept, the FULL
+FRAME is the YOLO training image, so the un-kept 2nd Waymo is an unlabelled positive region =
+teaching the model to SUPPRESS the exact thing we want it to detect. Any per-object pipeline feeding
+a per-frame trainer must emit ALL of a frame's positive boxes into one multi-box label (group by
+frame identity — here `(camera_id, captured_at)`), or it manufactures false negatives. When you lose
+an object to dedup, check whether you've also created a mislabel downstream.
+
+## 2026-06-20 — Generated configs must not bake absolute paths (WaymoNet first GPU train)
+`build_real_dataset.py` wrote `path: /home/hq/waymowatch/...` (the VPS build box) into
+`dataset.yaml`. On the rented Vast 4090 the dataset lived at `/workspace/...`, so ultralytics
+crashed instantly ("images not found, missing path /home/hq/..."). Cost: a wasted launch +
+debugging on the clock.
+**Pattern**: any config generated on one machine but consumed on another must use paths relative
+to the config's own location, or be normalised at consume-time. Fixed in `train.py`
+(`portable_data_path()` rewrites `path:` to the yaml's own dir, idempotent) rather than in the
+builder, because the consumer always knows where the file truly is. Also: on a Vast/RunPod
+**PyTorch template**, reuse the image's existing CUDA-torch venv (`/venv/main`) and only add
+ultralytics — do NOT create a fresh `python -m venv` (it has no CUDA torch; pip then pulls a CPU
+build and training silently runs on CPU or errors).

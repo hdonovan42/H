@@ -1,5 +1,509 @@
 # WaymoWatch — Changelog
 
+## v0.8.65 — Funnel gate = white-vehicle only; cosine cut dropped (2026-06-20)
+
+The weak dome scorer was deciding what the trained WaymoNet ever saw — capping end-to-end recall at
+the funnel's recall. **Removed the `cosine >= NEAR_TH (0.74)` discard in `live_capture.ingest()`**:
+the gate is now just **yolo11n car-detect + `is_white`**, so EVERY white-vehicle frame becomes a
+candidate and `waymonet_worker` scores it full-frame. The cosine `s` is kept only for legacy
+'new'/'near' bucketing + dedup, not as a gate. A real Waymo the frozen embedding rated < 0.74 now
+reaches WaymoNet instead of being binned. Disk headroom checked (47 G free); the extra rows land in
+'near' (7-day prune) and don't touch the old cosine-gated email path. Loop restarted to apply.
+
+# WaymoWatch — Changelog
+
+## v0.8.64 — WaymoNet review replies: rejects → fresh hard_negatives set (2026-06-20)
+
+The WaymoNet digest path now handles its own confirm/reject, into a **fresh v2 dataset** kept apart
+from the bootstrap data:
+- `waymonet_digest.py --confirm IDS` → `status=waymo`, copied to `data/real_positives/`.
+- `waymonet_digest.py --reject IDS` / `--reject-rest` → `status=reject`, copied to a NEW
+  **`data/hard_negatives/`** folder. The WaymoNet path's rejects are the *trained model's own* false
+  positives — the highest-signal negatives — so they are collected separately and **no longer
+  appended to the bootstrap reject pool** (user, 2026-06-20). `--reject-rest` banks every
+  reviewed-but-unconfirmed candidate (`wn_sent=1 AND status='new'`) at once.
+- First review actioned: **3 confirmed** (#40113 0.73, #35912 0.39, #40190 0.34 → real_positives),
+  **14 → hard_negatives** (first images in the new folder).
+- NB v2 dataset build should read `data/hard_negatives/` for negatives (not the old reject pool).
+  Positives still go to `real_positives/` (flag if a fresh positives folder is wanted too).
+
+## v0.8.63 — WaymoNet scoring pipeline made reliable; email restored at 30-pile (2026-06-20)
+
+The trained model is now wired into live collection as an **active-learning scorer** (built across
+sessions; consolidated + hardened here). Architecture:
+- **Bootstrap loop** (unchanged) is the cheap pre-filter — its `yolo11n→white→cosine` funnel
+  generates candidates. (No funnel = full-frame WaymoNet on every frame, ~10-50× heavier — avoided.)
+- **`waymonet_worker.py`** (VPS, no torch): for each candidate POSTs the **full frame** to the
+  homebox WaymoNet `/api/infer`, matches detections to the candidate bbox (IoU≥0.30), records
+  `wn_conf`/`wn_hit` (schema cols added to `live_capture.py`). WaymoNet sees the **whole frame @704**
+  (as trained/eval'd — gate holds), not a crop. Inference stays off the VPS (homebox).
+- **`waymonet_digest.py`** emails the `wn_hit` candidates for confirm/reject (confirms → fresh
+  positives, denies → high-signal hard negatives — the model curates its own next dataset).
+
+**Fixes this session:**
+- Email gap: the digest had **never been scheduled/run** — 17 flagged candidates were sitting unsent.
+  Flushed them now; **digest added to cron (`*/20`)** with a new **`--min 30`** threshold so a review
+  email fires once **30 flagged candidates pile up** (`--force` overrides).
+- Worker was a bare `nohup` (died on reboot) → now a **systemd service `waymonet-worker`** (enabled).
+- **Deleted `shadow_capture.py`** (+ homebox `~/waymonet-shadow`) — a redundant, worse parallel to
+  worker+digest (it ran WaymoNet full-frame on every clip; the worker gates on the funnel instead).
+
+## v0.8.62 — Local model-eval tooling + WaymoNet inference compute baseline (2026-06-20)
+
+First evaluation of the **trained** model (Run 1 `best.pt`, YOLO26s-P2 @704) against the live
+funnel, run LOCALLY without touching the capture loop. New `eval/` tooling + a measured serving
+cost — important context for the "WaymoNet replaces the human review" architecture decision.
+
+**Tooling (`eval/`)**
+- `score_candidates.py` — pulls a chosen candidate set's full frames from the VPS (read-only DB
+  query over SSH + rsync, missing-only) and scores them locally. Per-candidate verdict = a model
+  detection IoU-matching (>=0.3) the candidate's stored bbox at conf >= threshold (same rule as
+  `train/eval_gate.py`); also surfaces "extra" Waymos elsewhere in a frame (funnel misses).
+  Selection: `--ids`, `--cached` (the already-pulled set — drift-proof), recency, `--captured-after`.
+  Checkpoints each frame to `out/progress.csv` → resumable.
+- `email_audit.py` (runs on the VPS) — emails WaymoNet's claims + a top-N dome-score recall-audit
+  sheet (each cell labelled d=dome / m=model conf) through the existing Resend path.
+
+**Inference compute — MEASURED (dev box: WSL2, 16 GB, torch 2.12.0+cpu, OMP_NUM_THREADS=4)**
+- **~0.18 s/frame** at imgsz 704 on CPU (956 frames in 175 s) — cheaper than the earlier 0.5 s guess.
+- **~0.6 GB RSS, flat**, when scored ONE image per `predict()` call.
+- **GOTCHA (cost 3 session crashes before diagnosis):** `model.predict(list_of_paths, stream=True)`
+  does NOT stream — it ballooned to **15.4 GB RSS / 31.7 GB VM**, tripped the OOM-killer, and the
+  memory pressure took down WSL2 *and the Claude session*. Inference MUST be one frame per
+  `predict()` call (`del res` + periodic `gc`). The tool now also raises its own `oom_score_adj` so
+  it can never take the session down again. See `tasks/lessons.md`.
+- **Serving placement:** ~20–30 funnel survivors/cycle × 0.18 s ≈ **~5 s/cycle** is cheap in COMPUTE,
+  but the production VPS is memory-stressed (~1.5 GB already in swap — see v0.8.60), so inference
+  stays OFF it. A WaymoNet auto-confirm worker belongs on the **homebox inference host** (v0.8.60,
+  dash.waymonet.com), fed candidates by the VPS. OpenVINO INT8 (as for the yolo11n detector) is the
+  ~3× path if needed — re-validate the gate at INT8 first (quantisation can move the operating point).
+
+**First live read (956 candidates emailed since 13:58 today)**
+- WaymoNet flagged **2** as Waymo at conf ≥ 0.10 (#39047 m=0.42 / dome 0.90; #39249 m=0.17 / dome
+  0.79); **1** at ≥0.25, **0** at ≥0.50. Confidences are LOW in absolute terms (a strong real ≈0.42,
+  matching the gate sweep), so any auto-confirm bar sits near **~0.1–0.25, NOT 0.7** ("0.7" only
+  makes sense as the cheap dome PRE-gate that selects which frames WaymoNet runs on).
+- Selectivity — **2 of 956** — is the headline: the model can plausibly replace the bulk human
+  review (which trawls ~800/day). Live precision/recall still to be ground-truthed; WaymoNet-as-
+  verdict architecture under exploration (tiered confidence + shadow period + training kept
+  human-gated to avoid a self-confirmation feedback loop).
+
+## v0.8.61 — Public build-notes page at waymonet.com/notes (2026-06-20)
+
+Public writeup at **https://waymonet.com/notes** covering (1) the manual-review bootstrap that found
+the first 100 Waymos and (2) RUN_1's trained-model results + visualisations.
+
+- `site/notes/`: `notes.md` (markdown source) rendered client-side by a vendored `marked.min.js`
+  into `index.html` (TfL-palette: paper/ink/blue/red, Hammersmith One headings). Single editable
+  source; no CDN dependency.
+- Visualisations in `site/notes/img/`: 3 annotated held-out detections (regenerated from best.pt),
+  val-predictions grid, PR curve, confusion matrix, training curves. Gate results as an HTML table
+  (conf 0.10 -> 96.3% recall / 100% precision / 0 FP).
+- Homepage (`site/index.html`) key panel links to it. nginx serves `/notes` -> 301 -> `/notes/`.
+- Public-safe: ML method + results only, no infra/secrets. British spelling, brand "WaymoNet".
+- Deploy: `rsync -az site/ root@vps-hel1:/var/www/waymonet/` (no --delete). Verified live.
+
+## v0.8.60 — Inference dashboard on the homebox, VPS reverse-proxies dash.waymonet.com (2026-06-20)
+
+Personal eval dashboard, hosted to keep ALL inference off the production VPS (it's memory-stressed:
+1.5 GB already in swap; a torch model risked the live loop).
+
+- **Inference on the homebox** (`h@homebox`, tailnet 100.107.138.103): `~/waymonet-dash/`, uv py3.12
+  venv (system py3.14 has no torch wheels), CPU torch + ultralytics + opencv-python-headless (avoids
+  libGL). systemd `waymonet-dash` bound 0.0.0.0:3105. ~0.3-0.4 s/frame on 8 cores.
+- **VPS only reverse-proxies**: nginx `dash.waymonet.com` -> proxy_pass http://100.107.138.103:3105,
+  basic-auth (user `h`), client_max_body_size 8m, proxy_connect_timeout 5s. **Isolated: homebox down
+  -> only this vhost 502s; every other VPS service is an independent block, unaffected.** No torch
+  on the VPS.
+- Verified end-to-end through the proxy: auth gates (no/bad creds 401, good 200), inference returns
+  boxes (391 ms). server.py gained `WAYMONET_HOST` (bind) + `WAYMONET_BROWSE` (subdir-as-group, DB-free).
+- **LIVE at https://dash.waymonet.com** — DNS A -> 89.167.4.126 (Namecheap wildcard `*`), TLS via
+  `certbot --nginx` (Let's Encrypt, expires 2026-09-18, auto-renew), HTTP->HTTPS redirect. Verified
+  end-to-end over public HTTPS: 401 without creds, inference 215 ms with creds.
+- Repo `dashboard/`: server.py, index.html, run_local.sh (laptop), deploy_homebox.sh (push updates).
+  best.pt gitignored; model = run-1 baseline. See memory [[waymonet-dashboard]].
+
+## v0.8.59 — Backfill tool for missing boxes in confirmed frames (2026-06-20)
+
+New `dataset/backfill_multibox.py` — recovers Waymo boxes that pre-v0.8.58 multi-Waymo frames lost
+to the dedup, so their YOLO labels are complete (an unlabelled true Waymo in a training frame
+teaches the model to suppress reals). Human-in-loop (a dome score isn't proof):
+
+- `--scan IDS` / `--scan-all`: re-detect confirmed frames, find white vehicles NOT covered by an
+  existing confirmed box, email a numbered sheet (`ID:n`) for verification, record to
+  `backfill_pending.json`.
+- `--add ID:n[,n]`: insert the chosen boxes as `status='waymo'` rows keyed to the original frame's
+  `(camera_id, captured_at)`, so v0.8.58's grouping folds them into one multi-box label.
+- **Relaxed gates vs the live surfacer** (BACKFILL_MIN_H 20 vs 44, no dome-score floor, top-5/frame
+  cap): the live MIN_H/NEAR_TH floors exist because WE can't tell dome-vs-bar on a small/low view —
+  but the human has already confirmed the frame, so surface small/distant extras and let them judge.
+- **Training labels only**: backfilled boxes are NOT copied to `real_positives/`, so the centroid +
+  bars are untouched (no reseed/restart). The frame already surfaced via its primary Waymo.
+- First run on #37666 (Piccadilly/Whitehorse St): surfaced the 2nd Waymo (box [142,164,176,192],
+  h=28px, dome score 0.685). User confirmed (clear from the full frame; the tight crop only looked
+  bad because of INTER_NEAREST 6x upscale + context loss — training is unaffected, it uses FULL
+  FRAMES 288x352 + bbox labels, never the crops). **Added via --add 37666:1** -> #37666's frame now
+  carries 2 boxes. Rebuilt dataset: 98 images / 100 boxes / 2 multi-Waymo frames. box4 is a training
+  box + dashboard sighting but NOT in real_positives (a 34px roof crop would dilute the centroid).
+  Counts now: sightings (status='waymo') 101 | training 100 boxes/98 frames | centroid 99.
+
+## v0.8.58 — Multi-Waymo frames: don't merge same-clip tracks; multi-box labels (2026-06-20)
+
+Two Waymos in one frame (Piccadilly/Whitehorse St, #37666, 2026-06-20) were collapsed to one
+candidate — the 2nd silently lost. Root cause + fix, two parts:
+
+- **Surfacing (`live_capture.py ingest`)**: each freshly-INSERTed candidate was being added back into
+  the in-memory `recent` dedup pool, so a later track in the SAME clip could appearance-match
+  (cosine >= DEDUP_TH 0.93) an earlier one and merge into it. Two white I-PACE dome roof-crops are
+  near-identical at 352px, and the time-fence (`MERGE_WINDOW_MIN`) reads a 0-min same-clip gap as
+  "same vehicle, same pass" → the 2nd Waymo vanished (its crop was never even written). But tracks
+  from one clip are distinct vehicles BY CONSTRUCTION (ByteTrack = one id per object). Fix: stop
+  feeding this clip's own inserts into `recent`; dedup only against PRE-EXISTING rows (genuine
+  same-car-across-sweeps / parked cars). Both same-frame Waymos now surface as separate candidates.
+  (Old behaviour was a coin-flip: same-frame Waymos survived only if their crops were <0.93 similar —
+  e.g. #14502+#14504 at cam 07385 on 12 Jun, which differed enough.)
+- **Training labels (`build_real_dataset.py`)**: each candidate became its own image with one box —
+  so a frame with two Waymos yielded an image with one box + one UNLABELLED Waymo, teaching YOLO to
+  SUPPRESS real Waymos (false-negative signal). Fix: group positives by `(camera_id, captured_at)`
+  (= one clip's pass) → ONE image with a MULTI-LINE label carrying every box.
+- **Validated**: rebuilt dataset = 98 positive images carrying 99 Waymo boxes (1 multi-Waymo frame:
+  cam 07385 14:25, ids 14502+14504), train 71 / val 27 across 76 cameras + 7,488 negatives.
+- **Loop restarted** to activate the surfacing fix (code deploy; centroid real(99) + bars unchanged).
+- No schema change, no centroid/bar impact. Confirms unchanged: 99 training / 100 total.
+
+## v0.8.57 — Confirms 95-99: TRAINING TARGET HIT + resync restart (2026-06-20)
+
+**5 confirms**: #37065 (02351, 0.873), #37195 (03760, 0.812), #37666 (06503, 0.880), #37978
+(04476, 0.860), #37799 (03665, 0.891) — 3 NEW cameras + 2 repeats. **99 training confirms / 76
+cameras** (100 total sightings). **>>> Roadmap step 3 (Collect to ~100+ across >=5 cameras) is MET
+— next is step 4 (Train WaymoNet). <<<**
+
+- 99-real centroid; rescored n=28,424: non-waymo p80 0.852 / max 0.933 (#21882 reject, below
+  ALERT_TH 0.94; >=0.92 now 7); reals 0.764-0.933 — floor real #30789 0.764 (margin 0.014 over
+  PROB_TH 0.75; eval #31037 excluded). Bars HELD (0.75/0.74/0.94): margin still >0.01, and the bar
+  is about to be retired by the trained model rather than chased lower. Rebucket at 0.75: 149
+  promoted, 22 demoted.
+- **Resync RESTART** (not a bar change): drift had reached 11 (loop on real(88) for ~2 days;
+  deployed real(99)), past the ~8 trigger. Loop reloads the real(99) centroid + current bars.
+- Auto-retro FIRED at 100 (top-200, 0.908..0.858) — out for review. Next retro at 104.
+
+## v0.8.56 — Confirm 94 (#36842) (2026-06-19)
+
+**#36842** (00001.07379, 20:48, 0.893 — repeat cam). **94 training confirms / 73 cameras** (95
+total sightings).
+
+- 94-real centroid; rescored n=27,429: non-waymo p80 0.850 / max 0.933 (#21882 reject, below
+  ALERT_TH 0.94); reals 0.768-0.934 — floor real #30789 0.768 (margin 0.018 over PROB_TH 0.75; eval
+  #31037 excluded). Bars unchanged (0.75/0.74/0.94) -> **NO restart** (loop real(88), deployed
+  real(94), **6 behind — resync due at ~8**). Rebucket at 0.75: 85 promoted, 15 demoted. Retro
+  skipped (1/5 — at 99).
+
+## v0.8.55 — Confirms 92-93 (#34343, #35078) (2026-06-19)
+
+**#34343** (00001.04245, 07:53, 0.861) + **#35078** (00001.04339, 11:30, 0.932 — strong, finally
+above the white-van FP ceiling) — both NEW cameras. (#33357 re-listed by the user but already
+banked v0.8.54 — skipped.) **93 training confirms / 73 cameras** (94 total sightings).
+
+- 93-real centroid; rescored n=27,035: non-waymo p80 0.849 / max 0.932 (#21882 reject, below
+  ALERT_TH 0.94); reals 0.769-0.935 — floor real #30789 0.769 (margin 0.019 over PROB_TH 0.75; eval
+  #31037 excluded), top real now 0.935 (#35078 in-sample, first real above the 0.932 van FP). Bars
+  unchanged (0.75/0.74/0.94) -> **NO restart** (loop real(88), deployed real(93), 5 behind —
+  nearing the ~8 resync trigger). Rebucket at 0.75: 5 promoted, 93 demoted.
+- Auto-retro FIRED at 94 (top-200, 0.910..0.854) — reviewed -> 0 waymos -> 200 banked as negatives
+  (range 0.910..0.854, exact match to the retro set). Next retro at 99.
+- funny/ +2 (#34249 04651, #33737 03590) -> 24; roof-box/ +1 (#35123 09726) -> 23. Eval-only.
+- Training negatives: 7,488 (reject AND special IS NULL).
+
+## v0.8.54 — Confirm 91 (#33357) + 23:00 recovery banked (2026-06-18)
+
+**#33357** (00001.02352, 21:34, 0.879 — repeat cam, from the 23:00 recovery). **91 training
+confirms / 71 cameras** (92 total sightings). It was the lone Waymo in tonight's recovery — the
+other **199 banked as negatives**.
+
+- 91-real centroid; rescored n=27,445: non-waymo p80 0.849 / max 0.932 (#21882 reject, below
+  ALERT_TH 0.94); reals 0.769-0.928 — floor real #30789 0.769 (margin 0.019 over PROB_TH 0.75; eval
+  #31037 correctly excluded). Bars unchanged (0.75/0.74/0.94) -> **NO restart** (loop real(88),
+  deployed real(91), 3 behind). Rebucket at 0.75: 14 promoted, 17 demoted. Retro skipped (4/5 — at
+  93). Training negatives: 7,288.
+
+## v0.8.53 — Confirm 90 (#32467) + fix: eval positives must not drive bars (2026-06-18)
+
+**#32467** (00001.02352, 15:49, 0.827 — NEW camera). **90 training confirms / 71 cameras** (91
+total sightings incl. the eval-only #31037).
+
+- **Bug fix (from v0.8.52's new convention):** `confirm_cycle.py rescore()` selected the floor real
+  as `status='waymo'` — which now includes the eval-only `edge_positive` #31037 (0.752, NOT in the
+  centroid). Left unfixed it would have posed as the floor real (margin 0.002 over PROB_TH 0.75) and
+  spuriously triggered a bar drop. Now the floor/bar stats use `status='waymo' AND special IS NULL`
+  (training reals only). Non-waymo quantiles already excluded it (it's status='waymo').
+- 90-real centroid; rescored n=27,523: non-waymo p80 0.848 / max 0.932 (#21882 reject, below
+  ALERT_TH 0.94); reals 0.771-0.927 — floor real #30789 0.771 (margin 0.021 over PROB_TH 0.75).
+  Bars unchanged (0.75/0.74/0.94) -> **NO restart** (loop real(88), deployed real(90), 2 behind).
+  Rebucket at 0.75: 6 promoted, 29 demoted. Retro skipped (3/5 — at 93).
+
+## v0.8.52 — New convention: eval-only special POSITIVES (#31037) (2026-06-18)
+
+First confirmed-real Waymo held OUT of training/centroid. **#31037** (00001.07500 Northumberland
+Ave/Victoria Emb, 18 Jun 11:24) is a genuine Waymo (user saw the dome edge + rear-quarter sensor)
+but **~75% out of frame**: bbox [0,224,80,286] in a 352x288 frame — left edge clipped (x1=0),
+bottom nearly clipped (y2=286/288). Score 0.752.
+
+- **Why held out (FP risk):** the dome (our only discriminator) is a sliver here; the crop mostly
+  contributes generic "white I-PACE rear" features shared with Wayve/private I-PACEs. Averaging it
+  into the centroid dilutes dome-specificity -> raises FPs on non-Waymo I-PACEs. As a YOLO positive
+  it teaches firing on minimal evidence (and the rear sensor is occluded by the "North..." overlay
+  text). It would also become the new floor real (~0.75) and force another bar drop.
+- **New `special` value `edge_positive`**: until now all `special` rows were hard NEGATIVES
+  (roof-box/i-pac/funny/van_roof, status=reject). `edge_positive` is the first special POSITIVE —
+  status=waymo (ground-truth + countable as a sighting) but special-flagged.
+- **build_real_dataset.py**: POSITIVES query now `status='waymo' AND special IS NULL` (mirrors the
+  negatives rule) so special positives are excluded from YOLO training. Crop NOT copied to
+  real_positives/, so the centroid reseed (filesystem-based) never sees it.
+- **Counts now split**: TRAINING confirms = 89 (waymo AND special IS NULL); TOTAL confirmed
+  sightings = 90 (waymo); eval-only positives = 1. Centroid UNCHANGED (real 89), no reseed, no bar
+  change, no restart. Role: hard true-positive for recall eval on partial/edge views.
+- **NB dashboard**: sightings_api serves all status='waymo' (no special filter), so #31037 would
+  appear publicly — flagged to user; not filtered yet.
+
+## v0.8.51 — Confirm 89 (#31216, cam 03118) (2026-06-18)
+
+**#31216** (00001.03118, 11:18, 0.850 — NEW camera). **89 confirms / 70 distinct cameras.**
+
+- 89-real centroid; rescored n=27,664: non-waymo p80 0.849 / max 0.932 (#21882 reject, below
+  ALERT_TH 0.94); reals 0.771-0.928 — floor real #30789 ROSE 0.769->0.771 (a mid-high real nudged
+  the centroid up), margin 0.021 over PROB_TH 0.75. Bars unchanged (0.75/0.74/0.94) -> **NO
+  restart** (loop real(88) since 12:00, deployed real(89), 1 behind). Rebucket at 0.75: 183
+  promoted, 1 demoted. Retro skipped (1/5 — at 93).
+
+## v0.8.50 — Confirms 82-88 + funnel lowered another 0.01 (restart + resync) (2026-06-18)
+
+**Confirms 82-88** (7): #29727 (03656, 0.897, repeat), #29632 (02351, 0.857), #29895 (06607,
+0.829), #29132 (04633, 0.821), #29238 (06594, 0.811), **#30789 (03553, 0.765)**, **#30973
+(04223, 0.768)** — six NEW cameras + one repeat. **88 confirms / 69 distinct cameras.**
+
+- **v0.8.49's bar drop vindicated immediately**: #30789 (0.765) and #30973 (0.768) sat in the
+  0.76-0.77 band — under the old 0.77 bar they'd have been archived as 'near' and pruned unseen.
+  At PROB_TH 0.76 they surfaced as 'new' and were confirmed.
+- **Bars LOWERED another notch (user-approved):** PROB_TH 0.76->0.75, NEAR_TH 0.75->0.74,
+  RECOVERY_MID_FLOOR 0.76->0.75; ALERT_TH holds 0.94. Those two hard views are now the in-sample
+  floor (0.769/0.771), leaving only 0.009 over the 0.76 bar; in-sample, so fresh hard look-alikes
+  dip under 0.76. Lowering restores ~0.019 margin and keeps the hard-view band surfaced+recoverable.
+- **Restart performed** (bar change) — loop reloads real(88) centroid + new bars, resyncing the
+  **7-confirm drift** (loop had been on real(81) since the 17 Jun restart).
+- real(88) rescore n=27,742: reals 0.769-0.928 (floor #30789 0.769, next #30973 0.771, #26680
+  0.776); non-waymo p80 0.849 / p95 0.874 / max 0.932 (#21882 reject, 0.008 below ALERT_TH).
+  Rebucket at 0.76: 77 promoted, 7 demoted.
+- Retro FIRED at 88 (top-200, 0.907..0.854); weekly rejcheck FIRED (top-100, 0.932..0.901) — both
+  out for review. Next retro at 93.
+- **funny/ +2** (#28946 07458, #30294 06584) -> 22; **roof-box/ +2** (#26521 04529, #30119 06515)
+  -> 22. All eval-only (excluded from training).
+- 17 Jun 23:00 recovery (200) reviewed -> 0 waymos -> 186 banked as negatives.
+- **Training negatives: 7,089** (reject AND special IS NULL).
+
+## v0.8.49 — Confirms 78-81 + funnel lowered 0.01 (restart + centroid resync) (2026-06-17)
+
+**Confirms 78-80**: #26168 (00001.06521, 0.870), **#26680 (00001.07374, 0.776 — the low one)**,
+#27044 (00001.06512, 0.886) — all THREE new cameras. **Confirm 81**: #24969 (00001.03657, 0.865,
+repeat cam) surfaced in the top-200 retro. **81 confirms / 63 distinct cameras.**
+
+- **Bars LOWERED a notch (user-approved) — first bar move since real(74):** PROB_TH 0.77->0.76,
+  NEAR_TH 0.76->0.75, RECOVERY_MID_FLOOR 0.77->0.76; ALERT_TH holds 0.94. Driver: #26680 captured
+  0.776 and rescored to the **floor real at 0.776** (in-sample), dropping the floor 0.792->0.776 —
+  margin over the old 0.77 bar fell to 0.007, and since the floor real is in-sample a fresh
+  look-alike scores BELOW it out-of-sample (right at/under 0.77). Lowering restores ~0.016
+  eligibility margin and keeps low reals recoverable (recovery mid-band now floors at 0.76).
+- **Restart performed** (bar change) — loop reloads real(81) centroid + new bars, also resyncing
+  the **6-confirm drift** (loop had been on real(74) for 147h; deployed had reached real(80)).
+- real(81) rescore n=27,044: reals 0.776-0.926 (floor #26680 0.776, next #23145 0.789); non-waymo
+  p80 0.847 / p95 0.871 / max 0.932 (#21882 reject, 0.008 below ALERT_TH 0.94). Rebucket at 0.76:
+  **623 promoted, 0 demoted** (the 0.76-0.77 near-band lifted into 'new'; bounded by 7-day prune).
+- Auto-retro FIRED at 80 (top-200, 0.932..0.852); **#24969 the lone real in it, other 199 banked
+  as negatives** (scoped to exactly the retro 200 via top-200-by-score, NOT the 643-id accumulated
+  cycle_shown). Next retro at 85.
+- **funny/ gallery +2** (eval-only, excluded from training): #25980 (00001.01503), #18510
+  (00001.01685) — both ~0.77 floor-band confusers. Gallery now 20.
+- 23:00 daily recovery (200: 140 top + 60 mid-band) reviewed -> 0 waymos -> banked as negatives.
+- **Training negatives: 6,903** (reject AND special IS NULL).
+
+## v0.8.48 — Confirm 77 (#25808, Euston Rd/Conway St) (2026-06-16)
+
+**#25808** (00001.07387 Euston Rd/Conway St, 20:07, 0.868 — NEW camera, the Euston Rd spine).
+**77 confirms / 60 distinct cameras.**
+
+- 77-real centroid; rescored n=25,875: non-waymo p80 0.848 / max 0.931 (#21882 reject, below
+  ALERT_TH 0.94); reals 0.792-0.927 — floor real #23145 0.792 (rising), margin 0.022. Bars
+  unchanged (0.77/0.76/0.94). No bar moved -> **NO restart** (loop real(74), deployed real(77),
+  3 behind). Retro skipped (2/5 — at 80).
+
+## v0.8.47 — Confirm 76 (#24926, Jamaica Rd) (2026-06-16)
+
+**#24926** (00001.03555 Jamaica Rd W of Lower Rd, 16:19, 0.848 — NEW camera, SE/Bermondsey).
+**76 confirms / 59 cameras.**
+
+- 76-real centroid; rescored n=25,308: non-waymo p80 0.847 / max 0.931 (#21882 reject, below
+  ALERT_TH 0.94); reals 0.791-0.928 — floor real #23145 0.791, margin 0.021. Bars unchanged
+  (0.77/0.76/0.94). No bar moved -> **NO restart** (loop real(74), deployed real(76), 2 behind).
+  Retro skipped (1/5 — at 80).
+
+## v0.8.46 — Confirm 75 (#24685, Baker St/Marylebone Rd) (2026-06-16)
+
+**#24685** (00001.07369 Baker St/Marylebone Rd, 12:58, 0.889 — repeat cam). **75 confirms /
+58 cameras** — three-quarters of the ~100 training target.
+
+- 75-real centroid; rescored n=24,907: non-waymo p80 0.847 / max 0.931 (#21882 reject, below
+  ALERT_TH 0.94); reals 0.790-0.927 — floor real #23145 0.790, margin 0.020. Bars unchanged
+  (0.77/0.76/0.94). No bar moved -> **NO restart** (loop real(74), deployed real(75), 1 behind).
+- Auto-retro FIRED at 75 (top-200, 0.896..0.853); next at 80. NB the confirm-cycle retro now
+  overlaps heavily with the daily stratified recovery (both top-by-score) — candidate to retire.
+
+## v0.8.45 — Restore intraday paging; only the 23:00 scheduled email is the recovery (2026-06-16)
+
+Correction to v0.8.43-44: those removed BOTH the intraday 200-pile-up pages AND the 23:00 digest.
+The user wanted ONLY the scheduled 23:00 email replaced. **Restored `emit_pages` in the loop**
+(intraday paging AS IT WAS — sends a PAGE_SIZE email the moment that many candidates pile up,
+top-by-score, marks sent=1); the stratified **recovery remains the 23:00 scheduled email**
+(replacing the old bulk remainder-flush digest). So the only change vs the original is the 23:00
+email's content.
+
+- The old EOD demotion stays dropped — it was vestigial (budget is non-binding, so emit_pages
+  drains sent=0 intraday; `retention()`'s 7-day prune on new+near bounds disk).
+- NB the 23:00 recovery re-surfaces (in its head) high-scorers already paged intraday — the
+  intended safety-net re-sweep across the whole pool (incl. emailed-but-unflagged rows).
+- Deployed + loop restarted. Confirms 74 / 58.
+
+## v0.8.44 — Stratified daily recovery + 10:03 test-set banked (2026-06-16)
+
+- **Recovery is now STRATIFIED** (user): the daily 23:00 sheet = top-**140** by real-similarity
+  (head) + an even score-spread sample of **60** across the mid band [0.77, head-floor), so
+  mid-scoring reals (~0.78-0.86, e.g. #23145/#23121/#15922) get daily coverage instead of being
+  permanently outranked by the high head. The `recovered` flag walks BOTH bands down over days.
+  Tunable constants `RECOVERY_HIGH=140 / RECOVERY_MID=60 / RECOVERY_MID_FLOOR=0.77`. Validated via
+  `--recovery`: "140 top + 60 mid-band (0.861..0.774)". CAVEAT: the mid band is large (~15k), so
+  60/day is a SLOW secondary net — the confirm-cycle cosine mining remains the PRIMARY mid-real
+  mechanism; bump RECOVERY_MID if more mid budget is wanted.
+- **10:03 test sheet banked** (user verdict: zero Waymos): reproduced its exact top-200
+  (0.861-0.910) and rejected them -> reject pool now **6147**. All high-score (rejcheck-covered),
+  so safe; 74 waymos intact.
+- Deployed + loop restarted (stratified code live for tonight's 23:00 fire). Confirms 74 / 58.
+
+## v0.8.43 — Daily targeted recovery replaces the bulk digest (2026-06-16)
+
+User directive: the 23:00 daily email is now ONE **targeted-recovery sheet** — the top-200
+UNACTIONED candidates by real-similarity — instead of the old bulk digest (~13 noisy intraday
+pages + a 23:00 remainder flush).
+
+- **Why**: the dome score IS cosine-similarity to the 74 reals (the validated-best zero-cost
+  ranker — max-over-individual-reals was tested and rejected, it inflates the FP tail). The old
+  digest emailed everything eligible daily (unreviewable in bulk → reals buried). The recovery
+  is one reviewable sheet/day of the likeliest reals, drawn from the WHOLE pool incl. rows
+  emailed before but never flagged (the ~17.5k sent=1 `new` accumulation).
+- **How**: new `recovered` flag (schema migration) walks the pool DOWN over days so rows never
+  repeat. `send_recovery()` + `maybe_send_daily_recovery()` (once/day at DIGEST_HOUR, quota-safe
+  — marks recovered=1 only on a successful send). The loop no longer calls `emit_pages` (intraday
+  paging) or `maybe_send_daily_digest`; disk stays bounded by `retention()`'s existing 7-day
+  prune (new + near), so no EOD demotion is needed. New `--recovery` CLI flag (manual/test).
+- **Tradeoff (flagged)**: a top-200/day cut sits at the high-similarity band (~0.86+), so
+  mid-scoring reals (~0.78-0.86, e.g. #23145/#23121/#15922) won't appear in this sheet — they
+  rely on the confirm-cycle cosine mining (±45 min of confirms) + on-request backlog reviews.
+  Focus over breadth — the user's choice. Legacy one-shot modes (--email-digest, default sweep)
+  still use the old digest. Confirms unchanged (74 / 58 cameras). Deployed + loop restarted.
+
+## v0.8.42 — Confirms 72-74 (#23223, #23145, #20160) + PROB_TH 0.77 (2026-06-16)
+
+**#23223** (00001.07600 Kingsway/High Holborn, 21:13, 0.870 — NEW cam, night) + **#23145**
+(00001.03760 Shooters Hill Rd/Prince of Wales Rd, 20:04, 0.785 — REPEAT Shooters Hill cam;
+another mid-scoring real) + **#20160** (00001.04680 Borough High St/Gt Dover St, 05:13 dawn,
+0.837 — NEW cam). **74 confirms / 58 cameras.**
+
+- **PROB_TH 0.78 -> 0.77**: #23145 (captured 0.785) rescored to 0.789 = the new floor real,
+  dropping the floor from 0.793; margin over the 0.78 bar fell to 0.009 -> dropped a notch
+  (recall-first: set just below the weakest real). 894 near->new re-bucketed at 0.77. NEAR_TH
+  0.76 now only 0.01 below the bar (the irrecoverable backstop — watch). ALERT_TH 0.94 held.
+- 74-real centroid; rescored n=24,184: non-waymo p80 0.847 / max 0.930 (#21882 reject, below
+  ALERT_TH 0.94); reals 0.789-0.928 — floor real #23145 0.789.
+- Bar change -> loop **RESTARTED** (also clears the real(70)->real(74) drift). Retro skipped
+  (4/5 — at 75). NB 'new' eligible pool ~17.5k (large + growing — EOD demotion/sending may not
+  be bounding it; flagged for a separate look).
+
+## v0.8.41 — Confirm 71 (#23121) + top-200 retro banked as negatives (2026-06-15)
+
+**#23121** (00001.03662 A2 New Cross Rd/Nettleton Rd, 19:49, 0.822 — a repeat A2 New Cross cam;
+a MID-scoring real surfaced by the cosine new-to-you sheet, NOT the score-ranked retro).
+**71 confirms / 56 cameras.**
+
+- **Top-200 retrospective banked as negatives** (user verdict: zero Waymos). Reproduced the exact
+  retro set (top-200 by score among recorded-shown rows, range 0.871-0.905) and rejected them ->
+  reject pool 5014->5214. **Scoped deliberately**: cycle_shown.json had accumulated 865 ids across
+  ~8 cycles (never cleared this session), so `bank_shown.py` would have rejected all 861 — but
+  #23121 (0.822) was ITSELF in that accumulated shown set, proof that mid-scoring reals hide there
+  and the rejcheck (top-100 by SCORE) would never resurface a 0.822 real. So banked ONLY the 200
+  the user actually reviewed first.
+- **Backlog then surfaced + cleared**: the remaining older shown rows were emailed as 4
+  score-ranked review sheets (732 rows, 0.754-0.871, incl. the #23121 cycle's new-to-you).
+  User reviewed all — ZERO Waymos — so banked via `bank_shown.py`: 732 -> rejects (pool
+  5214->5946), `cycle_shown.json` cleared. 71 waymos intact. Shown backlog fully resolved,
+  no mid-scoring reals buried.
+- 71-real centroid; rescored n=23,179: non-waymo p80 0.847 / max 0.931 (#21882, now a reject;
+  1 row >=0.93, below ALERT_TH 0.94); reals 0.793-0.926 — floor real #15922 0.793, margin 0.013.
+  Bars unchanged (0.78/0.76/0.94). No bar moved -> **NO restart** (loop real(70), deployed real(71),
+  1 behind). Retro skipped (1/5 — at 75).
+
+## v0.8.40 — Confirms 69-70 + ALERT_TH 0.94 (frozen-embedding ceiling) + #21882 the hardest negative (2026-06-15)
+
+**#23022** (00001.06641 Kensington High St/Church St, 19:10, 0.902 — NEW cam, W) + **#22981**
+(00001.03611 London Rd/Thomas Doyle St, 18:55, 0.808 — NEW cam, Elephant & Castle).
+**70 confirms / 56 cameras.**
+
+- **#21882** (00001.04235 Horseferry Rd/Marsham St, 17:57) — a WHITE VAN that scored **0.933**
+  and tripped a FALSE instant-alert. On the real(70) rescore it sits at 0.931, ABOVE the top
+  real (0.927): the **frozen-embedding ceiling is reached** — the scorer can no longer separate
+  top reals from van-class FPs. Banked as a **PLAIN reject (training negative), NOT a held-out
+  special** — it's the single hardest negative, so build_real_dataset's hardest-first selection
+  makes it the #1 training example; the van-confuser CLASS is already eval-covered by the
+  funny/van_roof galleries (multiple held-out instances). Train on the hardest case; measure
+  generalisation on the held-out rest.
+- **ALERT_TH 0.93 -> 0.94**: reals have capped ~0.927 for several scales, so 0.93 already caught
+  ZERO reals and only ever fired on van FPs. Raised to stop the recurring false alarms; the
+  instant-alert channel is now effectively DORMANT until WaymoNet ships. The SHEETS (recall
+  channel) still surface every high-scorer — nothing lost.
+- Specials -> `funny` (17): **#22865** (Marylebone Rd/Osnaburgh St), **#22223** (Battersea
+  Bridge/Cheyne Wk), **#22211** (Camden Rd). Galleries: roof-box 19, funny 17, i-pac 3, van_roof 2.
+- 70-real centroid; rescored n=23,155: non-waymo p80 0.847 / max 0.931 (4 >=0.92, 1 >=0.93 =
+  #21882); reals 0.793-0.927 — floor real #15922 0.793, margin 0.013. PROB_TH 0.78 / NEAR_TH 0.76
+  unchanged. Training pools: 70 positives / negatives = reject AND special IS NULL.
+- Bar change (ALERT_TH) -> loop **RESTARTED** (also clears the real(62)->real(70) drift, which had
+  reached 8 behind). Auto-retro FIRED at 70 (top-200, 0.905..0.871); next at 75.
+
+## v0.8.39 — Confirm 68 (#19977, Bayswater Rd 04:06 night) + 2 specials (2026-06-15)
+
+**#19977** (00001.06660 Bayswater Rd/Lancaster Terrace, **04:06** — a deep-night confirm and the
+2nd on this camera after #13754/confirm 62; 0.862). **68 confirms / 54 cameras.**
+
+- Specials: **#18204** (Denmark Hill/Champion Pk, roof box, 0.840) -> `roof-box` (19); **#20374**
+  (Shooters Hill Rd/Charlton Pk Ln, white van, 0.894) -> `funny`. Galleries (eval-only,
+  training-excluded): roof-box 19, funny 14, i-pac 3, van_roof 2.
+- 68-real pure centroid; rescored n=20,903: non-waymo p80 0.848 / max 0.924 (3 FPs >=0.92,
+  none at the 0.93 alert bar); reals 0.793-0.927 — floor real #13754 0.793, margin 0.013.
+  Bars unchanged (0.78/0.76/0.93). 45 near->new re-bucketed.
+- No bar moved -> **NO loop restart**. Loop on real(62), now 6 reals behind deployed real(68)
+  (drift negligible — cos(real62,real68) ~>0.999); one-off resync restart planned at ~8 behind.
+  Retro skipped (3/5 — at 70).
+
+## v0.8.38 — Confirm 67 (#19406, Blackheath Rd) + 3 specials (2026-06-14)
+
+**#19406** (00001.03670 Blackheath Rd/Wickes Store, 17:58, 0.831 — a NEW camera, SE/Greenwich).
+**67 confirms / 54 cameras.**
+
+- Specials: **#19175 + #19321** (A205 Dulwich Common/College Rd — two roof-box cars in ONE
+  clip, 17:19:13) -> `roof-box` (18); **#19385** (Twr Bridge Rd/Grange Rd, white van, 0.895)
+  -> `funny` (12). Galleries: roof-box 18, funny 12, i-pac 3, van_roof 2 (training-excluded).
+- 67-real pure centroid; rescored n=19,493: non-waymo p80 0.849 / max 0.924 (3 FPs >=0.92,
+  none at the 0.93 alert bar); reals 0.793-0.928 — floor real #13754 0.793, margin 0.013.
+  Bars unchanged (0.78/0.76/0.93). 31 near->new re-bucketed.
+- No bar moved -> **NO loop restart**. Loop on real(62), now 5 reals behind deployed real(67)
+  (drift <0.003; the floor has been stable at #13754 since v0.8.34 so no bar-change restart has
+  triggered — one-off resync planned if drift reaches ~8 behind). Retro skipped (2/5 — at 70).
+
 ## v0.8.37 — Confirm 66 (#17469, Tower Bridge Rd) + 2 funny specials incl. an aeroplane (2026-06-14)
 
 **#17469** (00001.03488 Tower Bridge Rd/Rothsay St, 13 Jun 18:53, 0.902 — a NEW camera,
