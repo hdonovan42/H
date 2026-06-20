@@ -1,5 +1,26 @@
 # WaymoWatch — Changelog
 
+## v0.8.63 — WaymoNet scoring pipeline made reliable; email restored at 30-pile (2026-06-20)
+
+The trained model is now wired into live collection as an **active-learning scorer** (built across
+sessions; consolidated + hardened here). Architecture:
+- **Bootstrap loop** (unchanged) is the cheap pre-filter — its `yolo11n→white→cosine` funnel
+  generates candidates. (No funnel = full-frame WaymoNet on every frame, ~10-50× heavier — avoided.)
+- **`waymonet_worker.py`** (VPS, no torch): for each candidate POSTs the **full frame** to the
+  homebox WaymoNet `/api/infer`, matches detections to the candidate bbox (IoU≥0.30), records
+  `wn_conf`/`wn_hit` (schema cols added to `live_capture.py`). WaymoNet sees the **whole frame @704**
+  (as trained/eval'd — gate holds), not a crop. Inference stays off the VPS (homebox).
+- **`waymonet_digest.py`** emails the `wn_hit` candidates for confirm/reject (confirms → fresh
+  positives, denies → high-signal hard negatives — the model curates its own next dataset).
+
+**Fixes this session:**
+- Email gap: the digest had **never been scheduled/run** — 17 flagged candidates were sitting unsent.
+  Flushed them now; **digest added to cron (`*/20`)** with a new **`--min 30`** threshold so a review
+  email fires once **30 flagged candidates pile up** (`--force` overrides).
+- Worker was a bare `nohup` (died on reboot) → now a **systemd service `waymonet-worker`** (enabled).
+- **Deleted `shadow_capture.py`** (+ homebox `~/waymonet-shadow`) — a redundant, worse parallel to
+  worker+digest (it ran WaymoNet full-frame on every clip; the worker gates on the funnel instead).
+
 ## v0.8.62 — Local model-eval tooling + WaymoNet inference compute baseline (2026-06-20)
 
 First evaluation of the **trained** model (Run 1 `best.pt`, YOLO26s-P2 @704) against the live

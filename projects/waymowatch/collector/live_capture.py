@@ -139,9 +139,17 @@ def ensure_schema(con):
     for col in ("emb TEXT", "bbox TEXT", "alerted INTEGER DEFAULT 0",
                 "sent INTEGER DEFAULT 0",
                 "recovered INTEGER DEFAULT 0",   # shown in a daily targeted-recovery sheet (v0.8.43)
-                "special TEXT"):   # for pre-existing tables; special = curated gallery
-                                   # (roof-box/i-pac/funny) -> EXCLUDED from training negs,
-                                   # reserved for manual model eval (user, 2026-06-11)
+                "special TEXT",   # for pre-existing tables; special = curated gallery
+                                  # (roof-box/i-pac/funny) -> EXCLUDED from training negs,
+                                  # reserved for manual model eval (user, 2026-06-11)
+                # WaymoNet (trained YOLO) verdict layer — scored by collector/waymonet_worker.py
+                # via the homebox /api/infer endpoint (v0.8.63). The model is the new candidate
+                # GENERATOR; wn_hit=1 rows go to the human review email (waymonet_digest.py).
+                "wn_conf REAL",                    # max conf of a WaymoNet box matching this candidate
+                "wn_bbox TEXT",                    # that box [x1,y1,x2,y2] (WaymoNet's own detection)
+                "wn_scored INTEGER DEFAULT 0",     # 1 once the worker has run inference on this row
+                "wn_hit INTEGER DEFAULT 0",        # 1 if wn_conf >= COLLECT_FLOOR (model flagged it)
+                "wn_sent INTEGER DEFAULT 0"):      # 1 once shown in a WaymoNet review email
         try:
             con.execute(f"ALTER TABLE candidates ADD COLUMN {col}")
         except Exception:
