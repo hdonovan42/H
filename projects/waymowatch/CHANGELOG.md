@@ -1,5 +1,20 @@
 # WaymoWatch — Changelog
 
+## v0.8.61 — Public build-notes page at waymonet.com/notes (2026-06-20)
+
+Public writeup at **https://waymonet.com/notes** covering (1) the manual-review bootstrap that found
+the first 100 Waymos and (2) RUN_1's trained-model results + visualisations.
+
+- `site/notes/`: `notes.md` (markdown source) rendered client-side by a vendored `marked.min.js`
+  into `index.html` (TfL-palette: paper/ink/blue/red, Hammersmith One headings). Single editable
+  source; no CDN dependency.
+- Visualisations in `site/notes/img/`: 3 annotated held-out detections (regenerated from best.pt),
+  val-predictions grid, PR curve, confusion matrix, training curves. Gate results as an HTML table
+  (conf 0.10 -> 96.3% recall / 100% precision / 0 FP).
+- Homepage (`site/index.html`) key panel links to it. nginx serves `/notes` -> 301 -> `/notes/`.
+- Public-safe: ML method + results only, no infra/secrets. British spelling, brand "WaymoNet".
+- Deploy: `rsync -az site/ root@vps-hel1:/var/www/waymonet/` (no --delete). Verified live.
+
 ## v0.8.60 — Inference dashboard on the homebox, VPS reverse-proxies dash.waymonet.com (2026-06-20)
 
 Personal eval dashboard, hosted to keep ALL inference off the production VPS (it's memory-stressed:
