@@ -18,10 +18,25 @@ Efficiency (vs the old synthetic-era recipe):
 Dataset: data/dataset_real (build_real_dataset.py — confirms + vetted rejects from waymo.db).
 """
 import argparse
+import os
 
 from ultralytics import YOLO
 
 BASE = __file__.rsplit("/train/", 1)[0]
+
+
+def portable_data_path(data_yaml):
+    """build_real_dataset.py bakes an ABSOLUTE `path:` (the build box) into dataset.yaml, which is
+    wrong the moment the dataset is rsync'd to a GPU box (Vast run 2026-06-20 crashed on the VPS
+    path). Repoint `path:` at the yaml's own directory so training works wherever the dataset
+    actually lives — no manual sed. Idempotent."""
+    dy = os.path.abspath(data_yaml)
+    ddir = os.path.dirname(dy)
+    lines = open(dy).read().splitlines()
+    if not any(ln.strip() == f"path: {ddir}" for ln in lines):
+        lines = [f"path: {ddir}" if ln.split(":", 1)[0].strip() == "path" else ln for ln in lines]
+        open(dy, "w").write("\n".join(lines) + "\n")
+        print(f"dataset.yaml path -> {ddir} (portability fix)")
 
 
 def main():
@@ -39,6 +54,7 @@ def main():
     ap.add_argument("--no-export", action="store_true")
     a = ap.parse_args()
 
+    portable_data_path(a.data)
     m = YOLO(a.model)
     if a.model.endswith(".yaml") and a.weights:
         m.load(a.weights)

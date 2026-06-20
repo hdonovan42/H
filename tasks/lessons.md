@@ -151,3 +151,16 @@ teaching the model to SUPPRESS the exact thing we want it to detect. Any per-obj
 a per-frame trainer must emit ALL of a frame's positive boxes into one multi-box label (group by
 frame identity — here `(camera_id, captured_at)`), or it manufactures false negatives. When you lose
 an object to dedup, check whether you've also created a mislabel downstream.
+
+## 2026-06-20 — Generated configs must not bake absolute paths (WaymoNet first GPU train)
+`build_real_dataset.py` wrote `path: /home/hq/waymowatch/...` (the VPS build box) into
+`dataset.yaml`. On the rented Vast 4090 the dataset lived at `/workspace/...`, so ultralytics
+crashed instantly ("images not found, missing path /home/hq/..."). Cost: a wasted launch +
+debugging on the clock.
+**Pattern**: any config generated on one machine but consumed on another must use paths relative
+to the config's own location, or be normalised at consume-time. Fixed in `train.py`
+(`portable_data_path()` rewrites `path:` to the yaml's own dir, idempotent) rather than in the
+builder, because the consumer always knows where the file truly is. Also: on a Vast/RunPod
+**PyTorch template**, reuse the image's existing CUDA-torch venv (`/venv/main`) and only add
+ultralytics — do NOT create a fresh `python -m venv` (it has no CUDA torch; pip then pulls a CPU
+build and training silently runs on CPU or errors).

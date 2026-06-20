@@ -26,17 +26,26 @@ cd /home/hq/waymowatch && .venv/bin/python dataset/build_real_dataset.py
 ```
 
 ## 2. Rent + setup
-Single RTX 4090 (24 GB), RunPod/Vast (~$0.30/hr; expect 20–40 min wall with cache+704).
+Single RTX 4090 (24 GB), Vast/RunPod, **PyTorch template** (~$0.30/hr). Proven path (Vast,
+2026-06-20): the PyTorch image already ships CUDA torch in a venv (`/venv/main` on Vast) — do
+NOT `python -m venv` a fresh one (that loses CUDA torch and pip pulls a CPU build). Just add
+ultralytics into the image's env and ship a minimal bundle (no monorepo clone needed):
 ```bash
-git clone <repo> && cd H && git checkout waymowatch
-python -m venv .venv && .venv/bin/pip install 'ultralytics==8.4.63'   # pinned = reproducible
-rsync -av <vps>:/home/hq/waymowatch/data/dataset_real/ projects/waymowatch/data/dataset_real/
+# on the build box (VPS): tar czf waymonet_train.tgz train/ data/dataset_real/   (~26 MB)
+# laptop -> GPU box:      scp -P <port> waymonet_train.tgz root@<host>:/workspace/
+# on the GPU box:
+cd /workspace && tar xzf waymonet_train.tgz                 # -> train/  data/dataset_real/
+/venv/main/bin/pip install 'ultralytics==8.4.63'            # pinned; torch already present
 ```
+The dataset is tiny, so weaker GPUs work too — just slower (lower VRAM may need `--imgsz 512`
+or a smaller `--batch`). Apple Silicon: `--device mps --batch 16`. CPU-only is impractical.
 
 ## 3. Train
 ```bash
-.venv/bin/python projects/waymowatch/train/train.py --device 0
+/venv/main/bin/python /workspace/train/train.py --device 0
 ```
+train.py auto-repoints `dataset.yaml`'s `path:` to wherever the dataset actually sits (the
+builder bakes an absolute build-box path — `portable_data_path()` fixes it; no manual sed).
 Defaults: **yolo26s-p2.yaml + yolo26s.pt transfer, imgsz 704, batch auto, cache=ram,
 mosaic 0.4 / scale 0.15** (mosaic at 1.0 pushed the dome below the measured resolvability
 floor), 150 epochs / patience 30. Why not 1280: source is 352×288 — 1280 is 3× the compute
