@@ -8,9 +8,9 @@ These notes cover two phases: **(1)** finding the first 100 confirmed Waymos by 
 
 ---
 
-## Phase 1 — Finding the first 100 by hand
+## Phase 0 — 0 to 100
 
-No labelled Waymos existed to train on, so the first 100 were found with a **recall-biased funnel** — each stage cheaply throws out more of what *can't* be a Waymo, so only a handful of strong candidates a day reach human eyes:
+Wanted JamCam-specific data — decided to collect my own.
 
 <div class="pipe">
   <div class="stage stage-in"><div class="st-t">JamCams</div><div class="st-d">~600 cameras<br>polled every 150&nbsp;s</div></div>
@@ -26,13 +26,15 @@ No labelled Waymos existed to train on, so the first 100 were found with a **rec
   <div class="stage stage-out"><div class="st-t">Confirmed</div><div class="st-d">100 Waymos · 76 cameras<br>rejects → 7,488 hard negatives</div></div>
 </div>
 
+After the culling of obvious rejects, the surviving candidates are sent to me for manual review.
+
 <p class="pipe-loop">↻ Every confirmation re-anchors the “dome” scorer on real roof crops, so the funnel sharpens as the data grows.</p>
 
 The scorer is deliberately weak: at 352×288 a frozen embedding can't *decide* dome-vs-bar, it only has to **rank** well enough to surface real Waymos. The human is the precision stage — and every rejection becomes a hard negative that makes the trained model sharper.
 
 ---
 
-## Phase 2 — RUN_1: the first trained model
+## Phase 1 — RUN_1: the first trained model
 
 With 100 real positives across 76 cameras, the data finally cleared the bar to train a proper detector.
 
