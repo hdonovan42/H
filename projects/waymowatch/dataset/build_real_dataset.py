@@ -49,11 +49,20 @@ def main():
     random.seed(SEED)
     con = sqlite3.connect(a.db, timeout=60)
 
-    pos = [(cam, fp, json.loads(bb)) for cam, fp, bb in con.execute(
-        "SELECT camera_id, frame_path, bbox FROM candidates WHERE status='waymo' "
-        "AND special IS NULL "
-        "AND bbox IS NOT NULL AND frame_path IS NOT NULL").fetchall()
-        if fp and os.path.exists(fp)]
+    # Group confirmed Waymos by (camera, captured_at) = ONE clip's ByteTrack pass, so MULTIPLE
+    # Waymos in the same frame become ONE training image with MULTIPLE boxes (v0.8.58). Otherwise a
+    # 2nd same-frame Waymo is an unlabelled positive region that teaches YOLO to SUPPRESS real
+    # Waymos. (captured_at is stamped once per ingest() call, so it uniquely keys a single clip.)
+    frames = {}
+    for cam, at, fp, bb in con.execute(
+            "SELECT camera_id, captured_at, frame_path, bbox FROM candidates WHERE status='waymo' "
+            "AND special IS NULL "
+            "AND bbox IS NOT NULL AND frame_path IS NOT NULL").fetchall():
+        if not (fp and os.path.exists(fp)):
+            continue
+        g = frames.setdefault((cam, at), {"cam": cam, "fp": fp, "boxes": []})
+        g["boxes"].append(json.loads(bb))
+    pos = list(frames.values())   # each: {"cam", "fp" (one frame copy), "boxes": [bbox, ...]}
     # special IS NULL on BOTH classes: user-curated gallery cases are held OUT of training —
     # they are the manual post-train evaluation set (user, 2026-06-11). Negatives = hard confusers
     # (roof-box/i-pac/funny/van_roof); positives = confirmed-real but low-SNR/partial views
@@ -69,7 +78,7 @@ def main():
         raise SystemExit("no confirmed Waymos in the DB yet — confirm candidates first "
                          "(live_capture.py --confirm <ids>)")
 
-    pos_cams = sorted({c for c, _, _ in pos})
+    pos_cams = sorted({g["cam"] for g in pos})
     random.Random(13).shuffle(pos_cams)
     val_cams = set(pos_cams[:max(1, int(len(pos_cams) * VAL_FRACTION))])
     if len(pos_cams) < 3:
@@ -84,7 +93,9 @@ def main():
         os.makedirs(os.path.join(a.out, "labels", s))
 
     counts = {"train": {"pos": 0, "neg": 0}, "val": {"pos": 0, "neg": 0}}
-    for i, (cam, fp, bbox) in enumerate(pos):
+    multi, boxes_total = 0, 0
+    for i, g in enumerate(pos):
+        cam, fp, boxes = g["cam"], g["fp"], g["boxes"]
         s = "val" if cam in val_cams else "train"
         im = cv2.imread(fp)
         if im is None:
@@ -92,8 +103,11 @@ def main():
         name = f"waymo_{i:04d}"
         shutil.copy(fp, os.path.join(a.out, "images", s, name + ".jpg"))
         open(os.path.join(a.out, "labels", s, name + ".txt"), "w").write(
-            yolo_line(bbox, im.shape[1], im.shape[0]) + "\n")
-        counts[s]["pos"] += 1
+            "".join(yolo_line(b, im.shape[1], im.shape[0]) + "\n" for b in boxes))
+        counts[s]["pos"] += 1            # one image per frame; a frame may carry several boxes
+        boxes_total += len(boxes)
+        if len(boxes) > 1:
+            multi += 1
 
     # negatives: vetted rejects only, hardest (highest-scoring) first, capped per split
     target = {s: max(1, int(counts[s]["pos"] * NEG_RATIO)) for s in ("train", "val")}
@@ -116,6 +130,8 @@ def main():
         print("WARNING: no vetted negatives on the held-out cameras — eval_gate.py cannot "
               "measure FP rate. Review+bank a sheet covering the val cameras, then rebuild.")
     print(f"dataset -> {a.out}")
+    print(f"  positive images: {len(pos)} frames carrying {boxes_total} Waymo boxes "
+          f"({multi} multi-Waymo frame{'s' if multi != 1 else ''})")
     for s in ("train", "val"):
         print(f"  {s}: {counts[s]['pos']} real positives + {counts[s]['neg']} vetted negatives")
     print(f"  positive cameras: {len(pos_cams)} (val: {sorted(val_cams)})")

@@ -399,10 +399,15 @@ def ingest(con, embed, cen, cam_id, best):
                     found += 1
             continue                                      # same pass/spot -> no new row
         cv2.imwrite(cp, car); cv2.imwrite(fpth, frm)
-        cur = con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb,bbox,status)"
-                          " VALUES(?,?,?,?,?,?,?,?)", (cam_id, now, s, cp, fpth,
-                          json.dumps([round(float(x), 4) for x in e]), json.dumps(list(bbox)), status))
-        recent.insert(0, [cur.lastrowid, s, e, status, list(bbox), 0, now])
+        con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb,bbox,status)"
+                    " VALUES(?,?,?,?,?,?,?,?)", (cam_id, now, s, cp, fpth,
+                    json.dumps([round(float(x), 4) for x in e]), json.dumps(list(bbox)), status))
+        # DO NOT add this clip's own inserts to `recent` (v0.8.58): tracks from ONE clip are
+        # distinct vehicles BY CONSTRUCTION (ByteTrack gives one id per object), yet two white
+        # Waymo I-PACEs have near-identical dome roof-crops (cosine >= DEDUP_TH) — so feeding a
+        # fresh insert back into the matcher made a 2nd same-frame Waymo merge into the 1st and
+        # vanish (Piccadilly/Whitehorse St, 2026-06-20). Dedup only against PRE-EXISTING rows
+        # (loaded from the DB before this loop = genuine same-car-across-sweeps / parked cars).
         if status == "new":
             found += 1
         else:

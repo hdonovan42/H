@@ -1,5 +1,29 @@
 # WaymoWatch — Changelog
 
+## v0.8.58 — Multi-Waymo frames: don't merge same-clip tracks; multi-box labels (2026-06-20)
+
+Two Waymos in one frame (Piccadilly/Whitehorse St, #37666, 2026-06-20) were collapsed to one
+candidate — the 2nd silently lost. Root cause + fix, two parts:
+
+- **Surfacing (`live_capture.py ingest`)**: each freshly-INSERTed candidate was being added back into
+  the in-memory `recent` dedup pool, so a later track in the SAME clip could appearance-match
+  (cosine >= DEDUP_TH 0.93) an earlier one and merge into it. Two white I-PACE dome roof-crops are
+  near-identical at 352px, and the time-fence (`MERGE_WINDOW_MIN`) reads a 0-min same-clip gap as
+  "same vehicle, same pass" → the 2nd Waymo vanished (its crop was never even written). But tracks
+  from one clip are distinct vehicles BY CONSTRUCTION (ByteTrack = one id per object). Fix: stop
+  feeding this clip's own inserts into `recent`; dedup only against PRE-EXISTING rows (genuine
+  same-car-across-sweeps / parked cars). Both same-frame Waymos now surface as separate candidates.
+  (Old behaviour was a coin-flip: same-frame Waymos survived only if their crops were <0.93 similar —
+  e.g. #14502+#14504 at cam 07385 on 12 Jun, which differed enough.)
+- **Training labels (`build_real_dataset.py`)**: each candidate became its own image with one box —
+  so a frame with two Waymos yielded an image with one box + one UNLABELLED Waymo, teaching YOLO to
+  SUPPRESS real Waymos (false-negative signal). Fix: group positives by `(camera_id, captured_at)`
+  (= one clip's pass) → ONE image with a MULTI-LINE label carrying every box.
+- **Validated**: rebuilt dataset = 98 positive images carrying 99 Waymo boxes (1 multi-Waymo frame:
+  cam 07385 14:25, ids 14502+14504), train 71 / val 27 across 76 cameras + 7,488 negatives.
+- **Loop restarted** to activate the surfacing fix (code deploy; centroid real(99) + bars unchanged).
+- No schema change, no centroid/bar impact. Confirms unchanged: 99 training / 100 total.
+
 ## v0.8.57 — Confirms 95-99: TRAINING TARGET HIT + resync restart (2026-06-20)
 
 **5 confirms**: #37065 (02351, 0.873), #37195 (03760, 0.812), #37666 (06503, 0.880), #37978

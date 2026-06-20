@@ -135,3 +135,19 @@ human error rate; the per-vehicle confirm (#) is gold, the bulk "sheet is clean"
 re-rank and re-surface the top of the reject pool after every scorer recalibration (cheap:
 one extra contact sheet per re-seed). The fix is process (re-show), not automated screening
 (which the user rejected for routing hard negatives around training).
+
+## 2026-06-20 — Appearance-dedup must never merge objects from the SAME frame (WaymoWatch #37666)
+Two Waymos in one frame (Piccadilly/Whitehorse St) collapsed to one candidate: `ingest()` added each
+fresh INSERT back into the `recent` dedup pool, so the 2nd track in the clip appearance-matched the
+1st (cosine >= DEDUP_TH 0.93 — two white I-PACE dome crops are near-identical) and merged in. The
+time-fence meant to stop cross-time merges read the 0-min same-clip gap as "same vehicle, same pass."
+**Pattern**: tracks from one detector pass are distinct objects BY CONSTRUCTION (the tracker gives
+one id per object) — appearance/IoU dedup must run ONLY against state that existed BEFORE this pass,
+never against same-pass siblings. Whenever a dedup pool is mutated mid-loop by the loop's own
+inserts, ask "can two genuinely-distinct same-frame objects now match each other?"
+**Second-order (worse) effect — silent training poison**: even with one candidate kept, the FULL
+FRAME is the YOLO training image, so the un-kept 2nd Waymo is an unlabelled positive region =
+teaching the model to SUPPRESS the exact thing we want it to detect. Any per-object pipeline feeding
+a per-frame trainer must emit ALL of a frame's positive boxes into one multi-box label (group by
+frame identity — here `(camera_id, captured_at)`), or it manufactures false negatives. When you lose
+an object to dedup, check whether you've also created a mislabel downstream.
