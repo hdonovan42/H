@@ -362,9 +362,12 @@ def ingest(con, embed, cen, cam_id, best):
             continue
         e = embed(jamcam(roof))
         s = float(e @ cen)
-        if s < NEAR_TH:
-            continue  # below even the near-miss band; discard
-        status = "new" if s >= PROB_TH else "near"        # near = silent archive
+        # GATE = white-vehicle detection only (yolo11n car + is_white above). The cosine cut was
+        # DROPPED (v0.8.65, 2026-06-20, user): the weak dome scorer was gating what the trained
+        # WaymoNet ever saw, capping end-to-end recall at the funnel's recall. Now EVERY white-
+        # vehicle frame becomes a candidate and waymonet_worker scores it full-frame; the cosine s
+        # is kept ONLY for the legacy 'new'/'near' bucketing + dedup, not as a gate.
+        status = "new" if s >= PROB_TH else "near"        # near = silent archive (now incl. low-cosine)
         hd = int((y2 - y1) * 0.12)
         car = frm[max(0, y1 - hd):y2, max(0, x1):min(frm.shape[1], x2)]
         # same vehicle if same parked spot (bbox IoU) OR near-identical appearance

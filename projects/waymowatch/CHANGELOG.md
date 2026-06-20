@@ -1,5 +1,17 @@
 # WaymoWatch — Changelog
 
+## v0.8.65 — Funnel gate = white-vehicle only; cosine cut dropped (2026-06-20)
+
+The weak dome scorer was deciding what the trained WaymoNet ever saw — capping end-to-end recall at
+the funnel's recall. **Removed the `cosine >= NEAR_TH (0.74)` discard in `live_capture.ingest()`**:
+the gate is now just **yolo11n car-detect + `is_white`**, so EVERY white-vehicle frame becomes a
+candidate and `waymonet_worker` scores it full-frame. The cosine `s` is kept only for legacy
+'new'/'near' bucketing + dedup, not as a gate. A real Waymo the frozen embedding rated < 0.74 now
+reaches WaymoNet instead of being binned. Disk headroom checked (47 G free); the extra rows land in
+'near' (7-day prune) and don't touch the old cosine-gated email path. Loop restarted to apply.
+
+# WaymoWatch — Changelog
+
 ## v0.8.64 — WaymoNet review replies: rejects → fresh hard_negatives set (2026-06-20)
 
 The WaymoNet digest path now handles its own confirm/reject, into a **fresh v2 dataset** kept apart
