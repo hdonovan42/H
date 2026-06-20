@@ -1,5 +1,21 @@
 # WaymoWatch — Changelog
 
+## v0.8.57 — Confirms 95-99: TRAINING TARGET HIT + resync restart (2026-06-20)
+
+**5 confirms**: #37065 (02351, 0.873), #37195 (03760, 0.812), #37666 (06503, 0.880), #37978
+(04476, 0.860), #37799 (03665, 0.891) — 3 NEW cameras + 2 repeats. **99 training confirms / 76
+cameras** (100 total sightings). **>>> Roadmap step 3 (Collect to ~100+ across >=5 cameras) is MET
+— next is step 4 (Train WaymoNet). <<<**
+
+- 99-real centroid; rescored n=28,424: non-waymo p80 0.852 / max 0.933 (#21882 reject, below
+  ALERT_TH 0.94; >=0.92 now 7); reals 0.764-0.933 — floor real #30789 0.764 (margin 0.014 over
+  PROB_TH 0.75; eval #31037 excluded). Bars HELD (0.75/0.74/0.94): margin still >0.01, and the bar
+  is about to be retired by the trained model rather than chased lower. Rebucket at 0.75: 149
+  promoted, 22 demoted.
+- **Resync RESTART** (not a bar change): drift had reached 11 (loop on real(88) for ~2 days;
+  deployed real(99)), past the ~8 trigger. Loop reloads the real(99) centroid + current bars.
+- Auto-retro FIRED at 100 (top-200, 0.908..0.858) — out for review. Next retro at 104.
+
 ## v0.8.56 — Confirm 94 (#36842) (2026-06-19)
 
 **#36842** (00001.07379, 20:48, 0.893 — repeat cam). **94 training confirms / 73 cameras** (95
