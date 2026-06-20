@@ -10,30 +10,25 @@ These notes cover two phases: **(1)** finding the first 100 confirmed Waymos by 
 
 ## Phase 1 — Finding the first 100 by hand
 
-A detector needs labelled examples and none existed, so the first job was a **recall-biased bootstrap**: surface anything plausibly Waymo-like to a human who confirms or rejects. Precision is the human's job; the machine only has to *not miss*.
+No labelled Waymos existed to train on, so the first 100 were found with a **recall-biased funnel** — each stage cheaply throws out more of what *can't* be a Waymo, so only a handful of strong candidates a day reach human eyes:
 
-**The pipeline, every ~150 seconds, 24/7:**
+<div class="pipe">
+  <div class="stage stage-in"><div class="st-t">JamCams</div><div class="st-d">~600 cameras<br>polled every 150&nbsp;s</div></div>
+  <div class="arrow">→</div>
+  <div class="stage"><div class="st-t">Detect&nbsp;+&nbsp;track</div><div class="st-d">YOLO11n + ByteTrack<br>best frame per vehicle</div></div>
+  <div class="arrow">→</div>
+  <div class="stage stage-cull"><div class="st-t">White only</div><div class="st-d">cheap HSV gate —<br>culls the obvious non-Waymos first, before any heavy compute</div></div>
+  <div class="arrow">→</div>
+  <div class="stage"><div class="st-t">Roof score</div><div class="st-d">MobileNetV3 embedding<br>cosine vs “dome” centroid → rank</div></div>
+  <div class="arrow">→</div>
+  <div class="stage"><div class="st-t">Human</div><div class="st-d">top-ranked emailed<br>I confirm / reject</div></div>
+  <div class="arrow">→</div>
+  <div class="stage stage-out"><div class="st-t">Confirmed</div><div class="st-d">100 Waymos · 76 cameras<br>rejects → 7,488 hard negatives</div></div>
+</div>
 
-1. **Poll** — conditional-GET every camera in a ~600-camera central-London zone. Polling faster than TfL republishes means no clip is ever skipped.
-2. **Detect + track** — an INT8 **YOLO11n** detector (OpenVINO, ~0.6 s/clip on a 2-core box) with **ByteTrack** collapses each moving vehicle across the clip into one track and keeps its best — largest, clearest — frame.
-3. **Filter to white** — an HSV gate drops obviously coloured vehicles. (Grey/silver pass through — colour can't separate them from white at this resolution; that's the model's job later.)
-4. **Roof embedding** — crop the roof, embed it with a frozen **MobileNetV3**, and score **cosine similarity** against a "dome" reference centroid.
-5. **Rank, don't threshold** — the highest-scoring candidates are emailed as contact sheets, capped at a daily review budget. A weak scorer plus a fixed threshold would either flood the inbox or silently bin real cars; ranking against a human budget maximises the chance a real Waymo reaches human eyes.
-6. **Human confirms** — I review the sheets and reply with the IDs of any real Waymos. Confirmed → a training positive. Rejected → a *vetted hard negative* — these are gold: the look-alikes that actually fooled the scorer.
-7. **Recalibrate** — each confirmation re-anchors the centroid on **real** dome crops (the bootstrap started on synthetic composites), and the archive is re-mined ±45 min for the same vehicle elsewhere. Precision climbs and confirmations accelerate.
+<p class="pipe-loop">↻ Every confirmation re-anchors the “dome” scorer on real roof crops, so the funnel sharpens as the data grows.</p>
 
-**The honest part:** the bootstrap scorer is weak *by design*. A frozen embedding can't reliably tell a lidar dome from a roof box or a bright reflection — it was never meant to be the detector, just a funnel that puts a human in front of the right ~200 images a day.
-
-**What Phase 1 produced:**
-
-| Metric | Count |
-|---|---|
-| Confirmed Waymos | **100** |
-| Distinct cameras | **76** |
-| Vetted hard negatives | **7,488** |
-| Held-out eval set | 45 curated confusers + edge cases |
-
-Every confirmation is a human verdict on the full camera frame — detector-grade labels (frame + box), not weak heuristics.
+The scorer is deliberately weak: at 352×288 a frozen embedding can't *decide* dome-vs-bar, it only has to **rank** well enough to surface real Waymos. The human is the precision stage — and every rejection becomes a hard negative that makes the trained model sharper.
 
 ---
 

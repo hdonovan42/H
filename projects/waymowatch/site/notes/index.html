@@ -78,6 +78,23 @@
   #content img { width:100%; height:auto; display:block; border:1px solid var(--hairline); border-radius:6px; background:#fff; }
   #content figcaption { font-size:.8rem; color:var(--grey); margin-top:.4em; text-align:center; }
   #content em { color:var(--grey); }
+  /* pipeline diagram (AlexNet-style left-to-right funnel) */
+  #content .pipe { display:flex; flex-wrap:nowrap; align-items:stretch; gap:4px; margin:1.6em 0 .6em;
+    overflow-x:auto; padding-bottom:6px; }
+  #content .pipe .stage { flex:1 0 132px; border:1.5px solid var(--ink); border-radius:8px;
+    padding:10px 12px; background:#fff; }
+  #content .pipe .stage-in { background:#F4F3EE; }
+  #content .pipe .stage-cull { border-color:var(--red); background:#FFF6F5; }
+  #content .pipe .stage-out { border-color:var(--blue); background:#F1F3FF; }
+  #content .pipe .st-t { font-family:var(--display); font-size:.95rem; margin-bottom:4px; line-height:1.1; }
+  #content .pipe .st-d { font-size:.72rem; color:var(--grey); line-height:1.4; }
+  #content .pipe .arrow { align-self:center; color:var(--blue); font-size:1.25rem; flex:0 0 auto; }
+  #content .pipe-loop { font-size:.85rem; color:var(--grey); margin:0 0 1.4em; }
+  @media (max-width:640px) {
+    #content .pipe { flex-direction:column; overflow-x:visible; }
+    #content .pipe .stage { flex:1 1 auto; }
+    #content .pipe .arrow { transform:rotate(90deg); align-self:flex-start; margin-left:22px; }
+  }
   .loading { color:var(--grey); }
 </style>
 </head>
