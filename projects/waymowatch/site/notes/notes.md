@@ -32,6 +32,8 @@ After the culling of obvious rejects, the surviving candidates are sent to me fo
 
 Scorer's weak at 352×288, often confused by roof boxes and police sirens. Only needed to surface Waymos well enough for them to reach me — while banking confirmed negatives.
 
+<figure class="wide"><img src="img/coverage_map.jpg" alt="Map of London: every watched camera in grey, every Waymo sighting in red"><figcaption>Where we look vs where we find. Grey = the 683 cameras watched; red = the 101 Waymos confirmed at 77 of them. A wide net, but the sightings cluster in central and west-central London.</figcaption></figure>
+
 ---
 
 ## Phase 1 — RUN_1: the first trained model
