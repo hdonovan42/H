@@ -30,16 +30,22 @@ MAX_CELLS = 200
 
 
 def _build_sheet(rows, out_path, cols=6, cap=200):
-    """Grid of crops labelled '#id conf'. rows = [(id, conf, crop_path), ...]. Returns count shown.
+    """Grid of cells labelled '#id conf'. rows = [(id, conf, crop_path, frame_path), ...].
+    Returns count shown. If a candidate's crop is missing/unreadable, falls back to the FULL
+    frame (labelled '[frame]') so a flagged candidate is NEVER silently dropped from review.
     Inlined (not imported from live_capture) so this stays torch-free on the VPS."""
     cells = []
-    for cid, sc, cp in rows[:cap]:
+    for cid, sc, cp, fp in rows[:cap]:
         im = cv2.imread(cp) if cp else None
+        tag = ""
+        if im is None and fp:                       # no usable crop -> show the whole frame instead
+            im = cv2.imread(fp)
+            tag = " [frame]"
         if im is None:
             continue
         c = cv2.resize(im, (200, 150), interpolation=cv2.INTER_NEAREST)
-        cv2.rectangle(c, (0, 0), (96, 20), (0, 0, 0), -1)
-        cv2.putText(c, f"#{cid} {sc:.2f}", (3, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 255, 255), 1)
+        cv2.rectangle(c, (0, 0), (150 if tag else 96, 20), (0, 0, 0), -1)
+        cv2.putText(c, f"#{cid} {sc:.2f}{tag}", (3, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 255, 255), 1)
         cells.append(c)
     shown = len(cells)
     if shown == 0:
@@ -107,9 +113,9 @@ def main():
         bank(con, rest, "reject", HARD_DIR)
         return
     rows = con.execute(
-        "SELECT id, wn_conf, crop_path FROM candidates "
+        "SELECT id, wn_conf, crop_path, frame_path FROM candidates "
         "WHERE wn_hit=1 AND COALESCE(wn_sent,0)=0 AND status NOT IN ('waymo','reject') "
-        "AND crop_path IS NOT NULL ORDER BY wn_conf DESC LIMIT ?", (a.limit,)).fetchall()
+        "ORDER BY wn_conf DESC LIMIT ?", (a.limit,)).fetchall()
     if not rows:
         print("no unsent WaymoNet-flagged candidates")
         return
