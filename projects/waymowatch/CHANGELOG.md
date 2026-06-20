@@ -1,5 +1,21 @@
 # WaymoWatch — Changelog
 
+## v0.8.66 — Dash galleries auto-mirror VPS→homebox; hard_negatives now visible (2026-06-21)
+
+The WaymoNet review dashboard (dash.waymonet.com) is homebox-hosted and **snapshot-fed**, not
+repo/DB-backed — so the new `data/hard_negatives/` set (the trained model's own false positives,
+banked by `waymonet_digest.py --reject`; VPS-only + gitignored) never reached the dash and showed
+nothing. Fixed two ways:
+- **One-shot:** pushed the 47 hard-negative FULL FRAMES to the homebox as a new `special/hard_negatives/`
+  gallery (verified live through the public proxy: 47 tiles, image 200/jpeg).
+- **Durable:** new `collector/mirror_dash_to_homebox.sh` runs on the **VPS** (hq crontab, `*/15`),
+  pushing `*_frame.jpg` from `data/special/` + `data/hard_negatives/` to `h@homebox:waymonet-dash/
+  data/special/`. **Keyless over Tailscale SSH** (both nodes on the tailnet). Additive (no `--delete`),
+  frames only (the dash infers full-frame @704; crops would mis-infer). The dash re-globs per request,
+  so no service restart. All reject/confuser galleries (funny/roof-box/i-pac/van_roof/edge_positive)
+  now stay current with zero manual deploys.
+- `dashboard/deploy_homebox.sh` also pulls hard_negatives so a full manual deploy stays self-contained.
+
 ## v0.8.65 — Funnel gate = white-vehicle only; cosine cut dropped (2026-06-20)
 
 The weak dome scorer was deciding what the trained WaymoNet ever saw — capping end-to-end recall at
