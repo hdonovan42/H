@@ -89,3 +89,18 @@ confusion matrix).
 - **Grow the val set** before trusting precision/recall to a decimal point.
 - **Re-export ONNX at the serving resolution** once Phase-5 inference (TensorRT) settles on one —
   accuracy must be validated AT the serving size (current export is @704).
+
+## Inference / serving cost (measured 2026-06-20 — see CHANGELOG v0.8.62, `eval/`)
+Training is the cheap one-off; what matters for serving is **per-frame inference cost**, measured
+when scoring 956 live candidates with `best.pt` via `eval/score_candidates.py`:
+- **~0.18 s/frame** at imgsz 704 on a CPU (dev box: WSL2, torch 2.12+cpu, OMP_NUM_THREADS=4) —
+  ~5.5 fps. The model is small (9.66 M params, 26.4 GFLOPs) and 352×288 frames are mostly padding
+  at 704, so it's fast on CPU. No GPU needed for the candidate-rate workload.
+- **Memory: ~0.6 GB RSS, flat — but ONLY if you score one frame per `predict()` call.** Passing a
+  list to `predict()` does NOT stream; it hit **15.4 GB** and OOM-killed the box. Loop per-frame.
+- **Throughput vs the funnel:** ~20–30 white-car survivors/cycle × 0.18 s ≈ ~5 s/cycle — trivial
+  compute, but the production VPS is memory-stressed (inference is kept off it; the homebox is the
+  inference host, v0.8.60). OpenVINO INT8 is the ~3× lever if a host ever needs it (re-validate the
+  gate at INT8 — quantisation can shift the operating conf).
+- **Operating conf is LOW:** real Waymos score ≈0.1–0.45 model conf (gate: 96% recall @0.10, 3.7%
+  @0.80). An auto-confirm/alert bar lives near 0.1–0.25, never 0.7.

@@ -1,5 +1,45 @@
 # WaymoWatch — Changelog
 
+## v0.8.62 — Local model-eval tooling + WaymoNet inference compute baseline (2026-06-20)
+
+First evaluation of the **trained** model (Run 1 `best.pt`, YOLO26s-P2 @704) against the live
+funnel, run LOCALLY without touching the capture loop. New `eval/` tooling + a measured serving
+cost — important context for the "WaymoNet replaces the human review" architecture decision.
+
+**Tooling (`eval/`)**
+- `score_candidates.py` — pulls a chosen candidate set's full frames from the VPS (read-only DB
+  query over SSH + rsync, missing-only) and scores them locally. Per-candidate verdict = a model
+  detection IoU-matching (>=0.3) the candidate's stored bbox at conf >= threshold (same rule as
+  `train/eval_gate.py`); also surfaces "extra" Waymos elsewhere in a frame (funnel misses).
+  Selection: `--ids`, `--cached` (the already-pulled set — drift-proof), recency, `--captured-after`.
+  Checkpoints each frame to `out/progress.csv` → resumable.
+- `email_audit.py` (runs on the VPS) — emails WaymoNet's claims + a top-N dome-score recall-audit
+  sheet (each cell labelled d=dome / m=model conf) through the existing Resend path.
+
+**Inference compute — MEASURED (dev box: WSL2, 16 GB, torch 2.12.0+cpu, OMP_NUM_THREADS=4)**
+- **~0.18 s/frame** at imgsz 704 on CPU (956 frames in 175 s) — cheaper than the earlier 0.5 s guess.
+- **~0.6 GB RSS, flat**, when scored ONE image per `predict()` call.
+- **GOTCHA (cost 3 session crashes before diagnosis):** `model.predict(list_of_paths, stream=True)`
+  does NOT stream — it ballooned to **15.4 GB RSS / 31.7 GB VM**, tripped the OOM-killer, and the
+  memory pressure took down WSL2 *and the Claude session*. Inference MUST be one frame per
+  `predict()` call (`del res` + periodic `gc`). The tool now also raises its own `oom_score_adj` so
+  it can never take the session down again. See `tasks/lessons.md`.
+- **Serving placement:** ~20–30 funnel survivors/cycle × 0.18 s ≈ **~5 s/cycle** is cheap in COMPUTE,
+  but the production VPS is memory-stressed (~1.5 GB already in swap — see v0.8.60), so inference
+  stays OFF it. A WaymoNet auto-confirm worker belongs on the **homebox inference host** (v0.8.60,
+  dash.waymonet.com), fed candidates by the VPS. OpenVINO INT8 (as for the yolo11n detector) is the
+  ~3× path if needed — re-validate the gate at INT8 first (quantisation can move the operating point).
+
+**First live read (956 candidates emailed since 13:58 today)**
+- WaymoNet flagged **2** as Waymo at conf ≥ 0.10 (#39047 m=0.42 / dome 0.90; #39249 m=0.17 / dome
+  0.79); **1** at ≥0.25, **0** at ≥0.50. Confidences are LOW in absolute terms (a strong real ≈0.42,
+  matching the gate sweep), so any auto-confirm bar sits near **~0.1–0.25, NOT 0.7** ("0.7" only
+  makes sense as the cheap dome PRE-gate that selects which frames WaymoNet runs on).
+- Selectivity — **2 of 956** — is the headline: the model can plausibly replace the bulk human
+  review (which trawls ~800/day). Live precision/recall still to be ground-truthed; WaymoNet-as-
+  verdict architecture under exploration (tiered confidence + shadow period + training kept
+  human-gated to avoid a self-confirmation feedback loop).
+
 ## v0.8.61 — Public build-notes page at waymonet.com/notes (2026-06-20)
 
 Public writeup at **https://waymonet.com/notes** covering (1) the manual-review bootstrap that found

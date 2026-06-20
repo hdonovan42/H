@@ -15,3 +15,7 @@ models/*.onnx
 *.pt
 *.onnx
 runs/
+
+# local model-eval cache + outputs (pulled TfL frames, csv, sheets)
+eval/_cache/
+eval/out/

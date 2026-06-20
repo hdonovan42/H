@@ -2,6 +2,22 @@
 
 ## WaymoWatch
 
+### YOLO inference: one frame per predict() call — `predict(list)` OOMs the box (2026-06-20)
+Scoring a batch with `model.predict(list_of_paths, stream=True)` does NOT stream — it grew to
+**15.4 GB RSS / 31.7 GB VM** on a 16 GB machine, the OOM-killer killed python, and the memory
+pressure took down WSL2 *and the Claude Code session*. It took THREE "your session crashed" resumes
+before the cause was found — `dmesg`/`journalctl -k | grep -i oom` showed the kill. Per-frame
+`model.predict(path)` in a Python loop with `del res` holds RSS flat at **~0.6 GB**. Measured cost:
+**~0.18 s/frame** @704 on CPU (956 frames in 175 s).
+
+**How to apply:**
+- Never hand a list/dir to `predict()` for a large batch on a memory-bound box. Loop one frame at a
+  time, `del` the result, `gc.collect()` periodically, and checkpoint to CSV so a kill is resumable.
+- Have long-running local jobs raise their own `/proc/self/oom_score_adj` (e.g. 800) so the kernel
+  kills the JOB, never the surrounding agent session.
+- **If the agent session keeps "crashing" mid-compute, suspect OOM FIRST** (`free -h`,
+  `dmesg | grep -i oom`) before re-running — don't burn cycles relaunching a job that's killing the host.
+
 ### bank_shown.py banks the WHOLE accumulated cycle_shown.json — scope bulk-bank to what was reviewed (2026-06-15)
 `confirm_cycle.py` appends every sheet's shown ids to `data/candidates/cycle_shown.json` and only
 `bank_shown.py` clears it (on a "no waymos" verdict). If it isn't run for several cycles the file
