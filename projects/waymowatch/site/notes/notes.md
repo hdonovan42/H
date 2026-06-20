@@ -30,7 +30,7 @@ After the culling of obvious rejects, the surviving candidates are sent to me fo
 
 <p class="pipe-loop">↻ Every confirmation re-anchors the “dome” scorer on real roof crops, so the funnel sharpens as the data grows.</p>
 
-The scorer is deliberately weak: at 352×288 a frozen embedding can't *decide* dome-vs-bar, it only has to **rank** well enough to surface real Waymos. The human is the precision stage — and every rejection becomes a hard negative that makes the trained model sharper.
+Scorer's weak at 352×288, often confused by roof boxes and police sirens. Only needed to surface Waymos well enough for them to reach me — while banking confirmed negatives.
 
 ---
 
