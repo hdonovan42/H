@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WaymoNet — inference dashboard</title>
+<style>
+  :root{
+    --bg:#0a0c10; --panel:#12161d; --line:#222a35; --ink:#d6e0ea; --dim:#7c8a9a;
+    --accent:#2ea6ff; --hi:#27d27a; --mid:#ffb43a; --lo:#6b7686;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--mono);font-size:13px;height:100vh;display:flex;flex-direction:column}
+  header{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:14px}
+  header h1{margin:0;font-size:15px;letter-spacing:.5px}
+  header .sub{color:var(--dim);font-size:11px}
+  header .sub b{color:var(--accent)}
+  .wrap{flex:1;display:flex;min-height:0}
+  /* explorer */
+  aside{width:280px;border-right:1px solid var(--line);overflow:auto;background:var(--panel)}
+  .upload{margin:10px;padding:14px;border:1px dashed var(--line);border-radius:8px;text-align:center;color:var(--dim);cursor:pointer}
+  .upload.drag{border-color:var(--accent);color:var(--ink);background:#0e1620}
+  .group{margin:4px 0}
+  .group>.gh{padding:6px 12px;color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.6px;cursor:pointer;display:flex;justify-content:space-between}
+  .group>.gh:hover{color:var(--ink)}
+  .items{display:none}
+  .group.open .items{display:block}
+  .item{padding:4px 12px 4px 22px;cursor:pointer;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .item:hover{background:#0e1620}
+  .item.sel{background:#13283c;color:var(--accent)}
+  /* stage */
+  main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .toolbar{padding:8px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  .toolbar label{color:var(--dim)}
+  .toolbar input[type=range]{vertical-align:middle;width:200px;accent-color:var(--accent)}
+  .stat{color:var(--dim)} .stat b{color:var(--ink)}
+  .stagewrap{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:18px;background:
+    repeating-linear-gradient(45deg,#0b0e13,#0b0e13 10px,#0c1015 10px,#0c1015 20px)}
+  .stage{position:relative;line-height:0;max-width:100%;box-shadow:0 0 0 1px var(--line)}
+  .stage img{max-width:100%;max-height:78vh;display:block;image-rendering:auto}
+  .stage svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .empty{color:var(--dim);text-align:center;line-height:1.7}
+  .empty code{color:var(--accent)}
+  .legend{color:var(--dim);font-size:11px}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin:0 3px -1px 10px}
+</style>
+</head>
+<body>
+<header>
+  <h1>WaymoNet</h1>
+  <span class="sub">inference dashboard · model <b>run-1</b> (YOLO26s-P2 @704) · tailnet-only</span>
+</header>
+<div class="wrap">
+  <aside>
+    <div class="upload" id="drop">⬆ drop an image here<br>or click to upload</div>
+    <input type="file" id="file" accept="image/*" hidden>
+    <div id="tree"></div>
+  </aside>
+  <main>
+    <div class="toolbar">
+      <span><label>confidence ≥ </label><b id="cv">0.10</b></span>
+      <input type="range" id="conf" min="0.03" max="0.9" step="0.01" value="0.10">
+      <span class="stat" id="stat">no image selected</span>
+      <span class="legend">boxes:<i style="background:var(--hi)"></i>≥.5<i style="background:var(--mid)"></i>.2–.5<i style="background:var(--lo)"></i>&lt;.2</span>
+    </div>
+    <div class="stagewrap">
+      <div id="empty" class="empty">Pick an image from the explorer, or drop your own.<br>
+        It runs <code>best.pt</code> on the server and draws every detection;<br>the slider filters them live.</div>
+      <div class="stage" id="stage" style="display:none">
+        <img id="frame" alt="">
+        <svg id="ovl" preserveAspectRatio="none"></svg>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+let DATA = null;                       // last inference result {w,h,time_ms,boxes}
+const confEl = $("#conf"), cvEl = $("#cv");
+
+function colour(c){ return c>=0.5 ? getCSS('--hi') : c>=0.2 ? getCSS('--mid') : getCSS('--lo'); }
+function getCSS(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+function render(){
+  if(!DATA) return;
+  const t = +confEl.value; cvEl.textContent = t.toFixed(2);
+  const ovl = $("#ovl"); ovl.setAttribute("viewBox", `0 0 ${DATA.w} ${DATA.h}`);
+  const shown = DATA.boxes.filter(b => b.conf >= t);
+  const sw = DATA.w/600;               // stroke scaled to image
+  ovl.innerHTML = shown.map(b=>{
+    const col = colour(b.conf), w = b.x2-b.x1, h = b.y2-b.y1;
+    const ty = b.y1 > DATA.h*0.12 ? b.y1 - 3 : b.y2 + 13*sw;
+    return `<rect x="${b.x1}" y="${b.y1}" width="${w}" height="${h}" fill="none" stroke="${col}" stroke-width="${2*sw}"/>`
+         + `<text x="${b.x1}" y="${ty}" fill="${col}" font-size="${13*sw}" font-family="monospace" font-weight="700">waymo ${b.conf.toFixed(2)}</text>`;
+  }).join("");
+  const total = DATA.boxes.length, top = total?Math.max(...DATA.boxes.map(b=>b.conf)):0;
+  $("#stat").innerHTML = `<b>${shown.length}</b> shown / ${total} ≥0.03 · top <b>${top.toFixed(2)}</b> · ${DATA.time_ms} ms`;
+}
+confEl.addEventListener("input", render);
+
+function showStage(src){ $("#empty").style.display="none"; $("#stage").style.display=""; $("#frame").src=src; }
+
+async function pick(id, el){
+  document.querySelectorAll(".item.sel").forEach(e=>e.classList.remove("sel"));
+  if(el) el.classList.add("sel");
+  showStage("/img?id="+encodeURIComponent(id));
+  $("#stat").textContent = "running inference…"; DATA=null; $("#ovl").innerHTML="";
+  try{ DATA = await (await fetch("/api/infer?id="+encodeURIComponent(id))).json(); render(); }
+  catch(e){ $("#stat").textContent = "inference failed"; }
+}
+
+async function inferUpload(file){
+  showStage(URL.createObjectURL(file));
+  $("#stat").textContent = "running inference…"; DATA=null; $("#ovl").innerHTML="";
+  try{
+    const r = await fetch("/api/infer", {method:"POST", headers:{"Content-Type":file.type||"application/octet-stream"}, body:file});
+    DATA = await r.json(); if(DATA.error){ $("#stat").textContent=DATA.error; return; } render();
+  }catch(e){ $("#stat").textContent="inference failed"; }
+}
+
+async function loadTree(){
+  const {tree} = await (await fetch("/api/tree")).json();
+  $("#tree").innerHTML = tree.map((g,i)=>`
+    <div class="group ${i===0?'open':''}">
+      <div class="gh">${g.name}<span>${g.count}</span></div>
+      <div class="items">${g.images.map(im=>`<div class="item" data-id="${im.id}">${im.label}</div>`).join("")}</div>
+    </div>`).join("") || '<div class="empty" style="padding:20px">no images found</div>';
+  $("#tree").querySelectorAll(".gh").forEach(h=>h.onclick=()=>h.parentElement.classList.toggle("open"));
+  $("#tree").querySelectorAll(".item").forEach(it=>it.onclick=()=>pick(it.dataset.id, it));
+}
+
+// upload wiring
+const drop=$("#drop"), file=$("#file");
+drop.onclick=()=>file.click();
+file.onchange=()=>file.files[0] && inferUpload(file.files[0]);
+["dragover","dragenter"].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add("drag")}));
+["dragleave","drop"].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove("drag")}));
+drop.addEventListener("drop",ev=>{ const f=ev.dataTransfer.files[0]; if(f) inferUpload(f); });
+
+loadTree();
+</script>
+</body>
+</html>
