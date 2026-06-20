@@ -38,7 +38,7 @@ Scorer's weak at 352×288, often confused by roof boxes and police sirens. Only 
 
 With 100 real positives across 76 cameras, the data finally cleared the bar to train a proper detector.
 
-**Recipe:** YOLO26s with a **P2 (stride-4) head** — the high-resolution feature map a 5–15 px dome needs — transfer-learned from COCO and trained at **704 px** on full-frame images plus the vetted negatives. About **19 minutes** on a single rented RTX 4090.
+**Recipe:** YOLO26s with a **P2 (stride-4) head** — the high-resolution feature map a 5–15 px dome needs — transfer-learned from COCO and trained at **704 px** on full-frame images plus the vetted negatives. About **19 minutes** on a single RTX 4090.
 
 ### It works
 
