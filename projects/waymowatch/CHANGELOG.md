@@ -1,5 +1,20 @@
 # WaymoWatch — Changelog
 
+## v0.8.64 — WaymoNet review replies: rejects → fresh hard_negatives set (2026-06-20)
+
+The WaymoNet digest path now handles its own confirm/reject, into a **fresh v2 dataset** kept apart
+from the bootstrap data:
+- `waymonet_digest.py --confirm IDS` → `status=waymo`, copied to `data/real_positives/`.
+- `waymonet_digest.py --reject IDS` / `--reject-rest` → `status=reject`, copied to a NEW
+  **`data/hard_negatives/`** folder. The WaymoNet path's rejects are the *trained model's own* false
+  positives — the highest-signal negatives — so they are collected separately and **no longer
+  appended to the bootstrap reject pool** (user, 2026-06-20). `--reject-rest` banks every
+  reviewed-but-unconfirmed candidate (`wn_sent=1 AND status='new'`) at once.
+- First review actioned: **3 confirmed** (#40113 0.73, #35912 0.39, #40190 0.34 → real_positives),
+  **14 → hard_negatives** (first images in the new folder).
+- NB v2 dataset build should read `data/hard_negatives/` for negatives (not the old reject pool).
+  Positives still go to `real_positives/` (flag if a fresh positives folder is wanted too).
+
 ## v0.8.63 — WaymoNet scoring pipeline made reliable; email restored at 30-pile (2026-06-20)
 
 The trained model is now wired into live collection as an **active-learning scorer** (built across

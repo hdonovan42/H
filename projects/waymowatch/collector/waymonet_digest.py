@@ -50,6 +50,36 @@ def _build_sheet(rows, out_path, cols=6, cap=200):
     return shown
 
 
+REAL_DIR = os.path.join(BASE, "data", "real_positives")    # WaymoNet-path confirms -> positives
+HARD_DIR = os.path.join(BASE, "data", "hard_negatives")    # WaymoNet-path rejects -> v2 hard negatives
+                                                           # (a FRESH set — NOT the bootstrap reject pool)
+
+
+def _ids(s):
+    return [int(x) for x in s.replace(",", " ").split()]
+
+
+def bank(con, ids, status, dest):
+    """Copy each candidate's frame+crop into `dest` and set its DB status. The WaymoNet review path:
+    confirm -> real_positives (status=waymo); reject -> hard_negatives (status=reject) — the model's
+    OWN false positives, kept separate from the bootstrap funnel's reject pool for the next dataset."""
+    import shutil
+    os.makedirs(dest, exist_ok=True)
+    n = 0
+    for cid in ids:
+        row = con.execute("SELECT crop_path, frame_path FROM candidates WHERE id=?", (cid,)).fetchone()
+        if not row:
+            print(f"  #{cid}: not found")
+            continue
+        for p in row:
+            if p and os.path.exists(p):
+                shutil.copy(p, os.path.join(dest, os.path.basename(p)))
+        con.execute("UPDATE candidates SET status=? WHERE id=?", (status, cid))
+        n += 1
+    con.commit()
+    print(f"banked {n} -> {status}  ({dest})")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Email WaymoNet's flagged candidates for review.")
     ap.add_argument("--limit", type=int, default=MAX_CELLS)
@@ -57,9 +87,25 @@ def main():
                     help="only send once at least this many unsent flagged candidates have piled up")
     ap.add_argument("--force", action="store_true", help="send now regardless of --min")
     ap.add_argument("--dry-run", action="store_true", help="build the sheet but don't send or mark")
+    ap.add_argument("--confirm", default="", help="ids -> waymo, copied to data/real_positives/")
+    ap.add_argument("--reject", default="", help="ids -> reject, copied to data/hard_negatives/")
+    ap.add_argument("--reject-rest", action="store_true",
+                    help="reject ALL reviewed-but-unconfirmed (wn_sent=1, still 'new') -> hard_negatives")
     a = ap.parse_args()
 
     con = sqlite3.connect(DB, timeout=60)
+    if a.confirm:
+        bank(con, _ids(a.confirm), "waymo", REAL_DIR)
+        return
+    if a.reject:
+        bank(con, _ids(a.reject), "reject", HARD_DIR)
+        return
+    if a.reject_rest:
+        rest = [r[0] for r in con.execute(
+            "SELECT id FROM candidates WHERE wn_sent=1 AND status='new'").fetchall()]
+        print(f"reject-rest: {len(rest)} reviewed-but-unconfirmed -> hard_negatives")
+        bank(con, rest, "reject", HARD_DIR)
+        return
     rows = con.execute(
         "SELECT id, wn_conf, crop_path FROM candidates "
         "WHERE wn_hit=1 AND COALESCE(wn_sent,0)=0 AND status NOT IN ('waymo','reject') "
