@@ -17,8 +17,12 @@ teaches the model to suppress reals). Human-in-loop (a dome score isn't proof):
 - **Training labels only**: backfilled boxes are NOT copied to `real_positives/`, so the centroid +
   bars are untouched (no reseed/restart). The frame already surfaced via its primary Waymo.
 - First run on #37666 (Piccadilly/Whitehorse St): surfaced the 2nd Waymo (box [142,164,176,192],
-  h=28px, dome score 0.685) — emailed for the user's decision (sub-resolvable: label it for frame
-  integrity vs skip as low-SNR).
+  h=28px, dome score 0.685). User confirmed (clear from the full frame; the tight crop only looked
+  bad because of INTER_NEAREST 6x upscale + context loss — training is unaffected, it uses FULL
+  FRAMES 288x352 + bbox labels, never the crops). **Added via --add 37666:1** -> #37666's frame now
+  carries 2 boxes. Rebuilt dataset: 98 images / 100 boxes / 2 multi-Waymo frames. box4 is a training
+  box + dashboard sighting but NOT in real_positives (a 34px roof crop would dilute the centroid).
+  Counts now: sightings (status='waymo') 101 | training 100 boxes/98 frames | centroid 99.
 
 ## v0.8.58 — Multi-Waymo frames: don't merge same-clip tracks; multi-box labels (2026-06-20)
 
