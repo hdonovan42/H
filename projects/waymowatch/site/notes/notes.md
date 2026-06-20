@@ -1,8 +1,8 @@
-# WaymoNet — build notes
+#notes
 
 *How a self-driving-car spotter was bootstrapped from London's traffic cameras — and what the first trained model can do.*
 
-WaymoNet watches **TfL JamCam** traffic cameras and flags **Waymo**'s self-driving test cars: white Jaguar I-PACEs carrying a roof-mounted lidar **dome**. The catch — **Wayve**, another London AV company, runs near-identical white I-PACEs with a flat sensor **bar** instead of a dome. At 352×288 CIF resolution, dome-vs-bar is essentially the *only* feature separating them, so the whole system lives or dies on a few roof pixels.
+WaymoNet watches **TfL JamCam** traffic cameras and flags **Waymo**'s self-driving test cars: white Jaguar I-PACEs carrying a roof-mounted lidar **dome**, among other sensors . **Wayve**- coming next. 352×288 CIF resolution.
 
 These notes cover two phases: **(1)** finding the first 100 confirmed Waymos by hand, and **(2)** the first model trained on that data — *RUN_1*.
 
