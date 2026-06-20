@@ -1,5 +1,25 @@
 # WaymoWatch — Changelog
 
+## v0.8.59 — Backfill tool for missing boxes in confirmed frames (2026-06-20)
+
+New `dataset/backfill_multibox.py` — recovers Waymo boxes that pre-v0.8.58 multi-Waymo frames lost
+to the dedup, so their YOLO labels are complete (an unlabelled true Waymo in a training frame
+teaches the model to suppress reals). Human-in-loop (a dome score isn't proof):
+
+- `--scan IDS` / `--scan-all`: re-detect confirmed frames, find white vehicles NOT covered by an
+  existing confirmed box, email a numbered sheet (`ID:n`) for verification, record to
+  `backfill_pending.json`.
+- `--add ID:n[,n]`: insert the chosen boxes as `status='waymo'` rows keyed to the original frame's
+  `(camera_id, captured_at)`, so v0.8.58's grouping folds them into one multi-box label.
+- **Relaxed gates vs the live surfacer** (BACKFILL_MIN_H 20 vs 44, no dome-score floor, top-5/frame
+  cap): the live MIN_H/NEAR_TH floors exist because WE can't tell dome-vs-bar on a small/low view —
+  but the human has already confirmed the frame, so surface small/distant extras and let them judge.
+- **Training labels only**: backfilled boxes are NOT copied to `real_positives/`, so the centroid +
+  bars are untouched (no reseed/restart). The frame already surfaced via its primary Waymo.
+- First run on #37666 (Piccadilly/Whitehorse St): surfaced the 2nd Waymo (box [142,164,176,192],
+  h=28px, dome score 0.685) — emailed for the user's decision (sub-resolvable: label it for frame
+  integrity vs skip as low-SNR).
+
 ## v0.8.58 — Multi-Waymo frames: don't merge same-clip tracks; multi-box labels (2026-06-20)
 
 Two Waymos in one frame (Piccadilly/Whitehorse St, #37666, 2026-06-20) were collapsed to one
