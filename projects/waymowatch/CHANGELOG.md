@@ -14,11 +14,11 @@ Personal eval dashboard, hosted to keep ALL inference off the production VPS (it
   on the VPS.
 - Verified end-to-end through the proxy: auth gates (no/bad creds 401, good 200), inference returns
   boxes (391 ms). server.py gained `WAYMONET_HOST` (bind) + `WAYMONET_BROWSE` (subdir-as-group, DB-free).
-- **Pending (user action): DNS** `dash.waymonet.com` A -> 89.167.4.126, then `certbot --nginx` for TLS.
+- **LIVE at https://dash.waymonet.com** — DNS A -> 89.167.4.126 (Namecheap wildcard `*`), TLS via
+  `certbot --nginx` (Let's Encrypt, expires 2026-09-18, auto-renew), HTTP->HTTPS redirect. Verified
+  end-to-end over public HTTPS: 401 without creds, inference 215 ms with creds.
 - Repo `dashboard/`: server.py, index.html, run_local.sh (laptop), deploy_homebox.sh (push updates).
   best.pt gitignored; model = run-1 baseline. See memory [[waymonet-dashboard]].
-
-# WaymoWatch — Changelog
 
 ## v0.8.59 — Backfill tool for missing boxes in confirmed frames (2026-06-20)
 
