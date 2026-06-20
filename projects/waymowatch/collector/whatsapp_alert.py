@@ -19,6 +19,12 @@ VPS = "hq@89.167.4.126"
 
 
 def send_to_user(message, number=ALLOWED, dry_run=False):
+    # Alerting is OFF. The moltbot WhatsApp bridge was retired 2026-06-20 (VPS cleanup) and the
+    # gateway no longer runs; the VPS public IP is also firewalled (tailnet-only), so the scp/ssh
+    # below would block on their timeouts then fail. No-op until a new channel is chosen.
+    # Set WAYMO_WHATSAPP=1 to re-enable the bridge path below (requires a live moltbot gateway).
+    if os.environ.get("WAYMO_WHATSAPP") != "1":
+        return False
     if number != ALLOWED:
         raise ValueError(f"refusing recipient {number!r}; WhatsApp is locked to the operator")
     remote = f"/tmp/waymowatch-msg-{int(time.time())}.txt"
