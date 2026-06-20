@@ -1,5 +1,25 @@
 # WaymoWatch — Changelog
 
+## v0.8.60 — Inference dashboard on the homebox, VPS reverse-proxies dash.waymonet.com (2026-06-20)
+
+Personal eval dashboard, hosted to keep ALL inference off the production VPS (it's memory-stressed:
+1.5 GB already in swap; a torch model risked the live loop).
+
+- **Inference on the homebox** (`h@homebox`, tailnet 100.107.138.103): `~/waymonet-dash/`, uv py3.12
+  venv (system py3.14 has no torch wheels), CPU torch + ultralytics + opencv-python-headless (avoids
+  libGL). systemd `waymonet-dash` bound 0.0.0.0:3105. ~0.3-0.4 s/frame on 8 cores.
+- **VPS only reverse-proxies**: nginx `dash.waymonet.com` -> proxy_pass http://100.107.138.103:3105,
+  basic-auth (user `h`), client_max_body_size 8m, proxy_connect_timeout 5s. **Isolated: homebox down
+  -> only this vhost 502s; every other VPS service is an independent block, unaffected.** No torch
+  on the VPS.
+- Verified end-to-end through the proxy: auth gates (no/bad creds 401, good 200), inference returns
+  boxes (391 ms). server.py gained `WAYMONET_HOST` (bind) + `WAYMONET_BROWSE` (subdir-as-group, DB-free).
+- **Pending (user action): DNS** `dash.waymonet.com` A -> 89.167.4.126, then `certbot --nginx` for TLS.
+- Repo `dashboard/`: server.py, index.html, run_local.sh (laptop), deploy_homebox.sh (push updates).
+  best.pt gitignored; model = run-1 baseline. See memory [[waymonet-dashboard]].
+
+# WaymoWatch — Changelog
+
 ## v0.8.59 — Backfill tool for missing boxes in confirmed frames (2026-06-20)
 
 New `dataset/backfill_multibox.py` — recovers Waymo boxes that pre-v0.8.58 multi-Waymo frames lost

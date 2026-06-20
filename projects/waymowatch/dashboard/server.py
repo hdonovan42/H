@@ -29,6 +29,7 @@ WEIGHTS = os.environ.get("WAYMONET_WEIGHTS", os.path.join(HERE, "best.pt"))
 DB = os.environ.get("WAYMONET_DB", os.path.join(ROOT, "data", "waymo.db"))
 SPECIAL = os.environ.get("WAYMONET_SPECIAL", os.path.join(ROOT, "data", "special"))
 BROWSE = os.environ.get("WAYMONET_BROWSE", "")   # local mode: each immediate subdir -> a group
+HOST = os.environ.get("WAYMONET_HOST", "127.0.0.1")  # set 0.0.0.0 on the homebox (tailnet-reachable)
 PORT = int(os.environ.get("WAYMONET_PORT", "3105"))
 IMGSZ = 704
 BASE_CONF = 0.03            # return everything >= this; UI slider filters above it
@@ -173,8 +174,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"waymonet-dash :{PORT} | weights={WEIGHTS} | db={'yes' if os.path.exists(DB) else 'no'}",
+    print(f"waymonet-dash {HOST}:{PORT} | weights={WEIGHTS} | db={'yes' if os.path.exists(DB) else 'no'}",
           flush=True)
     model()  # warm the model at startup so the first request isn't slow
     print("model warm — serving", flush=True)
-    ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
