@@ -90,6 +90,28 @@ learned the 13 recovered Waymos *as negatives*).
 **Gate:** same held-out-camera acceptance (recall @ 100% precision, 0 FP); compare to Run 1 (96.3% R).
 **Status:** PENDING — open whether to collect to ~200 positives first (now 132 / 91 cameras).
 
+## Attached full rescore + RUN_1↔RUN_2 eval (RUN_2 onward)
+Score EVERY candidate with the new weights on the rented GPU (minutes) instead of ~5-9 h on the
+homebox, and diff it against RUN_1. Bolt onto the end of the train job (train → gate → rescore):
+1. **VPS, before renting:** `.venv/bin/python eval/export_score_manifest.py --out /tmp/run2_manifest.csv`
+   (one row per candidate-with-frame + its frozen RUN_1 `wn_conf`; ~32 k rows). Stage frames too:
+   `tar czf /tmp/cand_frames.tgz -C data candidates` (~1.9 GB) — pull to the laptop with the train bundle.
+2. **GPU box, after the gate:** untar frames to `/workspace/candidates`, upload the manifest, then
+   `/venv/main/bin/python /workspace/eval/rescore_all.py --weights <run>/weights/best.pt
+   --frames-dir /workspace/candidates --manifest /workspace/run2_manifest.csv
+   --out /workspace/run2_scored.csv --device 0` (~2–5 min on a 4090; `stream=True`, bounded memory).
+3. **VPS, report:** rsync `run2_scored.csv` home, then
+   `.venv/bin/python eval/run2_report.py --csv run2_scored.csv --email`. This:
+   - stores RUN_1 (frozen) + RUN_2 in a NEW `model_scores(run_tag, candidate_id, conf, bbox, …)` table
+     in waymo.db (the live `wn_*` columns are untouched) — compare any two runs with a self-join;
+   - prints/emails the **CONTRADICTIONS** — rejects the model now calls Waymo (**Waymos poisoning the
+     negatives** — recover them) and confirmed Waymos it now scores ~0 (miss/mislabel) — plus the
+     RUN_1→RUN_2 hit-rate movement per status.
+
+**Timing:** the rescore adds only ~2–5 min to the rental. Whole job ≈ train (~30–70 min at this dataset
+size — ~1.9 k train images, ×10 hard negatives) + gate (~1 min) + rescore (~3 min) ≈ **~40–75 min,
+~$0.30–0.50**. The ~1.9 GB frame upload is the only real cost — do it off the clock.
+
 ## Don't over-read Run 1
 - **Tiny val (27 positives):** 96.3% recall = 26/27 (a single miss moves it ~3.7 pts); 0/162 FP
   is encouraging but a small sample. Treat as a strong **smoke test**, not a precise estimate.

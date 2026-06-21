@@ -21,6 +21,7 @@ Usage: build_real_dataset.py [--db data/waymo.db] [--out data/dataset_real]
 Run on the VPS (where waymo.db + candidate jpgs live), then rsync --out to the GPU box.
 """
 import argparse
+import glob
 import json
 import os
 import random
@@ -31,7 +32,8 @@ import cv2
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VAL_FRACTION = 0.25   # fraction of positive-bearing cameras held out (>=1)
-NEG_RATIO = 6.0       # max negatives per positive — highest-scoring rejects first (hardest)
+NEG_RATIO = 6.0       # max ORDINARY negatives per positive — highest-scoring rejects first (hardest)
+HARD_WEIGHT = 10      # TRAIN oversample for hard_negatives (the model's own FPs); val keeps them x1
 SEED = 7
 
 
@@ -45,6 +47,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default=os.path.join(BASE, "data", "waymo.db"))
     ap.add_argument("--out", default=os.path.join(BASE, "data", "dataset_real"))
+    ap.add_argument("--hard-dir", default=os.path.join(BASE, "data", "hard_negatives"),
+                    help="dir of hard-negative full frames (model's own FPs); weighted in TRAIN")
+    ap.add_argument("--hard-weight", type=int, default=HARD_WEIGHT,
+                    help=f"TRAIN oversample factor for hard negatives (default {HARD_WEIGHT}; for ablation)")
     a = ap.parse_args()
     random.seed(SEED)
     con = sqlite3.connect(a.db, timeout=60)
@@ -68,11 +74,24 @@ def main():
     # (roof-box/i-pac/funny/van_roof); positives = confirmed-real but low-SNR/partial views
     # (edge_positive, 2026-06-18) that would dilute dome-specificity and manufacture FPs if trained
     # on — kept as eval-only true-positives for recall testing.
+    # hard negatives = the model's OWN false positives, curated in data/hard_negatives/ (v2 set):
+    # the highest-signal negatives (cars RUN_1 flagged as Waymos but the user rejected). They are
+    # status='reject' too, so we pull them OUT of the ordinary pool and weight them in TRAIN (val
+    # keeps them x1 — never oversample val). Match dir files -> DB rows by frame basename to recover
+    # camera_id for the by-camera split (cam=None if no longer in the DB -> defaults to train).
+    cam_by_base = {os.path.basename(fp): cam for cam, fp in con.execute(
+        "SELECT camera_id, frame_path FROM candidates WHERE frame_path IS NOT NULL").fetchall() if fp}
+    hard_files = sorted(glob.glob(os.path.join(a.hard_dir, "*_frame.jpg")))
+    hard = [(cam_by_base.get(os.path.basename(f)), f) for f in hard_files if os.path.exists(f)]
+    hard_base = {os.path.basename(f) for f in hard_files}
+
+    # ordinary vetted rejects = explicit human rejects MINUS the hard set, hardest (highest-score) first.
+    # The 13 RUN_1-recovered Waymos are status='waymo' now, so this status='reject' query excludes them.
     rejects = [(cam, fp) for cam, fp in con.execute(
         "SELECT camera_id, frame_path FROM candidates WHERE status='reject' "
         "AND special IS NULL "
         "AND frame_path IS NOT NULL ORDER BY score DESC").fetchall()
-        if fp and os.path.exists(fp)]
+        if fp and os.path.exists(fp) and os.path.basename(fp) not in hard_base]
 
     if not pos:
         raise SystemExit("no confirmed Waymos in the DB yet — confirm candidates first "
@@ -120,6 +139,16 @@ def main():
         shutil.copy(fp, os.path.join(a.out, "images", s, f"neg_{j:05d}.jpg"))
         counts[s]["neg"] += 1   # no label file = background (Ultralytics convention)
 
+    # hard negatives: model's own FPs — TRAIN x{hard_weight} (emphasis), VAL x1 (undistorted FP rate).
+    hard_counts = {"train": 0, "val": 0}
+    for j, (cam, fp) in enumerate(hard):
+        s = "val" if cam in val_cams else "train"
+        reps = a.hard_weight if s == "train" else 1
+        for k in range(reps):
+            shutil.copy(fp, os.path.join(a.out, "images", s, f"neghard_{j:05d}_{k:02d}.jpg"))
+        counts[s]["neg"] += reps
+        hard_counts[s] += reps
+
     open(os.path.join(a.out, "dataset.yaml"), "w").write(
         f"# WaymoNet REAL dataset — built from waymo.db (confirms + vetted rejects).\n"
         f"# Powered by TfL Open Data.\n"
@@ -135,8 +164,9 @@ def main():
     for s in ("train", "val"):
         print(f"  {s}: {counts[s]['pos']} real positives + {counts[s]['neg']} vetted negatives")
     print(f"  positive cameras: {len(pos_cams)} (val: {sorted(val_cams)})")
-    print(f"  pools: {len(pos)} confirms | {len(rejects)} vetted rejects "
-          f"(hardest-first, capped {NEG_RATIO:.0f}:1)")
+    print(f"  pools: {len(pos)} confirms | {len(rejects)} ordinary rejects "
+          f"(hardest-first, capped {NEG_RATIO:.0f}:1) | {len(hard)} hard negatives (model FPs) "
+          f"-> train x{a.hard_weight}={hard_counts['train']} + val x1={hard_counts['val']}")
 
 
 if __name__ == "__main__":
