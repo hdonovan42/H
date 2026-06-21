@@ -1,0 +1,12 @@
+{
+  "name": "historic_lookup",
+  "version": "0.1.0",
+  "description": "CLI for historic stock price lookups with split-adjusted returns",
+  "type": "module",
+  "bin": {
+    "historic_lookup": "./index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
