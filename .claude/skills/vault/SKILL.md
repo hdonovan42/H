@@ -124,13 +124,14 @@ cd projects/VAULT && bash deploy/deploy.sh
 
 VPS is in Helsinki, Finland (Hetzner) — not geo-blocked by Polymarket. To browse the web as if you're in Helsinki (e.g. for Polymarket account management):
 
-### 1. Open the tunnel (in WSL)
-```bash
-ssh -D 0.0.0.0:1080 -N -p 8443 hq@89.167.4.126
+### 1. Open the tunnel (in PowerShell — NOT WSL)
+```powershell
+ssh -D 1080 -N -p 8443 hq@89.167.4.126
 ```
+- **MUST run from PowerShell**, not WSL. WSL2 has its own network namespace — Edge on Windows can't reach WSL's localhost.
 - Port 8443 because uni WiFi blocks non-standard ports; VPS SSH listens on both 22 and 8443
-- `-D 0.0.0.0:1080` binds to all interfaces (WSL2 VM needs this for Windows to reach it)
 - Sits silently when working — no output expected
+- SSH key must be on Windows: `Copy-Item "\\wsl$\Ubuntu\home\hdonovan\.ssh\id_ed25519" ~\.ssh\id_ed25519` (one-time)
 
 ### 2. Copy SSH key to Windows (one-time)
 If Windows SSH doesn't have the key:
@@ -138,16 +139,18 @@ If Windows SSH doesn't have the key:
 Copy-Item "\\wsl$\Ubuntu\home\hdonovan\.ssh\id_ed25519" ~\.ssh\id_ed25519
 ```
 
-### 3. Launch Edge through the proxy (in PowerShell)
+### 3. Launch Edge through the proxy (in a second PowerShell window)
 ```powershell
-& "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --proxy-server="socks5://127.0.0.1:1080"
+& "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --proxy-server="socks5://127.0.0.1:1080" --user-data-dir="C:\Temp\edge-proxy"
 ```
+- `--user-data-dir` gives a fresh profile so it doesn't conflict with the existing Edge session
+- **Must be on one line** — PowerShell breaks if it wraps
 
 ### 4. Verify
 Browse to `whatismyipaddress.com` — should show `89.167.4.126` (Helsinki, Finland).
 
 ### 5. Cleanup
-Ctrl+C the tunnel in WSL when done.
+Ctrl+C the tunnel in PowerShell when done.
 
 ### Notes
 - VPS SSH listens on 8443 via systemd socket override: `/etc/systemd/system/ssh.socket.d/listen.conf`
