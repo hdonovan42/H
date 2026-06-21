@@ -79,11 +79,15 @@ def main():
     # status='reject' too, so we pull them OUT of the ordinary pool and weight them in TRAIN (val
     # keeps them x1 — never oversample val). Match dir files -> DB rows by frame basename to recover
     # camera_id for the by-camera split (cam=None if no longer in the DB -> defaults to train).
-    cam_by_base = {os.path.basename(fp): cam for cam, fp in con.execute(
-        "SELECT camera_id, frame_path FROM candidates WHERE frame_path IS NOT NULL").fetchall() if fp}
-    hard_files = sorted(glob.glob(os.path.join(a.hard_dir, "*_frame.jpg")))
-    hard = [(cam_by_base.get(os.path.basename(f)), f) for f in hard_files if os.path.exists(f)]
-    hard_base = {os.path.basename(f) for f in hard_files}
+    meta_by_base = {os.path.basename(fp): (cam, st) for cam, fp, st in con.execute(
+        "SELECT camera_id, frame_path, status FROM candidates WHERE frame_path IS NOT NULL").fetchall()
+        if fp}
+    hard = []                                  # STATUS is the source of truth: a recovered Waymo/edge-
+    for f in sorted(glob.glob(os.path.join(a.hard_dir, "*_frame.jpg"))):   # positive whose frame lingers
+        cam, st = meta_by_base.get(os.path.basename(f), (None, None))      # in the dir must NEVER be
+        if os.path.exists(f) and st == "reject":                          # trained as a x10 negative
+            hard.append((cam, f))
+    hard_base = {os.path.basename(f) for cam, f in hard}
 
     # ordinary vetted rejects = explicit human rejects MINUS the hard set, hardest (highest-score) first.
     # The 13 RUN_1-recovered Waymos are status='waymo' now, so this status='reject' query excludes them.
