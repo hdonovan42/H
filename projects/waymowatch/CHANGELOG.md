@@ -1,5 +1,35 @@
 # WaymoWatch — Changelog
 
+## v0.8.67 — Pre-YOLO filter is a FRAME GATE, not a localiser; review is model-detection-first + full-frame (2026-06-21)
+
+**How the pre-YOLO bootstrap filter actually works at this stage (the rule, for /notes/):** the cheap
+funnel — `yolo11n` car-detect + `is_white()` — is only a **recall-first FRAME SELECTOR**. It answers
+one question: *"does this frame contain one or more white vehicles?"* It does **NOT** decide *which*
+vehicle is a Waymo, or that any of them is. The candidate's stored bbox is merely whichever white car
+the detector/tracker happened to pick — **there is nothing to imply that box is the best (or the
+Waymo) candidate in the frame.** Treat the funnel as a gate that admits frames; treat **WaymoNet** as
+the thing that finds and localises Waymos within them.
+
+**The bug this corrects (dataset poisoning):** the earlier WaymoNet review matched the model's
+detections to the *funnel's* bbox (IoU ≥ 0.30) and emailed a **crop** of that box. So when a frame held
+a low-confidence non-Waymo (what the funnel cropped) *and* the real Waymo elsewhere, the human reviewed
+the wrong vehicle, and the real Waymo — having no candidate of its own — was invisible. Confirmed case
+**#18973** (New Kings Rd): the funnel cropped a plain white car (model conf **0.039**) while the actual
+Waymo sat bottom-centre (model conf **0.244**, roof dome clearly visible) with **no candidate**; it was
+banked as a hard negative. The review was poisoned at the source.
+
+**Fix — WaymoNet's own detection is the unit of both scoring and review:**
+- **Score** by the model's highest-confidence box **anywhere in the frame** (`top_detection`), never the
+  box that happens to match the funnel bbox.
+- **Review the FULL FRAME** with that top box overlaid (red) + `#id`/conf label — **never a crop** — so a
+  Waymo anywhere in the scene is visible.
+- `collector/scan_rejects.py` rewritten accordingly: re-scans the whole reject pool by top-box conf,
+  emails full-frame blocks (highest conf first), resumable checkpoint (`id,conf,x1,y1,x2,y2`), with a
+  flock single-run guard + `DONE_FLAG` so a scheduled re-fire can't duplicate emails.
+
+**Standing principle going forward:** all trained-model scoring and all human review operate on the
+**full frame** and the **model's own boxes** — the funnel only chooses which frames to look at.
+
 ## v0.8.66 — Dash galleries auto-mirror VPS→homebox; hard_negatives now visible (2026-06-21)
 
 The WaymoNet review dashboard (dash.waymonet.com) is homebox-hosted and **snapshot-fed**, not
