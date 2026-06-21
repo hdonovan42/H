@@ -15,10 +15,11 @@ frame (#40113, healthy ~0.73) to the dash; if the top conf collapses below 0.30 
 `sudo systemctl restart waymonet-dash` (re-warms in ~2 s). Silent degradation now self-heals within 20 min.
 First run: `canary ok conf=0.731`.
 
-**Full re-score.** Reset `wn_scored=0` on all **23,859** live-pool candidates so the worker re-runs them
-through the now-healthy model — resurfacing the Waymos buried during the dead window into the (full-frame)
-digest. Newest-first, so live detection isn't delayed; the canary protects the ~24k re-inferences from
-silently re-degrading mid-run.
+**Targeted re-score.** Only the dead window matters: yesterday's full reject re-scan + reviews ran while the
+model was *healthy* (they produced the 0.763 detections at ~02:11 UTC), and the degradation was later, so
+older data is left as-is. Reset `wn_scored=0` on the **~5,500 candidates captured yesterday + today**; the
+worker re-runs just those through the now-healthy model (~45 min), resurfacing the buried Waymos into the
+(full-frame) digest. Newest-first so live detection isn't delayed; the canary guards against re-degrading.
 
 **Inference stays on the homebox (VPS headroom assessed + rejected).** The VPS is **2 cores at ~1.6 load** —
 the live capture loop alone uses ~1.4 of them (664 MB). Running torch locally would starve the loop (dropped
