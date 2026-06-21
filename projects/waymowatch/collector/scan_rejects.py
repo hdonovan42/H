@@ -47,6 +47,8 @@ COLLECT_FLOOR = 0.03      # "registers a score at all" — same floor as the liv
 BLOCK = 60                # full frames are large -> smaller blocks keep each review email openable
 HTTP_TIMEOUT = 20
 BACKOFF = 60              # wait after a homebox error (it may be restarting/down), then retry
+ZERO_RECHECK = 1          # re-verify an empty result before trusting the zero (per-request flake guard)
+ZERO_RECHECK_DELAY = 0.3  # seconds between an empty pass and its re-verify
 
 
 def infer(frame_path):
@@ -67,6 +69,22 @@ def top_detection(boxes):
         if b["conf"] > best_c:
             best_c = b["conf"]
             best_b = [round(b["x1"], 1), round(b["y1"], 1), round(b["x2"], 1), round(b["y2"], 1)]
+    return best_c, best_b
+
+
+def score_frame(frame_path):
+    """top_detection with RE-VERIFY on empty (mirrors waymonet_worker v0.8.75): an empty pass is
+    re-run up to ZERO_RECHECK times before the zero is trusted, so a per-request model flake can't
+    bury a real Waymo in this final pre-train sweep. Raises on homebox error (caller backs off)."""
+    best_c, best_b = 0.0, None
+    for attempt in range(ZERO_RECHECK + 1):
+        c, b = top_detection(infer(frame_path))
+        if c > best_c:
+            best_c, best_b = c, b
+        if best_c >= COLLECT_FLOOR:
+            break
+        if attempt < ZERO_RECHECK:
+            time.sleep(ZERO_RECHECK_DELAY)
     return best_c, best_b
 
 
@@ -108,13 +126,12 @@ def scan(limit=None):
             f.write(f"{cid},0.0,,,,\n"); f.flush(); i += 1; n += 1
             continue
         try:
-            boxes = infer(frame_path)
+            conf, box = score_frame(frame_path)   # re-verifies empties (per-request flake guard)
         except Exception as e:
             print(f"[{time.strftime('%H:%M:%S')}] infer error id={cid}: {e} — backoff {BACKOFF}s",
                   flush=True)
             time.sleep(BACKOFF)
             continue                              # retry SAME row; progress not lost
-        conf, box = top_detection(boxes)
         bx = ",".join(str(v) for v in box) if box else ",,,"
         f.write(f"{cid},{round(conf, 4)},{bx}\n"); f.flush()
         if conf >= COLLECT_FLOOR:
