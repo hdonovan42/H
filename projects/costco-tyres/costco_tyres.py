@@ -216,47 +216,53 @@ def run_search():
     dvla, mot = fetch_vehicle_report(plate)
     print_vehicle_report(dvla, mot)
 
-    # 2. Show tyre size options
-    sizes = data.get("tireSize", [])
-    if not sizes:
+    # 2. Show tyre fitment options. Each group in `tireSize` is one wheel-size
+    # choice; a group with >1 tyre is a staggered setup (front + rear).
+    groups = [g.get("tyre", []) for g in data.get("tireSize", [])]
+    groups = [g for g in groups if g]
+    if not groups:
         print("\n  No tyre sizes found for this vehicle.")
         return
 
-    flat_sizes = []
-    for group in sizes:
-        for t in group.get("tyre", []):
-            flat_sizes.append(t)
-
-    print(f"\n  Tyre sizes for this vehicle:")
-    for i, t in enumerate(flat_sizes, 1):
-        w, p, r = t["width"], t["profile"], t["rimSize"]
-        speed = t.get("speedRating", "?")
-        load = t.get("loadIndex", "?")
+    def fmt_tyre(t):
         count = t.get("tireCount", 0) + t.get("higherSpeedRatingTireCount", 0)
-        print(f"    [{i}] {w}/{p} R{r} {load}{speed}  ({count} tyres available)")
+        return (f"{t['width']}/{t['profile']} R{t['rimSize']} "
+                f"{t.get('loadIndex','?')}{t.get('speedRating','?')}  "
+                f"({count} tyres available)")
 
-    # 3. Let user pick size(s)
-    if len(flat_sizes) == 1:
-        selected = [flat_sizes[0]]
-        print(f"\n  Auto-selected only size.")
-    else:
-        choice = input(f"\n  Select size [1-{len(flat_sizes)}, or 'all']: ").strip().lower()
-        if choice == "all":
-            selected = flat_sizes
+    print(f"\n  Tyre fitments for this vehicle:")
+    for i, g in enumerate(groups, 1):
+        if len(g) == 1 and g[0].get("tyreType", "Both") == "Both":
+            print(f"    [{i}] {g[0]['rimSize']}\"  {fmt_tyre(g[0])}")
         else:
-            try:
-                idx = int(choice) - 1
-                selected = [flat_sizes[idx]]
-            except (ValueError, IndexError):
-                print("  Invalid choice.")
-                return
+            print(f"    [{i}] {g[0]['rimSize']}\"  Staggered:")
+            for t in g:
+                pos = t.get("tyreType", "?")
+                print(f"          {pos:<5}  {fmt_tyre(t)}")
+
+    # 3. Let user pick a fitment (whole group). Staggered groups search all sizes.
+    if len(groups) == 1:
+        selected = groups[0]
+        if len(selected) > 1:
+            print(f"\n  Auto-selected staggered fitment ({len(selected)} sizes).")
+        else:
+            print(f"\n  Auto-selected only fitment.")
+    else:
+        choice = input(f"\n  Select fitment [1-{len(groups)}]: ").strip()
+        try:
+            selected = groups[int(choice) - 1]
+        except (ValueError, IndexError):
+            print("  Invalid choice.")
+            return
 
     # 4. Search for Michelin tyres
     for size in selected:
         w, p, r = size["width"], size["profile"], size["rimSize"]
         speed = size.get("speedRating", "?")
         load = size.get("loadIndex", "?")
-        size_str = f"{w}/{p} R{r} {load}{speed}"
+        pos = size.get("tyreType", "Both")
+        pos_label = f"{pos} — " if pos in ("Front", "Rear") else ""
+        size_str = f"{pos_label}{w}/{p} R{r} {load}{speed}"
 
         print(f"\n  Searching Michelin tyres for {size_str}...")
 
