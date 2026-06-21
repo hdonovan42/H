@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 """WaymoNet review email — the human precision gate for the model's own candidates.
 
-Emails the candidates WaymoNet flagged (wn_hit=1) that haven't been reviewed or sent yet,
-ranked by model confidence. The user replies with the # of any real Waymo; reply handling is
-the EXISTING `live_capture.py --confirm` / `--reject` (confirms -> fresh positives, denies ->
-fresh hard negatives). Reuses the digest sheet builder + the Resend sender, so nothing about
-the review/confirm flow changes — only the candidate SOURCE (WaymoNet instead of the dome scorer).
+Emails the candidates WaymoNet flagged (wn_hit=1), ranked by model confidence, as FULL FRAMES with
+the model's own detection box drawn in red — NEVER a crop. The bootstrap funnel's bbox only means
+"a white vehicle is somewhere here", not which vehicle is the Waymo, so both review AND banking use
+the model's box (wn_bbox) on the whole frame. Reply with the # of any real Waymo:
+  --confirm IDS -> positives, captured as the full frame + the MODEL box (bbox set to wn_bbox)
+  --reject  IDS -> hard_negatives (the frame is the negative background)
 
-  .venv/bin/python collector/waymonet_digest.py            # send pending wn_hit candidates
-  .venv/bin/python collector/waymonet_digest.py --dry-run  # build the sheet, don't send/mark
+  waymonet_digest.py                 # send pending wn_hit candidates (>= --min, or --force)
+  waymonet_digest.py --dry-run       # build the sheet, don't send/mark
 
 Powered by TfL Open Data.
 """
 import argparse
+import json
 import os
+import shutil
 import sqlite3
 import sys
 
@@ -27,38 +30,37 @@ sys.path.insert(0, HERE)
 from email_alert import send_email              # noqa: E402  (lightweight: requests only — NO torch)
 
 MAX_CELLS = 200
+REAL_DIR = os.path.join(BASE, "data", "real_positives")    # WaymoNet-path confirms -> positives
+HARD_DIR = os.path.join(BASE, "data", "hard_negatives")    # WaymoNet-path rejects -> v2 hard negatives
 
 
-def _build_sheet(rows, out_path, cols=6, cap=200):
-    """Grid of cells labelled '#id conf'. rows = [(id, conf, crop_path, frame_path), ...].
-    Returns count shown. If a candidate's crop is missing/unreadable, falls back to the FULL
-    frame (labelled '[frame]') so a flagged candidate is NEVER silently dropped from review.
-    Inlined (not imported from live_capture) so this stays torch-free on the VPS."""
+def _build_frame_sheet(rows, out_path, cols=4, cap=MAX_CELLS):
+    """Grid of FULL FRAMES with the model's box drawn red. rows = [(id, conf, box, frame_path), ...]
+    (box = [x1,y1,x2,y2] or None). The whole scene is shown so a Waymo ANYWHERE in the frame is
+    reviewable — never the funnel crop of one vehicle. Returns count shown."""
     cells = []
-    for cid, sc, cp, fp in rows[:cap]:
-        im = cv2.imread(cp) if cp else None
-        tag = ""
-        if im is None and fp:                       # no usable crop -> show the whole frame instead
-            im = cv2.imread(fp)
-            tag = " [frame]"
+    for cid, sc, box, fp in rows[:cap]:
+        im = cv2.imread(fp) if fp else None
         if im is None:
             continue
-        c = cv2.resize(im, (200, 150), interpolation=cv2.INTER_NEAREST)
-        cv2.rectangle(c, (0, 0), (150 if tag else 96, 20), (0, 0, 0), -1)
-        cv2.putText(c, f"#{cid} {sc:.2f}{tag}", (3, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 255, 255), 1)
+        c = im.copy()
+        if box:
+            x1, y1, x2, y2 = [max(0, int(round(v))) for v in box]
+            cv2.rectangle(c, (x1, y1), (x2, y2), (0, 0, 255), 2)        # red = the model's box
+        cv2.rectangle(c, (0, 0), (132, 20), (0, 0, 0), -1)
+        cv2.putText(c, f"#{cid} {sc:.2f}", (3, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
         cells.append(c)
     shown = len(cells)
     if shown == 0:
         return 0
-    cells += [np.full((150, 200, 3), 35, np.uint8)] * ((-len(cells)) % cols)
+    H = max(c.shape[0] for c in cells)
+    W = max(c.shape[1] for c in cells)
+    cells = [cv2.copyMakeBorder(c, 0, H - c.shape[0], 0, W - c.shape[1],
+                                cv2.BORDER_CONSTANT, value=(35, 35, 35)) for c in cells]
+    cells += [np.full((H, W, 3), 35, np.uint8)] * ((-len(cells)) % cols)
     grid = np.vstack([np.hstack(cells[i:i + cols]) for i in range(0, len(cells), cols)])
     cv2.imwrite(out_path, grid)
     return shown
-
-
-REAL_DIR = os.path.join(BASE, "data", "real_positives")    # WaymoNet-path confirms -> positives
-HARD_DIR = os.path.join(BASE, "data", "hard_negatives")    # WaymoNet-path rejects -> v2 hard negatives
-                                                           # (a FRESH set — NOT the bootstrap reject pool)
 
 
 def _ids(s):
@@ -66,34 +68,46 @@ def _ids(s):
 
 
 def bank(con, ids, status, dest):
-    """Copy each candidate's frame+crop into `dest` and set its DB status. The WaymoNet review path:
-    confirm -> real_positives (status=waymo); reject -> hard_negatives (status=reject) — the model's
-    OWN false positives, kept separate from the bootstrap funnel's reject pool for the next dataset."""
-    import shutil
+    """confirm -> positives captured at the MODEL box (wn_bbox: re-crop the frame there + set bbox);
+    reject -> hard_negatives (the frame is the negative background). NEVER banks the funnel crop as a
+    positive — that was the wrong vehicle."""
     os.makedirs(dest, exist_ok=True)
     n = 0
     for cid in ids:
-        row = con.execute("SELECT crop_path, frame_path FROM candidates WHERE id=?", (cid,)).fetchone()
+        row = con.execute("SELECT crop_path, frame_path, wn_bbox FROM candidates WHERE id=?",
+                          (cid,)).fetchone()
         if not row:
             print(f"  #{cid}: not found")
             continue
-        for p in row:
-            if p and os.path.exists(p):
-                shutil.copy(p, os.path.join(dest, os.path.basename(p)))
-        con.execute("UPDATE candidates SET status=? WHERE id=?", (status, cid))
+        cp, fp, wnb = row
+        box = json.loads(wnb) if wnb else None
+        if status == "waymo" and fp and os.path.exists(fp) and box:
+            con.execute("UPDATE candidates SET status='waymo', special=NULL, bbox=? WHERE id=?",
+                        (json.dumps([int(round(v)) for v in box]), cid))
+            img = cv2.imread(fp)
+            x1, y1, x2, y2 = [max(0, int(round(v))) for v in box]
+            crop = img[y1:y2, x1:x2]
+            if crop.size > 0:
+                cv2.imwrite(os.path.join(dest, os.path.basename(fp).replace("_frame.jpg", ".jpg")), crop)
+            shutil.copy(fp, os.path.join(dest, os.path.basename(fp)))
+        else:                                     # reject (or waymo w/o a model box) -> copy frame+crop
+            con.execute("UPDATE candidates SET status=? WHERE id=?", (status, cid))
+            for p in (cp, fp):
+                if p and os.path.exists(p):
+                    shutil.copy(p, os.path.join(dest, os.path.basename(p)))
         n += 1
     con.commit()
     print(f"banked {n} -> {status}  ({dest})")
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Email WaymoNet's flagged candidates for review.")
+    ap = argparse.ArgumentParser(description="Email WaymoNet's flagged candidates (full frame) for review.")
     ap.add_argument("--limit", type=int, default=MAX_CELLS)
-    ap.add_argument("--min", type=int, default=30, dest="min_pile",
+    ap.add_argument("--min", type=int, default=10, dest="min_pile",
                     help="only send once at least this many unsent flagged candidates have piled up")
     ap.add_argument("--force", action="store_true", help="send now regardless of --min")
     ap.add_argument("--dry-run", action="store_true", help="build the sheet but don't send or mark")
-    ap.add_argument("--confirm", default="", help="ids -> waymo, copied to data/real_positives/")
+    ap.add_argument("--confirm", default="", help="ids -> waymo (frame + model box) in real_positives/")
     ap.add_argument("--reject", default="", help="ids -> reject, copied to data/hard_negatives/")
     ap.add_argument("--reject-rest", action="store_true",
                     help="reject ALL reviewed-but-unconfirmed (wn_sent=1, still 'new') -> hard_negatives")
@@ -113,7 +127,7 @@ def main():
         bank(con, rest, "reject", HARD_DIR)
         return
     rows = con.execute(
-        "SELECT id, wn_conf, crop_path, frame_path FROM candidates "
+        "SELECT id, wn_conf, wn_bbox, frame_path FROM candidates "
         "WHERE wn_hit=1 AND COALESCE(wn_sent,0)=0 AND status NOT IN ('waymo','reject') "
         "ORDER BY wn_conf DESC LIMIT ?", (a.limit,)).fetchall()
     if not rows:
@@ -123,27 +137,28 @@ def main():
         print(f"only {len(rows)} flagged (< {a.min_pile}) — holding until {a.min_pile} pile up")
         return
 
+    sheet_rows = [(r[0], r[1], json.loads(r[2]) if r[2] else None, r[3]) for r in rows]
     sheet = os.path.join(BASE, "data/candidates/waymonet_review.jpg")
-    shown = _build_sheet(rows, sheet, cap=len(rows))
+    shown = _build_frame_sheet(sheet_rows, sheet, cap=len(sheet_rows))
     lo, hi = rows[-1][1], rows[0][1]
-    subj = f"WaymoWatch: WaymoNet flagged {shown} candidate(s) for review (conf {lo:.2f}–{hi:.2f})"
+    subj = f"WaymoWatch: WaymoNet flagged {shown} candidate(s) — FULL FRAMES (conf {lo:.2f}–{hi:.2f})"
     html = (
-        f"<p><b>WaymoNet</b> (the trained model) flagged these <b>{shown}</b> candidate(s) as a "
-        f"possible Waymo (any detection at conf &ge; 0.03). Labelled with the model confidence.</p>"
-        f"<p>Reply with the <b>#</b> of any that is a real Waymo (white Jaguar I-PACE, dark roof "
-        f"dome). Everything you don't flag becomes a hard negative — the model is building its own "
-        f"higher-signal dataset.</p>"
+        f"<p><b>WaymoNet</b> flagged these <b>{shown}</b> candidate(s) (conf &ge; 0.03), highest first. "
+        f"Each cell is the <b>FULL FRAME</b> with the model's box drawn in <b>red</b> and labelled "
+        f"#id + conf — so you see the whole scene and exactly what the model detected, never a crop.</p>"
+        f"<p>Reply with the <b>#</b> of any frame with a real Waymo (white Jaguar I-PACE, dark roof "
+        f"dome). Everything you don't flag becomes a hard negative — the model curates its own dataset.</p>"
         f"<p style='color:#888'>Powered by TfL Open Data.</p>")
 
     if a.dry_run:
-        print(f"[dry-run] {shown} candidate(s), conf {lo:.2f}–{hi:.2f} -> {sheet} (not sent)")
+        print(f"[dry-run] {shown} full-frame candidate(s), conf {lo:.2f}–{hi:.2f} -> {sheet} (not sent)")
         return
     if shown and send_email(subj, html, attachments=[sheet]):
         ids = [r[0] for r in rows]
         con.execute("UPDATE candidates SET wn_sent=1 WHERE id IN (%s)"
                     % ",".join(str(int(i)) for i in ids))
         con.commit()
-        print(f"sent {shown} WaymoNet candidate(s) for review; marked wn_sent=1")
+        print(f"sent {shown} WaymoNet candidate(s) for review (full frames); marked wn_sent=1")
     else:
         print("send failed or nothing to show — leaving wn_sent=0 for retry")
 

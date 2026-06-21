@@ -1,6 +1,6 @@
 # WaymoWatch — Changelog
 
-## v0.8.69 — Recovery banked (+13 positives); nested dash review; digest now 10:00/22:00 + 30-pile (2026-06-21)
+## v0.8.69 — Recovery banked (+13 positives); nested dash review; digest now FULL-FRAME + 10:00/22:00 + 10-pile (2026-06-21)
 
 Three things this session: the v0.8.68 recovery was **banked**, the dash gained **nested review galleries**,
 and the WaymoNet digest got a **time-based schedule** so reviews never wait days.
@@ -26,13 +26,22 @@ a **collapsible parent group with child galleries** (registry emits `{name, chil
 groups recursively). Used to review the recovery sets full-screen — the dash redraws fresh boxes on click
 — under one `temp review` parent (`recovered waymos` / `hard negatives`); galleries removed after banking.
 
-### 3. WaymoNet digest schedule — no more multi-day waits
-Previously the digest held until N candidates piled up, which at a low hit-rate could sit for **days**. Now:
-- **Immediate trigger at 30** — hourly check sends if ≥30 unsent (`waymonet_digest.py --min 30`).
-- **Scheduled flush at 10:00 and 22:00 Europe/London** (`--force`, `CRON_TZ=Europe/London`) — sends however
-  many are queued, **never an empty email**.
-A review email now arrives at worst every 12 h, sooner if 30 accrue. (VPS runs UTC; `CRON_TZ` keeps the
-clock times correct across BST/GMT. Cron-only change; no code change.)
+### 3. WaymoNet digest — FULL FRAMES, and a time-based schedule
+**Full frames, never crops (FIX).** `waymonet_digest.py` was still emailing the funnel **crop** — the same
+wrong-box poisoning v0.8.67 fixed for the reject scan, missed here. It now emails the **FULL FRAME with the
+model's box (`wn_bbox`) drawn in red** + #id/conf, and **`--confirm` banks positives at the model box**
+(re-crops the frame, sets `candidates.bbox`), never the funnel crop. (`_build_frame_sheet`, mirroring
+`scan_rejects.py`.)
+
+**Schedule — no more multi-day waits.** Previously held until N piled up (could sit for days at a low rate). Now:
+- **Immediate trigger at 10** — hourly check sends if ≥10 unsent (`--min 10`).
+- **Forced flush at 10:00 and 22:00 Europe/London** (`--force`, `CRON_TZ=Europe/London`) — sends whatever's
+  queued, **never an empty email**.
+A review email now lands at worst every 12 h, sooner if 10 accrue. (VPS runs UTC; `CRON_TZ` keeps the times
+correct across BST/GMT.)
+
+NB the **legacy bootstrap/dome recovery email** (`live_capture.py` 23:00) still builds crop sheets
+(`_build_sheet`) — it's the dome-scorer path being retired; flag to convert or disable separately.
 
 ## v0.8.68 — Trained model retroactively recovers 14 Waymos wrongly binned in the reject pool (2026-06-21)
 
