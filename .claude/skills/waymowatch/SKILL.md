@@ -34,7 +34,7 @@ video clips, autonomously, 24/7. Confirmed sightings become the real training se
 **WaymoNet**. Key confuser: **Wayve** also runs white I-PACEs — flat roof **BAR** vs dome
 is the only low-res discriminator.
 
-- **Repo path**: `projects/waymowatch/` (branch `waymowatch`; commit+push there)
+- **Repo path**: `projects/waymowatch/` (commit + push to `main` — the `waymowatch` branch is retired)
 - **VPS**: `89.167.4.126` user `hq`, path `/home/hq/waymowatch` (root@ if sudo needed)
 - **Local venv**: `projects/waymowatch/.venv` (cv2, torch-cpu, ultralytics 8.4.63, openvino)
 - **Alerts/digests**: Resend email → donovanh59@gmail.com (key in VPS `.env`, chmod 600)
@@ -141,23 +141,18 @@ ROOF_TOP/BOTTOM/INSET −0.06/0.22/0.28 (single source of truth — eval scripts
 ```
 Then re-anchor PROB_TH/NEAR_TH/ALERT_TH from the live score distribution at the new scale.
 
-## Branch workflow (user-established 2026-06-10)
+## Single-branch workflow (the `waymowatch` branch was RETIRED 2026-06-21)
 
-WaymoWatch work happens on the `waymowatch` branch; the dashboard session works directly on
-`main`. **Since 2026-06-11 the public site lives at https://waymonet.com** (VPS nginx, NOT
-GitHub Pages): source = `projects/waymowatch/site/`, deploy =
-`rsync -az projects/waymowatch/site/ root@89.167.4.126:/var/www/waymonet/` — dashboard
-changes no longer need a merge to main to publish. The old
-`projects/waymowatch/index.html` is a redirect stub to waymonet.com (that one IS
-GitHub-Pages-served, as is projects/projects.html, link text "WaymoNet").
-The full cycle — never skip step 3:
-1. Commit + push work to `waymowatch`.
-2. When the user agrees: `git checkout main && git pull --ff-only && git merge --no-ff
-   waymowatch && git push` (pull first — the dashboard session pushes to main directly).
-3. **Immediately merge main BACK into waymowatch** (`git checkout waymowatch && git merge
-   origin/main && git push`) so the branches never drift. This also pulls the dashboard
-   session's main-only commits into waymowatch. Verify with
-   `git log waymowatch..origin/main --oneline` → must be empty.
+All work now lands directly on `main`. The `waymowatch` branch was deleted once it had fully
+converged with main (nothing left to merge) — there is **no more branch dance**: just commit +
+push to `main`. NB everything on `main` is **PUBLIC** (GitHub Pages serves the whole repo) — never
+commit secrets; scan diffs before pushing backend files.
+
+The public site lives at https://waymonet.com (VPS nginx, NOT GitHub Pages): source =
+`projects/waymowatch/site/`, deploy = `cd projects/waymowatch/site && ./deploy.sh`
+(rsyncs to `root@vps-hel1:/var/www/waymonet/`; the `/notes` page fetches `notes.md` live, so a
+reload shows edits with no rebuild). The old `projects/waymowatch/index.html` is a redirect stub
+to waymonet.com (that one IS GitHub-Pages-served, as is projects/projects.html, link "WaymoNet").
 
 **API contract rule**: the dashboard (separate session; site source in
 `projects/waymowatch/site/`, served at https://waymonet.com same-origin) consumes
@@ -179,4 +174,5 @@ step). Adding new fields is safe (additive); renames/removals/semantic changes a
   <ids>` on the VPS (after --confirm + centroid rsync) — ONE email (echoes + new-to-you
   sheet), retro every >=5 confirms or --force-retro after bar changes, rejcheck weekly.
   "No waymos" verdict -> `collector/bank_shown.py` (banks exactly the recorded shown ids)
-- Auto-commit + CHANGELOG + push to `waymowatch` branch for any major revision
+- Auto-commit + CHANGELOG + push to `main` for any major revision (same behaviour as before, just
+  on `main` now that the `waymowatch` branch is retired)
