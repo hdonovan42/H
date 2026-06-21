@@ -4,7 +4,9 @@ import { executeAnyToolCall, getAllModules } from './capabilities/registry.js'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync, readFileSync } from 'node:fs'
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
+
+const CAPABILITY_ID_RE = /^[a-z0-9][a-z0-9_-]*$/i
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -182,6 +184,10 @@ export function deployVerifyCapability(capabilityId, baselinePackageJson) {
 export function coldVerifyCapability(capabilityId) {
   console.log(`[Verify] Cold-verify starting for ${capabilityId}`)
 
+  if (!CAPABILITY_ID_RE.test(capabilityId)) {
+    return { success: false, evidence: `Cold verify FAILED: invalid capabilityId "${capabilityId}" (must match ${CAPABILITY_ID_RE})` }
+  }
+
   const capPath = resolve(__dirname, `capabilities/${capabilityId}.js`)
   if (!existsSync(capPath)) {
     return { success: false, evidence: `Cold verify FAILED: file not found — ${capPath}` }
@@ -190,10 +196,15 @@ export function coldVerifyCapability(capabilityId) {
   // Use process.execPath so the subprocess uses the SAME Node binary as the
   // running server (nvm v22 under PM2), not whatever bare `node` resolves to.
   const nodeBin = process.execPath
-  const cmd = `"${nodeBin}" -e "import('dotenv').then(d=>d.config()).catch(()=>{}).then(()=>import('./capabilities/${capabilityId}.js')).then(m=>(m.default||m).verify()).then(r=>{console.log(JSON.stringify(r));if(!r.operational)process.exit(1)}).catch(e=>{console.error(e.message);process.exit(1)})"`
+  const script = `import('dotenv').then(d=>d.config()).catch(()=>{}).then(()=>import('./capabilities/${capabilityId}.js')).then(m=>(m.default||m).verify()).then(r=>{console.log(JSON.stringify(r));if(!r.operational)process.exit(1)}).catch(e=>{console.error(e.message);process.exit(1)})`
 
   try {
-    const stdout = execSync(cmd, { encoding: 'utf-8', timeout: 30000, cwd: __dirname })
+    const stdout = execFileSync(nodeBin, ['-e', script], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      cwd: __dirname,
+      shell: false,
+    })
     const result = JSON.parse(stdout.trim())
 
     if (!result.operational) {
@@ -207,7 +218,7 @@ export function coldVerifyCapability(capabilityId) {
     console.log(`[Verify] Cold-verify ${capabilityId}: PASSED`)
     return { success: true, evidence: `Cold verify PASSED: ${result.evidence}` }
   } catch (err) {
-    const detail = (err.stderr || err.message || '').slice(0, 500)
+    const detail = ((err.stderr?.toString?.() || err.message || '')).slice(0, 2000)
     console.log(`[Verify] Cold-verify ${capabilityId}: FAILED — ${detail}`)
     return { success: false, evidence: `Cold verify FAILED: ${detail}` }
   }

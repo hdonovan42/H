@@ -1,6 +1,6 @@
 // SP-Backup: Self-Preservation Capability Module for AXIOM v2
 // Integrates with the capability registry to provide backup tools
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,20 +10,19 @@ const BACKUP_SCRIPT = resolve(__dirname, 'sp-backup', 'backup.sh')
 const CONFIG_FILE = resolve(__dirname, 'sp-backup', 'config.json')
 const TIMEOUT = 120_000 // 2 minute timeout for backup operations
 
-function runBackupCommand(subcommand, args = '') {
+function runBackupCommand(subcommand, ...extraArgs) {
   try {
-    const cmd = `/bin/bash "${BACKUP_SCRIPT}" ${subcommand} ${args}`.trim()
-    const output = execSync(cmd, {
+    const output = execFileSync('/bin/bash', [BACKUP_SCRIPT, subcommand, ...extraArgs], {
       encoding: 'utf-8',
       timeout: TIMEOUT,
       maxBuffer: 1024 * 1024,
-      cwd: resolve(__dirname, 'sp-backup')
+      cwd: resolve(__dirname, 'sp-backup'),
+      shell: false,
     })
     return output.trim()
   } catch (err) {
-    // execSync throws on non-zero exit, but we still want stdout
-    const stdout = err.stdout ? err.stdout.trim() : ''
-    const stderr = err.stderr ? err.stderr.trim() : ''
+    const stdout = err.stdout ? err.stdout.toString().trim() : ''
+    const stderr = err.stderr ? err.stderr.toString().trim() : ''
     return `Error (exit ${err.status}): ${stdout}\n${stderr}`.trim()
   }
 }
@@ -132,12 +131,17 @@ export default {
         if (!input?.confirm) {
           return `Safety check: set confirm: true to execute restore of snapshot "${input.snapshot}"`
         }
-        const target = input.target || ''
-        const confirmFlag = '--confirm'
-        if (target) {
-          return runBackupCommand('restore', `"${input.snapshot}" "${target}" ${confirmFlag}`)
+        if (!/^[A-Za-z0-9._-]+$/.test(input.snapshot)) {
+          return `Error: snapshot name "${input.snapshot}" contains invalid characters (allowed: A-Z, a-z, 0-9, ., _, -)`
         }
-        return runBackupCommand('restore', `"${input.snapshot}" ${confirmFlag}`)
+        const target = input.target || ''
+        if (target && !/^[A-Za-z0-9._/-]+$/.test(target)) {
+          return `Error: target path "${target}" contains invalid characters`
+        }
+        const args = target
+          ? ['restore', input.snapshot, target, '--confirm']
+          : ['restore', input.snapshot, '--confirm']
+        return runBackupCommand(...args)
       }
 
       case 'backup_verify':

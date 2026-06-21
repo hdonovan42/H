@@ -257,8 +257,8 @@ If you DO use workspace helper files, the registry module can import them from .
 YOUR DELIVERABLES — execute in THIS order, using the EXACT commands shown:
 
 1. INSTALL DEPS (if needed — skip if none):
-   exec_command("npm install <pkg> 2>&1 | tail -3")
-   This works on the first try. cwd is server/. Do NOT cd anywhere. Do NOT guess paths.
+   exec_command("npm install <pkg>")
+   exec_command tokenizes without a shell — no pipes, redirects, or $(...). stdout AND stderr are both returned. This works on the first try. cwd is server/. Do NOT cd anywhere. Do NOT guess paths.
 
 2. WRITE THE MODULE via read_write_file to ${capabilityId}/${capabilityId}.js
    This is your main deliverable. Prefer writing everything in this single file.
