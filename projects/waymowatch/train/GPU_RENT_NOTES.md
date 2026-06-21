@@ -72,6 +72,24 @@ on real data). **Shipped the gate on the first real-data run.**
 **Artifacts:** `~/waymonet_run1/` (best.pt 20 MB, best.onnx 37 MB @704, results.csv, curves,
 confusion matrix).
 
+## Run 2 — (in progress, 2026-06-21)
+RUN_1 was used to re-score the existing dataset and **decontaminate** it (the biggest win). Plan:
+warm-start from RUN_1 `best.pt` and retrain on the entire cleaned, larger set.
+**Dataset (vs Run 1: 100 boxes / 98 frames / 76 cameras):**
+- **Positives: 132 Waymos / 129 frames / 91 cameras** (+32). Split of the gain:
+  **x = 13 removed from the NEGATIVES** (were `reject`; RUN_1 scoring caught them — they were
+  poisoning the negative set: the headline win), **y = 5 from the unreviewed backlog** (+19 more
+  confirmed from post-baseline live collection, not cleanly attributable). Earliest positive 2026-06-10.
+- **Negatives:** vetted reject pool (hardest-first) **minus the 13 recovered Waymos**, plus
+  **hard_negatives = 133** — RUN_1's OWN false positives (cars it thought were Waymos but weren't;
+  highest-signal) — **weighted ×10** (oversampled in the manifest).
+- special/edge_positive (2) excluded from training (as Run 1).
+**Model/stack:** unchanged (YOLO26s-P2 @704, ultralytics 8.4.63, 4090 ~19 min, ~$0.20).
+**Start checkpoint:** warm-start from RUN_1 `best.pt` (open: vs fresh COCO transfer — RUN_1's weights
+learned the 13 recovered Waymos *as negatives*).
+**Gate:** same held-out-camera acceptance (recall @ 100% precision, 0 FP); compare to Run 1 (96.3% R).
+**Status:** PENDING — open whether to collect to ~200 positives first (now 132 / 91 cameras).
+
 ## Don't over-read Run 1
 - **Tiny val (27 positives):** 96.3% recall = 26/27 (a single miss moves it ~3.7 pts); 0/162 FP
   is encouraging but a small sample. Treat as a strong **smoke test**, not a precise estimate.
