@@ -1,5 +1,23 @@
 # WaymoWatch — Changelog
 
+## v0.8.76 — Reject-pruning tool (dash.waymonet.com/prune) (2026-06-21)
+
+A fast keyboard-driven interface to hand-prune the reject pool for future training runs. A
+**🗑 Prune rejects** button in the dash header opens `/prune/` — a random reject frame; **→/←**
+traverse (forward = new random, re-walking history if you went back; back = same order); **`1`** prunes
+the current frame + advances; **`u`** undoes the last prune (valid only until the next keypress); no
+confirm dialogs.
+
+PRUNE is a **reversible status flip** `reject`→`pruned` (never a file delete): the row/frame/hourly
+backup are all kept, `build_real_dataset.py` (`status='reject'`) stops using it, and undo is one step.
+Recover everything: `UPDATE candidates SET status='reject' WHERE status='pruned'`.
+
+Architecture: the reject DB + 7,612 frames live on the VPS, so the tool runs there —
+`dashboard/prune_server.py` (systemd **`waymonet-prune`**, `127.0.0.1:3107`), surfaced via an nginx
+`location /prune/` on dash.waymonet.com (inherits the existing basic-auth + TLS; no new exposure). The
+homebox dash (a pure viewer with no DB) just links to it. Safe alongside the live loop + the running
+reject sweep (WAL DB, brief per-row writes). Verified end-to-end: prune→`pruned`, undo→`reject`.
+
 ## v0.8.75 — Transient-miss class CLOSED: re-verify zeros + audit trail (2026-06-21)
 
 **The v0.8.73 watchdog was only a partial fix and the forensics proved it.** A reliability audit (two
