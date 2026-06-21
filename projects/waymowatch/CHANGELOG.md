@@ -1,5 +1,30 @@
 # WaymoWatch — Changelog
 
+## v0.8.68 — Trained model retroactively recovers 14 Waymos wrongly binned in the reject pool (2026-06-21)
+
+**The first big payoff of model-detection-first review (v0.8.67), and a dataset-quality milestone for
+/notes/.** WaymoNet re-scanned the **entire reject pool (7,589 frames)** by its own highest-confidence
+box *anywhere* in each frame, surfacing **109 model-flagged frames**. Full-frame human review then
+**recovered 14 real Waymos that the old funnel-crop review had wrongly binned as hard negatives** —
+lifting the confirmed set from ~106 to ~120 (**≈ +13 %**), with the remaining 95 frames confirmed as
+model-vetted hard negatives (the highest-signal negatives).
+
+**Why they were lost (and why this matters):** the bootstrap funnel crops *one* white vehicle per frame
+— often NOT the Waymo. The old review showed that crop, so a real Waymo (a *different* box, or a vehicle
+the funnel never localised) was invisible and the frame got rejected. The trained model, scoring the
+whole frame, found them. The top recoveries scored conf **0.76 / 0.73 / 0.71** — i.e. *confirmed-Waymo
+territory* (a known real, #40113, scored 0.731). Recovered ids: 2702, 3904, 5827, 16372, 19414, 8940,
+1527, 1173, 20031, 9151, 760, 8955, 18973, 712.
+
+**Tooling:** `scan_rejects.py` gained `--email-ids` (rescued Waymos → confirm → positives) and
+`--email-rest` (everything else → model-vetted hard negatives), both **full-frame with the model's box
+overlaid in red** — never a crop. Rescued positives are captured as the full frame + the *model's* box,
+not the funnel crop.
+
+**The principle for /notes/:** a self-improving dataset — a model trained on the first ~100 hand-found
+Waymos then recovered ~14 % more from data a weaker pipeline had thrown away. The funnel is only a
+frame gate; the trained model is what localises and what curates.
+
 ## v0.8.67 — Pre-YOLO filter is a FRAME GATE, not a localiser; review is model-detection-first + full-frame (2026-06-21)
 
 **How the pre-YOLO bootstrap filter actually works at this stage (the rule, for /notes/):** the cheap

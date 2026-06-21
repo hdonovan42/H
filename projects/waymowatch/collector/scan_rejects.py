@@ -190,38 +190,59 @@ def collect_hits():
     return out
 
 
-def email_blocks(hits, dry_run=False):
+def email_blocks(hits, dry_run=False, kind="review", tag="block"):
+    """Email full-frame review sheets (top box drawn in red). `kind` sets the framing:
+    'review' (default scan), 'positives' (rescued Waymos -> confirm to move to positives),
+    'negatives' (model-flagged but not confirmed -> hard negatives)."""
     n = len(hits)
     nblocks = (n + BLOCK - 1) // BLOCK
-    print(f"[{time.strftime('%H:%M:%S')}] {n} hit(s) >= {COLLECT_FLOOR} -> {nblocks} block(s) of {BLOCK}",
-          flush=True)
+    print(f"[{time.strftime('%H:%M:%S')}] {kind}: {n} frame(s) -> {nblocks} block(s) of {BLOCK}", flush=True)
     sent = 0
     for k in range(nblocks):
         chunk = hits[k * BLOCK:(k + 1) * BLOCK]
         lo, hi = chunk[-1][1], chunk[0][1]
-        sheet = os.path.join(BASE, f"data/candidates/reject_scan_block{k + 1}.jpg")
+        sheet = os.path.join(BASE, f"data/candidates/reject_scan_{tag}{k + 1}.jpg")
         shown = _build_frame_sheet(chunk, sheet, cap=len(chunk))
-        subj = (f"WaymoWatch: reject re-scan (FULL FRAMES) — block {k + 1}/{nblocks} — "
-                f"{shown} frame(s) (conf {lo:.2f}–{hi:.2f})")
-        html = (
-            f"<p><b>WaymoNet</b> re-scanned the reject pool by its OWN highest-confidence detection "
-            f"anywhere in each frame (not the funnel's cropped vehicle). These <b>{shown}</b> frame(s) "
-            f"scored conf &ge; {COLLECT_FLOOR}. Block <b>{k + 1} of {nblocks}</b>, highest first.</p>"
-            f"<p>Each cell is the <b>FULL FRAME</b> with the model's top box drawn in <b>red</b> and "
-            f"labelled #id + conf — so you can see the whole scene and exactly what the model flagged.</p>"
-            f"<p>Reply with the <b>#</b> of any frame with a real Waymo (white Jaguar I-PACE, dark roof "
-            f"dome) — those are <b>rescues</b>; confirm with <code>live_capture.py --confirm &lt;ids&gt;"
-            f"</code>. Everything you don't flag stays a (model-vetted) hard negative.</p>"
-            f"<p style='color:#888'>Powered by TfL Open Data.</p>")
+        if kind == "positives":
+            subj = (f"WaymoWatch: RESCUED WAYMOS from rejects (FULL FRAMES) — block {k + 1}/{nblocks} — "
+                    f"{shown} frame(s) (conf {lo:.2f}–{hi:.2f})")
+            html = (
+                f"<p>The <b>{shown}</b> reject-pool frame(s) you flagged as real <b>Waymos</b> — full "
+                f"frame, the model's box in <b>red</b>, #id + conf. Block <b>{k + 1}/{nblocks}</b>, "
+                f"highest first.</p>"
+                f"<p><b>Reply to CONFIRM</b> — confirmed frames move to <b>positives</b>, captured as the "
+                f"full frame + the model's box (NOT the funnel crop, which was often the wrong vehicle). "
+                f"Reply <b>'undo #id'</b> for any that is NOT a Waymo so a wrong id never lands in positives.</p>"
+                f"<p style='color:#888'>Powered by TfL Open Data.</p>")
+        elif kind == "negatives":
+            subj = (f"WaymoWatch: reject re-scan — model-flagged, NOT confirmed (FULL FRAMES) — block "
+                    f"{k + 1}/{nblocks} — {shown} frame(s) (conf {lo:.2f}–{hi:.2f})")
+            html = (
+                f"<p>The <b>{shown}</b> reject frame(s) WaymoNet flagged but you did <b>not</b> mark as a "
+                f"Waymo — full frame, model's box in <b>red</b>, #id + conf. Block <b>{k + 1}/{nblocks}</b>, "
+                f"highest first.</p>"
+                f"<p>Reply with the <b>#</b> of any you DO see a Waymo in (a missed rescue). Everything else "
+                f"is confirmed a <b>model-vetted hard negative</b> — the highest-signal negatives.</p>"
+                f"<p style='color:#888'>Powered by TfL Open Data.</p>")
+        else:
+            subj = (f"WaymoWatch: reject re-scan (FULL FRAMES) — block {k + 1}/{nblocks} — "
+                    f"{shown} frame(s) (conf {lo:.2f}–{hi:.2f})")
+            html = (
+                f"<p><b>WaymoNet</b> re-scanned the reject pool by its OWN highest-confidence detection "
+                f"anywhere in each frame. These <b>{shown}</b> scored conf &ge; {COLLECT_FLOOR}. Block "
+                f"<b>{k + 1}/{nblocks}</b>, highest first. Each cell is the <b>FULL FRAME</b> with the "
+                f"model's top box in <b>red</b> + #id/conf.</p>"
+                f"<p>Reply with the <b>#</b> of any real Waymo -> <code>live_capture.py --confirm &lt;ids&gt;"
+                f"</code>.</p><p style='color:#888'>Powered by TfL Open Data.</p>")
         if dry_run:
-            print(f"  [dry-run] block {k + 1}/{nblocks}: {shown} FULL-FRAME cells (top box drawn), "
-                  f"conf {lo:.2f}-{hi:.2f} -> {sheet} (not sent)", flush=True)
+            print(f"  [dry-run] {kind} block {k + 1}/{nblocks}: {shown} full-frame cells, conf "
+                  f"{lo:.2f}-{hi:.2f} -> {sheet} (not sent)", flush=True)
             continue
         if shown and send_email(subj, html, attachments=[sheet]):
             sent += 1
             time.sleep(2)                          # be gentle on the Resend rate limit
         else:
-            print(f"  block {k + 1}/{nblocks} send FAILED — rerun to retry (idempotent)", flush=True)
+            print(f"  {kind} block {k + 1}/{nblocks} send FAILED — rerun to retry (idempotent)", flush=True)
     return sent
 
 
@@ -231,6 +252,10 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="scan + build sheets but do NOT email")
     ap.add_argument("--email-only", action="store_true",
                     help="skip scanning; just (re)build + send the blocks from the checkpoint")
+    ap.add_argument("--email-ids", default="",
+                    help="email ONLY these checkpoint-hit ids as a 'rescued Waymos -> positives' sheet")
+    ap.add_argument("--email-rest", default="",
+                    help="email all hits EXCEPT these ids as a 'flagged, not confirmed -> hard neg' sheet")
     a = ap.parse_args()
 
     # single-run guard: don't race a scheduled relaunch or a manual run (shared checkpoint append)
@@ -239,6 +264,19 @@ def main():
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         print(f"[{time.strftime('%H:%M:%S')}] another reject-scan holds {LOCK_PATH} — exiting")
+        return
+
+    if a.email_ids:
+        sel = set(int(x) for x in a.email_ids.replace(",", " ").split())
+        subset = [h for h in collect_hits() if h[0] in sel]
+        print(f"[{time.strftime('%H:%M:%S')}] email-ids: {len(subset)}/{len(sel)} ids matched scan hits")
+        email_blocks(subset, dry_run=a.dry_run, kind="positives", tag="rescue")
+        return
+    if a.email_rest:
+        sel = set(int(x) for x in a.email_rest.replace(",", " ").split())
+        subset = [h for h in collect_hits() if h[0] not in sel]
+        print(f"[{time.strftime('%H:%M:%S')}] email-rest: {len(subset)} hits excluding {len(sel)} ids")
+        email_blocks(subset, dry_run=a.dry_run, kind="negatives", tag="hardneg")
         return
 
     if not a.email_only and not a.dry_run and os.path.exists(DONE_FLAG):
