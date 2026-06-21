@@ -128,6 +128,77 @@ def infer(img):
     return {"w": w, "h": h, "time_ms": round(dt), "boxes": boxes}
 
 
+# --- model health watchdog -----------------------------------------------------------------------
+# The serving model can silently enter empty-return windows (observed 2026-06-21). A background
+# canary probes a known-Waymo frame every CANARY_EVERY s. While the model is unhealthy, /api/infer
+# returns 503 on a ZERO result instead of a false empty, so the worker retries and never records a
+# 0. Sustained failure exits -> systemd restarts a fresh model. A degraded model can therefore only
+# cause a brief DELAY, never a missed detection.
+CANARY = os.environ.get("WAYMONET_CANARY", os.path.join(HERE, "canary_waymo.jpg"))
+CANARY_MIN = 0.30
+CANARY_EVERY = 3.0
+CANARY_DEADCOUNT = 5          # consecutive fails (~15 s) -> exit for a systemd restart
+KEYFILE = os.path.join(HERE, ".resend_key")
+ALERT_TO = "donovanh59@gmail.com"
+_healthy = True
+
+
+def _alert(subject, html):
+    try:
+        key = open(KEYFILE).read().split("=", 1)[1].strip()
+        import urllib.request
+        req = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=json.dumps({"from": "WaymoWatch <noreply@autosnipe.co.uk>", "to": [ALERT_TO],
+                             "subject": subject, "html": html}).encode(),
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=20).read()
+    except Exception as e:
+        print(f"alert failed: {e}", flush=True)
+
+
+def _canary_loop():
+    global _healthy
+    img = cv2.imread(CANARY) if os.path.exists(CANARY) else None
+    if img is None:
+        print(f"canary frame missing ({CANARY}) — health watchdog DISABLED", flush=True)
+        return
+    fails = 0
+    while True:
+        time.sleep(CANARY_EVERY)
+        try:
+            r = infer(img)
+            top = r["boxes"][0]["conf"] if r["boxes"] else 0.0
+        except Exception:
+            top = -1.0
+        if top >= CANARY_MIN:
+            if not _healthy:
+                print(f"canary recovered (conf {top})", flush=True)
+            _healthy, fails = True, 0
+        else:
+            fails += 1
+            if _healthy:
+                print(f"canary FAIL (conf {top}) — degraded; returning 503 on empties", flush=True)
+            _healthy = False
+            if fails >= CANARY_DEADCOUNT:
+                print(f"canary dead x{fails} -> exit for systemd restart", flush=True)
+                _alert("WaymoNet dash: model degraded — auto-restarting",
+                       f"<p>The dash model failed its canary {fails}x (~{int(CANARY_EVERY * fails)}s) and is "
+                       f"restarting via systemd. While degraded it returned 503 on empty results so the worker "
+                       f"retried — no candidate was recorded as a false zero.</p>")
+                os._exit(1)
+
+
+def _respond_infer(handler, img):
+    """Return inference, but 503 on a zero-result while the model is degraded so the worker retries
+    instead of banking a false zero (never a transient miss)."""
+    r = infer(img)
+    if not r["boxes"] and not _healthy:
+        handler._json({"error": "model degraded (canary failing) — retry"}, 503)
+    else:
+        handler._json(r)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "waymonet-dash"
 
@@ -174,7 +245,7 @@ class Handler(BaseHTTPRequestHandler):
             if img is None:
                 self._json({"error": "unreadable"}, 400)
                 return
-            self._json(infer(img))
+            _respond_infer(self, img)
             return
         self._json({"error": "not found"}, 404)
 
@@ -191,7 +262,7 @@ class Handler(BaseHTTPRequestHandler):
         if img is None:
             self._json({"error": "not a decodable image"}, 400)
             return
-        self._json(infer(img))
+        _respond_infer(self, img)
 
 
 if __name__ == "__main__":
@@ -199,4 +270,5 @@ if __name__ == "__main__":
           flush=True)
     model()  # warm the model at startup so the first request isn't slow
     print("model warm — serving", flush=True)
+    threading.Thread(target=_canary_loop, daemon=True).start()   # health watchdog (503-on-degraded)
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

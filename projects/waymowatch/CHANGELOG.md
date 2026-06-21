@@ -1,5 +1,24 @@
 # WaymoWatch — Changelog
 
+## v0.8.73 — Dash health watchdog: a degraded model can no longer cause a missed Waymo (2026-06-21)
+
+**The transient-miss failure mode is eliminated** — not mitigated. The serving model can silently enter
+brief empty-return windows under load (caught: #43895, a real Waymo, recorded `wn_conf=0` at 14:57 while
+the `*/20` cron canary read healthy at 14:40 AND 15:00 — far too coarse to see a minutes-long window).
+Banking a false 0 on a transient is unacceptable, and with the dome scorer being retired there's no
+backstop. Fix is structural, entirely in the dash (`server.py`):
+- A **background canary** probes a known-Waymo frame **every 3 s** → a `_healthy` flag.
+- `/api/infer` returns **HTTP 503 on a zero-result while degraded**, never a false empty. The worker
+  already `raise_for_status()`-es and **backs off + retries without writing a score**, so a degraded
+  model now causes a brief **delay**, never a dropped detection.
+- Sustained failure (5 fails ≈ 15 s) → the dash **exits → systemd restarts a fresh model (~2 s)** and
+  emails the operator. (vs the old ~20 h silent outage / 20-min cron-canary window.)
+- Healthy genuine non-Waymos still return `200` with `[]` (verified) — only zero-results *during a
+  failing canary* become 503.
+
+This removes the reliance on the dome scorer as a recall backstop. The `*/20` `dash_canary.sh` cron stays
+as a coarse outer belt-and-braces; the in-process watchdog is the real-time guarantee.
+
 ## v0.8.72 — Canary emails on auto-restart; homebox-downtime pile-up confirmed (2026-06-21)
 
 - **Canary alert.** `dash_canary.sh` now **emails the operator** whenever it auto-restarts the dash, so a
