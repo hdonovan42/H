@@ -52,12 +52,15 @@ padding:8px 16px;border-radius:8px;opacity:0;transition:opacity .15s;pointer-eve
 <header><h1>WaymoNet · prune rejects</h1><span class="sub">reversible — flips status to <b>pruned</b>; <kbd>u</kbd> undoes</span></header>
 <div class="bar">
   <span class="btn" id="back">&larr; back</span><span class="btn" id="next">next &rarr;</span>
+  <input id="goto" type="number" placeholder="# look up" title="view any candidate # (any status)"
+    style="width:100px;background:#1b212b;border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:3px 8px;font-family:var(--mono);font-size:13px">
   <span class="dim">id</span> <b id="id">—</b>
+  <span class="dim">status</span> <b id="status">—</b>
   <span class="dim">cam</span> <b id="cam">—</b>
   <span class="dim">run1 conf</span> <b id="conf">—</b>
   <span class="dim">rejects left</span> <b id="left">—</b>
   <label class="dim" style="cursor:pointer;user-select:none"><input type="checkbox" id="modechk"> newest-first</label>
-  <span class="keys"><kbd>&larr;</kbd>/<kbd>&rarr;</kbd> traverse &nbsp; <kbd>1</kbd> prune &nbsp; <kbd>u</kbd> undo &nbsp; <kbd>m</kbd> mode</span>
+  <span class="keys"><kbd>&larr;</kbd>/<kbd>&rarr;</kbd> traverse &nbsp; <kbd>1</kbd> prune &nbsp; <kbd>u</kbd> undo &nbsp; <kbd>m</kbd> mode &nbsp; type a <kbd>#</kbd> + enter to look up</span>
 </div>
 <div class="stage"><img id="img" alt="reject frame"></div>
 <div class="flash" id="flash"></div>
@@ -66,8 +69,10 @@ const $=id=>document.getElementById(id);
 let hist=[], i=-1, cur=null, lastPruned=null, ftimer=null, mode='random';
 function flash(msg,cls){const f=$('flash');f.textContent=msg;f.className='flash show '+(cls||'');
   clearTimeout(ftimer);ftimer=setTimeout(()=>f.className='flash',1400);}
+const SCOL={waymo:'#27d27a',pruned:'#ff5470',reject:'#ffb43a',new:'#d6e0ea',near:'#7c8a9a'};
 function render(meta){ $('id').textContent=cur!=null?('#'+cur):'—';
   if(meta){$('cam').textContent=meta.camera||'—';
+    $('status').textContent=meta.status||'—'; $('status').style.color=SCOL[meta.status]||'#d6e0ea';
     $('conf').textContent=(meta.conf==null?'—':(+meta.conf).toFixed(3));
     if(meta.remaining!=null)$('left').textContent=meta.remaining;}}
 function show(id,meta){cur=id;$('img').src='img?id='+id+'&t='+Date.now();render(meta);}
@@ -89,6 +94,7 @@ function back(){ if(i>0){ i--; show(hist[i].id,hist[i]); } else flash('start of 
 async function prune(){
   if(cur==null)return; const id=cur;
   const r=await fetch('api/prune',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}).then(r=>r.json());
+  if(!r.changed){ flash('#'+id+' is not a reject — not pruned'); return; }
   flash('pruned #'+id+'  ·  press u to undo','prune');
   const nx=await fetchNext();
   if(nx.id!=null){ hist.push(nx); i=hist.length-1; show(nx.id,nx); }
@@ -102,9 +108,17 @@ async function undo(){
   flash('restored #'+id,'undo');
   if(r&&r.remaining!=null)$('left').textContent=r.remaining;
 }
+async function lookup(id){     // view ANY candidate # (any status), not just rejects
+  const r=await fetch('api/lookup?id='+id).then(r=>r.json());
+  if(r.id==null){ flash('no candidate #'+id); return; }
+  if(!r.has_frame){ flash('#'+id+' has no frame on disk'); return; }
+  hist.push(r); i=hist.length-1; show(r.id,r); lastPruned=null;
+}
 $('next').onclick=next; $('back').onclick=back;
 $('modechk').onchange=e=>setMode(e.target.checked?'newest':'random');
+$('goto').addEventListener('keydown',e=>{ if(e.key==='Enter'){ const v=parseInt(e.target.value,10); if(!isNaN(v))lookup(v); e.target.blur(); } });
 document.addEventListener('keydown',e=>{
+  if(e.target.id==='goto')return;        // typing an id to look up — let the field handle it
   if(e.key==='ArrowRight'){e.preventDefault();next();}
   else if(e.key==='ArrowLeft'){e.preventDefault();back();}
   else if(e.key==='1'){e.preventDefault();prune();}
@@ -133,7 +147,7 @@ def random_reject():
         con.close()
     if not row:
         return {"id": None, "remaining": remaining}
-    return {"id": row[0], "camera": row[1], "conf": row[2], "remaining": remaining}
+    return {"id": row[0], "status": "reject", "camera": row[1], "conf": row[2], "remaining": remaining}
 
 
 def next_reject(after=None):
@@ -154,7 +168,21 @@ def next_reject(after=None):
         con.close()
     if not row:
         return {"id": None, "remaining": remaining}
-    return {"id": row[0], "camera": row[1], "conf": row[2], "remaining": remaining}
+    return {"id": row[0], "status": "reject", "camera": row[1], "conf": row[2], "remaining": remaining}
+
+
+def lookup(cid):
+    """Metadata for ANY candidate id (any status) — for direct frame lookup/review, not just rejects."""
+    con = _conn()
+    try:
+        r = con.execute("SELECT id, status, camera_id, wn_conf, frame_path "
+                        "FROM candidates WHERE id=?", (cid,)).fetchone()
+    finally:
+        con.close()
+    if not r:
+        return {"id": None, "error": "no such candidate"}
+    return {"id": r[0], "status": r[1], "camera": r[2], "conf": r[3],
+            "has_frame": bool(r[4] and os.path.exists(r[4]))}
 
 
 def frame_path(cid):
@@ -218,6 +246,14 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 after = None
             self._json(next_reject(after))
+            return
+        if path == "/api/lookup":
+            try:
+                cid = int(qs.get("id", [""])[0])
+            except ValueError:
+                self._json({"id": None, "error": "bad id"}, 400)
+                return
+            self._json(lookup(cid))
             return
         if path == "/img":
             try:

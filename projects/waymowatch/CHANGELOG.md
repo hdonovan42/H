@@ -9,6 +9,9 @@ the current frame + advances; **`u`** undoes the last prune (valid only until th
 confirm dialogs. A **newest-first** toggle (checkbox or **`m`**; default random) switches
 forward-traversal to walk rejects by id descending — so freshly-added rejects surface immediately and
 in order (the `/api/random` and `/api/next` endpoints both read the live DB per call, no snapshot lag).
+A **`#` lookup box** (type a candidate id + Enter) opens *any* frame directly — any status, not just
+rejects (`/api/lookup` + the any-id `/img`) — with a colour-coded status badge, so a specific frame can
+be reviewed without round-tripping through me. Pruning a non-reject is a safe no-op (`changed=0`).
 
 PRUNE is a **reversible status flip** `reject`→`pruned` (never a file delete): the row/frame/hourly
 backup are all kept, `build_real_dataset.py` (`status='reject'`) stops using it, and undo is one step.
