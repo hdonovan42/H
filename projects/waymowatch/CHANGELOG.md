@@ -1,5 +1,30 @@
 # WaymoWatch — Changelog
 
+## v0.8.75 — Transient-miss class CLOSED: re-verify zeros + audit trail (2026-06-21)
+
+**The v0.8.73 watchdog was only a partial fix and the forensics proved it.** A reliability audit (two
+agents, VPS + homebox) found the real flaw is the *data model*, not the worker→homebox→worker topology
+(which provably handles downtime — a timed-out row, id=43047, was left unscored and later retried to
+success; homebox down = delay + pile-up, never a drop). The hole: a **successful empty** response was
+banked `wn_conf=0, wn_scored=1` **terminally**, and a *degraded-but-reachable* model returns `[]` for a
+real Waymo — indistinguishable from a true non-Waymo. The watchdog only fires on **global** collapse
+once its canary flips; it is **structurally blind to per-request flakiness** (proof: the canary has
+fired *zero* times ever, yet #43895 was a genuine transient miss). Two fixes close the class:
+
+- **Fix 1 — re-verify zeros (`waymonet_worker.py`).** An empty pass is re-run (`ZERO_RECHECK=1`, 0.3 s
+  apart); only a **second agreeing empty** is banked. A hit short-circuits immediately. The per-request
+  flake the canary can't see is now caught at the point of failure. *Verified live: every zero in a
+  test batch shows `wn_attempts=2`.* Cost is ~2× inference on zeros — trivial (homebox load 0.45/8).
+- **Fix 2 — audit trail.** New columns `wn_scored_at` / `wn_attempts` / `wn_model_ver` (self-migrating
+  ALTER on worker start, idempotent). `wn_model_ver` = `sha256(best.pt)[:12]`, returned by
+  `infer_server.py` so the worker records *which* model scored each row. Any residual zero is now
+  **recoverable** — `rescore everything from model vN` / `…scored during window X` is a one-line query
+  instead of the git-history archaeology #18973 needed. (Also unblocks a future daily re-score sweep.)
+
+Unreachable still raises → row left unscored → retried, so downtime semantics are unchanged. Removed
+the now-dead `iou()`/`IOU_MATCH` (the funnel-bbox match was dropped on 2026-06-21). Deployed +
+verified: infer service stamps `model_ver`, worker self-migrated the schema and re-verifies every zero.
+
 ## v0.8.74 — Inference decoupled from the dash: a viewer change can no longer disturb detection (2026-06-21)
 
 **The dash was doing two unrelated jobs in one process** — serving the review UI *and* hosting the

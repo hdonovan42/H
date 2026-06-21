@@ -12,6 +12,7 @@ model can therefore only cause a brief DELAY, never a missed detection.
 
 Env: WAYMONET_WEIGHTS, WAYMONET_HOST (0.0.0.0), WAYMONET_PORT (3105), WAYMONET_CANARY.
 """
+import hashlib
 import json
 import os
 import threading
@@ -40,6 +41,22 @@ _lock = threading.Lock()
 _healthy = True
 
 
+def _compute_model_ver():
+    """sha256(best.pt)[:12] — a stable content identity for the served weights, recorded by the
+    worker (wn_model_ver) so a future model swap can target a precise re-score by version."""
+    try:
+        h = hashlib.sha256()
+        with open(WEIGHTS, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest()[:12]
+    except Exception:
+        return "unknown"
+
+
+MODEL_VER = _compute_model_ver()
+
+
 def model():
     global _model
     if _model is None:
@@ -59,7 +76,7 @@ def infer(img):
               "x2": round(float(b.xyxy[0][2]), 1), "y2": round(float(b.xyxy[0][3]), 1),
               "conf": round(float(b.conf[0]), 3)} for b in r.boxes]
     boxes.sort(key=lambda b: -b["conf"])
-    return {"w": w, "h": h, "time_ms": round(dt), "boxes": boxes}
+    return {"w": w, "h": h, "time_ms": round(dt), "model_ver": MODEL_VER, "boxes": boxes}
 
 
 def _alert(subject, html):
