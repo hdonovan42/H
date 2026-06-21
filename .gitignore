@@ -17,3 +17,7 @@ __pycache__/
 
 # Office temp/lock files (e.g. ~$workbook.xlsx)
 ~$*
+
+# Regenerable data exports (curated all-in exports e.g. Q1'26.xlsx stay tracked)
+projects/autosnipe/exports/
+projects/all-in/exports/TSLA_Volume_2020_Present.xlsx
