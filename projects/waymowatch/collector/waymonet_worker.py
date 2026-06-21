@@ -74,7 +74,7 @@ def score_row(con, row):
     The HTTP inference happens OUTSIDE any DB transaction; the write is a single brief
     UPDATE + commit per row, so the SQLite write lock is held ~1 ms and never blocks the
     live capture loop (the batch-held-lock bug, v0.8.63)."""
-    cid, frame_path, bbox_json = row
+    cid, frame_path = row
     if not frame_path or not os.path.exists(frame_path):
         con.execute("UPDATE candidates SET wn_scored=1, wn_conf=0, wn_hit=0 WHERE id=?", (cid,))
         con.commit()
@@ -84,12 +84,15 @@ def score_row(con, row):
     except Exception as e:
         print(f"[{time.strftime('%H:%M:%S')}] infer error id={cid}: {e}", flush=True)
         return False, 0
-    cbb = json.loads(bbox_json) if bbox_json else None
+    # The model's HIGHEST-CONF box ANYWHERE in the frame — deliberately NOT matched to the funnel
+    # bbox. The funnel only says "a white vehicle is somewhere here", not which one is the Waymo, so
+    # the model's own best box is the unit of interest/review (aligned with scan_rejects.py +
+    # waymonet_digest.py, 2026-06-21). wn_bbox is that box; the digest draws it + --confirm banks it.
     best_conf, best_box = 0.0, None
     for b in boxes:
-        box = (b["x1"], b["y1"], b["x2"], b["y2"])
-        if cbb and iou(cbb, box) >= IOU_MATCH and b["conf"] > best_conf:
-            best_conf, best_box = b["conf"], box
+        if b["conf"] > best_conf:
+            best_conf = b["conf"]
+            best_box = [round(b["x1"], 1), round(b["y1"], 1), round(b["x2"], 1), round(b["y2"], 1)]
     hit = 1 if best_conf >= COLLECT_FLOOR else 0
     con.execute("UPDATE candidates SET wn_conf=?, wn_bbox=?, wn_scored=1, wn_hit=? WHERE id=?",
                 (round(best_conf, 4), json.dumps(best_box) if best_box else None, hit, cid))
@@ -103,7 +106,7 @@ def run(once=False, limit=None):
     total, hits = 0, 0
     while True:
         rows = con.execute(
-            "SELECT id, frame_path, bbox FROM candidates "
+            "SELECT id, frame_path FROM candidates "
             "WHERE COALESCE(wn_scored,0)=0 AND status NOT IN ('waymo','reject') "
             "ORDER BY id DESC LIMIT ?", (BATCH,)).fetchall()
         if not rows:

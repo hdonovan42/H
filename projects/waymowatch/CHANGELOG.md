@@ -1,5 +1,19 @@
 # WaymoWatch — Changelog
 
+## v0.8.71 — Worker aligned to the model's top box; duplicate systemd worker retired (2026-06-21)
+
+Completes the "the funnel bbox is not the Waymo" cleanup across the *whole* pipeline (it was already done
+for `scan_rejects.py` and `waymonet_digest.py`; the live worker was the last holdout).
+- **`waymonet_worker.py` now scores by the model's HIGHEST-CONF box anywhere in the frame** (`top_detection`)
+  — dropped the IoU-match to the funnel bbox. `wn_conf`/`wn_bbox` are the model's own best detection, so the
+  digest draws it and `--confirm` banks it. Closes the last gap where a Waymo the funnel boxed as a
+  *different* vehicle (the #18973 case) would score 0.
+- **Retired the duplicate systemd `waymonet-worker`.** It was running ALONGSIDE the cron `run_waymonet.sh`
+  flock supervisor — i.e. **two workers** scoring at once (2× homebox load). `systemctl disable --now`; the
+  cron-flock supervisor (the documented one) is now the sole worker.
+- Re-queued the **7,043** yesterday+today candidates for the new logic; a detached watcher force-flushes the
+  full-frame digest once the re-score drains, so all resurfaced Waymos arrive in one email.
+
 ## v0.8.70 — Homebox inference silently degraded ~20 h; canary auto-restart + full re-score (2026-06-21)
 
 **Discovered:** the WaymoNet review surfaced **0 Waymos overnight while the legacy dome scorer found ≥4**.
