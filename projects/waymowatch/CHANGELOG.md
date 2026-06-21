@@ -1,5 +1,39 @@
 # WaymoWatch — Changelog
 
+## v0.8.69 — Recovery banked (+13 positives); nested dash review; digest now 10:00/22:00 + 30-pile (2026-06-21)
+
+Three things this session: the v0.8.68 recovery was **banked**, the dash gained **nested review galleries**,
+and the WaymoNet digest got a **time-based schedule** so reviews never wait days.
+
+### 1. Reject-pool recovery banked — captured at the MODEL box, not the funnel crop
+The 14 Waymos WaymoNet recovered from the reject pool were reviewed **full-frame** on the dash, then banked:
+- **13 → positives.** Each is captured at the **model's own box** (the actual Waymo) — `candidates.bbox`
+  is set to the model box (so the YOLO training label is the Waymo, *not* the funnel's wrong vehicle), and
+  the `real_positives/` crop is cut from the frame at that box (clean centroid input). This is the whole
+  point of v0.8.67: the funnel only says "a white vehicle is here", so banking must use the model's box.
+- **#712 → `edge_positive`** (frame distorted): `status='waymo' special='edge_positive'`, copied to
+  `data/special/edge_positive/`, **excluded from training + centroid** (build_real_dataset takes
+  `status='waymo' AND special IS NULL`; joins #31037).
+- **95 → `data/hard_negatives/`** — the reviewed non-Waymos, now model-vetted high-signal negatives.
+- **Totals: waymo 120 / training positives 118 / edge_positives 2 / hard_negatives 192 files.** The set
+  went from quietly poisoned (14 real Waymos mislabelled negative) to **+13 clean positives + 95 confirmed
+  negatives**. No centroid reseed / loop restart (standing rule; the dome scorer is being retired now that
+  WaymoNet scores and the cosine gate is gone). Auto-archived by the hourly backup cron.
+
+### 2. Nested dash review galleries
+`dashboard/server.py` + `index.html`: a `WAYMONET_BROWSE` subdir that contains only subdirs now renders as
+a **collapsible parent group with child galleries** (registry emits `{name, children}`; the SPA renders
+groups recursively). Used to review the recovery sets full-screen — the dash redraws fresh boxes on click
+— under one `temp review` parent (`recovered waymos` / `hard negatives`); galleries removed after banking.
+
+### 3. WaymoNet digest schedule — no more multi-day waits
+Previously the digest held until N candidates piled up, which at a low hit-rate could sit for **days**. Now:
+- **Immediate trigger at 30** — hourly check sends if ≥30 unsent (`waymonet_digest.py --min 30`).
+- **Scheduled flush at 10:00 and 22:00 Europe/London** (`--force`, `CRON_TZ=Europe/London`) — sends however
+  many are queued, **never an empty email**.
+A review email now arrives at worst every 12 h, sooner if 30 accrue. (VPS runs UTC; `CRON_TZ` keeps the
+clock times correct across BST/GMT. Cron-only change; no code change.)
+
 ## v0.8.68 — Trained model retroactively recovers 14 Waymos wrongly binned in the reject pool (2026-06-21)
 
 **The first big payoff of model-detection-first review (v0.8.67), and a dataset-quality milestone for
