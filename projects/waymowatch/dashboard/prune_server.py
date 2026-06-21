@@ -56,13 +56,14 @@ padding:8px 16px;border-radius:8px;opacity:0;transition:opacity .15s;pointer-eve
   <span class="dim">cam</span> <b id="cam">—</b>
   <span class="dim">run1 conf</span> <b id="conf">—</b>
   <span class="dim">rejects left</span> <b id="left">—</b>
-  <span class="keys"><kbd>&larr;</kbd>/<kbd>&rarr;</kbd> traverse &nbsp; <kbd>1</kbd> prune &nbsp; <kbd>u</kbd> undo</span>
+  <label class="dim" style="cursor:pointer;user-select:none"><input type="checkbox" id="modechk"> newest-first</label>
+  <span class="keys"><kbd>&larr;</kbd>/<kbd>&rarr;</kbd> traverse &nbsp; <kbd>1</kbd> prune &nbsp; <kbd>u</kbd> undo &nbsp; <kbd>m</kbd> mode</span>
 </div>
 <div class="stage"><img id="img" alt="reject frame"></div>
 <div class="flash" id="flash"></div>
 <script>
 const $=id=>document.getElementById(id);
-let hist=[], i=-1, cur=null, lastPruned=null, ftimer=null;
+let hist=[], i=-1, cur=null, lastPruned=null, ftimer=null, mode='random';
 function flash(msg,cls){const f=$('flash');f.textContent=msg;f.className='flash show '+(cls||'');
   clearTimeout(ftimer);ftimer=setTimeout(()=>f.className='flash',1400);}
 function render(meta){ $('id').textContent=cur!=null?('#'+cur):'—';
@@ -70,19 +71,26 @@ function render(meta){ $('id').textContent=cur!=null?('#'+cur):'—';
     $('conf').textContent=(meta.conf==null?'—':(+meta.conf).toFixed(3));
     if(meta.remaining!=null)$('left').textContent=meta.remaining;}}
 function show(id,meta){cur=id;$('img').src='img?id='+id+'&t='+Date.now();render(meta);}
-async function randomFrame(){const r=await fetch('api/random').then(r=>r.json());return r;}
+async function fetchNext(){              // next item in the CURRENT mode (forward-at-front + post-prune)
+  if(mode==='newest') return await fetch('api/next'+(cur!=null?('?after='+cur):'')).then(r=>r.json());
+  return await fetch('api/random').then(r=>r.json());
+}
 async function next(){
-  if(i<hist.length-1){ i++; show(hist[i].id,hist[i]); }
-  else { const r=await randomFrame(); if(r.id==null){flash('no rejects left');return;}
-         hist.push(r); i=hist.length-1; show(r.id,r); }
-  lastPruned=null;
+  if(i<hist.length-1){ i++; show(hist[i].id,hist[i]); lastPruned=null; return; }
+  const r=await fetchNext();
+  if(r.id==null){ flash(mode==='newest'?'reached the oldest reject':'no rejects left'); return; }
+  hist.push(r); i=hist.length-1; show(r.id,r); lastPruned=null;
+}
+function setMode(m){
+  if(mode===m)return; mode=m; $('modechk').checked=(m==='newest');
+  hist=[]; i=-1; cur=null; lastPruned=null; next();   // restart traversal in the new mode
 }
 function back(){ if(i>0){ i--; show(hist[i].id,hist[i]); } else flash('start of history'); lastPruned=null; }
 async function prune(){
   if(cur==null)return; const id=cur;
   const r=await fetch('api/prune',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}).then(r=>r.json());
   flash('pruned #'+id+'  ·  press u to undo','prune');
-  const nx=await randomFrame();
+  const nx=await fetchNext();
   if(nx.id!=null){ hist.push(nx); i=hist.length-1; show(nx.id,nx); }
   if(r&&r.remaining!=null)$('left').textContent=r.remaining;
   lastPruned=id;                       // set AFTER advancing so undo targets the pruned one
@@ -95,11 +103,13 @@ async function undo(){
   if(r&&r.remaining!=null)$('left').textContent=r.remaining;
 }
 $('next').onclick=next; $('back').onclick=back;
+$('modechk').onchange=e=>setMode(e.target.checked?'newest':'random');
 document.addEventListener('keydown',e=>{
   if(e.key==='ArrowRight'){e.preventDefault();next();}
   else if(e.key==='ArrowLeft'){e.preventDefault();back();}
   else if(e.key==='1'){e.preventDefault();prune();}
   else if(e.key==='u'||e.key==='U'){e.preventDefault();undo();}
+  else if(e.key==='m'||e.key==='M'){e.preventDefault();setMode(mode==='random'?'newest':'random');}
   else { lastPruned=null; }            // any other key invalidates the undo
 });
 next();   // load the first random reject
@@ -118,6 +128,27 @@ def random_reject():
         row = con.execute("SELECT id, camera_id, wn_conf FROM candidates "
                           "WHERE status='reject' AND frame_path IS NOT NULL "
                           "ORDER BY RANDOM() LIMIT 1").fetchone()
+        remaining = con.execute("SELECT COUNT(*) FROM candidates WHERE status='reject'").fetchone()[0]
+    finally:
+        con.close()
+    if not row:
+        return {"id": None, "remaining": remaining}
+    return {"id": row[0], "camera": row[1], "conf": row[2], "remaining": remaining}
+
+
+def next_reject(after=None):
+    """Newest-first sequential traversal: the highest-id reject (id < `after` if given). 'newest' =
+    most-recently-captured candidate (id is monotonic with ingest) — the usual case for fresh rejects."""
+    con = _conn()
+    try:
+        if after is None:
+            row = con.execute("SELECT id, camera_id, wn_conf FROM candidates "
+                              "WHERE status='reject' AND frame_path IS NOT NULL "
+                              "ORDER BY id DESC LIMIT 1").fetchone()
+        else:
+            row = con.execute("SELECT id, camera_id, wn_conf FROM candidates "
+                              "WHERE status='reject' AND frame_path IS NOT NULL AND id<? "
+                              "ORDER BY id DESC LIMIT 1", (after,)).fetchone()
         remaining = con.execute("SELECT COUNT(*) FROM candidates WHERE status='reject'").fetchone()[0]
     finally:
         con.close()
@@ -179,6 +210,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/random":
             self._json(random_reject())
+            return
+        if path == "/api/next":
+            after = qs.get("after", [None])[0]
+            try:
+                after = int(after) if after is not None else None
+            except ValueError:
+                after = None
+            self._json(next_reject(after))
             return
         if path == "/img":
             try:

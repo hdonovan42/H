@@ -6,7 +6,9 @@ A fast keyboard-driven interface to hand-prune the reject pool for future traini
 **🗑 Prune rejects** button in the dash header opens `/prune/` — a random reject frame; **→/←**
 traverse (forward = new random, re-walking history if you went back; back = same order); **`1`** prunes
 the current frame + advances; **`u`** undoes the last prune (valid only until the next keypress); no
-confirm dialogs.
+confirm dialogs. A **newest-first** toggle (checkbox or **`m`**; default random) switches
+forward-traversal to walk rejects by id descending — so freshly-added rejects surface immediately and
+in order (the `/api/random` and `/api/next` endpoints both read the live DB per call, no snapshot lag).
 
 PRUNE is a **reversible status flip** `reject`→`pruned` (never a file delete): the row/frame/hourly
 backup are all kept, `build_real_dataset.py` (`status='reject'`) stops using it, and undo is one step.
