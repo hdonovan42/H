@@ -1,5 +1,25 @@
 # WaymoWatch — Changelog
 
+## v0.8.74 — Inference decoupled from the dash: a viewer change can no longer disturb detection (2026-06-21)
+
+**The dash was doing two unrelated jobs in one process** — serving the review UI *and* hosting the
+model the detection worker depends on. So a pure UI change (the gallery nesting) forced a dash restart,
+which reloaded the model and re-degraded scoring. A viewer must never be able to break detection. Split
+into two homebox services:
+
+- **`waymonet-infer`** (`infer_server.py`, **port 3105**) — model + `/api/infer` + `/health` + the
+  in-process canary watchdog (503-on-degraded, self-exit→systemd-restart). Pipeline-critical, lean, no
+  UI. The VPS worker, `scan_rejects.py` and the cron canary all hit 3105 — **unchanged** by design.
+- **`waymonet-dash`** (`server.py`, **port 3106**) — pure viewer: SPA, `/api/tree`, `/img`. It holds no
+  model; `/api/infer` (browse-time "draw boxes") simply **proxies to `waymonet-infer`**, relaying its
+  status verbatim (so a 503 still reaches the browser). cv2/numpy/ultralytics dropped from this process.
+
+Cutover (verified live): infer up on 3105 (canary healthy, known-Waymo probe 0.731), dash up on 3106
+(tree serves, proxied infer 0.731 via both POST and GET-by-id), VPS→3105 `/health` ok, VPS→3106 tree ok,
+nginx `dash.waymonet.com` repointed 3105→**3106** (`nginx -t` ok, reloaded; public returns 401 auth, not
+502), worker scored cleanly across the cutover (queue drained to ~0). `dash_canary.sh` now restarts
+`waymonet-infer`. Net: redeploy/restart the viewer freely — detection is physically isolated from it.
+
 ## v0.8.73 — Dash health watchdog: a degraded model can no longer cause a missed Waymo (2026-06-21)
 
 **The transient-miss failure mode is eliminated** — not mitigated. The serving model can silently enter

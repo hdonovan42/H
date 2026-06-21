@@ -1,50 +1,36 @@
 #!/usr/bin/env python3
-"""WaymoNet inference dashboard — read-only browse + on-demand inference + upload.
+"""WaymoNet dashboard — read-only browse VIEWER. No model in this process.
 
-Tailnet-only (fronted by `tailscale serve`); no auth of its own. Serves the SPA at `/` and a small
-JSON API. Runs `best.pt` via ultralytics on CPU, one inference at a time (the VPS is 2-vCPU and
-shares it with the live loop). Returns every box >= BASE_CONF; the UI slider filters live, so moving
-the threshold never re-runs inference.
+Decoupled from inference (2026-06-21): this serves the SPA at `/`, the gallery JSON API
+(`/api/tree`, `/img`), and PROXIES `/api/infer` to the separate `waymonet-infer` service
+(default 127.0.0.1:3105). The trained model lives ONLY in that service — so the detection
+worker never depends on this viewer, and restarting/redeploying the viewer can never disturb
+detection (the bug that motivated the split). Tailnet-only (fronted by VPS nginx); no auth.
 
 Env:
-  WAYMONET_WEIGHTS  path to best.pt          (default: ./best.pt)
-  WAYMONET_DB       path to waymo.db         (default: ../data/waymo.db; optional)
-  WAYMONET_SPECIAL  special galleries dir    (default: ../data/special; optional)
-  WAYMONET_BROWSE   local-mode root: each immediate subdir becomes an explorer group (optional)
+  WAYMONET_INFER_URL inference service endpoint (default: http://127.0.0.1:3105/api/infer)
+  WAYMONET_DB        path to waymo.db          (default: ../data/waymo.db; optional)
+  WAYMONET_SPECIAL   special galleries dir     (default: ../data/special; optional)
+  WAYMONET_BROWSE    local-mode root: each immediate subdir becomes an explorer group (optional)
+  WAYMONET_HOST/PORT bind addr/port            (default: 0.0.0.0:3106 on the homebox)
 """
 import glob
 import json
 import os
-import threading
-import time
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-import cv2
-import numpy as np
-
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-WEIGHTS = os.environ.get("WAYMONET_WEIGHTS", os.path.join(HERE, "best.pt"))
 DB = os.environ.get("WAYMONET_DB", os.path.join(ROOT, "data", "waymo.db"))
 SPECIAL = os.environ.get("WAYMONET_SPECIAL", os.path.join(ROOT, "data", "special"))
 BROWSE = os.environ.get("WAYMONET_BROWSE", "")   # local mode: each immediate subdir -> a group
-HOST = os.environ.get("WAYMONET_HOST", "127.0.0.1")  # set 0.0.0.0 on the homebox (tailnet-reachable)
-PORT = int(os.environ.get("WAYMONET_PORT", "3105"))
-IMGSZ = 704
-BASE_CONF = 0.03            # return everything >= this; UI slider filters above it
+HOST = os.environ.get("WAYMONET_HOST", "0.0.0.0")
+PORT = int(os.environ.get("WAYMONET_PORT", "3106"))
+INFER_URL = os.environ.get("WAYMONET_INFER_URL", "http://127.0.0.1:3105/api/infer")
 MAX_UPLOAD = 8 * 1024 * 1024
-
-_model = None
-_lock = threading.Lock()
-
-
-def model():
-    global _model
-    if _model is None:
-        from ultralytics import YOLO
-        _model = YOLO(WEIGHTS)
-    return _model
 
 
 def _db_rows(where, limit=None):
@@ -84,6 +70,7 @@ def registry():
                    for f in sorted(glob.glob(d + "*_frame.jpg"))])
     add_group("Recent candidates",
               [(f"db{r[0]}", r[1], f"#{r[0]}") for r in _db_rows("status='new'", limit=60)])
+
     def br_imgs(d, prefix):                   # register + list the *.jpg directly in dir d
         out = []
         for f in sorted(glob.glob(d + "*.jpg")):
@@ -114,91 +101,6 @@ def registry():
     return reg, tree
 
 
-def infer(img):
-    """Run WaymoNet on a BGR ndarray; return {w,h,time_ms,boxes:[{x1,y1,x2,y2,conf}]} (>=BASE_CONF)."""
-    with _lock:
-        t = time.time()
-        r = model().predict(img, conf=BASE_CONF, imgsz=IMGSZ, verbose=False)[0]
-        dt = (time.time() - t) * 1000
-    h, w = img.shape[:2]
-    boxes = [{"x1": round(float(b.xyxy[0][0]), 1), "y1": round(float(b.xyxy[0][1]), 1),
-              "x2": round(float(b.xyxy[0][2]), 1), "y2": round(float(b.xyxy[0][3]), 1),
-              "conf": round(float(b.conf[0]), 3)} for b in r.boxes]
-    boxes.sort(key=lambda b: -b["conf"])
-    return {"w": w, "h": h, "time_ms": round(dt), "boxes": boxes}
-
-
-# --- model health watchdog -----------------------------------------------------------------------
-# The serving model can silently enter empty-return windows (observed 2026-06-21). A background
-# canary probes a known-Waymo frame every CANARY_EVERY s. While the model is unhealthy, /api/infer
-# returns 503 on a ZERO result instead of a false empty, so the worker retries and never records a
-# 0. Sustained failure exits -> systemd restarts a fresh model. A degraded model can therefore only
-# cause a brief DELAY, never a missed detection.
-CANARY = os.environ.get("WAYMONET_CANARY", os.path.join(HERE, "canary_waymo.jpg"))
-CANARY_MIN = 0.30
-CANARY_EVERY = 3.0
-CANARY_DEADCOUNT = 5          # consecutive fails (~15 s) -> exit for a systemd restart
-KEYFILE = os.path.join(HERE, ".resend_key")
-ALERT_TO = "donovanh59@gmail.com"
-_healthy = True
-
-
-def _alert(subject, html):
-    try:
-        key = open(KEYFILE).read().split("=", 1)[1].strip()
-        import urllib.request
-        req = urllib.request.Request(
-            "https://api.resend.com/emails",
-            data=json.dumps({"from": "WaymoWatch <noreply@autosnipe.co.uk>", "to": [ALERT_TO],
-                             "subject": subject, "html": html}).encode(),
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=20).read()
-    except Exception as e:
-        print(f"alert failed: {e}", flush=True)
-
-
-def _canary_loop():
-    global _healthy
-    img = cv2.imread(CANARY) if os.path.exists(CANARY) else None
-    if img is None:
-        print(f"canary frame missing ({CANARY}) — health watchdog DISABLED", flush=True)
-        return
-    fails = 0
-    while True:
-        time.sleep(CANARY_EVERY)
-        try:
-            r = infer(img)
-            top = r["boxes"][0]["conf"] if r["boxes"] else 0.0
-        except Exception:
-            top = -1.0
-        if top >= CANARY_MIN:
-            if not _healthy:
-                print(f"canary recovered (conf {top})", flush=True)
-            _healthy, fails = True, 0
-        else:
-            fails += 1
-            if _healthy:
-                print(f"canary FAIL (conf {top}) — degraded; returning 503 on empties", flush=True)
-            _healthy = False
-            if fails >= CANARY_DEADCOUNT:
-                print(f"canary dead x{fails} -> exit for systemd restart", flush=True)
-                _alert("WaymoNet dash: model degraded — auto-restarting",
-                       f"<p>The dash model failed its canary {fails}x (~{int(CANARY_EVERY * fails)}s) and is "
-                       f"restarting via systemd. While degraded it returned 503 on empty results so the worker "
-                       f"retried — no candidate was recorded as a false zero.</p>")
-                os._exit(1)
-
-
-def _respond_infer(handler, img):
-    """Return inference, but 503 on a zero-result while the model is degraded so the worker retries
-    instead of banking a false zero (never a transient miss)."""
-    r = infer(img)
-    if not r["boxes"] and not _healthy:
-        handler._json({"error": "model degraded (canary failing) — retry"}, 503)
-    else:
-        handler._json(r)
-
-
 class Handler(BaseHTTPRequestHandler):
     server_version = "waymonet-dash"
 
@@ -215,6 +117,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def _json(self, obj, code=200):
         self._send(code, "application/json", json.dumps(obj).encode())
+
+    def _proxy_infer(self, raw):
+        """POST image bytes to the inference service and relay its JSON + status verbatim — so a 503
+        (model degraded) reaches the caller unchanged. Inference lives in waymonet-infer, not here."""
+        req = urllib.request.Request(INFER_URL, data=raw,
+                                     headers={"Content-Type": "application/octet-stream"})
+        try:
+            resp = urllib.request.urlopen(req, timeout=60)
+            self._send(resp.status, "application/json", resp.read())
+        except urllib.error.HTTPError as e:
+            self._send(e.code, "application/json", e.read())
+        except Exception as e:
+            self._json({"error": f"inference service unreachable: {e}"}, 502)
 
     def do_GET(self):
         path = urlparse(self.path).path
@@ -236,16 +151,17 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json({"error": "not found"}, 404)
             return
-        if path == "/api/infer":
+        if path == "/api/infer":                 # browse-time "draw boxes": read the file, proxy it
             p = registry()[0].get(qs.get("id", [""])[0])
             if not p:
                 self._json({"error": "unknown id"}, 404)
                 return
-            img = cv2.imread(p)
-            if img is None:
+            try:
+                raw = open(p, "rb").read()
+            except OSError:
                 self._json({"error": "unreadable"}, 400)
                 return
-            _respond_infer(self, img)
+            self._proxy_infer(raw)
             return
         self._json({"error": "not found"}, 404)
 
@@ -257,18 +173,10 @@ class Handler(BaseHTTPRequestHandler):
         if n <= 0 or n > MAX_UPLOAD:
             self._json({"error": f"bad upload size (max {MAX_UPLOAD} bytes)"}, 400)
             return
-        raw = self.rfile.read(n)
-        img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
-        if img is None:
-            self._json({"error": "not a decodable image"}, 400)
-            return
-        _respond_infer(self, img)
+        self._proxy_infer(self.rfile.read(n))
 
 
 if __name__ == "__main__":
-    print(f"waymonet-dash {HOST}:{PORT} | weights={WEIGHTS} | db={'yes' if os.path.exists(DB) else 'no'}",
-          flush=True)
-    model()  # warm the model at startup so the first request isn't slow
-    print("model warm — serving", flush=True)
-    threading.Thread(target=_canary_loop, daemon=True).start()   # health watchdog (503-on-degraded)
+    print(f"waymonet-dash (viewer) {HOST}:{PORT} | infer->{INFER_URL} | "
+          f"db={'yes' if os.path.exists(DB) else 'no'}", flush=True)
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
