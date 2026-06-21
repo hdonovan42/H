@@ -1,14 +1,12 @@
 # Notes
 
-*How a self-driving-car spotter was bootstrapped from London's traffic cameras — and what the first trained model can do.*
+*How to spot Waymos in London - using tfl JamCams.*
 
-WaymoNet watches **TfL JamCam** traffic cameras and flags **Waymo**'s self-driving test cars: white Jaguar I-PACEs carrying a roof-mounted lidar **dome**, among other sensors . **Wayve** - coming next.
+WaymoNet watches **TfL JamCam** traffic cameras and detects **Waymo**'s self-driving test cars - white Jaguar I-PACEs carrying a roof-mounted lidar **dome**, among other sensors . **Wayve** - coming next.
 
-These notes cover two phases: **(1)** finding the first 100 confirmed Waymos by hand, and **(2)** the first model trained on that data — *RUN_1*.
+These notes cover two phases: **(1)** finding the first 100 confirmed Waymos by hand, and **(2)** the first model trained on that data.
 
----
-
-## Phase 0 — 0 to 100
+## 0 to 100
 
 Wanted JamCam-specific data — decided to collect my own.
 
@@ -36,11 +34,11 @@ Scorer's weak at 352×288, often confused by roof boxes and police sirens. Only 
 
 ---
 
-## Phase 1 — RUN_1: the first trained model
+## First Model
 
 With 100 real positives across 76 cameras, the data finally cleared the bar to train a proper detector.
 
-**Recipe:** YOLO26s with a **P2 (stride-4) head** — the high-resolution feature map a 5–15 px dome needs — transfer-learned from COCO and trained at **704 px** on full-frame images plus the vetted negatives. About **19 minutes** on a single RTX 4090.
+**Recipe:** YOLO26s with a **P2 (stride-4) head** — the high-resolution feature map a 5–15 px dome needs — transfer-learned from COCO and trained at **704 px** on full-frame images plus the vetted negatives. Trained on a single RTX 4090.
 
 ### It works
 
