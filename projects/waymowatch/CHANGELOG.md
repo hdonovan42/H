@@ -1,5 +1,18 @@
 # WaymoWatch — Changelog
 
+## v0.8.72 — Canary emails on auto-restart; homebox-downtime pile-up confirmed (2026-06-21)
+
+- **Canary alert.** `dash_canary.sh` now **emails the operator** whenever it auto-restarts the dash, so a
+  silent degradation is no longer invisible — it's a prompt to chase the root cause. The homebox emails
+  Resend **directly** (homebox→VPS ssh isn't set up); `RESEND_API_KEY` lives in `~/waymonet-dash/.resend_key`
+  (chmod 600, piped from the VPS `.env`, not in git). Send path verified end-to-end.
+- **Homebox downtime resilience (confirmed; no code change).** When the homebox is unreachable the worker
+  `infer()` raises → it backs off 60 s and retries **without** writing `wn_scored`, so candidates stay
+  `wn_scored=0` and **pile up, processed when the homebox returns — never silently skipped**. (The only
+  "mark scored 0" path is a genuinely pruned frame.) **Edge:** an outage > 7 days lets the retention prune
+  delete the oldest un-scored frames; would harden retention to keep un-scored candidates (disk-capped) if
+  long outages become a thing.
+
 ## v0.8.71 — Worker aligned to the model's top box; duplicate systemd worker retired (2026-06-21)
 
 Completes the "the funnel bbox is not the Waymo" cleanup across the *whole* pipeline (it was already done
