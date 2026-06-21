@@ -1,9 +1,14 @@
 import jwt from 'jsonwebtoken'
-import { randomUUID, randomBytes } from 'node:crypto'
+import { randomUUID, randomBytes, timingSafeEqual } from 'node:crypto'
 import { Resend } from 'resend'
 import { getDb } from './db.js'
 
-const JWT_SECRET = process.env.JWT_SECRET || randomBytes(32).toString('hex')
+const JWT_SECRET = process.env.JWT_SECRET
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET env var is required — sessions would invalidate on every restart without a stable secret')
+}
+
+const ADMIN_KEY = process.env.ADMIN_KEY
 const RESEND_API_KEY = process.env.RESEND_API_KEY
 const APP_URL = process.env.APP_URL || 'http://localhost:5177'
 
@@ -94,4 +99,23 @@ export function requireAuth(req, res, next) {
   } catch {
     return res.status(401).json({ error: 'Invalid token' })
   }
+}
+
+export function requireAdminAuth(req, res, next) {
+  if (!ADMIN_KEY) {
+    return res.status(503).json({ error: 'Admin endpoints disabled: ADMIN_KEY not configured' })
+  }
+
+  const authHeader = req.headers.authorization
+  const provided = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null
+  if (!provided) {
+    return res.status(401).json({ error: 'Admin auth required' })
+  }
+
+  const a = Buffer.from(provided)
+  const b = Buffer.from(ADMIN_KEY)
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+    return res.status(401).json({ error: 'Invalid admin key' })
+  }
+  next()
 }

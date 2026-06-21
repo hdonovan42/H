@@ -7,6 +7,14 @@ function escapeShell(str) {
 }
 
 export async function sendWhatsApp(phone, message) {
+  // Alerting is OFF. The moltbot WhatsApp bridge was retired 2026-06-20 (VPS cleanup) and the
+  // gateway no longer runs, so the SSH below would just block for the full 60s timeout — on the
+  // event loop, since this is execSync — then fail. No-op until a new channel is chosen.
+  // Set ALERTS_WHATSAPP=1 to re-enable the bridge path below (requires a live moltbot gateway).
+  if (process.env.ALERTS_WHATSAPP !== '1') {
+    return { success: false, disabled: true }
+  }
+
   try {
     const safePhone = phone.replace(/[^0-9+]/g, '')
     const safeMessage = escapeShell(message)

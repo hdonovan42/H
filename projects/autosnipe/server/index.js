@@ -2,7 +2,7 @@ import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import { getDb } from './db.js'
-import { sendMagicLink, verifyMagicLink, requireAuth } from './auth.js'
+import { sendMagicLink, verifyMagicLink, requireAuth, requireAdminAuth } from './auth.js'
 import { createSubscriptionCheckout, addSlot, createPortalSession, handleWebhook } from './stripe.js'
 import { startScheduler, stopScheduler, runPollCycle, pollSingleSearch } from './scheduler.js'
 import { buildAutotraderUrl, countSearch } from './scraper.js'
@@ -282,7 +282,7 @@ app.get('/api/taxonomy', (req, res) => {
 
 // ===== ADMIN =====
 
-app.post('/api/admin/refresh-taxonomy', requireAuth, async (req, res) => {
+app.post('/api/admin/refresh-taxonomy', requireAdminAuth, async (req, res) => {
   try {
     await refreshTaxonomy()
     res.json({ success: true })
@@ -291,7 +291,7 @@ app.post('/api/admin/refresh-taxonomy', requireAuth, async (req, res) => {
   }
 })
 
-app.post('/api/admin/poll', requireAuth, async (req, res) => {
+app.post('/api/admin/poll', requireAdminAuth, async (req, res) => {
   try {
     await runPollCycle()
     res.json({ success: true })
@@ -300,8 +300,7 @@ app.post('/api/admin/poll', requireAuth, async (req, res) => {
   }
 })
 
-// Protected by nginx basic auth on dash.autosnipe.co.uk
-app.get('/api/admin/stats', (req, res) => {
+app.get('/api/admin/stats', requireAdminAuth, (req, res) => {
   const db = getDb()
   const users = db.prepare('SELECT COUNT(*) as total FROM users').get().total
   const searches = db.prepare('SELECT COUNT(*) as total FROM searches WHERE active = 1').get().total
@@ -309,14 +308,14 @@ app.get('/api/admin/stats', (req, res) => {
   res.json({ users, activeSearches: searches, totalListings: listings })
 })
 
-app.get('/api/admin/users', (req, res) => {
+app.get('/api/admin/users', requireAdminAuth, (req, res) => {
   const users = getDb().prepare(`
     SELECT id, email, phone, paid_slots, created_at FROM users ORDER BY created_at DESC
   `).all()
   res.json(users)
 })
 
-app.get('/api/admin/poll-log-all', (req, res) => {
+app.get('/api/admin/poll-log-all', requireAdminAuth, (req, res) => {
   const logs = getDb().prepare(`
     SELECT pl.*, s.name as search_name
     FROM poll_log pl
