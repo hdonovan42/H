@@ -2,3 +2,18 @@ axiom-bootstrap.tar.gz
 *:Zone.Identifier
 .env
 /temp/
+
+# Build output / bundler artifacts
+dist/
+
+# ML run outputs (e.g. YOLO runs/detect)
+runs/
+
+# Python bytecode cache
+__pycache__/
+
+# Lock files (e.g. .claude/scheduled_tasks.lock, flock files)
+*.lock
+
+# Office temp/lock files (e.g. ~$workbook.xlsx)
+~$*
