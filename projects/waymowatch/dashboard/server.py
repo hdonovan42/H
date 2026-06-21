@@ -84,12 +84,33 @@ def registry():
                    for f in sorted(glob.glob(d + "*_frame.jpg"))])
     add_group("Recent candidates",
               [(f"db{r[0]}", r[1], f"#{r[0]}") for r in _db_rows("status='new'", limit=60)])
-    if BROWSE:               # local mode: list each subdir of BROWSE as its own group (no DB needed)
-        for d in sorted(glob.glob(os.path.join(BROWSE, "*/"))):
+    def br_imgs(d, prefix):                   # register + list the *.jpg directly in dir d
+        out = []
+        for f in sorted(glob.glob(d + "*.jpg")):
+            iid = prefix + os.path.basename(f)[:-4]
+            if os.path.exists(f):
+                reg[iid] = f
+                out.append({"id": iid, "label": os.path.basename(f)[:16]})
+        return out
+
+    if BROWSE:               # local mode: each subdir of BROWSE = a group; a subdir holding ONLY
+        for d in sorted(glob.glob(os.path.join(BROWSE, "*/"))):   # subdirs becomes a nested parent
             gname = os.path.basename(d.rstrip("/"))
-            add_group(gname.replace("_", " "),
-                      [("br_" + gname + "_" + os.path.basename(f)[:-4], f, os.path.basename(f)[:16])
-                       for f in sorted(glob.glob(d + "*.jpg"))])
+            direct = br_imgs(d, "br_" + gname + "_")
+            subs = sorted(glob.glob(d + "*/"))
+            if subs and not direct:                               # parent with child sub-galleries
+                children = []
+                for s in subs:
+                    sname = os.path.basename(s.rstrip("/"))
+                    cimgs = br_imgs(s, "br_" + gname + "_" + sname + "_")
+                    if cimgs:
+                        children.append({"name": sname.replace("_", " "),
+                                         "count": len(cimgs), "images": cimgs})
+                if children:
+                    tree.append({"name": gname.replace("_", " "),
+                                 "count": sum(c["count"] for c in children), "children": children})
+            elif direct:
+                tree.append({"name": gname.replace("_", " "), "count": len(direct), "images": direct})
     return reg, tree
 
 

@@ -29,6 +29,9 @@
   .item{padding:4px 12px 4px 22px;cursor:pointer;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .item:hover{background:#0e1620}
   .item.sel{background:#13283c;color:var(--accent)}
+  /* nested groups (a browse parent with child galleries) */
+  .items .group>.gh{padding-left:22px;text-transform:none;color:var(--accent)}
+  .items .group .item{padding-left:34px}
   /* stage */
   main{flex:1;display:flex;flex-direction:column;min-width:0}
   .toolbar{padding:8px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:18px;flex-wrap:wrap}
@@ -119,14 +122,20 @@ async function inferUpload(file){
   }catch(e){ $("#stat").textContent="inference failed"; }
 }
 
+function groupHTML(g, open){
+  const body = g.children
+    ? g.children.map(c=>groupHTML(c,false)).join("")
+    : (g.images||[]).map(im=>`<div class="item" data-id="${im.id}">${im.label}</div>`).join("");
+  return `<div class="group${open?' open':''}">
+      <div class="gh">${g.name}<span>${g.count}</span></div>
+      <div class="items">${body}</div>
+    </div>`;
+}
 async function loadTree(){
   const {tree} = await (await fetch("/api/tree")).json();
-  $("#tree").innerHTML = tree.map((g,i)=>`
-    <div class="group ${i===0?'open':''}">
-      <div class="gh">${g.name}<span>${g.count}</span></div>
-      <div class="items">${g.images.map(im=>`<div class="item" data-id="${im.id}">${im.label}</div>`).join("")}</div>
-    </div>`).join("") || '<div class="empty" style="padding:20px">no images found</div>';
-  $("#tree").querySelectorAll(".gh").forEach(h=>h.onclick=()=>h.parentElement.classList.toggle("open"));
+  $("#tree").innerHTML = tree.map((g,i)=>groupHTML(g, i===0 || !!g.children)).join("")
+    || '<div class="empty" style="padding:20px">no images found</div>';
+  $("#tree").querySelectorAll(".gh").forEach(h=>h.onclick=e=>{e.stopPropagation();h.parentElement.classList.toggle("open")});
   $("#tree").querySelectorAll(".item").forEach(it=>it.onclick=()=>pick(it.dataset.id, it));
 }
 
