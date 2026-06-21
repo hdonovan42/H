@@ -85,8 +85,10 @@ warm-start from RUN_1 `best.pt` and retrain on the entire cleaned, larger set.
   highest-signal) — **weighted ×10** (oversampled in the manifest).
 - special/edge_positive (2) excluded from training (as Run 1).
 **Model/stack:** unchanged (YOLO26s-P2 @704, ultralytics 8.4.63, 4090 ~19 min, ~$0.20).
-**Start checkpoint:** warm-start from RUN_1 `best.pt` (open: vs fresh COCO transfer — RUN_1's weights
-learned the 13 recovered Waymos *as negatives*).
+**Start checkpoint:** FRESH from COCO `yolo26s.pt` — `train.py`'s default; do NOT pass RUN_1 `best.pt`
+(those weights were fine-tuned on the *poisoned* set — they learned the 13 recovered Waymos as
+negatives, which warm-starting would carry forward). Run with `--name waymonet_real_v2` so RUN_2 lands
+in its own run dir and doesn't overwrite RUN_1.
 **Gate:** same held-out-camera acceptance (recall @ 100% precision, 0 FP); compare to Run 1 (96.3% R).
 **Status:** PENDING — open whether to collect to ~200 positives first (now 132 / 91 cameras).
 
