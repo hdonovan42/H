@@ -1,5 +1,16 @@
 # WaymoWatch — Changelog
 
+## v0.8.77 — scan_rejects `--hard`: final pre-train re-check of the hard-negative set (2026-06-21)
+
+Hard negatives are weighted **×10** in training, so a Waymo hiding among them poisons a run ~10× worse
+than one left in the ordinary reject pool. `scan_rejects.py --hard` re-checks **only** the hard-negative
+set (the model's own FPs in `data/hard_negatives/`, matched to `status='reject'` rows by frame basename)
+with the same full-frame, **re-verified**, model-box review — its own checkpoint
+(`reject_scan_hard.csv`) + lock + a "HARD-NEGATIVE re-check" subject so it never collides with the main
+reject sweep. Small and fast (~140 frames, ~2 min) and target-rich by definition (these are all high-conf
+FPs). The final pre-flight gate before a training run. (Also this session: reject sweep recovered
+edge-positive #1579 — RUN_1 score 0.085 frozen in a new `model_scores` table for future-model comparison.)
+
 ## v0.8.76 — Reject-pruning tool (dash.waymonet.com/prune) (2026-06-21)
 
 A fast keyboard-driven interface to hand-prune the reject pool for future training runs. A

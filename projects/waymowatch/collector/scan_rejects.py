@@ -36,6 +36,8 @@ DB = os.path.join(BASE, "data", "waymo.db")
 PROGRESS = os.path.join(BASE, "data", "candidates", "reject_scan.csv")   # id,conf,x1,y1,x2,y2
 DONE_FLAG = os.path.join(BASE, "data", "candidates", "reject_scan.done")
 LOCK_PATH = "/tmp/waymo-reject-scan.lock"
+HARD_DIR = os.path.join(BASE, "data", "hard_negatives")   # --hard: re-check ONLY the hard-negative set
+SCAN_LABEL = "reject re-scan"                              # email subject label (overridden in --hard)
 
 sys.path.insert(0, HERE)
 import cv2                                     # noqa: E402  (torch-free)
@@ -101,12 +103,16 @@ def load_done():
     return done
 
 
-def scan(limit=None):
+def scan(limit=None, hard=False):
     con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=60)
     rows = con.execute(
         "SELECT id, frame_path FROM candidates "
         "WHERE status='reject' AND frame_path IS NOT NULL ORDER BY id").fetchall()
     con.close()
+    if hard:                                   # restrict to the hard-negative set (the model's own FPs,
+        import glob                             # weighted x10 in training — a Waymo here poisons 10x worse)
+        hb = {os.path.basename(f) for f in glob.glob(os.path.join(HARD_DIR, "*_frame.jpg"))}
+        rows = [r for r in rows if r[1] and os.path.basename(r[1]) in hb]
     done = load_done()
     todo = [r for r in rows if r[0] not in done]
     print(f"[{time.strftime('%H:%M:%S')}] scan set {len(rows)}, already done {len(done)}, "
@@ -242,7 +248,7 @@ def email_blocks(hits, dry_run=False, kind="review", tag="block"):
                 f"is confirmed a <b>model-vetted hard negative</b> — the highest-signal negatives.</p>"
                 f"<p style='color:#888'>Powered by TfL Open Data.</p>")
         else:
-            subj = (f"WaymoWatch: reject re-scan (FULL FRAMES) — block {k + 1}/{nblocks} — "
+            subj = (f"WaymoWatch: {SCAN_LABEL} (FULL FRAMES) — block {k + 1}/{nblocks} — "
                     f"{shown} frame(s) (conf {lo:.2f}–{hi:.2f})")
             html = (
                 f"<p><b>WaymoNet</b> re-scanned the reject pool by its OWN highest-confidence detection "
@@ -273,7 +279,16 @@ def main():
                     help="email ONLY these checkpoint-hit ids as a 'rescued Waymos -> positives' sheet")
     ap.add_argument("--email-rest", default="",
                     help="email all hits EXCEPT these ids as a 'flagged, not confirmed -> hard neg' sheet")
+    ap.add_argument("--hard", action="store_true",
+                    help="re-check ONLY the hard-negative set (separate checkpoint) — final pre-train gate")
     a = ap.parse_args()
+
+    if a.hard:                                 # re-point checkpoint/lock/label at the hard-neg variant
+        global PROGRESS, DONE_FLAG, LOCK_PATH, SCAN_LABEL
+        PROGRESS = os.path.join(BASE, "data", "candidates", "reject_scan_hard.csv")
+        DONE_FLAG = os.path.join(BASE, "data", "candidates", "reject_scan_hard.done")
+        LOCK_PATH = "/tmp/waymo-hardneg-scan.lock"
+        SCAN_LABEL = "HARD-NEGATIVE re-check"
 
     # single-run guard: don't race a scheduled relaunch or a manual run (shared checkpoint append)
     lock = open(LOCK_PATH, "w")
@@ -302,7 +317,7 @@ def main():
         return
 
     if not a.email_only:
-        remaining = scan(limit=a.limit)
+        remaining = scan(limit=a.limit, hard=a.hard)
         if remaining > 0:
             print(f"[{time.strftime('%H:%M:%S')}] {remaining} still unscanned (limit/backoff) — "
                   f"NOT emailing yet; rerun to finish.", flush=True)
