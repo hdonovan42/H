@@ -1,5 +1,30 @@
 # WaymoWatch — Changelog
 
+## v0.8.70 — Homebox inference silently degraded ~20 h; canary auto-restart + full re-score (2026-06-21)
+
+**Discovered:** the WaymoNet review surfaced **0 Waymos overnight while the legacy dome scorer found ≥4**.
+Root cause = a **silent serving failure** on the homebox dash: after ~20 h up (~24k inferences) the model
+process returned **empty detections for ~everything** — no crash, no error in the log — so
+`waymonet_worker` recorded **99.7 % of scored candidates (23,810 / 23,870) as `wn_conf=0`**. The correct
+`best.pt` was loaded (mtime 14:09, loaded 15:21); a **restart fixed it**. Confirmed healthy after restart:
+known Waymos score as expected (#40113 → **0.731** = its eval score; #42115 → **0.748**; #43385 → 0.36).
+**This was a serving-reliability failure, not a model-recall one** — the buried Waymos are detectable.
+
+**Canary safeguard — `dashboard/dash_canary.sh` (homebox cron `*/20`).** POSTs a known confirmed-Waymo
+frame (#40113, healthy ~0.73) to the dash; if the top conf collapses below 0.30 the model has gone dead →
+`sudo systemctl restart waymonet-dash` (re-warms in ~2 s). Silent degradation now self-heals within 20 min.
+First run: `canary ok conf=0.731`.
+
+**Full re-score.** Reset `wn_scored=0` on all **23,859** live-pool candidates so the worker re-runs them
+through the now-healthy model — resurfacing the Waymos buried during the dead window into the (full-frame)
+digest. Newest-first, so live detection isn't delayed; the canary protects the ~24k re-inferences from
+silently re-degrading mid-run.
+
+**Inference stays on the homebox (VPS headroom assessed + rejected).** The VPS is **2 cores at ~1.6 load** —
+the live capture loop alone uses ~1.4 of them (664 MB). Running torch locally would starve the loop (dropped
+clips) and add memory pressure on a multi-project box, and wouldn't fix the degradation anyway (same torch
+process, larger blast radius). Homebox (8 cores, 7 GB) remains the inference host; the canary is the fix.
+
 ## v0.8.69 — Recovery banked (+13 positives); nested dash review; digest now FULL-FRAME + 10:00/22:00 + 10-pile (2026-06-21)
 
 Three things this session: the v0.8.68 recovery was **banked**, the dash gained **nested review galleries**,
