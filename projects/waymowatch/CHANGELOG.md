@@ -13,14 +13,15 @@
   delete the oldest un-scored frames; would harden retention to keep un-scored candidates (disk-capped) if
   long outages become a thing.
 
-## v0.8.71 — Worker aligned to the model's top box; duplicate systemd worker retired (2026-06-21)
+## v0.8.71 — Worker no longer relies on the initial filters' bbox — the model draws its own; duplicate systemd worker retired (2026-06-21)
 
 Completes the "the funnel bbox is not the Waymo" cleanup across the *whole* pipeline (it was already done
 for `scan_rejects.py` and `waymonet_digest.py`; the live worker was the last holdout).
-- **`waymonet_worker.py` now scores by the model's HIGHEST-CONF box anywhere in the frame** (`top_detection`)
-  — dropped the IoU-match to the funnel bbox. `wn_conf`/`wn_bbox` are the model's own best detection, so the
-  digest draws it and `--confirm` banks it. Closes the last gap where a Waymo the funnel boxed as a
-  *different* vehicle (the #18973 case) would score 0.
+- **`waymonet_worker.py` no longer relies on the bbox from the initial filters (yolo11n + `is_white`) — the
+  model draws its own box.** It records WaymoNet's own highest-confidence detection anywhere in the frame
+  (dropped the IoU-match to the funnel bbox). `wn_conf`/`wn_bbox` are that detection, so the digest draws it
+  and `--confirm` banks it. Closes the last gap where a Waymo the initial filter boxed as a *different*
+  vehicle (the #18973 case) would score 0.
 - **Retired the duplicate systemd `waymonet-worker`.** It was running ALONGSIDE the cron `run_waymonet.sh`
   flock supervisor — i.e. **two workers** scoring at once (2× homebox load). `systemctl disable --now`; the
   cron-flock supervisor (the documented one) is now the sole worker.
