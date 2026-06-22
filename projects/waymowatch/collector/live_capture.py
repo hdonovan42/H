@@ -20,6 +20,7 @@ Run on a schedule (cron/systemd, every ~10 min) to accumulate real data 24/7. CP
 """
 import argparse
 import glob
+import hashlib
 import json
 import os
 import sys
@@ -149,7 +150,11 @@ def ensure_schema(con):
                 "wn_bbox TEXT",                    # that box [x1,y1,x2,y2] (WaymoNet's own detection)
                 "wn_scored INTEGER DEFAULT 0",     # 1 once the worker has run inference on this row
                 "wn_hit INTEGER DEFAULT 0",        # 1 if wn_conf >= COLLECT_FLOOR (model flagged it)
-                "wn_sent INTEGER DEFAULT 0"):      # 1 once shown in a WaymoNet review email
+                "wn_sent INTEGER DEFAULT 0",       # 1 once shown in a WaymoNet review email
+                "wn_scored_at TEXT", "wn_attempts INTEGER", "wn_model_ver TEXT",
+                # in-process synchronous scoring (2026-06-22): a verdict BINDS to the frame's bytes
+                "frame_sha TEXT",                  # sha256 of the current frame jpg
+                "wn_frame_sha TEXT"):              # the frame sha that produced wn_conf (stale iff != frame_sha)
         try:
             con.execute(f"ALTER TABLE candidates ADD COLUMN {col}")
         except Exception:
@@ -228,6 +233,54 @@ def detector():
     from ultralytics import YOLO
     p = os.path.join(HERE, "models", "yolo11n_int8_openvino_model")
     return YOLO(p if os.path.isdir(p) else "yolo11n.pt", task="detect")
+
+
+# --- WaymoNet, IN-PROCESS (2026-06-22) -----------------------------------------------------------
+# The trained detector scores candidate frames SYNCHRONOUSLY in this loop — no homebox, no HTTP hop,
+# no lazy worker, no stale-frame race. ~0.35 s/frame, 0.52 GB (feasibility-confirmed for the candidate
+# rate). The verdict is written ATOMICALLY with the frame + its sha (see ingest) so it can never go stale.
+_WN = None
+_WN_VER = None
+WN_IMGSZ = 704
+WN_FLOOR = 0.03            # wn_hit floor — "registers a score at all"
+
+
+def waymonet():
+    global _WN, _WN_VER
+    if _WN is None:
+        from ultralytics import YOLO
+        wp = os.path.join(HERE, "best.pt")
+        _WN = YOLO(wp)
+        try:
+            _WN_VER = hashlib.sha256(open(wp, "rb").read()).hexdigest()[:12]
+        except Exception:
+            _WN_VER = "unknown"
+    return _WN
+
+
+def wn_safe(frm):
+    """WaymoNet on a full BGR frame -> (top_conf, top_box or None, scored_flag). The model's highest-
+    confidence box ANYWHERE in the frame (the Waymo may not be the yolo11n track). On ANY failure
+    returns scored=0 so the row stays wn_scored=0 and the lazy worker re-scores it (transition net)."""
+    try:
+        r = waymonet().predict(frm, imgsz=WN_IMGSZ, conf=WN_FLOOR, verbose=False)[0]
+        bc, bb = 0.0, None
+        for b in r.boxes:
+            c = float(b.conf[0])
+            if c > bc:
+                xy = b.xyxy[0].tolist()
+                bc, bb = c, [round(xy[0], 1), round(xy[1], 1), round(xy[2], 1), round(xy[3], 1)]
+        return bc, bb, 1
+    except Exception as ex:
+        print(f"[wn] score error: {ex}", flush=True)
+        return 0.0, None, 0
+
+
+def write_frame(path, frm):
+    """Write a JPEG and return sha256 of the EXACT bytes, so a verdict can bind to the frame."""
+    _, buf = cv2.imencode(".jpg", frm)
+    buf.tofile(path)
+    return hashlib.sha256(buf.tobytes()).hexdigest()
 
 
 def zone_watchlist(cams):
@@ -396,16 +449,18 @@ def ingest(con, embed, cen, cam_id, best):
             promote = m[3] == "near" and status == "new"  # near vehicle crossed the digest bar
             if (m[3] in ("new", "near") and not m[5]
                     and (s > m[1] + 0.01 or promote)):    # better view of an UNSEEN pass -> update
-                cv2.imwrite(cp, car); cv2.imwrite(fpth, frm)
-                # The frame is being REPLACED with a better view -> the old WaymoNet verdict is stale
-                # (it scored the worse frame). Reset the wn_* fields so the worker re-scores the new
-                # frame; otherwise a Waymo whose first view scored 0 keeps that 0 forever (#45157).
+                cv2.imwrite(cp, car)
+                fsha = write_frame(fpth, frm)
+                # Better view -> re-score the NEW frame IN-PROCESS, synchronously, and bind the verdict
+                # to its bytes (frame_sha). No stale 0, no waiting on the worker (kills the #45157 class).
+                wc, wb, wsc = wn_safe(frm)
                 con.execute("UPDATE candidates SET score=?,crop_path=?,frame_path=?,emb=?,bbox=?,"
-                            "captured_at=?,status=?,"
-                            "wn_scored=0,wn_conf=NULL,wn_bbox=NULL,wn_hit=0,wn_sent=0,"
-                            "wn_scored_at=NULL,wn_attempts=NULL,wn_model_ver=NULL WHERE id=?",
+                            "captured_at=?,status=?,frame_sha=?,wn_conf=?,wn_bbox=?,wn_scored=?,wn_hit=?,"
+                            "wn_sent=0,wn_model_ver=?,wn_frame_sha=?,wn_scored_at=? WHERE id=?",
                             (s, cp, fpth, json.dumps([round(float(x), 4) for x in e]),
-                             json.dumps(list(bbox)), now, "new" if promote else m[3], m[0]))
+                             json.dumps(list(bbox)), now, "new" if promote else m[3], fsha,
+                             round(wc, 4), json.dumps(wb) if wb else None, wsc, 1 if wc >= WN_FLOOR else 0,
+                             _WN_VER, fsha if wsc else None, now if wsc else None, m[0]))
                 # superseded files are KEPT (v0.8.19) — evidence is never destroyed;
                 # the 7-day retention prune handles disk.
                 merged += 1
@@ -414,10 +469,15 @@ def ingest(con, embed, cen, cam_id, best):
                     m[3] = "new"
                     found += 1
             continue                                      # same pass/spot -> no new row
-        cv2.imwrite(cp, car); cv2.imwrite(fpth, frm)
-        con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb,bbox,status)"
-                    " VALUES(?,?,?,?,?,?,?,?)", (cam_id, now, s, cp, fpth,
-                    json.dumps([round(float(x), 4) for x in e]), json.dumps(list(bbox)), status))
+        cv2.imwrite(cp, car)
+        fsha = write_frame(fpth, frm)
+        wc, wb, wsc = wn_safe(frm)        # score the new candidate IN-PROCESS, synchronously, at capture
+        con.execute("INSERT INTO candidates(camera_id,captured_at,score,crop_path,frame_path,emb,bbox,"
+                    "status,frame_sha,wn_conf,wn_bbox,wn_scored,wn_hit,wn_model_ver,wn_frame_sha,wn_scored_at)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (cam_id, now, s, cp, fpth,
+                    json.dumps([round(float(x), 4) for x in e]), json.dumps(list(bbox)), status, fsha,
+                    round(wc, 4), json.dumps(wb) if wb else None, wsc, 1 if wc >= WN_FLOOR else 0,
+                    _WN_VER, fsha if wsc else None, now if wsc else None))
         # DO NOT add this clip's own inserts to `recent` (v0.8.58): tracks from ONE clip are
         # distinct vehicles BY CONSTRUCTION (ByteTrack gives one id per object), yet two white
         # Waymo I-PACEs have near-identical dome roof-crops (cosine >= DEDUP_TH) — so feeding a
