@@ -1,5 +1,17 @@
 # WaymoWatch — Changelog
 
+## v0.9.2 — fix: retention deleted model-flagged Waymos awaiting review; #22408 recovered (2026-06-22)
+
+`retention()` pruned `status='new'` rows older than 7 days (and `near` past `NEAR_KEEP_DAYS`) regardless
+of `wn_hit`/`wn_sent`. The big re-score surfaced **historic** Waymos (captured days ago, scored 0 by the
+old serving) and emailed them — then retention **deleted them, row AND frame**, before they could be
+banked. **#22408** (Blackheath Rd/Greenwich High Rd, dome 0.80, captured 2026-06-15) was emailed at 16:17
+then retention-deleted ~20 min later (it was a 7-day-old `'new'` row). Fix: retention **never prunes a
+candidate with `wn_hit=1` or `wn_sent=1`** — model-flagged / emailed = pending review, not stale.
+#22408 recovered from the **append-only backup** (frame restored, re-scored **0.102**, screenshot-
+confirmed) and banked as a Waymo. (This bug + v0.9.1's downgrade were both caught by the user's review of
+the banked sets — the review-email step is essential.)
+
 ## v0.9.1 — fix: the in-process best-view update could DOWNGRADE a Waymo (take-max) (2026-06-22)
 
 The v0.9.0 best-view update overwrote a candidate's frame + verdict with the dome's "better" view

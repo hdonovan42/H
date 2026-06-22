@@ -502,8 +502,12 @@ def retention(con):
     """Prune stale candidate rows AND their jpgs (files were previously orphaned forever)."""
     for status_, days in (("new", 7), ("near", NEAR_KEEP_DAYS)):
         cut = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - days * 86400))
+        # NEVER prune a model-flagged / emailed candidate awaiting review (wn_hit / wn_sent). Retention
+        # deleted real Waymos the re-score surfaced (#22408: a 7-day-old 'new' row, emailed at 16:17,
+        # then retention-deleted before it could be banked). Only never-flagged stale rows age out.
+        keep = " AND COALESCE(wn_hit,0)=0 AND COALESCE(wn_sent,0)=0"
         stale = con.execute("SELECT crop_path,frame_path FROM candidates WHERE captured_at < ? "
-                            "AND status=?", (cut, status_)).fetchall()
+                            "AND status=?" + keep, (cut, status_)).fetchall()
         for row in stale:
             for f in row:
                 if f and os.path.exists(f):
@@ -511,7 +515,7 @@ def retention(con):
                         os.remove(f)
                     except Exception:
                         pass
-        con.execute("DELETE FROM candidates WHERE captured_at < ? AND status=?", (cut, status_))
+        con.execute("DELETE FROM candidates WHERE captured_at < ? AND status=?" + keep, (cut, status_))
     con.commit()
 
 
