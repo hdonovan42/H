@@ -1,5 +1,31 @@
 # WaymoWatch — Changelog
 
+## v0.9.0 — WaymoNet scores IN-PROCESS on the VPS; lazy worker + homebox live-serving retired (2026-06-22)
+
+**Architecture redesign.** The repeated missed-Waymo failures were one root shape, not bad luck:
+WaymoNet was a lazy, fire-once filter behind a lossy funnel across an unreliable remote hop, its verdict
+decoupled from the frame. A recall audit settled it — **the model detects ~96% of confirmed Waymos on
+their current frames, but the pipeline had captured only 15%.** The gap was the data flow, not the model
+(e.g. #45157: stored 0.0, live 0.642 — scored once on an early frame, then the frame upgraded without
+re-scoring). Redesigned:
+
+- **WaymoNet now scores SYNCHRONOUSLY, IN-PROCESS, in the capture loop on the VPS** (`live_capture.ingest`)
+  — at capture, on the exact frame. No homebox, no HTTP hop, no lazy worker, no stale-frame race.
+  ~0.35 s/frame, loop RSS ~0.66 G, ~0.06 core (feasibility-confirmed). `best.pt` → `collector/best.pt`;
+  `earlyoom` enabled on the VPS first.
+- **The verdict binds to the frame's content hash** — `frame_sha = sha256(frame)` + `wn_frame_sha`,
+  written atomically with the row. A score is valid only if it matches the current frame, so it can
+  **never go stale**; the best-view update re-scores in-process instead of stranding a 0.
+- **Cutover:** the lazy worker (`waymonet_worker.py` + `run_waymonet.sh` cron) is **retired** (cron
+  removed; code kept). The homebox `waymonet-infer` stays **only** for the dash viewer's "draw boxes".
+- **Remediation:** a 12k re-score of existing candidates on their current frames drained + emailed the
+  recovered Waymos (incl. a 0.78). Verified: in-process == homebox (#45157→0.642); 1,751+ scored
+  in-process; 10/10 latest post-cutover frame-bound; 0 stragglers; loop stable.
+
+Remaining (separate increments): score-every-view take-max (leak #2); a `frame_sha`/`model_ver` re-score
+sweep (in-process straggler/staleness net); demote/retire the dome scorer AFTER RUN_2 eval (it still
+catches model misses, e.g. #45157).
+
 ## v0.8.77 — scan_rejects `--hard`: final pre-train re-check of the hard-negative set (2026-06-21)
 
 Hard negatives are weighted **×10** in training, so a Waymo hiding among them poisons a run ~10× worse
