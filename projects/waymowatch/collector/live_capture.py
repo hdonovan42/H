@@ -397,8 +397,13 @@ def ingest(con, embed, cen, cam_id, best):
             if (m[3] in ("new", "near") and not m[5]
                     and (s > m[1] + 0.01 or promote)):    # better view of an UNSEEN pass -> update
                 cv2.imwrite(cp, car); cv2.imwrite(fpth, frm)
+                # The frame is being REPLACED with a better view -> the old WaymoNet verdict is stale
+                # (it scored the worse frame). Reset the wn_* fields so the worker re-scores the new
+                # frame; otherwise a Waymo whose first view scored 0 keeps that 0 forever (#45157).
                 con.execute("UPDATE candidates SET score=?,crop_path=?,frame_path=?,emb=?,bbox=?,"
-                            "captured_at=?,status=? WHERE id=?",
+                            "captured_at=?,status=?,"
+                            "wn_scored=0,wn_conf=NULL,wn_bbox=NULL,wn_hit=0,wn_sent=0,"
+                            "wn_scored_at=NULL,wn_attempts=NULL,wn_model_ver=NULL WHERE id=?",
                             (s, cp, fpth, json.dumps([round(float(x), 4) for x in e]),
                              json.dumps(list(bbox)), now, "new" if promote else m[3], m[0]))
                 # superseded files are KEPT (v0.8.19) — evidence is never destroyed;
