@@ -449,23 +449,30 @@ def ingest(con, embed, cen, cam_id, best):
             promote = m[3] == "near" and status == "new"  # near vehicle crossed the digest bar
             if (m[3] in ("new", "near") and not m[5]
                     and (s > m[1] + 0.01 or promote)):    # better view of an UNSEEN pass -> update
-                cv2.imwrite(cp, car)
-                fsha = write_frame(fpth, frm)
-                # Better view -> re-score the NEW frame IN-PROCESS, synchronously, and bind the verdict
-                # to its bytes (frame_sha). No stale 0, no waiting on the worker (kills the #45157 class).
+                # The DOME says this is a better view. Score it, but only REPLACE the stored frame+verdict
+                # if WaymoNet scores it >= the existing — NEVER downgrade a Waymo by overwriting a good
+                # view with a dome-better-but-WaymoNet-worse one (the #46871 regression). Take the MAX
+                # WaymoNet view (leak #2). Scoring failure (wsc=0) also keeps the existing verdict.
                 wc, wb, wsc = wn_safe(frm)
-                con.execute("UPDATE candidates SET score=?,crop_path=?,frame_path=?,emb=?,bbox=?,"
-                            "captured_at=?,status=?,frame_sha=?,wn_conf=?,wn_bbox=?,wn_scored=?,wn_hit=?,"
-                            "wn_sent=0,wn_model_ver=?,wn_frame_sha=?,wn_scored_at=? WHERE id=?",
-                            (s, cp, fpth, json.dumps([round(float(x), 4) for x in e]),
-                             json.dumps(list(bbox)), now, "new" if promote else m[3], fsha,
-                             round(wc, 4), json.dumps(wb) if wb else None, wsc, 1 if wc >= WN_FLOOR else 0,
-                             _WN_VER, fsha if wsc else None, now if wsc else None, m[0]))
-                # superseded files are KEPT (v0.8.19) — evidence is never destroyed;
-                # the 7-day retention prune handles disk.
-                merged += 1
-                m[1], m[2], m[4], m[6] = s, e, list(bbox), now
-                if promote:
+                oldwc = con.execute("SELECT COALESCE(wn_conf,-1.0) FROM candidates WHERE id=?",
+                                    (m[0],)).fetchone()[0]
+                if wsc and wc >= oldwc:
+                    cv2.imwrite(cp, car)
+                    fsha = write_frame(fpth, frm)
+                    con.execute("UPDATE candidates SET score=?,crop_path=?,frame_path=?,emb=?,bbox=?,"
+                                "captured_at=?,status=?,frame_sha=?,wn_conf=?,wn_bbox=?,wn_scored=1,wn_hit=?,"
+                                "wn_sent=0,wn_model_ver=?,wn_frame_sha=?,wn_scored_at=? WHERE id=?",
+                                (s, cp, fpth, json.dumps([round(float(x), 4) for x in e]),
+                                 json.dumps(list(bbox)), now, "new" if promote else m[3], fsha,
+                                 round(wc, 4), json.dumps(wb) if wb else None, 1 if wc >= WN_FLOOR else 0,
+                                 _WN_VER, fsha, now, m[0]))
+                    merged += 1
+                    m[1], m[2], m[4], m[6] = s, e, list(bbox), now
+                    if promote:
+                        m[3] = "new"
+                        found += 1
+                elif promote:        # keep the better existing verdict+frame; just bump near -> new
+                    con.execute("UPDATE candidates SET status='new' WHERE id=?", (m[0],))
                     m[3] = "new"
                     found += 1
             continue                                      # same pass/spot -> no new row

@@ -1,5 +1,18 @@
 # WaymoWatch — Changelog
 
+## v0.9.1 — fix: the in-process best-view update could DOWNGRADE a Waymo (take-max) (2026-06-22)
+
+The v0.9.0 best-view update overwrote a candidate's frame + verdict with the dome's "better" view
+**unconditionally** — but the dome's pick (by cosine/area) can score *lower* for WaymoNet, re-hiding a
+Waymo. **#46871** (Parliament Sq) was emailed at 0.09, then a dome-better view overwrote it and WaymoNet
+scored that view 0.0 — the good view was lost and it dropped out of review. Fix: on a best-view update,
+score the new view and **only replace if WaymoNet scores it ≥ the existing — take the MAX view, never
+downgrade** (a scoring failure also keeps the existing verdict). This is the surgical form of leak #2.
+**Caveat:** while the bug was live (~5 h) some good views were overwritten on disk and are unrecoverable;
+the live loop re-captures those Waymos on future passes. Also recovered from this review: **#25920** (a
+0.44 Waymo wrongly banked as a hard negative when "the rest" was rejected — the review email caught it),
+**#46871** → waymo, **#23349** → edge_positive. Confirmed Waymos 153 → 156.
+
 ## v0.9.0 — WaymoNet scores IN-PROCESS on the VPS; lazy worker + homebox live-serving retired (2026-06-22)
 
 **Architecture redesign.** The repeated missed-Waymo failures were one root shape, not bad luck:
