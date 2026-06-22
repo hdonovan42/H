@@ -22,6 +22,17 @@ re-scoring). Redesigned:
   recovered Waymos (incl. a 0.78). Verified: in-process == homebox (#45157→0.642); 1,751+ scored
   in-process; 10/10 latest post-cutover frame-bound; 0 stragglers; loop stable.
 
+**Results — first review after the redesign (2026-06-22).** The re-score-on-current-frames + in-process
+pipeline surfaced **16 Waymos in one review session** — including the 2 the operator had independently
+found via the legacy dome digest, plus 14 more (14 confirmed; 2 of the 16 IDs were entry typos, pending
+correction). **Of the 14 confirmed, 8 were HISTORIC — captured 1–6 days earlier and hidden in the
+dataset**, scored 0/stale by the old serving and never surfaced until now (oldest **#24909, 2026-06-16 —
+hidden 6 days**; also #26870 5d, #29664/#30691 4d, + 4 from 06-21). The other 6 were caught fresh the
+same day by in-process scoring. This is the proof: the model was always capable (recall audit ~96%) and
+the **serving was the bottleneck** — 8 real Waymos had been sitting unseen in the data for up to a week.
+The 70 reviewed-but-unconfirmed candidates were banked as hard negatives (217 total). Confirmed Waymos:
+139 → **153**.
+
 Remaining (separate increments): score-every-view take-max (leak #2); a `frame_sha`/`model_ver` re-score
 sweep (in-process straggler/staleness net); demote/retire the dome scorer AFTER RUN_2 eval (it still
 catches model misses, e.g. #45157).
