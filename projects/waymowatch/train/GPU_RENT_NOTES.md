@@ -4,6 +4,39 @@ Practical companion to `RUNBOOK.md` (RUNBOOK = the recipe/rationale; this = the 
 how-to, the gotchas we actually hit, and the **Run 1 baseline numbers** to compare against).
 First proven end-to-end on **Vast.ai, 2026-06-20**. Powered by TfL Open Data.
 
+## RUN_2 — pre-rental checklist (2026-06-22)
+Status: dataset built + **PREFLIGHT PASS** (154 boxes / 147 frames / 99 cameras + 229 hard negs ×10).
+Locked: **fresh from COCO** (do NOT warm-start from RUN_1), **`--name waymonet_real_v2`**, attached 4090
+full-rescore. Details below; this is the ordered run sheet.
+
+### A. Off the clock (VPS + laptop) — BEFORE renting
+- [ ] If new confirms landed since: `.venv/bin/python dataset/build_real_dataset.py && .venv/bin/python train/preflight.py` → "PREFLIGHT PASS"
+- [ ] Train bundle: `cd ~/waymowatch && tar czf /tmp/waymonet_train.tgz train/ data/dataset_real/` → pull to laptop
+- [ ] Rescore inputs: `tar czf /tmp/cand_frames.tgz -C data candidates` (~1.9 GB), THEN
+      `.venv/bin/python eval/export_score_manifest.py --out /tmp/run2_manifest.csv` (manifest after the tar so every row has a frame) → pull both to laptop
+- [ ] Vast: add credit; paste the **laptop** SSH pubkey at Account → SSH Keys
+- [ ] DECIDE: apply the two rescore-report fixes before `run2_report.py`? — #1 backfill reject RUN_1
+      baseline from the sweep CSVs; #2 exclude edge positives from the "Waymo→0" miss check (~10 min if yes)
+
+### B. On the clock (RTX 4090) — ~40–75 min total, ~$0.30–0.50
+- [ ] Rent: RTX 4090 · PyTorch template · ~30 GB disk · On-Demand · reliability >99%; copy the **Direct SSH** line (the `>_`/key icon, NOT "OPEN")
+- [ ] Upload + setup: `scp -P <port>` both tgz to `/workspace`; `tar xzf …`; `/venv/main/bin/pip install 'ultralytics==8.4.63'` (REUSE `/venv/main` — never a fresh venv)
+- [ ] Train: `nohup /venv/main/bin/python /workspace/train/train.py --device 0 --name waymonet_real_v2 > /workspace/train.log 2>&1 &` (~30–70 min at this dataset size)
+- [ ] **GATE (ship decision):** `/venv/main/bin/python /workspace/train/eval_gate.py --weights /workspace/data/runs/waymonet_real_v2/weights/best.pt` → recall @ precision-100% / 0 FP on held-out cameras; compare to RUN_1 (96.3% @0.10)
+- [ ] Rescore (attached, ~3 min): `tar xzf cand_frames.tgz` → `/workspace/candidates`, then
+      `/venv/main/bin/python /workspace/eval/rescore_all.py --weights /workspace/data/runs/waymonet_real_v2/weights/best.pt --frames-dir /workspace/candidates --manifest /workspace/run2_manifest.csv --out /workspace/run2_scored.csv --device 0`
+- [ ] Pull back: `rsync -az -e "ssh -p <port>" root@<ip>:/workspace/data/runs/waymonet_real_v2/ ~/waymonet_run2/` + `run2_scored.csv`
+- [ ] **DESTROY** the instance (trash icon — NOT Stop; Stop still bills storage)
+
+### C. Post-rental (VPS)
+- [ ] Report: `.venv/bin/python eval/run2_report.py --csv run2_scored.csv --email` → contradictions
+      (rejects RUN_2 now calls Waymo = more hidden ones to recover) + RUN_1↔RUN_2 movement, stored in `model_scores`
+- [ ] Deploy RUN_2 live: copy `best.pt` → **`collector/best.pt`** (VPS, in-process live scoring) AND
+      **`~/waymonet-dash/best.pt`** (homebox, the dash); restart the loop (bracketed `pkill -f 'live_capture.py --[l]oop'`) + `waymonet-infer`; **recheck the dash canary threshold** — RUN_2 scores #40113 differently than 0.73
+- [ ] Apply RUN_2 to the BACKLOG: the loop scores NEW candidates with RUN_2, but ~52k existing rows keep
+      RUN_1 scores — reset `wn_scored=0` on `status IN ('new','near')` so the loop re-scores them with RUN_2 and surfaces anything RUN_1 missed (then the digest emails the new hits)
+- [ ] Keep the **dome scorer** running through this eval (it still catches model misses)
+
 ## Quick procedure (Vast.ai — proven)
 1. **Build dataset** on the VPS: `.venv/bin/python dataset/build_real_dataset.py`
 2. **Preflight** (free, CPU — never debug on the clock): `.venv/bin/python train/preflight.py` → "PREFLIGHT PASS"
