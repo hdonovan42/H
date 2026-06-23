@@ -97,9 +97,9 @@ def main():
     contra_rej = sorted([r for r in rows if r["status"] == "reject"
                          and (_f(r["run2_conf"]) or 0) >= a.contra_conf],
                         key=lambda r: -(_f(r["run2_conf"]) or 0))
-    contra_way = sorted([r for r in rows if r["status"] == "waymo"
+    contra_way = sorted([r for r in rows if r["status"] == "waymo" and not (r.get("special") or "").strip()
                          and _f(r["run2_conf"]) is not None and _f(r["run2_conf"]) < a.miss_conf],
-                        key=lambda r: (_f(r["run2_conf"]) or 0))
+                        key=lambda r: (_f(r["run2_conf"]) or 0))   # exclude edge positives (eval-only, low-conf)
 
     def show(title, rs, lim=40):
         print(f"\n{title}: {len(rs)}")

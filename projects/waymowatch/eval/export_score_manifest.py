@@ -27,14 +27,14 @@ def main():
     n = 0
     with open(a.out, "w", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(["id", "camera_id", "captured_at", "status", "dome_score",
+        w.writerow(["id", "camera_id", "captured_at", "status", "special", "dome_score",
                     "run1_conf", "run1_hit", "frame_basename"])
-        for cid, cam, at, st, sc, c1, h1, fp in con.execute(
-                "SELECT id,camera_id,captured_at,status,score,wn_conf,wn_hit,frame_path "
+        for cid, cam, at, st, sp, sc, c1, h1, fp in con.execute(
+                "SELECT id,camera_id,captured_at,status,special,score,wn_conf,wn_hit,frame_path "
                 "FROM candidates WHERE frame_path IS NOT NULL"):
             if not (fp and os.path.exists(fp)):
                 continue
-            w.writerow([cid, cam, at, st, sc, c1, h1, os.path.basename(fp)])
+            w.writerow([cid, cam, at, st, sp, sc, c1, h1, os.path.basename(fp)])
             n += 1
     print(f"manifest -> {a.out} ({n} candidates with frames)")
 
