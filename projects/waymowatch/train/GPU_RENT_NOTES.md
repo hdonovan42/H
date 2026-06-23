@@ -15,8 +15,7 @@ full-rescore. Details below; this is the ordered run sheet.
 - [ ] Rescore inputs: `tar czf /tmp/cand_frames.tgz -C data candidates` (~1.9 GB), THEN
       `.venv/bin/python eval/export_score_manifest.py --out /tmp/run2_manifest.csv` (manifest after the tar so every row has a frame) → pull both to laptop
 - [ ] Vast: add credit; paste the **laptop** SSH pubkey at Account → SSH Keys
-- [ ] DECIDE: apply the two rescore-report fixes before `run2_report.py`? — #1 backfill reject RUN_1
-      baseline from the sweep CSVs; #2 exclude edge positives from the "Waymo→0" miss check (~10 min if yes)
+- [ ] **#5 — the two rescore-report fixes (recommended: DO #2, SKIP #1 — explained below). ~5 min.**
 
 ### B. On the clock (RTX 4090) — ~40–75 min total, ~$0.30–0.50
 - [ ] Rent: RTX 4090 · PyTorch template · ~30 GB disk · On-Demand · reliability >99%; copy the **Direct SSH** line (the `>_`/key icon, NOT "OPEN")
@@ -36,6 +35,23 @@ full-rescore. Details below; this is the ordered run sheet.
 - [ ] Apply RUN_2 to the BACKLOG: the loop scores NEW candidates with RUN_2, but ~52k existing rows keep
       RUN_1 scores — reset `wn_scored=0` on `status IN ('new','near')` so the loop re-scores them with RUN_2 and surfaces anything RUN_1 missed (then the digest emails the new hits)
 - [ ] Keep the **dome scorer** running through this eval (it still catches model misses)
+
+### #5 explained — the two `run2_report` report-quality fixes
+Both only tidy the post-train report (which finds MORE hidden Waymos); NEITHER affects the headline
+output — "rejects RUN_2 now calls Waymo" works regardless. **Recommendation: do #2, skip #1.**
+- **#2 — DO IT (~5 min, 1–2 lines).** The report flags `status='waymo' AND run2_conf < 0.05` as "a
+  confirmed Waymo the model now scores ~0" — a *genuine recall miss* worth seeing. But the **5 edge
+  positives** are deliberately low-conf / eval-only, so RUN_2 will score them <0.05 → ~5 false alarms
+  that bury the real misses. Fix: export `special` in the manifest + exclude `special IS NOT NULL` from
+  the miss check. Without it the miss-list is mostly noise.
+- **#1 — SKIP.** The report uses `wn_conf` as the RUN_1 baseline for the RUN_1→RUN_2 *movement*; most
+  **rejects** have `wn_conf=NULL` (rejected pre-WaymoNet; their RUN_1 scores live in `reject_scan.csv`,
+  not the DB), so reject movement compares against ~0. Backfilling from the sweep CSVs would be
+  **partial** (today's 230 new hard-negatives aren't in them) — a half-filled baseline is more
+  misleading than an empty one — and the hidden-Waymo contradiction uses run2 alone, so it doesn't need
+  it. Leave the reject baseline empty.
+- **Third option:** skip both — the report still finds the hidden Waymos; you just read around ~5
+  edge-positive false misses.
 
 ## Quick procedure (Vast.ai — proven)
 1. **Build dataset** on the VPS: `.venv/bin/python dataset/build_real_dataset.py`
