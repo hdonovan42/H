@@ -185,8 +185,13 @@ RUN_2 **100% recall @0.1–0.2, 0 leaks** on 487 rejects.
 hard confusers). So **non-Waymo ceiling = 0.22** (#6318) vs **lowest real Waymo = 0.10** (#216, a lone
 outlier; next-lowest 0.18) → a thin **0.10–0.22 overlap band** (3 Waymos / 5 confusers); 201/204 Waymos sit
 above every confuser. **vs RUN_1: worst confuser 0.64 sat above 140/204 Waymos** (lowest Waymo 0.00, a
-miss; confusers ≥0.30: 16) → RUN_2 collapsed the overlap **69%→1.5%, confusers ≥0.30 16→0**. RUN_3: prise
-the 0.10–0.22 band apart (esp. #216).
+miss; confusers ≥0.30: 16) → RUN_2 collapsed the overlap **69%→1.5%, confusers ≥0.30 16→0**.
+
+**CAVEAT — production 2026-06-25:** that 0.22 ceiling is on *labelled* rejects only (the model effectively
+knew them). A **NOVEL** confuser (**#40294, scored 0.67**) was auto-banked live and caught at review — so
+there is NO clean low cut on unseen data, and the **auto-bank threshold was raised 0.30 → 0.75** (near-
+certain only; below → manual review). RUN_3: prise the band apart — #216 (the 0.10 Waymo) AND the
+novel-confuser tail (#40294 @0.67 / #47783 @0.35, both now hard negatives) so the auto-bank cut can drop.
 
 **Cost / wall-clock:** ~2.3 h training (127 epochs @ ~64 s) + ~4 h total instance lifetime incl. eval/debug;
 4090 @ ~$0.30–0.40/h ≈ **~$1.50**.
@@ -203,6 +208,25 @@ hard-neg ×10 duplication**.
 - **NOT RUN — train-throughput matrix** (workers/batch/`rect`/`compile`; hard-weight ×3/×5 + imgsz 512
   gate runs). The rescore debugging consumed the idle window. `train/bench.py` + the hardlinked
   `dataset_hw{1,3,5}` variants are built and ready. [RESULTS: PENDING — next rental]
+
+## Run 3 — plan (STANDING recipe from here: warm-start + full dataset)
+**Why RUN_2 was fresh-from-COCO but RUN_3 won't be.** RUN_2 trained **fresh from COCO** (`yolo26s.pt`,
+766/902 transfer — confirmed in the train log; `train.py` defaults, NO `--model`/`--weights` override)
+*specifically because* RUN_1's weights were fine-tuned on the **poisoned** negative set — they'd learned
+the later-recovered Waymos *as* negatives, and warm-starting would carry that contamination forward.
+That poisoned lineage is now broken: RUN_2 trained on a decontaminated set, so **its weights are clean**.
+
+**So from RUN_3 onward — warm-start from the previous run + train on the FULL dataset:**
+- **Warm-start:** `train.py --model ~/waymonet_runN/weights/best.pt --name waymonet_real_v3` (a `.pt`
+  passed as `--model` fine-tunes directly — no separate COCO `--weights` transfer). Inherits the prior
+  run's learned features → faster convergence, builds on prior knowledge.
+- **Full dataset, always:** never train on just the new confirms. `dataset/build_real_dataset.py` already
+  rebuilds from the WHOLE DB each run (every `status='waymo'` + every `status='reject'`/hard-neg), so the
+  set only grows and cleans. Just rebuild + preflight before each rental.
+- **Fresh-from-COCO is the EXCEPTION** — use it ONLY to break a poisoned lineage (as RUN_2 did), never by
+  default.
+- **RUN_3 targets:** the 0.10–0.22 overlap (esp. #216) AND the novel-confuser tail (#40294 @0.67, #47783
+  @0.35 — both banked as hard negatives 2026-06-25) so the auto-bank cut can drop from 0.75 back down.
 
 ## Attached full rescore + RUN_1↔RUN_2 eval (RUN_2 onward)
 Score EVERY candidate with the new weights on the rented GPU (minutes) instead of ~5-9 h on the

@@ -32,8 +32,10 @@ from email_alert import send_email              # noqa: E402  (lightweight: requ
 MAX_CELLS = 200
 REAL_DIR = os.path.join(BASE, "data", "real_positives")    # WaymoNet-path confirms -> positives
 HARD_DIR = os.path.join(BASE, "data", "hard_negatives")    # WaymoNet-path rejects -> v2 hard negatives
-AUTO_BANK_TH = 0.30   # RUN_2: confirmed non-Waymos top out at 0.22, so anything >= 0.30 is auto-banked
-                      # as a positive (no manual review); the day's auto-banks are emailed at midnight.
+AUTO_BANK_TH = 0.75   # auto-bank only NEAR-CERTAIN Waymos. The 0.22 "confuser ceiling" held only on
+                      # LABELLED rejects (the model effectively knew them); a NOVEL confuser (#40294)
+                      # scored 0.67 in production (2026-06-25), so the clean cut sits high. Anything below
+                      # -> manual review (no false-positive risk into the training set). Emailed at midnight.
 
 
 def _model_ver():

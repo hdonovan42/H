@@ -15,6 +15,14 @@ stale RUN_1 score (confusers reached 0.64) can never auto-bank. The **review dig
 0.03–0.30 band** — strong Waymos skip manual review, lightening the load. First run banked **9** (conf
 0.35–0.82); waymo total 209 → 218. New column `wn_autobank`.
 
+**Same-day correction:** 2 of the 9 were confusers (#40294 @**0.67**, #47783 @0.35). A *novel* confuser
+at 0.67 broke the labelled-reject "0.22 ceiling" (that ceiling only held on rejects the model was trained
+against), so the **auto-bank cut was raised 0.30 → 0.75** (near-certain only; below → manual review) and
+the 2 rebanked as hard negatives (RUN_3 training signal). **Standing recipe added** (`GPU_RENT_NOTES`
+"Run 3 — plan", + memory): RUN_2 was fresh-from-COCO to break RUN_1's poisoned-negative lineage;
+**RUN_3+ warm-start from the previous run's `best.pt` on the FULL dataset** (fresh-from-COCO is the
+exception, only to break a poisoned lineage).
+
 ## RUN_2 trained — PASSES the gate, BEATS RUN_1 head-to-head (2026-06-25)
 
 WaymoNet RUN_2 trained on the doubled, decontaminated set — **204 boxes / 190 frames / 112 cameras + 425
