@@ -12,8 +12,10 @@ record in `train/GPU_RENT_NOTES.md`.
   `eval/headtohead.py`): RUN_2 wins everything. Waymo-score **mean 0.51→0.59, std 0.20→0.17 (tighter),
   min 0.00→0.10** (no more zero-scored Waymos). Catch/leak (7905 rejects): @0.10 96.6%/88 → **100%/5**,
   @0.20 91.7%/41 → 98.5%/1, @0.30 83.3%/16 → **94.1%/0**. Held-out cut: **100% recall @0.1–0.2, 0 leaks**.
-- **5 reject→Waymo "leaks"** (#6318/#20036/#6151/#3765/#66667) = candidate hidden Waymos in the negatives,
-  emailed for manual review (the decontamination win, like RUN_1's 13).
+- **5 reject→Waymo "leaks"** (#6318/#20036/#6151/#3765/#66667) reviewed → **all confirmed NOT Waymos**
+  (hard confusers). They pin the **non-Waymo ceiling at 0.22** vs the **lowest real Waymo 0.10** (#216, an
+  outlier) — a thin 0.10–0.22 overlap. vs RUN_1 (worst confuser **0.64** over **140/204** Waymos), RUN_2
+  collapsed the overlap **69%→1.5%**, confusers ≥0.30 **16→0**.
 - **Site notes updated** — waymonet.com/notes now carries the RUN_2 section.
 
 **Tooling:** `eval/rescore_all.py` GPU rescore was *broken* (whole-list `predict()` → 49 GiB OOM; batched

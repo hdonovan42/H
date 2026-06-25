@@ -179,8 +179,14 @@ to ~25%). Full 150 epochs ≈ ~2.7 h. (RUN_1 was ~7.5 s/epoch — RUN_2 is 10× 
 RUN_2 wins every metric. Confirmed-Waymo score (n=204): **mean 0.51→0.59, std 0.20→0.17 (tighter), min
 0.00→0.10** (RUN_1 had a zero-scored Waymo; RUN_2's worst clears the 0.1 floor). Catch/leak (7905 rejects):
 @0.10 **96.6%/88 → 100%/5**; @0.20 91.7%/41 → 98.5%/1; @0.30 83.3%/16 → 94.1%/**0**. Held-out cut (unbiased):
-RUN_2 **100% recall @0.1–0.2, 0 leaks** on 487 rejects. The **5 leaks @0.10** = candidate hidden Waymos in
-the negatives (#6318, #20036, #6151, #3765, #66667 — emailed for manual review; the decontamination win).
+RUN_2 **100% recall @0.1–0.2, 0 leaks** on 487 rejects.
+
+**Separation (the operating reality):** the 5 leaks were reviewed → **all confirmed NOT Waymos** (genuine
+hard confusers). So **non-Waymo ceiling = 0.22** (#6318) vs **lowest real Waymo = 0.10** (#216, a lone
+outlier; next-lowest 0.18) → a thin **0.10–0.22 overlap band** (3 Waymos / 5 confusers); 201/204 Waymos sit
+above every confuser. **vs RUN_1: worst confuser 0.64 sat above 140/204 Waymos** (lowest Waymo 0.00, a
+miss; confusers ≥0.30: 16) → RUN_2 collapsed the overlap **69%→1.5%, confusers ≥0.30 16→0**. RUN_3: prise
+the 0.10–0.22 band apart (esp. #216).
 
 **Cost / wall-clock:** ~2.3 h training (127 epochs @ ~64 s) + ~4 h total instance lifetime incl. eval/debug;
 4090 @ ~$0.30–0.40/h ≈ **~$1.50**.

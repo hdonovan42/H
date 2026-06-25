@@ -119,9 +119,20 @@ And at every threshold it **catches more Waymos while leaking fewer non-Waymos**
 
 On the unbiased held-out cameras alone, RUN_2 reaches **100 % recall at 0.1–0.2 with zero leaks** — genuine generalisation, not memorisation.
 
-### A bonus: it finds Waymos we'd mislabelled
+### The gap that matters — and the work that's left
 
-Those handful of "leaks" RUN_2 flags at 0.10 are largely **real Waymos hiding in the negative pile** — sightings the weaker early funnel had filed as rejects. Every new model decontaminates the dataset a little more, which makes the next model better still. Onward to RUN_3.
+Recall-at-a-threshold hides the real question: **how far apart are the two score distributions?** If the weakest real Waymo outscores the strongest confuser, one clean cut separates them. If not, there's an overlap band where no threshold is perfect. Scored across all 204 confirmed Waymos and all vetted non-Waymos:
+
+| | RUN_1 | RUN_2 |
+|---|---|---|
+| Lowest-scoring **real Waymo** | **0.00** — a total miss | **0.10** |
+| Highest-scoring **non-Waymo** | **0.64** | **0.22** |
+| Real Waymos *below* the worst confuser | **140 / 204** (69 %) | **3 / 204** (1.5 %) |
+| Confusers scoring ≥ 0.30 | 16 | **0** |
+
+RUN_1's distributions overlapped badly — a single confuser at **0.64** outscored *140 of 204* real Waymos, so no threshold could cleanly separate them (the held-out gate only looked clean because those particular confusers weren't in its small val split). RUN_2 collapses that band: confusers now top out at **0.22**, and **201 of 204** Waymos sit above every one of them.
+
+**Still some work to do.** That leaves a thin overlap from **0.10–0.22**: three real Waymos dip into it (the lowest, 0.10, is a lone outlier — the next is 0.18) against five stubborn confusers (a 0.22 worst case, manually reviewed and confirmed *not* Waymos). A cut near 0.22 separates 201/204 Waymos from every confuser but drops those three; a low cut near 0.10 catches everything at the cost of a few false alarms — which, with a human in the loop, is the trade we want. RUN_3's job is to prise that band further apart.
 
 ---
 
