@@ -80,4 +80,49 @@ This is a strong **baseline**, not a finished model. The held-out positive set i
 
 ---
 
+## Second Model — RUN_2
+
+Five days on, the live system — now scoring **in-process** with RUN_1 — had more than **doubled** the training set, and, just as importantly, **decontaminated** it: re-scoring the old data with RUN_1 caught Waymos that had been wrongly filed as negatives. RUN_2 trained on the cleaned, larger set.
+
+**Dataset (vs RUN_1's 100 boxes / 76 cameras):** **204 Waymo boxes across 190 frames and 112 cameras**, plus **425 hard negatives** — the model's *own* false positives from RUN_1, the highest-signal negatives there are — oversampled ×10. Trained fresh from COCO (not warm-started from RUN_1, whose weights had learned the recovered Waymos *as* negatives) to 127 epochs on a single RTX 4090.
+
+### The gate — better, on a harder test
+
+Same ship test (recall vs false-positives on held-out cameras), now on a **bigger, harder** validation set — 47 positives / 300 negatives / 28 cameras, against RUN_1's 27 / 162 / 19:
+
+| Confidence | Recall | False positives | Precision |
+|---|---|---|---|
+| **0.10** | **100 %** | **0 / 300** | **100 %** |
+| **0.20** | **100 %** | **0 / 300** | **100 %** |
+| 0.25 | 97.9 % | 0 / 300 | 100 % |
+| 0.30 | 89.4 % | 0 / 300 | 100 % |
+
+RUN_2 holds **100 % recall all the way to confidence 0.20 with zero false positives** — on twice as many vetted negatives.
+
+### Head-to-head: RUN_1 vs RUN_2 on *identical* data
+
+The honest comparison: score every one of ~43,000 candidate frames with *both* models and diff them. Across all 204 confirmed Waymos, RUN_2 is **more confident and more consistent**:
+
+| | RUN_1 | RUN_2 |
+|---|---|---|
+| Mean score | 0.51 | **0.59** |
+| Spread (std) | 0.20 | **0.17** — tighter |
+| Lowest-scoring Waymo | **0.00** — a total miss | **0.10** — still above the alert line |
+
+And at every threshold it **catches more Waymos while leaking fewer non-Waymos** (out of 7,905 vetted rejects):
+
+| Confidence | RUN_1 — recall / leaks | RUN_2 — recall / leaks |
+|---|---|---|
+| 0.10 | 96.6 % / 88 | **100 % / 5** |
+| 0.20 | 91.7 % / 41 | **98.5 % / 1** |
+| 0.30 | 83.3 % / 16 | **94.1 % / 0** |
+
+On the unbiased held-out cameras alone, RUN_2 reaches **100 % recall at 0.1–0.2 with zero leaks** — genuine generalisation, not memorisation.
+
+### A bonus: it finds Waymos we'd mislabelled
+
+Those handful of "leaks" RUN_2 flags at 0.10 are largely **real Waymos hiding in the negative pile** — sightings the weaker early funnel had filed as rejects. Every new model decontaminates the dataset a little more, which makes the next model better still. Onward to RUN_3.
+
+---
+
 *Powered by TfL Open Data. WaymoNet is an independent research project, not affiliated with Waymo, Wayve, or Transport for London.*

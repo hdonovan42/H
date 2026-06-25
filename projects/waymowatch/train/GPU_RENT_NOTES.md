@@ -121,25 +121,82 @@ on real data). **Shipped the gate on the first real-data run.**
 **Artifacts:** `~/waymonet_run1/` (best.pt 20 MB, best.onnx 37 MB @704, results.csv, curves,
 confusion matrix).
 
-## Run 2 — (in progress, 2026-06-21)
-RUN_1 was used to re-score the existing dataset and **decontaminate** it (the biggest win). Plan:
-warm-start from RUN_1 `best.pt` and retrain on the entire cleaned, larger set.
-**Dataset (vs Run 1: 100 boxes / 98 frames / 76 cameras):**
-- **Positives: 132 Waymos / 129 frames / 91 cameras** (+32). Split of the gain:
-  **x = 13 removed from the NEGATIVES** (were `reject`; RUN_1 scoring caught them — they were
-  poisoning the negative set: the headline win), **y = 5 from the unreviewed backlog** (+19 more
-  confirmed from post-baseline live collection, not cleanly attributable). Earliest positive 2026-06-10.
-- **Negatives:** vetted reject pool (hardest-first) **minus the 13 recovered Waymos**, plus
-  **hard_negatives = 133** — RUN_1's OWN false positives (cars it thought were Waymos but weren't;
-  highest-signal) — **weighted ×10** (oversampled in the manifest).
-- special/edge_positive (2) excluded from training (as Run 1).
-**Model/stack:** unchanged (YOLO26s-P2 @704, ultralytics 8.4.63, 4090 ~19 min, ~$0.20).
-**Start checkpoint:** FRESH from COCO `yolo26s.pt` — `train.py`'s default; do NOT pass RUN_1 `best.pt`
-(those weights were fine-tuned on the *poisoned* set — they learned the 13 recovered Waymos as
-negatives, which warm-starting would carry forward). Run with `--name waymonet_real_v2` so RUN_2 lands
-in its own run dir and doesn't overwrite RUN_1.
-**Gate:** same held-out-camera acceptance (recall @ 100% precision, 0 FP); compare to Run 1 (96.3% R).
-**Status:** PENDING — open whether to collect to ~200 positives first (now 132 / 91 cameras).
+## Run 2 — actual record (trained 2026-06-25, Vast.ai RTX 4090, `--name waymonet_real_v2`)
+The decontaminate-via-RUN_1-rescore plan above was superseded: by the time we trained, the live
+in-process scorer (v0.9.0) had already surfaced + the user had banked a much larger real set. RUN_2
+trained on that. **Fresh from COCO** (NOT warm-started from RUN_1 — those weights learned the
+recovered Waymos as negatives on the poisoned set).
+
+**Dataset (built by `dataset/build_real_dataset.py`, `data/dataset_real`):**
+- **Confirmed Waymos in DB:** 209 rows (`status='waymo'`), of which **5 edge_positive held out**
+  (eval-only) → **204 training-eligible boxes across 190 frames** (12 multi-Waymo frames carry >1 box),
+  spanning **112 positive cameras**.
+- **Split is BY CAMERA** (whole feeds held out — the only honest split): 28 cameras → val.
+  - **train: 143 positive frames + 4928 negatives** (= 5071 images)
+  - **val: 47 positive frames + 300 negatives** (= 347 images)
+- **Negative composition (train 4928):** 858 ordinary vetted rejects (hardest-first, **6:1 cap**) +
+  **4070 hard-negative copies = 407 unique frames ×10**. Val negatives 300 = 282 ordinary + 18 hard (×1).
+- **Pools available:** 190 confirm frames · **7428** ordinary rejects (capped to 6:1) · **425 curated
+  hard negatives** (the model's OWN false positives, `data/hard_negatives/`) → train ×10 = 4070, val ×1 = 18.
+- ⚠️ **The ×10 is PHYSICAL duplication** → 80% of every train epoch is 407 uniques re-augmented. Main
+  speed/efficiency target for future runs (see "Bench / optimisation" below).
+
+**vs RUN_1 (100 boxes / 98 frames / 76 cameras; train 71+426, val 27+162, 19 val cams, no hard-neg set):**
+- Positives ~2× (204 vs 100 boxes; +36 cameras → far stronger by-camera val).
+- Negatives: RUN_1 had **no** hard-negative ×10 set; RUN_2 adds 425 model-FP hard negs ×10 — this is
+  the key recipe change to test at the gate (heavier negative emphasis → precision↑ but watch recall).
+
+**Model / config (resolved):** YOLO26s-P2, **9,663,464 params, 26.4 GFLOPs**; COCO `yolo26s.pt`
+transfer **766/902**; imgsz **704**; epochs **150** (patience 30, close_mosaic 15); **AutoBatch = 9**
+(13.13/23.65 G, **56% VRAM**); optimizer auto → **MuSGD(lr=0.01, mom=0.9)**; cache=ram; mosaic 0.4,
+scale 0.15, degrees 3, shear 2; **8 dataloader workers**.
+
+**Hardware/stack:** RTX 4090 24 G (driver 535.113.01) · **32 vCPU / 503 G RAM** · torch 2.12.0+cu126 ·
+ultralytics 8.4.63 · 30 G disk (4.4 G used). Direct-SSH; VPS→GPU key authorised for direct dataset push.
+
+**Throughput observed:** **~64 s/epoch** steady-state (~10 it/s, 564 iters/epoch), peak VRAM ~6 G,
+**GPU only ~58% utilised (dataloader-bound** — 8 workers on 32 cores can't feed the card; regular dips
+to ~25%). Full 150 epochs ≈ ~2.7 h. (RUN_1 was ~7.5 s/epoch — RUN_2 is 10× the train images from the
+×10 hard-neg blow-up, not a per-image slowdown.)
+
+**Training:** ran to **epoch 127/150** (early-stopped on fitness, patience 30); best per-epoch val
+**mAP50 0.972 @ e111**, final-model val **mAP50 0.959 / mAP50-95 0.529**. close_mosaic never triggered
+(early stop landed before the last-15-epoch window). Curve: 0.58 (e19) → 0.87 (e43) → 0.93 (e62) → 0.97 (e111).
+
+**GATE (ship decision — held-out cameras): PASS, and beats RUN_1**, on a BIGGER/HARDER val (47 pos /
+300 neg / 28 cams vs RUN_1's 27 / 162 / 19):
+
+| conf | RUN_2 recall | FP/300 | RUN_1 (ref) |
+|---|---|---|---|
+| 0.10 | **100%** | 0 | 96.3% @ 0/162 |
+| 0.20 | **100%** | 0 | — |
+| 0.25 | 97.9% | 0 | — |
+| 0.30 | 89.4% | 0 | — |
+
+100% recall to conf 0.20, 0 FP on 2× the negatives. Held-out → clean generalisation.
+
+**Head-to-head vs RUN_1 — fresh rescore of all 43,370 candidate frames with BOTH weights (`eval/headtohead.py`):**
+RUN_2 wins every metric. Confirmed-Waymo score (n=204): **mean 0.51→0.59, std 0.20→0.17 (tighter), min
+0.00→0.10** (RUN_1 had a zero-scored Waymo; RUN_2's worst clears the 0.1 floor). Catch/leak (7905 rejects):
+@0.10 **96.6%/88 → 100%/5**; @0.20 91.7%/41 → 98.5%/1; @0.30 83.3%/16 → 94.1%/**0**. Held-out cut (unbiased):
+RUN_2 **100% recall @0.1–0.2, 0 leaks** on 487 rejects. The **5 leaks @0.10** = candidate hidden Waymos in
+the negatives (#6318, #20036, #6151, #3765, #66667 — emailed for manual review; the decontamination win).
+
+**Cost / wall-clock:** ~2.3 h training (127 epochs @ ~64 s) + ~4 h total instance lifetime incl. eval/debug;
+4090 @ ~$0.30–0.40/h ≈ **~$1.50**.
+
+### Bench / optimisation (RUN_2 idle-GPU experiments)
+Diagnosed bottleneck: **dataloader starvation** (GPU ~58%, 8 workers / 32 cores) + **80% redundant
+hard-neg ×10 duplication**.
+- **DONE — GPU rescore batching** (`eval/rescore_all.py`). The rescore was *broken on GPU*: a whole-list
+  `predict()` collates all 43k frames into one tensor → 49 GiB OOM. Two-part fix: hand-chunk the list AND
+  key the verdict off the input path (batched `res.path` comes back as `image{i}.jpg`, not the filename —
+  silently wrote 0 scores until caught). Measured @704: **batch 1→92 fps, 32→230 fps (~2.5×, 3.2 GB)**;
+  plateaus past 32 (compute-bound, not data-starved). chunk=32 is the new default. See "Two inference
+  paths" under Inference/serving — the live CPU path stays per-frame and was NOT touched.
+- **NOT RUN — train-throughput matrix** (workers/batch/`rect`/`compile`; hard-weight ×3/×5 + imgsz 512
+  gate runs). The rescore debugging consumed the idle window. `train/bench.py` + the hardlinked
+  `dataset_hw{1,3,5}` variants are built and ready. [RESULTS: PENDING — next rental]
 
 ## Attached full rescore + RUN_1↔RUN_2 eval (RUN_2 onward)
 Score EVERY candidate with the new weights on the rented GPU (minutes) instead of ~5-9 h on the
@@ -189,6 +246,16 @@ when scoring 956 live candidates with `best.pt` via `eval/score_candidates.py`:
   at 704, so it's fast on CPU. No GPU needed for the candidate-rate workload.
 - **Memory: ~0.6 GB RSS, flat — but ONLY if you score one frame per `predict()` call.** Passing a
   list to `predict()` does NOT stream; it hit **15.4 GB** and OOM-killed the box. Loop per-frame.
+- **Two inference paths — do NOT conflate (2026-06-25):**
+  - **Live / production = per-frame on CPU.** `live_capture.py::wn_safe` (VPS in-process) + the homebox
+    dash infer server score ONE frame per `predict()` call (~0.6 GB RSS). The memory-stressed VPS/homebox
+    MUST stay per-frame — a list source OOMs (15.4 GB, above). **This is the normal job; leave it alone.**
+  - **Bulk rescore on a rented GPU = hand-chunked batches.** `eval/rescore_all.py --batch 32` chunks the
+    frame list itself (each `model.predict(chunk)` = one real GPU batch) → **~2.5× the card** (measured
+    92→230 fps @704, 3.2 GB VRAM; plateaus past 32 — compute-bound, not data-starved). A *whole-list*
+    `predict()` OOMs on GPU too (ultralytics collates the entire list into ONE tensor — the bug we hit:
+    tried to alloc 49 GiB). **Batching is GPU-rescore-ONLY; it does not — and must not — touch the live
+    CPU path.** Same rule for any future on-GPU bulk scoring (eval, dataset re-labelling): chunk by hand.
 - **Throughput vs the funnel:** ~20–30 white-car survivors/cycle × 0.18 s ≈ ~5 s/cycle — trivial
   compute, but the production VPS is memory-stressed (inference is kept off it; the homebox is the
   inference host, v0.8.60). OpenVINO INT8 is the ~3× lever if a host ever needs it (re-validate the

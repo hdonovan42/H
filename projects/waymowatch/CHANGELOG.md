@@ -1,5 +1,28 @@
 # WaymoWatch — Changelog
 
+## RUN_2 trained — PASSES the gate, BEATS RUN_1 head-to-head (2026-06-25)
+
+WaymoNet RUN_2 trained on the doubled, decontaminated set — **204 boxes / 190 frames / 112 cameras + 425
+hard negatives ×10** — fresh from COCO on a rented RTX 4090 (127 epochs, early-stopped, ~$1.50). Full
+record in `train/GPU_RENT_NOTES.md`.
+
+- **GATE: PASS** — **100% recall @ conf 0.10–0.20, 0 FP / 300** held-out negatives, on a *bigger, harder*
+  val than RUN_1 (47/300/28 cams vs 27/162/19). RUN_1 ref: 96.3% @ 0/162.
+- **Head-to-head on identical data** (fresh rescore of all 43,370 candidates with both weights,
+  `eval/headtohead.py`): RUN_2 wins everything. Waymo-score **mean 0.51→0.59, std 0.20→0.17 (tighter),
+  min 0.00→0.10** (no more zero-scored Waymos). Catch/leak (7905 rejects): @0.10 96.6%/88 → **100%/5**,
+  @0.20 91.7%/41 → 98.5%/1, @0.30 83.3%/16 → **94.1%/0**. Held-out cut: **100% recall @0.1–0.2, 0 leaks**.
+- **5 reject→Waymo "leaks"** (#6318/#20036/#6151/#3765/#66667) = candidate hidden Waymos in the negatives,
+  emailed for manual review (the decontamination win, like RUN_1's 13).
+- **Site notes updated** — waymonet.com/notes now carries the RUN_2 section.
+
+**Tooling:** `eval/rescore_all.py` GPU rescore was *broken* (whole-list `predict()` → 49 GiB OOM; batched
+`res.path` renamed to `image{i}.jpg` → silently 0 scores). Fixed: hand-chunk (batch 32, ~2.5×, 92→230 fps
+@704) keyed off the input path. **Live CPU per-frame inference is untouched** — documented as "Two
+inference paths" in GPU_RENT_NOTES. New `train/bench.py` + `eval/headtohead.py`. Train-throughput bench
+matrix staged but NOT run (rescore debugging ate the window) → next rental. Weights pulled to laptop
+`~/waymonet_run2/`; **NOT yet deployed to production** (`collector/best.pt`) — pending decision.
+
 ## RUN_2 data — 48 h digest backlog banked; pass-dedup applied to the COUNT, not the data (2026-06-25)
 
 Worked the Jun 23–25 review backlog. **+43 confirmed Waymos** banked as positives (43/43 carry a

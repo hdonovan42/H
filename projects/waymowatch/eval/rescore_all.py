@@ -30,6 +30,10 @@ def main():
     ap.add_argument("--imgsz", type=int, default=704)        # MUST match training resolution
     ap.add_argument("--conf", type=float, default=0.03)      # = COLLECT_FLOOR; thresholds applied offline
     ap.add_argument("--device", default="0")
+    ap.add_argument("--batch", type=int, default=32,         # GPU chunk: measured sweet spot @704 + P2.
+                    help="frames per forward pass. Measured on a 4090 @704: 1->92fps, 32->230fps (3.2GB), "
+                         "plateaus after (compute-bound). The list MUST be chunked by hand — ultralytics "
+                         "stacks a whole-list source into ONE tensor and OOMs regardless of stream/batch.")
     a = ap.parse_args()
 
     rows = list(csv.DictReader(open(a.manifest)))
@@ -44,16 +48,22 @@ def main():
     model = YOLO(a.weights)
     verdict = {}                                             # basename -> (conf, bbox, n_dets)
     t0 = time.time()
-    # stream=True => generator (one result at a time): bounded memory, GPU-batched internally
-    for res in model.predict(present, imgsz=a.imgsz, conf=a.conf, device=a.device,
-                             stream=True, verbose=False):
-        best_c, best_b = 0.0, None
-        for b in res.boxes:
-            c = float(b.conf[0])
-            if c > best_c:
-                xy = b.xyxy[0].tolist()
-                best_c, best_b = c, [round(xy[0], 1), round(xy[1], 1), round(xy[2], 1), round(xy[3], 1)]
-        verdict[os.path.basename(res.path)] = (round(best_c, 4), best_b, len(res.boxes))
+    # ultralytics collates a whole list/stream source into ONE forward-pass tensor (OOMs on 43k frames),
+    # so chunk by hand: each model.predict(chunk) is one real GPU batch of --batch frames. ~2.5x over
+    # batch=1 on a 4090 (measured 92->230 fps @704), bounded VRAM (~3 GB at batch 32).
+    for i in range(0, len(present), a.batch):
+        chunk = present[i:i + a.batch]
+        # ultralytics renames batched results image0.jpg, image1.jpg, … (res.path is NOT the input path),
+        # so key the verdict off the KNOWN input path via zip — results come back in input order.
+        for path, res in zip(chunk, model.predict(chunk, imgsz=a.imgsz, conf=a.conf,
+                                                  device=a.device, verbose=False)):
+            best_c, best_b = 0.0, None
+            for b in res.boxes:
+                c = float(b.conf[0])
+                if c > best_c:
+                    xy = b.xyxy[0].tolist()
+                    best_c, best_b = c, [round(xy[0], 1), round(xy[1], 1), round(xy[2], 1), round(xy[3], 1)]
+            verdict[os.path.basename(path)] = (round(best_c, 4), best_b, len(res.boxes))
     dt = time.time() - t0
     print(f"scored {len(verdict)} frames in {dt:.0f}s ({len(verdict) / max(dt, 1):.1f} frames/s)")
 
