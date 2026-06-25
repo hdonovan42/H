@@ -32,6 +32,16 @@ from email_alert import send_email              # noqa: E402  (lightweight: requ
 MAX_CELLS = 200
 REAL_DIR = os.path.join(BASE, "data", "real_positives")    # WaymoNet-path confirms -> positives
 HARD_DIR = os.path.join(BASE, "data", "hard_negatives")    # WaymoNet-path rejects -> v2 hard negatives
+AUTO_BANK_TH = 0.30   # RUN_2: confirmed non-Waymos top out at 0.22, so anything >= 0.30 is auto-banked
+                      # as a positive (no manual review); the day's auto-banks are emailed at midnight.
+
+
+def _model_ver():
+    """sha256[:12] of the DEPLOYED weights. Auto-bank acts ONLY on candidates scored by the current
+    model — the 0.30 cut is model-specific, so a stale RUN_1 score (confusers reached 0.64) must never
+    auto-bank."""
+    import hashlib
+    return hashlib.sha256(open(os.path.join(HERE, "best.pt"), "rb").read()).hexdigest()[:12]
 
 
 def _build_frame_sheet(rows, out_path, cols=4, cap=MAX_CELLS):
@@ -100,6 +110,37 @@ def bank(con, ids, status, dest):
     print(f"banked {n} -> {status}  ({dest})")
 
 
+def auto_bank(con):
+    """Bank every candidate the CURRENT model scores >= AUTO_BANK_TH as a positive (no manual review —
+    nothing non-Waymo reaches 0.30 on RUN_2), then email the batch so a rare creep-in can be undone."""
+    ver = _model_ver()
+    rows = con.execute(
+        "SELECT id, wn_conf, wn_bbox, frame_path FROM candidates "
+        "WHERE COALESCE(wn_conf,0) >= ? AND status IN ('new','near') AND wn_model_ver = ? "
+        "ORDER BY wn_conf DESC", (AUTO_BANK_TH, ver)).fetchall()
+    if not rows:
+        print(f"auto-bank: nothing >= {AUTO_BANK_TH:.2f} (model {ver})")
+        return
+    ids = [r[0] for r in rows]
+    bank(con, ids, "waymo", REAL_DIR)                 # status=waymo + frame & model-box crop -> positives
+    con.execute("UPDATE candidates SET wn_autobank=1 WHERE id IN (%s)"
+                % ",".join(str(int(i)) for i in ids))
+    con.commit()
+    data = [(r[0], r[1] or 0.0, json.loads(r[2]) if r[2] else None, r[3]) for r in rows]
+    sheet = os.path.join(BASE, "data/candidates/autobank.jpg")
+    n = _build_frame_sheet(data, sheet, cap=len(data))
+    lo, hi = rows[-1][1], rows[0][1]
+    send_email(
+        f"WaymoWatch: {n} auto-banked as Waymos (conf {lo:.2f}–{hi:.2f}) — reply 'undo #id' if any is NOT a Waymo",
+        f"<p><b>WaymoNet</b> scored these <b>{n}</b> candidate(s) <b>&ge;{AUTO_BANK_TH:.2f}</b> — above "
+        f"every confirmed non-Waymo (the model's confuser ceiling is ~0.22) — so they were "
+        f"<b>auto-banked as Waymos</b>, no manual confirm needed. Full frame, model box in <b>red</b>, "
+        f"#id + conf (highest first).</p><p>Reply <b>undo #id</b> for any that is <b>not</b> a Waymo and "
+        f"I'll move it back out of the positives.</p><p style='color:#888'>Powered by TfL Open Data.</p>",
+        attachments=[sheet])
+    print(f"auto-banked {n} -> waymo (model {ver}), emailed for review")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Email WaymoNet's flagged candidates (full frame) for review.")
     ap.add_argument("--limit", type=int, default=MAX_CELLS)
@@ -111,9 +152,19 @@ def main():
     ap.add_argument("--reject", default="", help="ids -> reject, copied to data/hard_negatives/")
     ap.add_argument("--reject-rest", action="store_true",
                     help="reject ALL reviewed-but-unconfirmed (wn_sent=1, still 'new') -> hard_negatives")
+    ap.add_argument("--auto-bank", action="store_true",
+                    help=f"bank everything the current model scores >= {AUTO_BANK_TH} as a positive + email it")
     a = ap.parse_args()
 
     con = sqlite3.connect(DB, timeout=60)
+    try:
+        con.execute("ALTER TABLE candidates ADD COLUMN wn_autobank INTEGER DEFAULT 0")
+        con.commit()
+    except sqlite3.OperationalError:
+        pass
+    if a.auto_bank:
+        auto_bank(con)
+        return
     if a.confirm:
         bank(con, _ids(a.confirm), "waymo", REAL_DIR)
         return
@@ -129,7 +180,8 @@ def main():
     rows = con.execute(
         "SELECT id, wn_conf, wn_bbox, frame_path FROM candidates "
         "WHERE wn_hit=1 AND COALESCE(wn_sent,0)=0 AND status NOT IN ('waymo','reject') "
-        "ORDER BY wn_conf DESC LIMIT ?", (a.limit,)).fetchall()
+        "AND COALESCE(wn_conf,0) < ? "          # >= AUTO_BANK_TH auto-banks instead (no manual review)
+        "ORDER BY wn_conf DESC LIMIT ?", (AUTO_BANK_TH, a.limit)).fetchall()
     if not rows:
         print("no unsent WaymoNet-flagged candidates")
         return

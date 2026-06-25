@@ -1,5 +1,20 @@
 # WaymoWatch — Changelog
 
+## RUN_2 deployed to production + auto-bank ≥0.30 pipeline (2026-06-25)
+
+RUN_2 replaced RUN_1 as the **live** model — `collector/best.pt` (VPS in-process scorer) + homebox dash
+(RUN_1 backed up as `best_run1.pt` on both → one-copy rollback); live loop + `waymonet-infer` restarted;
+canary healthy (RUN_2 scores it **0.827**, floor 0.30 — no canary edit). Backlog refreshed to RUN_2
+scores: **43,371 loaded** from `r2_scored.csv` + **1,013 stragglers re-scored** in-process (the retired
+lazy worker no longer does this, so a one-off pass) → surfaced **+1 hidden backlog Waymo**.
+
+**Auto-bank** (`waymonet_digest.py --auto-bank`, new midnight cron `0 0 * * *`): RUN_2's separation —
+confirmed non-Waymos top out at **0.22** — lets anything **≥0.30 auto-bank as a positive** with no manual
+confirm; the day's batch is emailed ("reply `undo #id`"). **Gated on the deployed model's sha256** so a
+stale RUN_1 score (confusers reached 0.64) can never auto-bank. The **review digest now emails only the
+0.03–0.30 band** — strong Waymos skip manual review, lightening the load. First run banked **9** (conf
+0.35–0.82); waymo total 209 → 218. New column `wn_autobank`.
+
 ## RUN_2 trained — PASSES the gate, BEATS RUN_1 head-to-head (2026-06-25)
 
 WaymoNet RUN_2 trained on the doubled, decontaminated set — **204 boxes / 190 frames / 112 cameras + 425
