@@ -1,5 +1,28 @@
 # WaymoWatch — Changelog
 
+## RUN_2 data — 48 h digest backlog banked; pass-dedup applied to the COUNT, not the data (2026-06-25)
+
+Worked the Jun 23–25 review backlog. **+43 confirmed Waymos** banked as positives (43/43 carry a
+WaymoNet box → all enter training), taking the confirmed set to **209 rows**. Pass-clustering (same
+camera, captures ≤8 min apart) shows those 43 frames are **36 distinct sightings** — the same vehicle
+re-clocked across consecutive clips (e.g. **#64663–64666** = one four-frame pass; also #59696/59772,
+#57921/57922, #57878/58203, #55015/62585). **Decision: bank every frame.** The dataset split is
+**by camera** (whole feeds held out), so all frames of a pass already land on the *same* side — near-dupes
+**cannot** leak train↔val, and the extra real views help at small n. Deduplication is therefore a
+**count-only** concern (honest "distinct sightings" headline), never a reason to discard real positive
+pixels; the count-logic wiring into the dash/digest is deferred.
+
+**+124 hard negatives** banked, but only *after* a pre-bank review email (full frames + model box) —
+nothing rejected blind, guarded so an interleaving `:17` digest could not slip an unreviewed candidate
+into the bank. The curated ×10 `hard_negatives/` set is now **425** frames (the 426th file is a
+recovered/relabelled frame the `status='reject'` guard correctly excludes — no poisoning).
+
+RUN_2 dataset has roughly **doubled** since the last preflight (154 → ~209 positive boxes, 229 → 425 hard
+negs). **Rebuild + re-run `preflight.py` before renting the 4090** (checklist step 1 in `GPU_RENT_NOTES.md`).
+Disk: the built YOLO dataset is still only **~250 MB** even with the ×10 hard-neg duplication baked in
+(39 KB/frame), so the prior **30 GB** rental container remains comfortable — the image + checkpoints
+dominate, not the data.
+
 ## v0.9.2 — fix: retention deleted model-flagged Waymos awaiting review; #22408 recovered (2026-06-22)
 
 `retention()` pruned `status='new'` rows older than 7 days (and `near` past `NEAR_KEEP_DAYS`) regardless
