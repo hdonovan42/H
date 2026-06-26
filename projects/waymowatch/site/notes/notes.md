@@ -134,7 +134,7 @@ RUN_1's distributions overlapped badly — a single confuser at **0.64** outscor
 
 **Still some work to do.** That leaves a thin overlap from **0.10–0.22**: three real Waymos dip into it (the lowest, 0.10, is a lone outlier — the next is 0.18) against five stubborn confusers (a 0.22 worst case, manually reviewed and confirmed *not* Waymos). A cut near 0.22 separates 201/204 Waymos from every confuser but drops those three; a low cut near 0.10 catches everything at the cost of a few false alarms — which, with a human in the loop, is the trade we want. RUN_3's job is to prise that band further apart.
 
-One honest caveat the table hides: those confusers are cars the model was *trained against*. Once deployed, a **novel** confuser — one it had never seen — scored **0.67**, right in the middle of the real-Waymo range. So part of that clean separation is a training-set effect; making it hold on unseen London traffic is exactly what more data, and the next model, are for.
+One honest caveat the table hides: those non-Waymos are the ones we'd *already reviewed and filed as rejects* — confusers the pipeline had caught. They're a curated sample, not a fair slice of London traffic. The hardest confusers are, almost by definition, the ones still sitting *unlabelled* in the backlog — and once deployed, one of those scored **0.67**, right in the middle of the real-Waymo range. So that clean separation is measured on the confusers we knew about; making it hold on the ones we don't is exactly what more data, and the next model, are for.
 
 ---
 

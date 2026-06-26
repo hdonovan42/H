@@ -187,11 +187,15 @@ outlier; next-lowest 0.18) → a thin **0.10–0.22 overlap band** (3 Waymos / 5
 above every confuser. **vs RUN_1: worst confuser 0.64 sat above 140/204 Waymos** (lowest Waymo 0.00, a
 miss; confusers ≥0.30: 16) → RUN_2 collapsed the overlap **69%→1.5%, confusers ≥0.30 16→0**.
 
-**CAVEAT — production 2026-06-25:** that 0.22 ceiling is on *labelled* rejects only (the model effectively
-knew them). A **NOVEL** confuser (**#40294, scored 0.67**) was auto-banked live and caught at review — so
-there is NO clean low cut on unseen data, and the **auto-bank threshold was raised 0.30 → 0.75** (near-
-certain only; below → manual review). RUN_3: prise the band apart — #216 (the 0.10 Waymo) AND the
-novel-confuser tail (#40294 @0.67 / #47783 @0.35, both now hard negatives) so the auto-bank cut can drop.
+**CAVEAT — corrected 2026-06-26 (sampling bias, NOT contamination):** the 0.22 ceiling was computed over
+`status='reject'` ONLY — the **7905 user-LABELLED** confusers we'd already caught. It is NOT a training
+effect: only **~1.5k of those 7905** were in RUN_2's dataset (190 confirms + 858 capped rejects + 425 hard
+negs ×10); the ~6.3k held out by the 6:1 cap also scored ≤0.22. The HARDEST confusers sit **unlabelled**
+in the ~34k `new`/`near` pool — **#40294 (`status='new'`) scored 0.67**, auto-banked live + caught at
+review, and was NEVER in the "non-Waymo" tally. So the absolute clean separation is a **sampling artifact**
+(RUN_2 > RUN_1 still holds — same labelled set — but "0.22 ceiling" does not generalise). Auto-bank cut
+raised **0.30 → 0.75**. RUN_3: prise the band apart — #216 (the 0.10 Waymo) AND the novel-confuser tail
+(#40294 @0.67 / #47783 @0.35, both now hard negatives) so the auto-bank cut can drop.
 
 **Cost / wall-clock:** ~2.3 h training (127 epochs @ ~64 s) + ~4 h total instance lifetime incl. eval/debug;
 4090 @ ~$0.30–0.40/h ≈ **~$1.50**.

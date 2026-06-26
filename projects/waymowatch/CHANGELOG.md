@@ -16,8 +16,10 @@ stale RUN_1 score (confusers reached 0.64) can never auto-bank. The **review dig
 0.35–0.82); waymo total 209 → 218. New column `wn_autobank`.
 
 **Same-day correction:** 2 of the 9 were confusers (#40294 @**0.67**, #47783 @0.35). A *novel* confuser
-at 0.67 broke the labelled-reject "0.22 ceiling" (that ceiling only held on rejects the model was trained
-against), so the **auto-bank cut was raised 0.30 → 0.75** (near-certain only; below → manual review) and
+at 0.67 broke the labelled-reject "0.22 ceiling" — which was a **sampling artifact**, not a training
+effect: it was computed over `status='reject'` (already-caught confusers) only, and #40294 was an
+unlabelled `status='new'` candidate never in that tally (only ~1.5k of the 7905 rejects were even in
+training; the rest still scored ≤0.22). So the **auto-bank cut was raised 0.30 → 0.75** and
 the 2 rebanked as hard negatives (RUN_3 training signal). **Standing recipe added** (`GPU_RENT_NOTES`
 "Run 3 — plan", + memory): RUN_2 was fresh-from-COCO to break RUN_1's poisoned-negative lineage;
 **RUN_3+ warm-start from the previous run's `best.pt` on the FULL dataset** (fresh-from-COCO is the
