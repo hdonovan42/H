@@ -162,8 +162,19 @@ def audit(con):
     stale = []
     for cid, fp, sa in con.execute("SELECT id, frame_path, wn_scored_at FROM candidates "
                                    "WHERE status IN ('new','near') AND frame_path IS NOT NULL"):
-        if fp and os.path.exists(fp) and os.path.getmtime(fp) > to_unix(sa) + 2:
+        # need a KNOWN score time to judge staleness — NULL wn_scored_at = unbound backlog (frame
+        # unchanged so the score is still valid; it self-binds when the loop next touches it). 120 s slack
+        # so within-cycle write->score latency (a few s) is never mistaken for real desync, which is
+        # minutes-to-hours (a frame overwritten long after its score was taken).
+        if fp and sa and os.path.exists(fp) and os.path.getmtime(fp) > to_unix(sa) + 120:
             stale.append((cid, fp))
+    if len(stale) > 2000:                              # normal daily count is ~0; this = a systemic break
+        send_email(f"WaymoNet AUDIT: {len(stale)} stale scores — systemic desync, NOT auto-re-scoring",
+                   f"<p>The self-audit found <b>{len(stale)}</b> candidates whose frame changed well after "
+                   f"they were scored — far above the normal ~0, signalling a systemic binding break (e.g. a "
+                   f"bulk score load). NOT auto-re-scoring, to avoid masking it. Investigate.</p>")
+        print(f"audit: {len(stale)} stale ABOVE CAP — alarmed, not auto-re-scoring")
+        return len(stale), 0
     recovered = []
     for cid, fp in stale:
         try:
