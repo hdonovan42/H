@@ -180,3 +180,22 @@ builder, because the consumer always knows where the file truly is. Also: on a V
 **PyTorch template**, reuse the image's existing CUDA-torch venv (`/venv/main`) and only add
 ultralytics — do NOT create a fresh `python -m venv` (it has no CUDA torch; pip then pulls a CPU
 build and training silently runs on CPU or errors).
+
+## Never write a model score without re-binding it to its frame — and build a LOUD desync detector (2026-06-27)
+**Mistake:** to refresh the WaymoWatch backlog to RUN_2 scores I bulk-loaded scores from `r2_scored.csv`
+— a ~16:20 FRAME SNAPSHOT from the rented GPU — straight into `candidates.wn_conf/wn_bbox`, without
+updating `wn_scored_at`/`wn_frame_sha`. But the live loop keeps OVERWRITING frame files in place
+(best-view take-max), so for Waymos that appeared in a later view I stamped the stale snapshot's 0.0 over
+the correct live score and nulled the box. Real Waymos were silently scored 0, dropped from the digest,
+and the confirm email drew the funnel's wrong-car box. ~12.8k candidates desynced. It failed SILENTLY —
+caught only because the user eyeballed a wrong box. User: "failing silently like this is unforgivable."
+**Rules:**
+- A model score is valid ONLY for the exact frame bytes it was computed on. NEVER copy a score onto a
+  candidate whose frame may have changed — score the CURRENT frame in-process, or leave the score alone.
+- Any write to `wn_conf` MUST also write `wn_scored_at` + `wn_frame_sha = sha256(current frame)`. That
+  binding is the only thing that makes staleness DETECTABLE.
+- A snapshot rescore (CSV pulled off a rented GPU) is for ANALYSIS only (head-to-head, contradictions).
+  It must NOT be loaded back as the live score — frames mutate between snapshot and load.
+- Recall-critical pipelines need a loud desync alarm, not just a fix: `waymonet_digest.py --audit`
+  (cron `0 4`) re-scores any candidate whose `frame mtime > wn_scored_at` and EMAILS if it recovers a
+  Waymo. When a failure mode can silently drop the thing you exist to catch, build the alarm.

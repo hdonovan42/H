@@ -1,5 +1,20 @@
 # WaymoWatch — Changelog
 
+## Silent score/frame desync — root-caused + self-heal audit added (2026-06-27)
+
+**Incident.** A backlog refresh loaded RUN_2 scores from a ~16:20 *frame snapshot* (`r2_scored.csv`) into
+`wn_conf/wn_bbox` without updating the frame binding. The live loop overwrites frame files in place
+(best-view take-max), so for Waymos that appeared in a *later* view the stale 0.0 got stamped over the
+correct live score → **real Waymos silently scored 0 and dropped from review**, and the confirm echo drew
+the funnel's wrong-car box. ~12.8k candidates desynced. Caught only because the user eyeballed a wrong box.
+- **Data fixed:** re-scored the desynced backlog on CURRENT frames, restoring `wn_conf/wn_bbox` +
+  `wn_scored_at`/`wn_frame_sha` binding; re-boxed all 28 banked positives (#56001/#67343 were wrong).
+- **Made it LOUD — `waymonet_digest.py --audit` (cron `0 4`):** re-scores any candidate whose frame
+  `mtime > wn_scored_at` (the desync signature) and **emails an alarm if it recovers a Waymo**. A silent
+  drop is now a loud email.
+- Lesson logged (`tasks/lessons.md`): a score is valid only for the exact frame it was computed on;
+  snapshot rescores (off a rented GPU) are analysis-only and must never be loaded back as live scores.
+
 ## Email chain simplified + original dome-score channel retired; +28 confirms (2026-06-27)
 
 - **Banked +28 confirmed Waymos** (review backlog Jun 25–27) → waymo total **249**. Positive-echo +

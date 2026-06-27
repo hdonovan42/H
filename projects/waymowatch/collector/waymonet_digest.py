@@ -143,6 +143,57 @@ def auto_bank(con):
     print(f"auto-banked {n} -> waymo (model {ver}), emailed for review")
 
 
+def audit(con):
+    """SELF-HEAL + ALARM against silent score/frame desync (the bug that scored real Waymos 0 and
+    dropped them). A score is STALE if the frame file was written AFTER the score was taken
+    (mtime > wn_scored_at) — the live take-max keeps these in sync, so in normal operation this finds
+    ~nothing; it fires only when the binding breaks. Stale candidates are re-scored on the CURRENT
+    frame, and if any re-score as a Waymo we EMAIL an alarm — a silent drop becomes loud."""
+    import hashlib
+    import time
+    from live_capture import wn_safe                     # torch-heavy: imported only when auditing
+
+    def to_unix(iso):
+        try:
+            return time.mktime(time.strptime((iso or "").replace("Z", ""), "%Y-%m-%dT%H:%M:%S"))
+        except (ValueError, TypeError):
+            return 0.0
+
+    stale = []
+    for cid, fp, sa in con.execute("SELECT id, frame_path, wn_scored_at FROM candidates "
+                                   "WHERE status IN ('new','near') AND frame_path IS NOT NULL"):
+        if fp and os.path.exists(fp) and os.path.getmtime(fp) > to_unix(sa) + 2:
+            stale.append((cid, fp))
+    recovered = []
+    for cid, fp in stale:
+        try:
+            b = open(fp, "rb").read()
+            sha = hashlib.sha256(b).hexdigest()
+            im = cv2.imdecode(np.frombuffer(b, np.uint8), cv2.IMREAD_COLOR)
+            wc, wb, _ = wn_safe(im)
+        except Exception:
+            continue
+        old = con.execute("SELECT COALESCE(wn_conf,0) FROM candidates WHERE id=?", (cid,)).fetchone()[0]
+        con.execute("UPDATE candidates SET wn_conf=?, wn_bbox=?, wn_hit=?, wn_scored=1, wn_scored_at=?, "
+                    "wn_frame_sha=?, frame_sha=? WHERE id=?",
+                    (round(wc, 4), json.dumps(wb) if wb else None, 1 if wc >= 0.03 else 0,
+                     time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), sha, sha, cid))
+        if wc >= 0.10 and old < 0.10:
+            recovered.append((cid, round(wc, 3)))
+    con.commit()
+    print(f"audit: {len(stale)} stale (frame newer than score) re-scored; {len(recovered)} recovered >= 0.10")
+    if recovered:
+        recovered.sort(key=lambda x: -x[1])
+        send_email(
+            f"WaymoNet AUDIT ALARM: {len(recovered)} stale-scored Waymo(s) recovered",
+            "<p><b>WaymoNet self-audit</b> found candidates whose stored score was <b>STALE</b> (frame "
+            f"changed after scoring) and that re-score as a Waymo (&ge;0.10) — they were at risk of being "
+            f"<b>silently missed</b>. Re-scored and back in the review pool:</p><ul>"
+            + "".join(f"<li>#{c} — {v}</li>" for c, v in recovered[:60])
+            + "</ul><p style='color:#888'>Powered by TfL Open Data.</p>")
+    return len(stale), len(recovered)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Email WaymoNet's flagged candidates (full frame) for review.")
     ap.add_argument("--limit", type=int, default=MAX_CELLS)
@@ -156,14 +207,19 @@ def main():
                     help="reject ALL reviewed-but-unconfirmed (wn_sent=1, still 'new') -> hard_negatives")
     ap.add_argument("--auto-bank", action="store_true",
                     help=f"bank everything the current model scores >= {AUTO_BANK_TH} as a positive + email it")
+    ap.add_argument("--audit", action="store_true",
+                    help="self-heal: re-score candidates whose frame changed after scoring; alarm on recovered Waymos")
     a = ap.parse_args()
 
-    con = sqlite3.connect(DB, timeout=60)
+    con = sqlite3.connect(DB, timeout=120)
     try:
         con.execute("ALTER TABLE candidates ADD COLUMN wn_autobank INTEGER DEFAULT 0")
         con.commit()
     except sqlite3.OperationalError:
         pass
+    if a.audit:
+        audit(con)
+        return
     if a.auto_bank:
         auto_bank(con)
         return
