@@ -1,5 +1,17 @@
 # WaymoWatch — Changelog
 
+## Email chain simplified + original dome-score channel retired; +28 confirms (2026-06-27)
+
+- **Banked +28 confirmed Waymos** (review backlog Jun 25–27) → waymo total **249**. Positive-echo +
+  a 42-candidate proposed-negatives review email sent (negatives NOT banked — awaiting user review).
+- **Retired the original dome-score email chain.** `live_capture.watch_loop` no longer calls
+  `emit_pages` (the 200-page paged digest), `maybe_send_instant_alerts` (≥0.93 instant), or
+  `maybe_send_daily_recovery` (23:00 recovery). WaymoNet's own digest (`waymonet_digest.py`) is now the
+  **sole** review channel; the loop just captures + scores in-process. (Functions kept, dead — only the
+  calls removed.)
+- **Simplified the digest schedule** — dropped the 10:00 & 22:00 `--force` auto-clears. Cadence is now
+  just the **`:17` hourly review digest (sends if ≥10 pending)** + the **00:00 auto-bank**.
+
 ## RUN_2 deployed to production + auto-bank ≥0.30 pipeline (2026-06-25)
 
 RUN_2 replaced RUN_1 as the **live** model — `collector/best.pt` (VPS in-process scorer) + homebox dash

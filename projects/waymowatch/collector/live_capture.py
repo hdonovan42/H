@@ -857,13 +857,8 @@ def watch_loop(con):
                 time.sleep(30)
                 continue
         if not in_collection_window():
-            try:
-                maybe_send_instant_alerts(con)
-                maybe_send_daily_recovery(con)
-            except Exception as e:
-                print(f"[{ts()}] send error: {e}", flush=True)
-            time.sleep(60)
-            continue
+            time.sleep(60)                  # old dome-score emails RETIRED (v0.9.x): WaymoNet's own
+            continue                        # digest (waymonet_digest.py cron) is the only review channel
         if now - last_poll >= POLL_EVERY:
             if last_poll:                              # close + report the finished cycle
                 try:
@@ -878,12 +873,10 @@ def watch_loop(con):
                           f" | dropped {dropped} | +{newc} new +{nearc} near ~{mrgc} merged"
                           f" | {now - cyc_t0:.0f}s", flush=True)
                     retention(con)
-                    review_sheet(con)
-                    emit_pages(con)        # intraday: page out a full PAGE_SIZE email the moment that
-                                           # many pile up (restored AS WAS — v0.8.45)
-                    maybe_send_instant_alerts(con)
-                    maybe_send_daily_recovery(con)  # the ONLY change vs original: the scheduled 23:00
-                                                    # email is now the stratified recovery, not the digest
+                    review_sheet(con)      # writes a LOCAL sheet only (no email)
+                    # OLD dome-score email chain RETIRED v0.9.x (emit_pages 200-page digest, instant
+                    # alerts >=0.93, daily recovery) — superseded by WaymoNet's own digest
+                    # (waymonet_digest.py, cron :17). The loop now only captures + scores in-process.
                 except Exception as e:
                     print(f"[{ts()}] cycle-close error: {e}", flush=True)
                 started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
