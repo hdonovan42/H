@@ -83,9 +83,11 @@ def main():
         "SELECT camera_id, frame_path, status FROM candidates WHERE frame_path IS NOT NULL").fetchall()
         if fp}
     hard = []                                  # STATUS is the source of truth: a recovered Waymo/edge-
-    for f in sorted(glob.glob(os.path.join(a.hard_dir, "*_frame.jpg"))):   # positive whose frame lingers
-        cam, st = meta_by_base.get(os.path.basename(f), (None, None))      # in the dir must NEVER be
-        if os.path.exists(f) and st == "reject":                          # trained as a x10 negative
+    hard_files = (sorted(glob.glob(os.path.join(a.hard_dir, "*_frame.jpg"))) +      # RUN_1-era hard negs +
+                  sorted(glob.glob(os.path.join(a.hard_dir, "run2", "*_frame.jpg"))))   # RUN_2-era (own FPs)
+    for f in hard_files:                                                   # a recovered Waymo/edge-positive
+        cam, st = meta_by_base.get(os.path.basename(f), (None, None))      # whose frame lingers in the dir
+        if os.path.exists(f) and st == "reject":                          # must NEVER be trained as a x10 neg
             hard.append((cam, f))
     hard_base = {os.path.basename(f) for cam, f in hard}
 

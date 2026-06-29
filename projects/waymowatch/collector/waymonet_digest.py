@@ -31,7 +31,9 @@ from email_alert import send_email              # noqa: E402  (lightweight: requ
 
 MAX_CELLS = 200
 REAL_DIR = os.path.join(BASE, "data", "real_positives")    # WaymoNet-path confirms -> positives
-HARD_DIR = os.path.join(BASE, "data", "hard_negatives")    # WaymoNet-path rejects -> v2 hard negatives
+HARD_DIR = os.path.join(BASE, "data", "hard_negatives", "run2")   # RUN_2-era rejects kept SEPARATE from the
+# RUN_1 hard negatives (data/hard_negatives/*): they're a different population — RUN_2's OWN false positives
+# (its current blind spots), vs RUN_1's, which RUN_2 already mostly suppresses. build_real_dataset globs both.
 AUTO_BANK_TH = 0.75   # auto-bank only NEAR-CERTAIN Waymos. The 0.22 "confuser ceiling" held only on
                       # LABELLED rejects (the model effectively knew them); a NOVEL confuser (#40294)
                       # scored 0.67 in production (2026-06-25), so the clean cut sits high. Anything below

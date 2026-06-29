@@ -1,5 +1,19 @@
 # WaymoWatch — Changelog
 
+## RUN_2 hard negatives kept separate from RUN_1; loop-stall alarm; +10 confirms (2026-06-29)
+
+- **Loop-stall alarm** (`check_loop_health` in `waymonet_digest.py`, every cron run): emails if no
+  candidate captured in 2 h. The loop had silently sat "alive but not writing" for ~2 days (DB lock from
+  my concurrent re-score writes bloating the WAL to 236 MB); recovered by checkpointing the WAL (integrity
+  ok) + restarting detached. No stored data lost; ~2 days of capture coverage gone (ephemeral clips).
+- **Hard-negative provenance split:** new (RUN_2-era) rejects bank to `data/hard_negatives/run2/`, kept
+  SEPARATE from the RUN_1 set (`data/hard_negatives/*`). RUN_2's hard negatives are its OWN false positives
+  (current blind spots — novel confusers); RUN_1's are largely already suppressed by RUN_2, so re-weighting
+  them ×10 would over-train solved cases. `build_real_dataset.py` globs BOTH (×10 each for now; RUN_3 can
+  down-weight RUN_1's).
+- **+10 confirmed Waymos** re-scored on current frames (correct boxes) → waymo total **262**; 41 corrected
+  negatives re-proposed (not banked). #43436/#39486/#44529 resent for explicit approval.
+
 ## Silent score/frame desync — root-caused + self-heal audit added (2026-06-27)
 
 **Incident.** A backlog refresh loaded RUN_2 scores from a ~16:20 *frame snapshot* (`r2_scored.csv`) into
