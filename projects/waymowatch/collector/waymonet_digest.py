@@ -205,6 +205,39 @@ def audit(con):
     return len(stale), len(recovered)
 
 
+def check_loop_health(con):
+    """LOUD alarm for a STALLED capture loop. The loop can be 'alive' (process up, cycling) yet fail to
+    persist anything for days — e.g. a DB lock — with no signal; that is how 2 days of captures were lost
+    (the run_watch watchdog only catches a HUNG loop via heartbeat, not a non-writing one). If the newest
+    candidate is older than STALL_HOURS, email an alarm (throttled to once / 3 h via a marker file)."""
+    import time
+    STALL_HOURS = 2.0
+    row = con.execute("SELECT MAX(captured_at) FROM candidates").fetchone()
+    latest = row[0] if row and row[0] else None
+    if not latest:
+        return
+    try:
+        age_h = (time.time() - time.mktime(time.strptime(
+            latest.replace("Z", "").split(".")[0], "%Y-%m-%dT%H:%M:%S"))) / 3600.0
+    except (ValueError, TypeError):
+        return
+    if age_h < STALL_HOURS:
+        return
+    marker = os.path.join(BASE, "data", ".stall_alarm")
+    if os.path.exists(marker) and time.time() - os.path.getmtime(marker) < 3 * 3600:
+        print(f"loop STALL: newest capture {age_h:.1f} h old (alarm throttled)")
+        return
+    send_email(
+        f"WaymoWatch LOOP STALL — no new captures in {age_h:.1f} h",
+        f"<p><b>The capture loop has not persisted a candidate in {age_h:.1f} hours</b> (newest: "
+        f"{latest}). The loop may be alive but unable to WRITE (e.g. a 'database is locked'/WAL issue). "
+        f"On the VPS: tail <code>data/candidates/capture.log</code> for 'database is locked'; bracket-pkill "
+        f"the loop (run_watch restarts it), and checkpoint the WAL if bloated.</p>"
+        f"<p style='color:#888'>Powered by TfL Open Data.</p>")
+    open(marker, "w").write(latest)
+    print(f"loop STALL ALARM emailed: newest capture {age_h:.1f} h old")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Email WaymoNet's flagged candidates (full frame) for review.")
     ap.add_argument("--limit", type=int, default=MAX_CELLS)
@@ -228,6 +261,10 @@ def main():
         con.commit()
     except sqlite3.OperationalError:
         pass
+    try:
+        check_loop_health(con)          # runs on every invocation (:17 / auto-bank / audit) — stall alarm
+    except Exception as e:
+        print(f"loop-health check failed: {e}")
     if a.audit:
         audit(con)
         return
