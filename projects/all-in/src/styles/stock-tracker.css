@@ -74,7 +74,7 @@ a.earnings-link:hover { text-decoration: underline; }
 
 @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
 
-.timestamp { font-size: 11px; color: #888; text-align: right; margin-top: 14px; letter-spacing: 1px; }
+.timestamp { font-size: 11px; color: #888; text-align: right; margin-top: 10px; letter-spacing: 1px; }
 .extended-hours-bar { margin-top: 16px; padding: 10px 16px; background: #f5f3ed; border: 1px solid #d0cdc4; border-radius: 3px; display: flex; justify-content: space-between; align-items: center; }
 
 @media (max-width: 900px) {
