@@ -199,3 +199,23 @@ caught only because the user eyeballed a wrong box. User: "failing silently like
 - Recall-critical pipelines need a loud desync alarm, not just a fix: `waymonet_digest.py --audit`
   (cron `0 4`) re-scores any candidate whose `frame mtime > wn_scored_at` and EMAILS if it recovers a
   Waymo. When a failure mode can silently drop the thing you exist to catch, build the alarm.
+
+## Never run heavy/bulk writes against a live single-writer SQLite DB (2026-06-27 → 29, ~2-day outage)
+**Mistake:** to clean up the score desync I ran several big bulk-UPDATE passes (12.8k + 2.6k re-scores +
+the audit) DIRECTLY against the live WaymoWatch `waymo.db` while the capture loop — the SINGLE writer by
+design — was running. SQLite serialises writers; my concurrent writers bloated the WAL to **236 MB** and
+left the loop's long-lived connection unable to write. It failed every `INSERT` with "database is locked"
+but stayed **alive and cycling**, so it SILENTLY captured nothing for ~2 days. Only noticed because the
+review emails stopped. ~2 days of capture coverage lost (JamCam clips are ephemeral — unrecoverable). No
+DB corruption or stored-data loss (integrity `ok`, WAL checkpointed clean).
+**Rules:**
+- The live loop is the single DB writer BY DESIGN. Do NOT hammer `waymo.db` with bulk/concurrent writes
+  while it's live. To re-score a backlog: small batches with pauses, OR pause the loop, OR work on a COPY
+  and swap it in. A 30k-row UPDATE pass against a live single-writer DB is an outage waiting to happen.
+- After any heavy write session, check the WAL (`ls -la data/waymo.db-wal`) and
+  `PRAGMA wal_checkpoint(TRUNCATE)` if it's bloated; a multi-hundred-MB WAL is a red flag.
+- "Process alive" != "working". A pipeline that can fail silently while up needs a LIVENESS-OF-OUTPUT
+  alarm, not just a heartbeat/process check — here, `check_loop_health()` (in `waymonet_digest.py`, runs
+  every cron invocation) emails if `MAX(captured_at)` is >2 h old. The watchdog only caught a HUNG loop.
+- Locked-loop recovery: bracket-pkill the loop (run_watch restarts it), `wal_checkpoint(TRUNCATE)`,
+  quick_check, verify `MAX(captured_at)` advances.
