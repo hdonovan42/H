@@ -119,6 +119,8 @@ And at every threshold it **catches more Waymos while leaking fewer non-Waymos**
 
 On the unbiased held-out cameras alone, RUN_2 reaches **100 % recall at 0.1–0.2 with zero leaks** — genuine generalisation, not memorisation.
 
+**In the wild.** Live, the difference is obvious in the review inbox: RUN_2 surfaces **far fewer false positives** than RUN_1 did — real Waymos now arrive in clean batches with only a handful of confusers alongside, instead of the human wading through RUN_1's wider net. The day-to-day reviewer load dropped sharply, exactly as the 86-fewer-false-positives head-to-head predicted.
+
 ### The gap that matters — and the work that's left
 
 Recall-at-a-threshold hides the real question: **how far apart are the two score distributions?** If the weakest real Waymo outscores the strongest confuser, one clean cut separates them. If not, there's an overlap band where no threshold is perfect. Scored across all 204 confirmed Waymos and all vetted non-Waymos:
