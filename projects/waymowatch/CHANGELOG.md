@@ -1,5 +1,21 @@
 # WaymoWatch — Changelog
 
+## Public map dedups to distinct passes; +35 confirms (2026-06-30)
+
+- **Map counts distinct *passes*, not raw frames** (`server/sightings_api.py::sightings()`). A Waymo
+  snapped several frames apart at one camera (same `captured_at`/within minutes — there's no `track_id`)
+  was counted as N separate sightings: the dot showed "3", the bottom-left total inflated. `sightings()`
+  now collapses same-camera rows chained within `SIGHTING_GAP_S` (600 s) into one pass — representative =
+  the highest-`wn_conf` frame, `frames` = how many collapsed. **Presentation-only: training
+  (`build_real_dataset.py`) still keeps every frame** (more views = more signal); only the website dedups.
+  Frontend untouched — it already groups by camera, counts the group, pages it, and totals `rows.length`,
+  so the dots, popup paging AND the bottom-left total all become distinct-passes for free. Live: 312 raw
+  rows → **291 passes** (21 frames collapsed across 17 passes). Deployed + `waymowatch-api.service` restarted.
+- **+35 confirmed Waymos / 23 hard negatives** (today's four digests, 07:17–21:17) → waymo total **312 rows
+  (291 passes)**. Banked both-sides per the standing rule: positive-echo + proposed-negatives reviewed
+  before banking. One typo caught (#93220 → #83220, the frame before the also-named #83221 — same pass).
+  Rejects → `data/hard_negatives/run2/` (now 73 RUN_2-era hard negs).
+
 ## RUN_2 hard negatives kept separate from RUN_1; loop-stall alarm; +10 confirms (2026-06-29)
 
 - **Loop-stall alarm** (`check_loop_health` in `waymonet_digest.py`, every cron run): emails if no

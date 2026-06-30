@@ -16,12 +16,14 @@ served only for status='waymo' rows — unreviewed candidates stay private.
 import json
 import re
 import sqlite3
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DB = ROOT / "data" / "waymo.db"
 PORT = 3104
+SIGHTING_GAP_S = 600   # same camera within 10 min = ONE pass (no track_id; JamCams poll ~150 s)
 
 IMG_RE = re.compile(r"^/img/(\d+)(_frame)?\.jpg$")
 
@@ -32,19 +34,59 @@ def db():
     return con
 
 
+def _ts(s):
+    """Parse 'YYYY-MM-DDThh:mm:ss[.f]Z' to a datetime (for pass-gap maths)."""
+    return datetime.strptime((s or "").replace("Z", "").split(".")[0], "%Y-%m-%dT%H:%M:%S")
+
+
 def sightings():
+    """Confirmed sightings, deduped to distinct PASSES for the public map.
+
+    A Waymo snapped several frames apart (same camera, consecutive frames within SIGHTING_GAP_S)
+    is ONE sighting, not three — the map dots, popup paging AND the bottom-left total all count
+    passes, not raw frames. Only the presentation dedups; training (build_real_dataset) still keeps
+    every frame. Representative of a pass = its highest-confidence frame; `frames` = how many
+    collapsed into it. There's no track_id, so the key is (camera, time-chained within the gap)."""
     con = db()
     try:
         rows = con.execute(
-            """SELECT c.id, c.camera_id, c.captured_at, c.score,
+            """SELECT c.id, c.camera_id, c.captured_at, c.score, c.wn_conf,
                       cam.common_name, cam.view, cam.lat, cam.lon
                FROM candidates c JOIN cameras cam ON cam.id = c.camera_id
                WHERE c.status = 'waymo'
-               ORDER BY c.captured_at DESC"""
+               ORDER BY c.camera_id, c.captured_at"""        # camera then time -> consecutive = same pass
         ).fetchall()
-        return [dict(r) for r in rows]
     finally:
         con.close()
+
+    KEYS = ("id", "camera_id", "captured_at", "score", "common_name", "view", "lat", "lon")
+    events, cluster, prev = [], [], None
+
+    def flush():
+        if not cluster:
+            return
+        rep = max(cluster, key=lambda r: (r["wn_conf"] if r["wn_conf"] is not None else -1.0,
+                                          r["score"] if r["score"] is not None else -1.0))
+        ev = {k: rep[k] for k in KEYS}
+        ev["frames"] = len(cluster)
+        events.append(ev)
+
+    for r in rows:
+        same_pass = prev is not None and r["camera_id"] == prev["camera_id"]
+        if same_pass:
+            try:
+                same_pass = (_ts(r["captured_at"]) - _ts(prev["captured_at"])).total_seconds() <= SIGHTING_GAP_S
+            except (ValueError, TypeError):
+                same_pass = False        # unparseable timestamp -> treat as a separate pass
+        if not same_pass:
+            flush()
+            cluster.clear()
+        cluster.append(r)
+        prev = r
+    flush()
+
+    events.sort(key=lambda e: e["captured_at"], reverse=True)   # frontend expects newest-first
+    return events
 
 
 def image_path(cand_id, frame):
