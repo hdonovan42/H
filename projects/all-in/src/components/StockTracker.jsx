@@ -1146,7 +1146,7 @@ export default function StockTracker() {
           </div>
         </div>
 
-        <div className="box spreadsheet" style={{marginTop: '20px'}}>
+        <div className="box spreadsheet" style={{marginTop: '10px'}}>
           <div className="spreadsheet-scroll">
             <div className="spreadsheet-inner">
               <div className="spreadsheet-header">
