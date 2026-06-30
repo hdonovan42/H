@@ -2,7 +2,7 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-.page-wrapper { min-height: 100vh; background: #f4f1e8; font-family: 'IBM Plex Mono', monospace; color: #1a1a1a; padding: 16px 16px 0; }
+.page-wrapper { min-height: 100vh; background: #f4f1e8; font-family: 'IBM Plex Mono', monospace; color: #1a1a1a; padding: 16px 16px 4px; }
 .container { max-width: 1200px; margin: 0 auto; padding: 0px 28px; }
 .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding-bottom: 14px; border-bottom: 2px solid #1a1a1a; }
 .ticker-display { font-size: clamp(32px, 6vw, 44px); font-weight: 600; letter-spacing: -1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
