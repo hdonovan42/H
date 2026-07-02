@@ -187,30 +187,54 @@ def render_value_table(positions: dict[str, int]) -> Table:
     return table
 
 
+# ─── price resolution ─────────────────────────────────────────────────────────
+
+def _prompt_price(ticker: str) -> float:
+    return _validate_price(Prompt.ask(f"Enter price for {ticker} (USD)"))
+
+
+def resolve_price(ticker: str, price: Optional[float]) -> float:
+    """Return the trade price: the one supplied, else prompt (current vs manual)."""
+    if price is not None:
+        return price
+    current = fetch_price(ticker)
+    if current is None:
+        console.print(f"[yellow]No live price available for {ticker}.[/yellow]")
+        return _prompt_price(ticker)
+    choice = Prompt.ask(
+        f"No price given. [1] at current price ([green]${current:,.2f}[/green])  [2] enter price",
+        choices=["1", "2"],
+        default="1",
+    )
+    return current if choice == "1" else _prompt_price(ticker)
+
+
 # ─── mutation ─────────────────────────────────────────────────────────────────
 
-def apply_transaction(state: dict, action: str, ticker: str, quantity: int) -> dict:
-    if action == "SELL":
-        held = state["positions"].get(ticker, 0)
-        if quantity > held:
-            raise click.ClickException(f"cannot SELL {quantity} {ticker} — only hold {held}")
+def apply_transaction(state: dict, action: str, ticker: str, quantity: int, price: float) -> dict:
     tx = {
         "id": len(state["transactions"]) + 1,
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "action": action,
         "ticker": ticker,
         "quantity": quantity,
+        "price": price,
     }
     state["transactions"].append(tx)
     state["positions"] = recompute_positions(state["transactions"])
     return state
 
 
-def execute(action: str, ticker: str, quantity: int) -> None:
+def execute(action: str, ticker: str, quantity: int, price: Optional[float]) -> None:
     state = load_state()
+    if action == "SELL":
+        held = state["positions"].get(ticker, 0)
+        if quantity > held:
+            raise click.ClickException(f"cannot SELL {quantity} {ticker} — only hold {held}")
     console.print(render_positions(state["positions"], "Before"))
-    state = apply_transaction(state, action, ticker, quantity)
-    message = f"portfolio: {action} {ticker} {quantity}"
+    resolved = resolve_price(ticker, price)
+    state = apply_transaction(state, action, ticker, quantity, resolved)
+    message = f"portfolio: {action} {ticker} {quantity} @ {resolved:,.2f}"
     persist(state, message)
     console.print(render_positions(state["positions"], "After"))
     console.print(f"[green]✓[/green] {message}")
@@ -221,7 +245,25 @@ def execute(action: str, ticker: str, quantity: int) -> None:
 @click.group(invoke_without_command=True)
 @click.pass_context
 def cli(ctx: click.Context) -> None:
-    """PORTFOLIO.py — stock portfolio tracker."""
+    """PORTFOLIO — command-line stock portfolio tracker.
+
+    \b
+    Every buy and sell records a price. Give it explicitly with `@`:
+        portfolio buy AAPL 10 @ 401.00
+        portfolio sell AAPL 4 @ 415.50
+
+    \b
+    Omit the price and you'll be asked to either use the current market
+    price (shown as a preview) or type your own:
+        portfolio buy AAPL 10
+        -> No price given. [1] at current price ($401.23)  [2] enter price
+
+    \b
+    Other commands:
+        portfolio value      current holdings, live prices + total value
+        portfolio history    full transaction ledger (with recorded prices)
+        portfolio            interactive prompt (action / ticker / qty / price)
+    """
     if ctx.invoked_subcommand is None:
         interactive()
 
@@ -236,20 +278,46 @@ def _validate_quantity(qty_str: str) -> int:
     return qty
 
 
-@cli.command()
-@click.argument("ticker")
-@click.argument("quantity")
-def buy(ticker: str, quantity: str) -> None:
-    """Buy QUANTITY shares of TICKER."""
-    execute("BUY", ticker.upper(), _validate_quantity(quantity))
+def _validate_price(raw: str) -> float:
+    try:
+        price = float(str(raw).lstrip("@").strip().replace(",", ""))
+    except ValueError:
+        raise click.ClickException(f"price must be a number, got '{raw}'")
+    if price <= 0:
+        raise click.ClickException("price must be > 0")
+    return price
 
 
-@cli.command()
+def _parse_price_tokens(tokens: tuple[str, ...]) -> Optional[float]:
+    """Parse the trailing `@ PRICE` tokens of a buy/sell. None when absent."""
+    joined = " ".join(tokens).strip().lstrip("@").strip()
+    if not joined:
+        return None
+    return _validate_price(joined)
+
+
+@cli.command(context_settings={"ignore_unknown_options": True})
 @click.argument("ticker")
 @click.argument("quantity")
-def sell(ticker: str, quantity: str) -> None:
-    """Sell QUANTITY shares of TICKER."""
-    execute("SELL", ticker.upper(), _validate_quantity(quantity))
+@click.argument("price", nargs=-1)
+def buy(ticker: str, quantity: str, price: tuple[str, ...]) -> None:
+    """Buy QUANTITY shares of TICKER, e.g. `buy AAPL 10 @ 401.00`.
+
+    Omit the price to be asked for the current market price or your own.
+    """
+    execute("BUY", ticker.upper(), _validate_quantity(quantity), _parse_price_tokens(price))
+
+
+@cli.command(context_settings={"ignore_unknown_options": True})
+@click.argument("ticker")
+@click.argument("quantity")
+@click.argument("price", nargs=-1)
+def sell(ticker: str, quantity: str, price: tuple[str, ...]) -> None:
+    """Sell QUANTITY shares of TICKER, e.g. `sell AAPL 4 @ 415.50`.
+
+    Omit the price to be asked for the current market price or your own.
+    """
+    execute("SELL", ticker.upper(), _validate_quantity(quantity), _parse_price_tokens(price))
 
 
 @cli.command()
@@ -269,29 +337,33 @@ def history() -> None:
     table.add_column("Action")
     table.add_column("Ticker")
     table.add_column("Quantity", justify="right")
+    table.add_column("Price (USD)", justify="right")
     if not state["transactions"]:
-        table.add_row("—", "—", "—", "—", "—")
+        table.add_row("—", "—", "—", "—", "—", "—")
     else:
         for tx in state["transactions"]:
             colour = "green" if tx["action"] == "BUY" else "red"
+            price = tx.get("price")
+            price_str = f"{price:,.2f}" if price is not None else "—"
             table.add_row(
                 str(tx["id"]),
                 tx["ts"],
                 f"[{colour}]{tx['action']}[/{colour}]",
                 tx["ticker"],
                 str(tx["quantity"]),
+                price_str,
             )
     console.print(table)
 
 
 def interactive() -> None:
-    """Prompt for action/ticker/quantity."""
+    """Prompt for action/ticker/quantity/price."""
     action = Prompt.ask("Action", choices=["buy", "sell"], default="buy").upper()
     ticker = Prompt.ask("Ticker").strip().upper()
     if not ticker:
         raise click.ClickException("ticker required")
     qty = _validate_quantity(Prompt.ask("Quantity"))
-    execute(action, ticker, qty)
+    execute(action, ticker, qty, None)
 
 
 if __name__ == "__main__":

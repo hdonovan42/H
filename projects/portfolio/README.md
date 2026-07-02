@@ -10,8 +10,9 @@ so your ledger stays in sync (and backed up) across every machine you use.
 ## How it works
 
 - **Transactions are the source of truth.** Each `buy`/`sell` appends an immutable
-  record to `portfolio.json`. Current positions are *recomputed* from the full
-  transaction list on every read — never stored as authoritative state.
+  record (action, ticker, quantity, price) to `portfolio.json`. Current positions
+  are *recomputed* from the full transaction list on every read — never stored as
+  authoritative state.
 - **The data vault is a separate private repo.** `PORTFOLIO.py` reads and writes
   `~/.portfolio-vault/portfolio.json`; the directory is a clone of
   `github.com/hdonovan42/PORTFOLIO`. After each change the CLI runs
@@ -63,15 +64,26 @@ The CLI refuses to run until the data vault exists locally. Bootstrapping is two
 ## Usage
 
 ```bash
-portfolio buy AAPL 10      # buy 10 shares of AAPL
-portfolio sell AAPL 4      # sell 4 (refuses if you hold fewer than 4)
-portfolio value            # current holdings with live prices + total value
-portfolio history          # full transaction ledger
-portfolio                  # no subcommand → interactive prompt
+portfolio buy AAPL 10 @ 401.00   # buy 10 AAPL at $401.00
+portfolio sell AAPL 4 @ 415.50   # sell 4 (refuses if you hold fewer than 4)
+portfolio buy AAPL 10            # no price → asks: current price or enter your own
+portfolio value                  # current holdings with live prices + total value
+portfolio history                # full transaction ledger (with recorded prices)
+portfolio                        # no subcommand → interactive prompt
 ```
 
-Tickers are upper-cased automatically. Quantities must be integers ≥ 1.
-`buy` and `sell` print a before/after positions table and the committed message.
+Every `buy`/`sell` records a **price**. Supply it with `@` (e.g. `buy AAPL 10 @ 401.00`).
+Leave it off and the CLI follows up with a choice — use the current market price
+(shown as a preview) or type your own:
+
+```
+portfolio buy AAPL 10
+→ No price given. [1] at current price ($401.23)  [2] enter price
+```
+
+Tickers are upper-cased automatically. Quantities must be integers ≥ 1 and prices
+must be > 0. `buy` and `sell` print a before/after positions table and the committed
+message. Run `portfolio --help` for the full command reference.
 
 ## Files
 
@@ -89,7 +101,7 @@ Tickers are upper-cased automatically. Quantities must be integers ≥ 1.
 {
   "version": 1,
   "transactions": [
-    { "id": 1, "ts": "2026-06-02T09:30:00Z", "action": "BUY", "ticker": "AAPL", "quantity": 10 }
+    { "id": 1, "ts": "2026-06-02T09:30:00Z", "action": "BUY", "ticker": "AAPL", "quantity": 10, "price": 401.00 }
   ],
   "positions": {}
 }
