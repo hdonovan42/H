@@ -292,6 +292,42 @@ measured rather than assumed · low tail (#216) lifts somewhat with ~2× positiv
 multi-view take-max attacks the same tail independently) · recall holds at 100% on pinned val or
 it doesn't ship.
 
+### Pre-rental tooling SHIPPED + RUN_2 baselines under the FIXED metrics (2026-07-02)
+All the "before the rental" items above are DONE and deployed to the VPS:
+- **Pinned val**: `train/val_cams_run2.txt` (RUN_2's 28 val cams, recovered by content-hashing all
+  47 val images against the banked frames — 47/47 matched). `build_real_dataset.py` reads it by
+  default; new-since-RUN_2 cameras all train. Random split = fallback only, with a loud warning.
+- **Builder**: per-provenance hard-neg weights `--hard-weight-run1` (default **3**) /
+  `--hard-weight-run2` (default **10**); writes `val_meta.csv` (val positives' camera+timestamp)
+  for the night-cut metric.
+- **eval_gate.py FIXED**: box-level recall over ALL GT boxes (was first-box-only), FP counting on
+  positive frames (was neg-only), night/day recall split, `--data` for bench variants.
+- **confuser_gate.py (NEW)**: `--export` on the VPS builds `data/confuser_suite/` (galleries =
+  held-out; hard_negatives/run2 = trained; edge_positive = recall floor), score mode reports
+  per-group max/mean + PASS/FAIL vs `--bar 0.67`.
+
+**RUN_2 BASELINES — the numbers RUN_3 must beat** (measured 2026-07-02, RUN_2 `best.pt` on the
+pinned val of a 392-box test build: 74 pos frames / 77 boxes / 470 backgrounds):
+| metric | RUN_2 |
+|---|---|
+| box-recall @0.10–0.20 | **96.1%** (3 new-era boxes missed — RUN_2 never saw them) |
+| FP on backgrounds | 3/470 @0.10 → 1 @0.20 → **0 @0.30** |
+| FP on positive frames | **0/74** at every conf |
+| night / day box-recall @0.10 | **16/16 (100%)** / 58/61 (95.1%) — first measured night number |
+| confuser suite: held-out galleries max | **0.000** (RUN_1-era confusers fully suppressed) |
+| confuser suite: run2_hardneg (trained-for-RUN_3) max / mean | **0.568** / 0.075 |
+| edge-positive (recall floor) max | 0.636 |
+
+**RUN_3 success looks like:** box-recall ≥96% *including* the 3 misses recovered; `run2_hardneg`
+max collapsing toward the galleries' ~0 (the RUN_1→RUN_2 pattern repeating) while the galleries
+STAY at ~0 (proof the run1 ×3 down-weight didn't let them resurface); then `threshold_report.py`
+re-derives AUTO_BANK_TH from the live distribution.
+
+**Trigger status at ship time: 392/≈408 eligible boxes, 106 run2 hard negs (target 100–150) —
+the compound trigger is effectively MET.** Rental can be scheduled once the current review
+backlog is banked: rebuild + preflight + `confuser_gate.py --export`, bundle
+`train/ data/dataset_real/ data/confuser_suite/`, and run the bench hw-ablation + gates per plan.
+
 ## Attached full rescore + RUN_1↔RUN_2 eval (RUN_2 onward)
 Score EVERY candidate with the new weights on the rented GPU (minutes) instead of ~5-9 h on the
 homebox, and diff it against RUN_1. Bolt onto the end of the train job (train → gate → rescore):

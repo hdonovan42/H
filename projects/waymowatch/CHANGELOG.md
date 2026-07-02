@@ -1,5 +1,31 @@
 # WaymoWatch — Changelog
 
+## RUN_3 pre-rental tooling shipped + RUN_2 baselines measured (2026-07-02)
+
+All "before the rental" items from the RUN_3 plan, deployed to the VPS (`dataset_real` = the
+RUN_2 build left untouched as evidence):
+
+- **Pinned val split**: `train/val_cams_run2.txt` — RUN_2's 28 val cameras, recovered exactly by
+  content-hashing all 47 val images against the banked Waymo frames (47/47 matched).
+  `build_real_dataset.py` reads it by default; new-since-RUN_2 cameras all go to train; the old
+  `Random(13)` split is a loud-warning fallback. Gate numbers are now run-comparable.
+- **Per-provenance hard-negative weights** in the builder: `--hard-weight-run1` (default **3**) /
+  `--hard-weight-run2` (default **10**) — ends the blanket ×10 that spent 80% of every RUN_2 epoch
+  on mostly-solved RUN_1 confusers. Also writes `val_meta.csv` (val positives' camera+timestamp).
+- **`eval_gate.py` fixed metrics**: box-level recall over ALL GT boxes (was silently first-box-only —
+  multi-Waymo frames under-evaluated), FP counting on positive frames (was neg-images-only →
+  precision optimistic), night/day recall split, `--data` for bench variants.
+- **`train/confuser_gate.py` (NEW)** — the honest replacement for the "0.22 ceiling" sampling
+  artifact: `--export` builds `data/confuser_suite/` (curated galleries = held-out;
+  `hard_negatives/run2` = trained; `edge_positive` = recall floor); score mode reports per-group
+  max/mean + PASS/FAIL vs `--bar 0.67`.
+- **RUN_2 baselines measured** (CPU, RUN_2 weights, pinned val of a 392-box test build — the
+  numbers RUN_3 must beat, full table in `train/GPU_RENT_NOTES.md`): box-recall **96.1%**
+  @0.10–0.20, FP-neg 3/470→0 @0.30, FP-pos 0/74, **night 16/16 (100%)** vs day 95.1%; confuser
+  suite galleries max **0.000**, run2_hardneg max **0.568**, edge-positive max 0.636.
+- **Trigger status: 392/≈408 eligible boxes + 106 run2 hard negs — the compound RUN_3 trigger is
+  effectively MET**; rental schedulable once the current review backlog is banked.
+
 ## RUN_3 training plan locked (2026-07-02)
 
 Detailed, user-agreed RUN_3 plan written to `train/GPU_RENT_NOTES.md` → "Run 3 — plan" (supersedes

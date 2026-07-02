@@ -1,0 +1,35 @@
+# WaymoNet PINNED val cameras — frozen at RUN_2 (built 2026-06-25, 28 cams / 47 val positives).
+# Recovered 2026-07-02 by content-hashing dataset_real/images/val/waymo_*.jpg (47/47 matched)
+# against the banked waymo frames. build_real_dataset.py reads this file: these cameras' frames
+# ALWAYS go to val; every other camera (incl. all new-since-RUN_2 cameras) goes to train. This is
+# what makes gate numbers comparable across runs — RUN_2 never trained on these feeds, so RUN_3+
+# warm-started models are honestly held out on them too. Do NOT edit casually: growing this list
+# steals positives from train; shrinking it contaminates the RUN_2 comparison.
+JamCams_00001.02352
+JamCams_00001.02500
+JamCams_00001.03105
+JamCams_00001.03555
+JamCams_00001.03651
+JamCams_00001.03652
+JamCams_00001.03654
+JamCams_00001.03663
+JamCams_00001.03672
+JamCams_00001.04250
+JamCams_00001.04328
+JamCams_00001.04333
+JamCams_00001.04680
+JamCams_00001.05900
+JamCams_00001.06512
+JamCams_00001.06522
+JamCams_00001.06585
+JamCams_00001.06600
+JamCams_00001.07317
+JamCams_00001.07326
+JamCams_00001.07350
+JamCams_00001.07360
+JamCams_00001.07364
+JamCams_00001.07373
+JamCams_00001.07379
+JamCams_00001.07389
+JamCams_00001.07500
+JamCams_00001.08753
