@@ -1,5 +1,16 @@
 # WaymoWatch — Changelog
 
+## RUN_3 training plan locked (2026-07-02)
+
+Detailed, user-agreed RUN_3 plan written to `train/GPU_RENT_NOTES.md` → "Run 3 — plan" (supersedes
+the stub). Headlines: win condition = separation (drop the 0.75 auto-bank cut), not the saturated
+gate; compound trigger ≈408 eligible boxes AND 100–150 run2-era hard negs (hard negs gating — at
+lock: 318 / ~73); hard-neg reweight run2 ×10 / run1 ×1–3 via the staged `bench.py` ablation;
+**epochs 150→100 + close_mosaic 20** (RUN_2 early-stopped at e127, before the 135–150 close window —
+the mosaic-off finishing phase never ran); workers 8→16; pre-rental eval upgrades (pinned val cams,
+eval_gate multi-box + FP-on-positives fixes, confuser regression suite); ship gate = pinned-val
+recall ≥ RUN_2 AND confuser-suite max < 0.67; scripted cutover with data-driven AUTO_BANK_TH.
+
 ## P0 reliability fixes: systemd loop supervision, scoring-health alarm, safe auto-bank, short DB txns (2026-07-02)
 
 From `tasks/architecture-audit-2026-07-02.md` (four-agent architecture audit). Four silent-loss classes closed:

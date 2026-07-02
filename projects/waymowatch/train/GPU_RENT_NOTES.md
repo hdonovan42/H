@@ -213,24 +213,84 @@ hard-neg ×10 duplication**.
   gate runs). The rescore debugging consumed the idle window. `train/bench.py` + the hardlinked
   `dataset_hw{1,3,5}` variants are built and ready. [RESULTS: PENDING — next rental]
 
-## Run 3 — plan (STANDING recipe from here: warm-start + full dataset)
+## Run 3 — plan (LOCKED 2026-07-02, user-agreed; supersedes the stub plan)
+**Framing — what "better than RUN_2" means.** RUN_2's acceptance gate is SATURATED (100% recall /
+0 FP on held-out cameras) — RUN_3 cannot and should not chase it. The measured gap is elsewhere:
+the **novel-confuser tail** (#40294 scored **0.67** from the unlabelled pool → auto-bank stuck at
+0.75) and the **low-conf Waymo tail** (#216 @0.10, next-lowest 0.18). **Win condition = SEPARATION:**
+confuser ceiling down + Waymo floor up → the auto-bank cut drops → more auto-banks, less manual
+review. RUN_3 is a **data-composition + measurement release, not a modelling release.**
+
 **Why RUN_2 was fresh-from-COCO but RUN_3 won't be.** RUN_2 trained **fresh from COCO** (`yolo26s.pt`,
 766/902 transfer — confirmed in the train log; `train.py` defaults, NO `--model`/`--weights` override)
 *specifically because* RUN_1's weights were fine-tuned on the **poisoned** negative set — they'd learned
 the later-recovered Waymos *as* negatives, and warm-starting would carry that contamination forward.
 That poisoned lineage is now broken: RUN_2 trained on a decontaminated set, so **its weights are clean**.
 
-**So from RUN_3 onward — warm-start from the previous run + train on the FULL dataset:**
-- **Warm-start:** `train.py --model ~/waymonet_runN/weights/best.pt --name waymonet_real_v3` (a `.pt`
-  passed as `--model` fine-tunes directly — no separate COCO `--weights` transfer). Inherits the prior
-  run's learned features → faster convergence, builds on prior knowledge.
-- **Full dataset, always:** never train on just the new confirms. `dataset/build_real_dataset.py` already
-  rebuilds from the WHOLE DB each run (every `status='waymo'` + every `status='reject'`/hard-neg), so the
-  set only grows and cleans. Just rebuild + preflight before each rental.
-- **Fresh-from-COCO is the EXCEPTION** — use it ONLY to break a poisoned lineage (as RUN_2 did), never by
-  default.
-- **RUN_3 targets:** the 0.10–0.22 overlap (esp. #216) AND the novel-confuser tail (#40294 @0.67, #47783
-  @0.35 — both banked as hard negatives 2026-06-25) so the auto-bank cut can drop from 0.75 back down.
+### Triggers — do NOT rent until BOTH (compound rule)
+- **Positives ≈408 training-eligible boxes** (2× RUN_2's 204). At 2026-07-02: **318**.
+- **run2-era hard negatives 100–150** (`data/hard_negatives/run2/`). At 2026-07-02: **~73** — this is
+  the GATING input (novel-confuser signal), prioritise it over raw positives. The unreviewed
+  **[0.30, 0.75) band** in the DB (64 rows at audit time) is exactly this queue — review it first.
+- Pre-rental: re-run the all-positives audit contact sheet (cheap insurance, last done at 38 reals)
+  + `build_real_dataset.py` + `preflight.py` → "PREFLIGHT PASS", as before.
+
+### Keep (validated — do not churn)
+Warm-start `train.py --model ~/waymonet_run2/weights/best.pt --name waymonet_real_v3` (a `.pt` as
+`--model` fine-tunes directly, no COCO transfer) · FULL dataset rebuild every run (never just new
+confirms) · imgsz **704** · mosaic **0.4** / scale 0.15 · by-camera split · YOLO26s-P2 ·
+ultralytics **8.4.63** · Vast 4090 flow + attached full rescore. Fresh-from-COCO stays the
+poisoned-lineage EXCEPTION only. **No architecture/augmentation churn** — the 47-positive val makes
+mAP deltas noise; do not tune for them.
+
+### Changes vs RUN_2 (ranked by expected impact)
+1. **Hard-negative reweight by provenance — the #1 recipe lever.** RUN_2 duplicated ALL 425 hard
+   negs ×10, but most are RUN_1-era confusers RUN_2 already suppresses → **80% of every epoch was
+   407 uniques re-augmented** (capacity on solved cases; also the 58%-GPU dataloader starvation).
+   RUN_3: **run2-era ×10, run1-era ×1–3** (`build_real_dataset.py` needs a per-provenance weight;
+   currently one HARD_WEIGHT for both dirs). Decide the exact run1 weight empirically: `train/bench.py`
+   + the hardlinked `dataset_hw{1,3,5}` variants are BUILT AND UNRUN — run the matrix as gate-checked
+   variants in ONE rental (~$0.30–0.50 each) and ship the winner. Risk note: run1 negs stay ×1–3
+   (never ×0) so old confusers can't silently resurface; the regression suite (below) catches it.
+2. **epochs 150 → 100, close_mosaic 15 → 20.** 150 was fresh-from-COCO headroom, never a measured
+   benefit: RUN_1 stopped e142, RUN_2 stopped **e127 — BEFORE the close_mosaic window (135–150), so
+   the mosaic-off clean-image finishing phase NEVER RAN in RUN_2**, and cos_lr stretched over 150
+   epochs kept the LR higher for longer, pushing best-epoch later (e111). A warm-started run
+   converges earlier still → at 150 the close window is unreachable by construction. At **100/20**
+   the window is epochs 80–100, cos_lr reaches its floor by e100, and the post-close fitness bump
+   (cleaner small-object boxes — matters at 3–6 px domes) actually happens. Keep patience 30.
+   Optional: `lr0 0.005` for the fine-tune (MuSGD's 0.01 is a fresh-training rate) — low-risk either way.
+3. **Dataloader workers 8 → 16** (32-core box, GPU was at 58%). With the ×10 rebalance shrinking the
+   epoch ~4×, expect ~15–20 s/epoch; whole rental cheaper than RUN_2's ~$1.50.
+4. **Eval upgrades BEFORE the rental (all CPU, off the clock) — else RUN_3 vs RUN_2 is not provable:**
+   - **Pin the val cameras**: freeze RUN_2's 28 val cams in a committed file (builder + eval_gate +
+     headtohead read it); new-since-RUN_2 cameras go to TRAIN. Today `Random(13)` over the grown
+     camera list reshuffles the split → gate numbers not run-comparable.
+   - **eval_gate.py fixes**: read ALL GT boxes per frame (currently first-box-only — RUN_2's val had
+     12 multi-Waymo frames, under-evaluated) + count FPs on POSITIVE frames (currently only negative
+     images count → precision optimistic).
+   - **Confuser regression suite** (the honest replacement for the "0.22 ceiling" sampling artifact):
+     fixed labelled set = curated galleries (roof-box / i-pac / funny / van_roof — currently in NO
+     automated eval) + the banked novel tail (#40294, #47783); PLUS the attached-GPU full-pool rescore
+     with the top-N unlabelled scorers human-checked pre-deploy (the ceiling lives in `new`/`near`,
+     not in `status='reject'`).
+   - Report a **night-cut recall** number (informational — no night metric exists anywhere yet).
+5. **SHIP GATE (RUN_3):** pinned-val recall ≥ RUN_2 (100% @0.10–0.20) **AND** confuser-suite max
+   conf **< 0.67** (RUN_2's measured novel ceiling). Either fails → no deploy.
+6. **Scripted cutover** (RUN_2's was manual; this is where ground was lost): swap `collector/best.pt`
+   (keep `best_run2.pt` rollback both hosts) → attached full rescore + contradiction report (rejects
+   the new model calls Waymo = poisoned-negative recovery) → `threshold_report.py` on the NEW score
+   distribution → **set AUTO_BANK_TH from data** (0.75 is a RUN_2-scoped number; target ~0.4–0.6 if
+   the suite shows margin) → reset `wn_scored=0` on `new`/`near` backlog for in-process re-score
+   (also closes the stale-model ≥0.75 dead band: old-ver rows are excluded from BOTH auto-bank and
+   digest) → recheck the dash canary → restart loop + `waymonet-infer`.
+
+### Expected outcomes (honest)
+Auto-bank cut drops to a measured level (fewer manual reviews — the headline win) · #40294/#47783
+class suppressed (now ×10 signal) — NEW novels will still appear, the suite makes the ceiling
+measured rather than assumed · low tail (#216) lifts somewhat with ~2× positives (serving-side
+multi-view take-max attacks the same tail independently) · recall holds at 100% on pinned val or
+it doesn't ship.
 
 ## Attached full rescore + RUN_1↔RUN_2 eval (RUN_2 onward)
 Score EVERY candidate with the new weights on the rented GPU (minutes) instead of ~5-9 h on the
