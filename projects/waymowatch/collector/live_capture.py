@@ -505,7 +505,10 @@ def retention(con):
         # NEVER prune a model-flagged / emailed candidate awaiting review (wn_hit / wn_sent). Retention
         # deleted real Waymos the re-score surfaced (#22408: a 7-day-old 'new' row, emailed at 16:17,
         # then retention-deleted before it could be banked). Only never-flagged stale rows age out.
-        keep = " AND COALESCE(wn_hit,0)=0 AND COALESCE(wn_sent,0)=0"
+        # wn_scored=0 rows are ALSO kept: a scoring failure (wn_safe swallowed an error) means the row
+        # was never actually looked at — pruning it would finalise a silent drop of a possible Waymo.
+        keep = (" AND COALESCE(wn_hit,0)=0 AND COALESCE(wn_sent,0)=0"
+                " AND COALESCE(wn_scored,0)=1")
         stale = con.execute("SELECT crop_path,frame_path FROM candidates WHERE captured_at < ? "
                             "AND status=?" + keep, (cut, status_)).fetchall()
         for row in stale:
@@ -830,7 +833,8 @@ def watch_loop(con):
     the polling layer. Fresh clips queue per tier: spine processes first and is never
     dropped; the zone queue drops OLDEST on backlog (counted, never silent). Single process,
     single DB writer. Telemetry per poll-cycle -> `cycles` table + timestamped log line;
-    a heartbeat file lets run_watch.sh kill a hung loop (cron restarts within 6 min)."""
+    systemd (waymowatch-loop.service, Restart=always) respawns a dead loop; a heartbeat file
+    lets run_watch.sh (cron */6, watchdog-only) kill a HUNG one for systemd to respawn."""
     det, embed, cen = detector(), build_embedder(), load_centroid()
     os.makedirs(CAND_DIR, exist_ok=True)
     hb = os.path.join(CAND_DIR, "heartbeat")
@@ -873,10 +877,11 @@ def watch_loop(con):
                           f" | dropped {dropped} | +{newc} new +{nearc} near ~{mrgc} merged"
                           f" | {now - cyc_t0:.0f}s", flush=True)
                     retention(con)
-                    review_sheet(con)      # writes a LOCAL sheet only (no email)
-                    # OLD dome-score email chain RETIRED v0.9.x (emit_pages 200-page digest, instant
-                    # alerts >=0.93, daily recovery) — superseded by WaymoNet's own digest
-                    # (waymonet_digest.py, cron :17). The loop now only captures + scores in-process.
+                    # review_sheet() dropped from the loop (2026-07-02): it re-read ~72 jpgs + wrote a
+                    # grid EVERY cycle with no consumer since the dome-score emails were retired. Still
+                    # available via --review. OLD dome-score email chain RETIRED v0.9.x (emit_pages
+                    # 200-page digest, instant alerts >=0.93, daily recovery) — superseded by WaymoNet's
+                    # own digest (waymonet_digest.py, cron :17). The loop only captures + scores in-process.
                 except Exception as e:
                     print(f"[{ts()}] cycle-close error: {e}", flush=True)
                 started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -929,7 +934,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cameras", type=int, default=0, help="0 = all zone cameras")
     ap.add_argument("--loop", action="store_true",
-                    help="run forever: ETag-driven spine watch (cron supervises via flock)")
+                    help="run forever: ETag-driven spine watch (systemd waymowatch-loop supervises)")
     ap.add_argument("--sample-every", type=int, default=SAMPLE_EVERY)
     ap.add_argument("--review", action="store_true")
     ap.add_argument("--digest", action="store_true", help="WhatsApp the operator a daily review nudge")

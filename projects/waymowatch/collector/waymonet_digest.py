@@ -98,6 +98,7 @@ def bank(con, ids, status, dest):
         if status == "waymo" and fp and os.path.exists(fp) and box:
             con.execute("UPDATE candidates SET status='waymo', special=NULL, bbox=? WHERE id=?",
                         (json.dumps([int(round(v)) for v in box]), cid))
+            con.commit()      # short write txns: the loop is writing too — never hold the lock across file I/O
             img = cv2.imread(fp)
             x1, y1, x2, y2 = [max(0, int(round(v))) for v in box]
             crop = img[y1:y2, x1:x2]
@@ -106,6 +107,7 @@ def bank(con, ids, status, dest):
             shutil.copy(fp, os.path.join(dest, os.path.basename(fp)))
         else:                                     # reject (or waymo w/o a model box) -> copy frame+crop
             con.execute("UPDATE candidates SET status=? WHERE id=?", (status, cid))
+            con.commit()
             for p in (cp, fp):
                 if p and os.path.exists(p):
                     shutil.copy(p, os.path.join(dest, os.path.basename(p)))
@@ -126,15 +128,14 @@ def auto_bank(con):
         print(f"auto-bank: nothing >= {AUTO_BANK_TH:.2f} (model {ver})")
         return
     ids = [r[0] for r in rows]
-    bank(con, ids, "waymo", REAL_DIR)                 # status=waymo + frame & model-box crop -> positives
-    con.execute("UPDATE candidates SET wn_autobank=1 WHERE id IN (%s)"
-                % ",".join(str(int(i)) for i in ids))
-    con.commit()
     data = [(r[0], r[1] or 0.0, json.loads(r[2]) if r[2] else None, r[3]) for r in rows]
     sheet = os.path.join(BASE, "data/candidates/autobank.jpg")
     n = _build_frame_sheet(data, sheet, cap=len(data))
     lo, hi = rows[-1][1], rows[0][1]
-    send_email(
+    # Email FIRST, bank only on a confirmed send: the undo review is the ONLY safety net on
+    # auto-banked positives, so a lost email (Resend quota/outage) must never leave rows silently
+    # banked. On failure nothing is banked — the rows stay eligible and tomorrow's run retries.
+    ok = send_email(
         f"WaymoWatch: {n} auto-banked as Waymos (conf {lo:.2f}–{hi:.2f}) — reply 'undo #id' if any is NOT a Waymo",
         f"<p><b>WaymoNet</b> scored these <b>{n}</b> candidate(s) <b>&ge;{AUTO_BANK_TH:.2f}</b> — above "
         f"every confirmed non-Waymo (the model's confuser ceiling is ~0.22) — so they were "
@@ -142,6 +143,13 @@ def auto_bank(con):
         f"#id + conf (highest first).</p><p>Reply <b>undo #id</b> for any that is <b>not</b> a Waymo and "
         f"I'll move it back out of the positives.</p><p style='color:#888'>Powered by TfL Open Data.</p>",
         attachments=[sheet])
+    if not ok:
+        print(f"auto-bank: email FAILED — NOT banking {n} candidate(s); they stay eligible for the next run")
+        return
+    bank(con, ids, "waymo", REAL_DIR)                 # status=waymo + frame & model-box crop -> positives
+    con.execute("UPDATE candidates SET wn_autobank=1 WHERE id IN (%s)"
+                % ",".join(str(int(i)) for i in ids))
+    con.commit()
     print(f"auto-banked {n} -> waymo (model {ver}), emailed for review")
 
 
@@ -191,6 +199,8 @@ def audit(con):
                     "wn_frame_sha=?, frame_sha=? WHERE id=?",
                     (round(wc, 4), json.dumps(wb) if wb else None, 1 if wc >= 0.03 else 0,
                      time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), sha, sha, cid))
+        con.commit()   # per-row: each re-score is ~0.35 s — one txn across the sweep starved the
+        # loop's writes for minutes and bloated the WAL (the 2026-06-27 two-day stall)
         if wc >= 0.10 and old < 0.10:
             recovered.append((cid, round(wc, 3)))
     con.commit()
@@ -207,37 +217,61 @@ def audit(con):
     return len(stale), len(recovered)
 
 
+def _alarm(marker_name, subject, html, throttle_h=3.0):
+    """Throttled alarm email. The throttle marker is written ONLY on a confirmed send — a
+    quota-failed alarm must not silence itself for the next 3 h (the old stall alarm did)."""
+    import time
+    marker = os.path.join(BASE, "data", marker_name)
+    if os.path.exists(marker) and time.time() - os.path.getmtime(marker) < throttle_h * 3600:
+        print(f"alarm throttled ({marker_name}): {subject}")
+        return
+    if send_email(subject, html):
+        open(marker, "w").write(subject)
+        print(f"ALARM emailed: {subject}")
+    else:
+        print(f"ALARM send FAILED (will retry next run): {subject}")
+
+
 def check_loop_health(con):
-    """LOUD alarm for a STALLED capture loop. The loop can be 'alive' (process up, cycling) yet fail to
-    persist anything for days — e.g. a DB lock — with no signal; that is how 2 days of captures were lost
-    (the run_watch watchdog only catches a HUNG loop via heartbeat, not a non-writing one). If the newest
-    candidate is older than STALL_HOURS, email an alarm (throttled to once / 3 h via a marker file)."""
+    """LOUD alarms for the two silent failure modes, run on every cron invocation (:17 / 00:00 / 04:00).
+    1) STALLED capture: the loop can be 'alive' (process up, cycling) yet fail to persist anything for
+       days — e.g. a DB lock — with no signal; that is how 2 days of captures were lost.
+    2) SCORING blackout: wn_safe swallows every failure (rows land wn_scored=0, wn_hit=0), so a
+       persistent break (corrupt best.pt, ultralytics error) means candidates keep flowing but NONE
+       reach the digest or auto-bank — capture-health stays green while detection is fully dark."""
     import time
     STALL_HOURS = 2.0
     row = con.execute("SELECT MAX(captured_at) FROM candidates").fetchone()
     latest = row[0] if row and row[0] else None
-    if not latest:
-        return
-    try:
-        age_h = (time.time() - time.mktime(time.strptime(
-            latest.replace("Z", "").split(".")[0], "%Y-%m-%dT%H:%M:%S"))) / 3600.0
-    except (ValueError, TypeError):
-        return
-    if age_h < STALL_HOURS:
-        return
-    marker = os.path.join(BASE, "data", ".stall_alarm")
-    if os.path.exists(marker) and time.time() - os.path.getmtime(marker) < 3 * 3600:
-        print(f"loop STALL: newest capture {age_h:.1f} h old (alarm throttled)")
-        return
-    send_email(
-        f"WaymoWatch LOOP STALL — no new captures in {age_h:.1f} h",
-        f"<p><b>The capture loop has not persisted a candidate in {age_h:.1f} hours</b> (newest: "
-        f"{latest}). The loop may be alive but unable to WRITE (e.g. a 'database is locked'/WAL issue). "
-        f"On the VPS: tail <code>data/candidates/capture.log</code> for 'database is locked'; bracket-pkill "
-        f"the loop (run_watch restarts it), and checkpoint the WAL if bloated.</p>"
-        f"<p style='color:#888'>Powered by TfL Open Data.</p>")
-    open(marker, "w").write(latest)
-    print(f"loop STALL ALARM emailed: newest capture {age_h:.1f} h old")
+    if latest:
+        try:
+            age_h = (time.time() - time.mktime(time.strptime(
+                latest.replace("Z", "").split(".")[0], "%Y-%m-%dT%H:%M:%S"))) / 3600.0
+        except (ValueError, TypeError):
+            age_h = None
+        if age_h is not None and age_h >= STALL_HOURS:
+            _alarm(".stall_alarm",
+                   f"WaymoWatch LOOP STALL — no new captures in {age_h:.1f} h",
+                   f"<p><b>The capture loop has not persisted a candidate in {age_h:.1f} hours</b> "
+                   f"(newest: {latest}). It may be dead or alive-but-unable-to-WRITE ('database is "
+                   f"locked'/WAL bloat). On the VPS: tail <code>data/candidates/capture.log</code>; "
+                   f"restart with <code>ssh root@vps-hel1 systemctl restart waymowatch-loop</code>; "
+                   f"checkpoint the WAL if bloated.</p>"
+                   f"<p style='color:#888'>Powered by TfL Open Data.</p>")
+    SCORE_FAIL_HOURS, SCORE_FAIL_MIN = 2.0, 10
+    cut = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - SCORE_FAIL_HOURS * 3600))
+    n_fail = con.execute("SELECT COUNT(*) FROM candidates WHERE captured_at >= ? "
+                         "AND COALESCE(wn_scored,0)=0", (cut,)).fetchone()[0]
+    if n_fail >= SCORE_FAIL_MIN:
+        _alarm(".scoring_alarm",
+               f"WaymoWatch SCORING FAILURE — {n_fail} unscored candidates in the last {SCORE_FAIL_HOURS:.0f} h",
+               f"<p><b>{n_fail}</b> candidates captured in the last {SCORE_FAIL_HOURS:.0f} h have "
+               f"<b>wn_scored=0</b> — in-process WaymoNet scoring is failing, so they are invisible "
+               f"to the review digest AND auto-bank. Check <code>capture.log</code> for "
+               f"'[wn] score error' lines and that <code>collector/best.pt</code> is intact. "
+               f"Unscored rows are exempt from retention (nothing is lost) but stay dark until "
+               f"re-scored after the fix.</p>"
+               f"<p style='color:#888'>Powered by TfL Open Data.</p>")
 
 
 def main():

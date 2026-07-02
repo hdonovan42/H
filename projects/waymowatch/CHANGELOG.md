@@ -1,5 +1,31 @@
 # WaymoWatch — Changelog
 
+## P0 reliability fixes: systemd loop supervision, scoring-health alarm, safe auto-bank, short DB txns (2026-07-02)
+
+From `tasks/architecture-audit-2026-07-02.md` (four-agent architecture audit). Four silent-loss classes closed:
+
+- **Loop now runs under systemd** (`deploy/waymowatch-loop.service`, User=hq, `Restart=always`,
+  RestartSec=30) — the cron `flock -n` starter whose stale-lock no-op left the loop dead for **48.5 h**
+  (Jun 27–29) is retired. `run_watch.sh` is now WATCHDOG-ONLY: heartbeat >600 s stale → kill the hung
+  process, systemd respawns (hangs are the one case systemd can't see). Verified live: killed the
+  process, systemd respawned it in ~30 s (`NRestarts=1`); first cycle clean (`dropped 0`, candidates
+  flowing). Cron line unchanged (same script path, same `*/6` schedule).
+- **Scoring-blackout alarm** (`check_loop_health`): `wn_safe` swallows every failure (rows land
+  `wn_scored=0`, invisible to digest AND auto-bank) — a persistent break (corrupt best.pt) was a total
+  silent blackout while capture-health stayed green. Now ≥10 unscored captures in 2 h → alarm email.
+  `retention()` also exempts `wn_scored=0` rows from the 7-day prune (a never-scored row must not age
+  out — it was never looked at). New `_alarm()` helper writes the 3 h throttle marker **only on a
+  confirmed send** (the old stall alarm armed its throttle even when the alarm email failed).
+- **Auto-bank emails FIRST, banks on send success**: previously it banked then emailed without checking
+  the send — on a Resend quota failure the undo-review email (the only safety net on auto-banked
+  positives) was silently lost. Now a failed send banks nothing; rows stay eligible for the next run.
+- **DB contention root-caused and fixed** — 5,916 `database is locked` errors (failed cycle-close +
+  camera-refresh writes) came from digest `bank()`/`audit()` holding ONE write txn across slow work
+  (file copies per id; ~0.35 s model predict per stale row — the June WAL-bloat stall). Both now commit
+  per row; loop `busy_timeout` 10 s → 60 s (`db_connect`).
+- Rider: dropped the dead per-cycle `review_sheet()` call (re-read ~72 jpgs + wrote a grid every 150 s
+  with no consumer since the dome-score emails were retired; still available via `--review`).
+
 ## Public map dedups to distinct passes; +35 confirms (2026-06-30)
 
 - **Map counts distinct *passes*, not raw frames** (`server/sightings_api.py::sightings()`). A Waymo

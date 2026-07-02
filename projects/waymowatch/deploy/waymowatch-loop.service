@@ -1,0 +1,26 @@
+# WaymoWatch live capture loop — systemd supervision (replaces the cron flock -n starter,
+# whose stale-lock no-op left the loop dead for 48.5 h on 2026-06-27..29).
+# Death -> Restart=always respawns in 30 s. Hang (process up, heartbeat stale) is handled by
+# run_watch.sh (cron */6): it kills the hung process and systemd respawns it.
+# Install (root): cp to /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now waymowatch-loop
+[Unit]
+Description=WaymoWatch live capture loop (spine+zone, 24/7)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hq
+WorkingDirectory=/home/hq/waymowatch
+Environment=OMP_NUM_THREADS=2
+Environment=MKL_NUM_THREADS=2
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/hq/waymowatch/.venv/bin/python collector/live_capture.py --loop
+Nice=10
+Restart=always
+RestartSec=30
+StandardOutput=append:/home/hq/waymowatch/data/candidates/capture.log
+StandardError=inherit
+
+[Install]
+WantedBy=multi-user.target

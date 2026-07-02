@@ -69,9 +69,11 @@ CREATE INDEX IF NOT EXISTS idx_sightings_status ON sightings(status);
 
 def db_connect(path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    con = sqlite3.connect(path)
+    con = sqlite3.connect(path, timeout=60)
     con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA busy_timeout=10000")
+    # 60 s: the loop must outwait any sibling writer (digest banking, audit) rather than error —
+    # 10 s lost cycle-close/camera-refresh writes 5,916 times before 2026-07-02.
+    con.execute("PRAGMA busy_timeout=60000")
     con.executescript(SCHEMA)
     return con
 
