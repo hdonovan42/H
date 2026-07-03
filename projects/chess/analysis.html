@@ -2,7 +2,12 @@
 <html>
   <head>
     <title>Chess Analysis with Stockfish</title>
-    <link rel="icon" type="image/png" href="/images/H-favicon.png"> 
+    <!-- Cross-origin isolation shim: GitHub Pages can't send COOP/COEP headers,
+         so this service worker injects them (one automatic reload on first visit).
+         Must be the FIRST script and live in the same directory as this page.
+         Unlocks SharedArrayBuffer -> threaded Stockfish. -->
+    <script src="coi-serviceworker.min.js"></script>
+    <link rel="icon" type="image/png" href="/images/H-favicon.png">
     
     <!-- Preload critical resources (all local — no CDN dependencies) -->
     <link rel="preload" href="js/chessboard-1.0.0.min.js" as="script">

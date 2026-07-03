@@ -219,3 +219,14 @@ DB corruption or stored-data loss (integrity `ok`, WAL checkpointed clean).
   every cron invocation) emails if `MAX(captured_at)` is >2 h old. The watchdog only caught a HUNG loop.
 - Locked-loop recovery: bracket-pkill the loop (run_watch restarts it), `wal_checkpoint(TRUNCATE)`,
   quick_check, verify `MAX(captured_at)` advances.
+
+## 2026-07-03 — Chess: "leave X as is" means the ORIGINAL, not my proposal
+- I asked "happy with chess.hjd.ai as the domain?" and read "leave domain as is" as
+  approval. It meant KEEP THE ORIGINAL URL (hjd.ai/projects/chess). Cost: a full VPS
+  vhost deploy + teardown.
+- Rule: when an answer to "A or B?" contains "as is"/"keep it"/"leave it", it refers to
+  the PRE-EXISTING state, not the plan's default. If the referent is ambiguous, restate
+  both concretely ("keep hjd.ai/projects/chess, or go with new chess.hjd.ai?") before
+  acting on infrastructure.
+- Rule: for anything user-facing and identity-like (domains, names, URLs, branding),
+  treat MY proposal as unconfirmed until the user names it back explicitly.

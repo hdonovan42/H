@@ -1,7 +1,7 @@
 // HJD Chess Analysis — Lichess content script
 // Adds an "Analyse on HJD" button to Lichess game pages
 
-const ANALYSIS_URL = 'https://chess.hjd.ai/analysis.html';
+const ANALYSIS_URL = 'https://hjd.ai/projects/chess/analysis.html';
 
 // Lichess game IDs are 8 alphanumeric characters
 function extractGameId() {
