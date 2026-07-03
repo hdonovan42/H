@@ -44,4 +44,35 @@
   #content .pipe .stage { flex:1 1 auto; }
   #content .pipe .arrow { transform:rotate(90deg); align-self:flex-start; margin-left:22px; }
 }
+/* AlexNet-style application diagram — thin bars = cheap filters, big block = the model */
+#content .anet { display:flex; align-items:center; justify-content:center; gap:14px;
+  margin:1.8em 0 4.2em; }   /* deep bottom margin clears the staggered bar labels */
+#content .anet .a-t { font-family:var(--display); font-size:1.15rem; line-height:1.15; }
+#content .anet .a-d { font-size:.8rem; color:var(--grey); }
+#content .anet .a-io { border:1.5px solid #8E8C85; border-radius:10px; background:#EEEDE8;
+  padding:14px 20px; text-align:center; flex:0 0 auto; }
+#content .anet .a-out { border-color:#C9962F; background:#FBF0DB; }
+#content .anet .a-out .a-t { color:#7B4B00; }
+#content .anet .a-model { border:1.5px solid #6D68DC; background:#E9E8FA; border-radius:14px;
+  flex:0 1 220px; min-height:170px; display:flex; flex-direction:column; justify-content:center;
+  text-align:center; padding:14px 18px; }
+#content .anet .a-model .a-t { color:#3F3BBF; font-size:1.35rem; }
+#content .anet .a-model .a-d { color:#6D68DC; font-size:.95rem; }
+#content .anet .a-arrow { color:var(--grey); font-size:1.25rem; flex:0 0 auto; }
+#content .anet .a-bar { position:relative; flex:0 0 auto; width:16px; height:150px;
+  border:1.5px solid #4E9B7D; background:#D9EDE3; border-radius:7px; }
+#content .anet .a-bar::after { content:""; position:absolute; left:50%; top:100%;
+  height:20px; border-left:1px dashed #B4B2AA; }
+#content .anet .a-bar .a-lbl { position:absolute; left:50%; transform:translateX(-50%);
+  top:calc(100% + 24px); white-space:nowrap; font-size:.85rem; color:var(--grey); }
+#content .anet .a-lo::after { height:48px; }
+#content .anet .a-lo .a-lbl { top:calc(100% + 52px); }
+@media (max-width:640px) {
+  #content .anet { flex-direction:column; gap:10px; margin-bottom:1.8em; }
+  #content .anet .a-arrow { transform:rotate(90deg); }
+  #content .anet .a-bar { width:170px; height:16px; margin-bottom:22px; }
+  #content .anet .a-bar::after, #content .anet .a-lo::after { display:none; }
+  #content .anet .a-bar .a-lbl, #content .anet .a-lo .a-lbl { top:calc(100% + 4px); }
+  #content .anet .a-model { min-height:0; flex-basis:auto; width:220px; padding:24px 18px; }
+}
 .loading { color:var(--grey); }

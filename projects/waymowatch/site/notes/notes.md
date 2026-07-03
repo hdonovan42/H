@@ -34,7 +34,7 @@ Scorer's weak at 352×288, often confused by roof boxes and police sirens. Only 
 
 ---
 
-## First Model
+## RUN_1
 
 With 100 real positives across 76 cameras, the data finally cleared the bar to train a proper detector.
 
@@ -72,17 +72,25 @@ The ship decision isn't mAP — it's **recall versus false-positives on held-out
 
 ### How it's applied
 
+<div class="anet">
+  <div class="a-io"><div class="a-t">608</div><div class="a-d">cameras</div></div>
+  <div class="a-arrow">→</div>
+  <div class="a-bar"><span class="a-lbl">Car filter</span></div>
+  <div class="a-arrow">→</div>
+  <div class="a-bar a-lo"><span class="a-lbl">White car filter</span></div>
+  <div class="a-arrow">→</div>
+  <div class="a-model"><div class="a-t">Model</div><div class="a-d">RUN_1</div></div>
+  <div class="a-arrow">→</div>
+  <div class="a-io a-out"><div class="a-t">Score</div><div class="a-d">0…1</div></div>
+</div>
+
 WaymoNet is an object **detector**, not a yes/no classifier. Per frame it emits boxes, each with a confidence ∈ [0, 1], and a threshold decides what counts as a sighting. Real Waymos land around **0.5–0.74**; the hard negatives produce *nothing* — a clean gap that lets a low cut (0.10) catch 96 % of Waymos with zero false alarms.
-
-### Don't over-read RUN_1
-
-This is a strong **baseline**, not a finished model. The held-out positive set is small (27 frames), so a single miss shifts recall by ~4 points — read these as a confident smoke test, not a final grade. The plan is to keep collecting and retrain on a larger, more camera-diverse set. RUN_1 is the number to beat.
 
 ---
 
-## Second Model — RUN_2
+## RUN_2
 
-Five days on, the live system — now scoring **in-process** with RUN_1 — had more than **doubled** the training set, and, just as importantly, **decontaminated** it: re-scoring the old data with RUN_1 caught Waymos that had been wrongly filed as negatives. RUN_2 trained on the cleaned, larger set.
+More than **doubled** the training set, and, just as importantly, **decontaminated** it: re-scoring the old data with RUN_1 caught Waymos that had been wrongly filed as negatives. RUN_2 trained on the cleaned, larger set.
 
 **Dataset (vs RUN_1's 100 boxes / 76 cameras):** **204 Waymo boxes across 190 frames and 112 cameras**, plus **425 hard negatives** — the model's *own* false positives from RUN_1, the highest-signal negatives there are — oversampled ×10. Trained fresh from COCO (not warm-started from RUN_1, whose weights had learned the recovered Waymos *as* negatives) to 127 epochs on a single RTX 4090.
 
@@ -136,8 +144,6 @@ RUN_1's distributions overlapped badly — a single confuser at **0.64** outscor
 
 **Still some work to do.** That leaves a thin overlap from **0.10–0.22**: three real Waymos dip into it (the lowest, 0.10, is a lone outlier — the next is 0.18) against five stubborn confusers (a 0.22 worst case, manually reviewed and confirmed *not* Waymos). A cut near 0.22 separates 201/204 Waymos from every confuser but drops those three; a low cut near 0.10 catches everything at the cost of a few false alarms — which, with a human in the loop, is the trade we want. RUN_3's job is to prise that band further apart.
 
-One honest caveat the table hides: those non-Waymos are the ones we'd *already reviewed and filed as rejects* — confusers the pipeline had caught. They're a curated sample, not a fair slice of London traffic. The hardest confusers are, almost by definition, the ones still sitting *unlabelled* in the backlog — and once deployed, one of those scored **0.67**, right in the middle of the real-Waymo range. So that clean separation is measured on the confusers we knew about; making it hold on the ones we don't is exactly what more data, and the next model, are for.
-
 ---
 
-*Powered by TfL Open Data. WaymoNet is an independent research project, not affiliated with Waymo, Wayve, or Transport for London.*
+*Powered by TfL Open Data. WaymoNet is an independent research project, not affiliated with Waymo, Wayve, or Transport for London.* 

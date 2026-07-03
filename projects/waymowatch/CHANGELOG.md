@@ -1,5 +1,14 @@
 # WaymoWatch — Changelog
 
+## Notes: AlexNet-style application diagram (2026-07-03)
+
+User-designed pipeline diagram (`temp/waymonet_pipeline_alexnet_style.png`) implemented as
+HTML/CSS in the "How it's applied" section of /notes: 608 cameras → thin filter bars (car,
+white-car) → Model RUN_1 → score 0…1. New `.anet` classes in `site/notes/notes.css` (thin bars =
+cheap filters, big block = the model, staggered dashed labels); stacks vertically under 640 px.
+Rendered live and verified by screenshot at desktop + mobile widths. Also picks up the user's
+browser edits (RUN_1/RUN_2 section renames, trimmed caveats — notes.md pulled back via deploy).
+
 ## In-browser editor for waymonet.com/notes (2026-07-03)
 
 The /notes page is now editable in the browser at **https://waymonet.com/notes/edit** — no more
