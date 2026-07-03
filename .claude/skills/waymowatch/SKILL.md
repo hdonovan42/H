@@ -150,9 +150,17 @@ commit secrets; scan diffs before pushing backend files.
 
 The public site lives at https://waymonet.com (VPS nginx, NOT GitHub Pages): source =
 `projects/waymowatch/site/`, deploy = `cd projects/waymowatch/site && ./deploy.sh`
-(rsyncs to `root@vps-hel1:/var/www/waymonet/`; the `/notes` page fetches `notes.md` live, so a
-reload shows edits with no rebuild). The old `projects/waymowatch/index.html` is a redirect stub
-to waymonet.com (that one IS GitHub-Pages-served, as is projects/projects.html, link "WaymoNet").
+(rsyncs to `root@vps-hel1:/var/www/waymonet/` with `--chown=hq:hq`; the `/notes` page fetches
+`notes.md` live, so a reload shows edits with no rebuild). The old `projects/waymowatch/index.html`
+is a redirect stub to waymonet.com (that one IS GitHub-Pages-served, as is projects/projects.html,
+link "WaymoNet").
+
+**notes.md is browser-edited (2026-07-03)**: the user edits it at https://waymonet.com/notes/edit
+(token-gated `PUT /api/notes` in sightings_api.py; `NOTES_EDIT_TOKEN` in the VPS `.env`; every save
+banks the outgoing version to `data/notes_versions/`, last 50 kept). **The VPS copy is the source
+of truth — deploy.sh pulls it back into the repo BEFORE pushing**, so never edit
+`site/notes/notes.md` locally and expect it to deploy. Markdown styles are shared via
+`site/notes/notes.css` (notes page + editor preview).
 
 **API contract rule**: the dashboard (separate session; site source in
 `projects/waymowatch/site/`, served at https://waymonet.com same-origin) consumes
