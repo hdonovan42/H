@@ -1,4 +1,4 @@
-"""WaymoWatch sightings API — read-only, public.
+"""WaymoWatch sightings API — public reads + one authenticated write.
 
 Serves confirmed Waymo sightings (status='waymo') from waymo.db to the
 dashboard on https://hjd.ai/projects/waymowatch/. Sits on 127.0.0.1:3104
@@ -8,15 +8,19 @@ Routes:
   GET /api/sightings        all confirmed sightings + camera metadata
   GET /img/<id>.jpg         vehicle crop for a confirmed sighting
   GET /img/<id>_frame.jpg   full annotated frame for a confirmed sighting
+  PUT /api/notes            replace the /notes page markdown (X-Notes-Token auth)
 
-No auth: the data is what the public map displays anyway. Images are
+No auth on reads: the data is what the public map displays anyway. Images are
 served only for status='waymo' rows — unreviewed candidates stay private.
+Writes are gated by NOTES_EDIT_TOKEN from .env (the /notes/edit page).
 """
 
+import hmac
 import json
+import os
 import re
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -25,7 +29,27 @@ DB = ROOT / "data" / "waymo.db"
 PORT = 3104
 SIGHTING_GAP_S = 600   # same camera within 10 min = ONE pass (no track_id; JamCams poll ~150 s)
 
+NOTES_PATH = Path("/var/www/waymonet/notes/notes.md")
+VERSIONS_DIR = ROOT / "data" / "notes_versions"   # every save banks the outgoing version here
+VERSIONS_KEEP = 50
+NOTES_MAX_BYTES = 1_000_000
+
 IMG_RE = re.compile(r"^/img/(\d+)(_frame)?\.jpg$")
+
+
+def _notes_token():
+    """NOTES_EDIT_TOKEN from ROOT/.env (chmod 600; same file as the Resend key)."""
+    try:
+        for line in (ROOT / ".env").read_text().splitlines():
+            k, _, v = line.partition("=")
+            if k.strip() == "NOTES_EDIT_TOKEN":
+                return v.strip().strip("'\"")
+    except OSError:
+        pass
+    return None
+
+
+NOTES_TOKEN = _notes_token()
 
 
 def db():
@@ -104,6 +128,19 @@ def image_path(cand_id, frame):
     return p if p.is_file() else None
 
 
+def save_notes(body):
+    """Bank the outgoing notes.md to VERSIONS_DIR, then atomic-replace it."""
+    VERSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    if NOTES_PATH.is_file():
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        (VERSIONS_DIR / f"notes-{stamp}.md").write_bytes(NOTES_PATH.read_bytes())
+        for old in sorted(VERSIONS_DIR.glob("notes-*.md"))[:-VERSIONS_KEEP]:
+            old.unlink()
+    tmp = NOTES_PATH.with_suffix(".md.tmp")
+    tmp.write_bytes(body)
+    os.replace(tmp, NOTES_PATH)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "waymowatch-api"
 
@@ -117,6 +154,37 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Cache-Control", cache)
         self.end_headers()
+
+    def _json(self, code, obj):
+        body = json.dumps(obj).encode()
+        self._headers(code, "application/json", len(body))
+        self.wfile.write(body)
+
+    def do_PUT(self):
+        if self.path.split("?", 1)[0] != "/api/notes":
+            self._json(404, {"error": "not found"})
+            return
+        if not NOTES_TOKEN:
+            self._json(503, {"error": "editing not configured"})
+            return
+        sent = self.headers.get("X-Notes-Token", "")
+        if not hmac.compare_digest(sent, NOTES_TOKEN):
+            self._json(401, {"error": "bad token"})
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            self._json(400, {"error": "empty body"})   # a blank save is almost certainly a mistake
+            return
+        if length > NOTES_MAX_BYTES:
+            self._json(413, {"error": "too large"})
+            return
+        body = self.rfile.read(length)
+        try:
+            save_notes(body)
+        except OSError as e:
+            self._json(500, {"error": str(e)})
+            return
+        self._json(200, {"ok": True, "bytes": len(body)})
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]

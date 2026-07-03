@@ -1,5 +1,25 @@
 # WaymoWatch — Changelog
 
+## In-browser editor for waymonet.com/notes (2026-07-03)
+
+The /notes page is now editable in the browser at **https://waymonet.com/notes/edit** — no more
+command-line editing. Textarea + live markdown preview (same marked.js + a new shared
+`notes/notes.css`, extracted from the notes page so the preview can't drift from production).
+
+- **`PUT /api/notes`** added to `server/sightings_api.py` (additive — sightings/img routes
+  untouched): gated by `NOTES_EDIT_TOKEN` from the VPS `.env` (constant-time compare, HTTPS,
+  1 MB cap, empty-body rejected), atomic write, and every save banks the outgoing version to
+  `data/notes_versions/` (last 50 kept).
+- **Editor UX**: password prompted once then kept in localStorage (re-prompt on 401), Ctrl+S,
+  unsaved-changes guard, localStorage draft autosave with a restore bar, Edit/Preview toggle on
+  narrow screens.
+- **VPS is now the source of truth for notes.md**: `site/deploy.sh` pulls the live file back into
+  the repo before pushing (git keeps history; deploys can never clobber a browser edit) and pushes
+  with `--chown=hq:hq` so the API user keeps write access to the webroot (one-time
+  `chown -R hq:hq /var/www/waymonet` applied).
+- Verified end-to-end: 401/400 guards, marker save visible on /notes, revert byte-identical,
+  backups present, `/api/sightings` unaffected.
+
 ## RUN_3 pre-rental tooling shipped + RUN_2 baselines measured (2026-07-02)
 
 All "before the rental" items from the RUN_3 plan, deployed to the VPS (`dataset_real` = the

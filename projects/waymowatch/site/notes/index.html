@@ -50,53 +50,8 @@
   header.site .links a { color:var(--grey); text-decoration:none; font-size:14px; margin-left:16px; }
   header.site .links a:hover { color:var(--blue); }
   main { max-width:820px; margin:0 auto; padding:34px 22px 80px; }
-  /* rendered markdown */
-  #content h1 { font-family:var(--display); font-weight:400; font-size:2.05rem; line-height:1.12; margin:.2em 0 .15em; }
-  #content > p:first-of-type, #content em:first-child { color:var(--grey); }
-  #content h2 {
-    font-family:var(--display); font-weight:400; font-size:1.5rem; margin:2.2em 0 .5em;
-    padding-bottom:.28em; border-bottom:2px solid var(--blue);
-  }
-  #content h3 { font-family:var(--display); font-weight:400; font-size:1.18rem; margin:1.8em 0 .4em; color:var(--blue); }
-  #content a { color:var(--blue); }
-  #content strong { color:var(--ink); }
-  #content hr { border:none; border-top:1px solid var(--hairline); margin:2.4em 0; }
-  #content ol, #content ul { padding-left:1.3em; }
-  #content li { margin:.32em 0; }
-  #content code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.9em;
-    background:#F1EFEA; padding:.08em .35em; border-radius:4px; }
-  /* tables */
-  #content table { border-collapse:collapse; width:100%; margin:1.3em 0; font-size:.95rem; }
-  #content th, #content td { padding:.5em .7em; border-bottom:1px solid var(--hairline); text-align:left; }
-  #content thead th { font-family:var(--display); font-weight:400; color:#fff; background:var(--blue); border-bottom:none; }
-  #content tbody tr:nth-child(odd) { background:#F4F3EE; }
-  /* figures */
-  #content .figrow { display:flex; gap:12px; flex-wrap:wrap; margin:1.4em 0; }
-  #content .figrow figure { flex:1 1 200px; margin:0; }
-  #content figure { margin:1.4em 0; }
-  #content figure.wide img { width:100%; }
-  #content img { width:100%; height:auto; display:block; border:1px solid var(--hairline); border-radius:6px; background:#fff; }
-  #content figcaption { font-size:.8rem; color:var(--grey); margin-top:.4em; text-align:center; }
-  #content em { color:var(--grey); }
-  /* pipeline diagram (AlexNet-style left-to-right funnel) */
-  #content .pipe { display:flex; flex-wrap:nowrap; align-items:stretch; gap:4px; margin:1.6em 0 .6em;
-    overflow-x:auto; padding-bottom:6px; }
-  #content .pipe .stage { flex:1 0 132px; border:1.5px solid var(--ink); border-radius:8px;
-    padding:10px 12px; background:#fff; }
-  #content .pipe .stage-in { background:#F4F3EE; }
-  #content .pipe .stage-cull { border-color:var(--red); background:#FFF6F5; }
-  #content .pipe .stage-out { border-color:var(--blue); background:#F1F3FF; }
-  #content .pipe .st-t { font-family:var(--display); font-size:.95rem; margin-bottom:4px; line-height:1.1; }
-  #content .pipe .st-d { font-size:.72rem; color:var(--grey); line-height:1.4; }
-  #content .pipe .arrow { align-self:center; color:var(--blue); font-size:1.25rem; flex:0 0 auto; }
-  #content .pipe-loop { font-size:.85rem; color:var(--grey); margin:0 0 1.4em; }
-  @media (max-width:640px) {
-    #content .pipe { flex-direction:column; overflow-x:visible; }
-    #content .pipe .stage { flex:1 1 auto; }
-    #content .pipe .arrow { transform:rotate(90deg); align-self:flex-start; margin-left:22px; }
-  }
-  .loading { color:var(--grey); }
 </style>
+<link rel="stylesheet" href="notes.css" />
 </head>
 <body>
 <header class="site">

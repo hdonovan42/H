@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WaymoNet — edit notes</title>
+<meta name="robots" content="noindex,nofollow" />
+<!-- base ../ = the /notes/ directory, so notes.md, notes.css and marked.min.js resolve
+     exactly as they do on the notes page (and img/ paths work in the preview) -->
+<base href="../" />
+<link rel="icon" type="image/png" href="/assets/favicon.png" />
+<style>
+  @font-face {
+    font-family: "Hammersmith One";
+    src: url("/assets/hammersmith-one-latin.woff2") format("woff2");
+    font-display: swap;
+  }
+  :root {
+    --paper:#FBFAF7; --ink:#16161F; --blue:#000F9F; --red:#E32017;
+    --grey:#6E6E73; --hairline:#D9D7D0; --green:#1B7F3B;
+    --display:"Hammersmith One","Gill Sans",sans-serif;
+    --body:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  * { box-sizing:border-box; }
+  html { -webkit-text-size-adjust:100%; }
+  html, body { height:100%; }
+  body {
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:var(--body); font-size:17px; line-height:1.62;
+    -webkit-font-smoothing:antialiased;
+    display:flex; flex-direction:column;
+  }
+  header.site { border-bottom:2px solid var(--ink); background:var(--paper); flex:0 0 auto; }
+  header.site .bar {
+    max-width:1500px; margin:0 auto; padding:10px 22px;
+    display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
+  }
+  header.site a.brand {
+    font-family:var(--display); font-size:22px; color:var(--ink);
+    text-decoration:none; letter-spacing:.2px;
+  }
+  header.site a.brand .net { color:var(--blue); }
+  .tools { display:flex; align-items:center; gap:14px; }
+  .tools a { color:var(--grey); text-decoration:none; font-size:14px; }
+  .tools a:hover { color:var(--blue); }
+  .status { font-size:13px; color:var(--grey); }
+  .status.ok { color:var(--green); }
+  .status.err { color:var(--red); }
+  button {
+    font-family:var(--display); font-size:15px; letter-spacing:.3px;
+    border:1.5px solid var(--ink); border-radius:6px; background:var(--blue); color:#fff;
+    padding:6px 18px; cursor:pointer;
+  }
+  button:disabled { background:#B9B7B0; border-color:#B9B7B0; cursor:default; }
+  button.ghost { background:transparent; color:var(--ink); display:none; }
+  #draftbar {
+    flex:0 0 auto; background:#FFF6E5; border-bottom:1px solid var(--hairline);
+    padding:8px 22px; font-size:14px; display:flex; gap:14px; align-items:center; flex-wrap:wrap;
+  }
+  #draftbar button { font-size:13px; padding:3px 12px; }
+  #draftbar .keep { background:var(--blue); }
+  #draftbar .bin { background:transparent; color:var(--ink); }
+  main.split { flex:1 1 auto; display:flex; min-height:0; }
+  #editor {
+    flex:1 1 50%; min-width:0; border:none; outline:none; resize:none;
+    background:#fff; color:var(--ink);
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:14px; line-height:1.55; padding:22px; border-right:1px solid var(--hairline);
+  }
+  .pane { flex:1 1 50%; min-width:0; overflow-y:auto; }
+  .pane article { max-width:820px; margin:0 auto; padding:24px 22px 80px; }
+  @media (max-width:900px) {
+    button.ghost { display:inline-block; }
+    main.split.show-edit .pane { display:none; }
+    main.split.show-preview #editor { display:none; }
+  }
+</style>
+<link rel="stylesheet" href="notes.css" />
+</head>
+<body>
+<header class="site">
+  <div class="bar">
+    <a class="brand" href="/">Waymo<span class="net">Net</span></a>
+    <div class="tools">
+      <span id="status" class="status">loading…</span>
+      <button id="toggle" class="ghost" type="button">Preview</button>
+      <button id="save" type="button" disabled>Save</button>
+      <a href="./" target="_blank">view page ↗</a>
+    </div>
+  </div>
+</header>
+<div id="draftbar" hidden>
+  <span id="draftmsg"></span>
+  <button class="keep" id="draftkeep" type="button">Restore draft</button>
+  <button class="bin" id="draftbin" type="button">Discard</button>
+</div>
+<main class="split show-edit">
+  <textarea id="editor" spellcheck="false" disabled></textarea>
+  <div class="pane"><article id="content"></article></div>
+</main>
+<script src="marked.min.js"></script>
+<script>
+  const TOKEN_KEY = "wn_notes_token", DRAFT_KEY = "wn_notes_draft";
+  const $ = id => document.getElementById(id);
+  const editor = $("editor"), saveBtn = $("save");
+  let loadedText = null, dirty = false, renderT = null, draftT = null;
+
+  function setStatus(msg, cls) { $("status").textContent = msg; $("status").className = "status " + (cls || ""); }
+  function render() { $("content").innerHTML = marked.parse(editor.value); }
+  function markDirty() {
+    dirty = editor.value !== loadedText;
+    saveBtn.disabled = !dirty;
+    if (dirty) setStatus("unsaved changes");
+  }
+
+  editor.addEventListener("input", () => {
+    markDirty();
+    clearTimeout(renderT); renderT = setTimeout(render, 250);
+    clearTimeout(draftT); draftT = setTimeout(() => {
+      if (dirty) localStorage.setItem(DRAFT_KEY, JSON.stringify({ text: editor.value, at: Date.now() }));
+    }, 500);
+  });
+
+  async function saveNow() {
+    if (!dirty || editor.disabled) return;
+    let token = localStorage.getItem(TOKEN_KEY);
+    if (!token) token = prompt("Editing password:");
+    if (!token) return;
+    localStorage.setItem(TOKEN_KEY, token);
+    setStatus("saving…");
+    const text = editor.value;
+    try {
+      const r = await fetch("/api/notes", {
+        method: "PUT",
+        headers: { "X-Notes-Token": token, "Content-Type": "text/markdown" },
+        body: text,
+      });
+      if (r.status === 401) {
+        localStorage.removeItem(TOKEN_KEY);
+        setStatus("wrong password — hit Save to retry", "err");
+        return;
+      }
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        throw new Error(e.error || "HTTP " + r.status);
+      }
+      loadedText = text; dirty = false; saveBtn.disabled = true;
+      localStorage.removeItem(DRAFT_KEY);
+      setStatus("saved " + new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }), "ok");
+    } catch (e) {
+      setStatus("save failed: " + e.message, "err");
+    }
+  }
+  saveBtn.addEventListener("click", saveNow);
+  document.addEventListener("keydown", e => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); saveNow(); }
+  });
+  window.addEventListener("beforeunload", e => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+  $("toggle").addEventListener("click", () => {
+    const m = document.querySelector("main.split");
+    const toPreview = m.classList.contains("show-edit");
+    m.classList.toggle("show-edit", !toPreview);
+    m.classList.toggle("show-preview", toPreview);
+    if (toPreview) render();
+    $("toggle").textContent = toPreview ? "Edit" : "Preview";
+  });
+
+  fetch("notes.md?ts=" + Date.now(), { cache: "no-store" })
+    .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
+    .then(text => {
+      loadedText = text;
+      editor.value = text;
+      editor.disabled = false;
+      render();
+      setStatus("loaded", "ok");
+      const draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
+      if (draft && draft.text !== text) {
+        $("draftmsg").textContent = "An unsaved local draft from " +
+          new Date(draft.at).toLocaleString("en-GB") + " differs from the live page.";
+        $("draftbar").hidden = false;
+        $("draftkeep").onclick = () => {
+          editor.value = draft.text; markDirty(); render(); $("draftbar").hidden = true;
+        };
+        $("draftbin").onclick = () => {
+          localStorage.removeItem(DRAFT_KEY); $("draftbar").hidden = true;
+        };
+      } else if (draft) {
+        localStorage.removeItem(DRAFT_KEY);
+      }
+    })
+    .catch(e => setStatus("could not load notes.md (" + e.message + ")", "err"));
+</script>
+</body>
+</html>
