@@ -1,5 +1,28 @@
 # Chess Analysis — Changelog
 
+## v2.7 — Graph drawing rework (2026-07-03)
+
+Playback no longer pays for the eval graph.
+
+- **Current-position dot moved off Chart.js** onto its own overlay canvas
+  (`#graph-dot-overlay`, created in `initEvalChart`). Navigation now draws one
+  circle from cached pixel coords — measured **0 chart updates across 20 nav
+  steps** (was one full chart rebuild per keypress). Nav sync cost ~7ms avg.
+- **Throttled analysis-pass repaints**: during the graph pass the chart
+  redraws at most every 250ms (`GRAPH_REDRAW_MS`), with a final full render on
+  completion. Notation classification badges are patched per move in place —
+  no more full notation HTML rebuild per eval.
+- **In-place dataset mutation**: chart arrays are allocated once per game
+  length and mutated per redraw — no per-redraw allocation churn.
+- resetBoard now keeps an idle graph worker warm (only kills a mid-run one).
+- Verified: dot pixel-tested at cached coords (#FF5722), badges patch,
+  accuracy suite 5/5, no page errors.
+
+### What to watch
+- Dot position after browser zoom changes without a window resize (cache
+  refreshes on resize/redraw; a stale dot would self-correct on next data
+  change or resize).
+
 ## v2.6 — Serve the engine better (2026-07-03)
 
 Efficiency release: same depths, dramatically less waiting. One new vendored

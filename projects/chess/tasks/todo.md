@@ -53,3 +53,13 @@ to the coi-serviceworker shim (vendored, ~2KB), VPS vhost torn down. Lesson
 recorded in tasks/lessons.md ("leave X as is" = the pre-existing state).
 Watch: engine-ready time on real hardware; whether the ~5-moves-in engine death
 from notes.txt is gone; Safari quietly falling back to single-threaded is expected.
+
+## Graph rework A–C (2026-07-03, follow-up)
+- [x] A: current-position dot on `#graph-dot-overlay` canvas; `_applyNavigation()`
+      calls `drawGraphDot()` only — 0 chart updates across 20 nav steps (verified)
+- [x] B: 250ms throttle on analysis-pass chart repaints + per-move notation badge
+      patching (`patchNotationClassification`); full render once at completion
+- [x] C: chart arrays allocated once per game length, mutated in place
+- [x] Bonus: resetBoard keeps idle graph worker warm
+- [x] Verified: dot pixel test (#FF5722 at cached coords), accuracy 5/5, 0 errors
+- [ ] D (optional, not built): replace Chart.js with hand-rolled canvas sparkline

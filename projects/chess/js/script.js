@@ -6,6 +6,7 @@ const ANALYSIS_DEPTH = 18;
 const MULTI_PV_LINES = 3;
 const GRAPH_DEPTH = 22;
 const EVAL_CACHE_MAX = 2000;
+const GRAPH_REDRAW_MS = 250; // min interval between chart repaints during the graph pass
 
 // Multi-threaded engines need SharedArrayBuffer, which needs cross-origin
 // isolation (COOP/COEP headers). chess.hjd.ai serves them; GitHub Pages can't,
@@ -104,6 +105,7 @@ const AppState = {
   notationDirty: true,           // Whether notation needs re-render
   graphWorker: null,             // Persistent worker for graph analysis
   graphWorkerIdle: false,        // Worker alive and between runs — reusable
+  _graphPixelCache: null,        // Per-index pixel coords on the eval chart (for the dot overlay)
   _fullEnginePreloading: false,  // True while preloadFullEngine() worker is loading
   hasLoadedOnce: false,          // Skip init timeout on first load
   _lastArrowKey: '',             // Arrow fingerprint for skip-redraw optimisation
@@ -1284,7 +1286,8 @@ function _applyNavigation() {
   updateGameStatus();
   AppState.notationDirty = true;
   updateDisplay();
-  if (AppState.gameLoaded) drawAnalysisEvalGraph();
+  // Only the current-position dot moves during navigation — never the chart
+  if (AppState.gameLoaded) drawGraphDot();
   if (AppState.engineEnabled) updateStockfishAnalysis();
 }
 
@@ -1441,20 +1444,9 @@ function initEvalChart() {
           pointBorderColor: [],
           pointBorderWidth: 1,
           order: 1
-        },
-        {
-          // Current position indicator
-          data: [],
-          fill: false,
-          borderWidth: 0,
-          showLine: false,
-          pointRadius: [],
-          pointBackgroundColor: '#FF5722',
-          pointBorderColor: '#FF5722',
-          pointBorderWidth: 0,
-          pointHoverRadius: 5,
-          order: 0
         }
+        // NOTE: the current-position dot is NOT a dataset — it lives on the
+        // #graph-dot-overlay canvas so navigation never triggers a chart update
       ]
     },
     options: {
@@ -1509,60 +1501,129 @@ function initEvalChart() {
     },
     plugins: [zeroLinePlugin, accuracyOverlay, crosshairPlugin]
   });
+
+  // Overlay canvas for the current-position dot — navigation redraws only this,
+  // never the chart. pointer-events:none keeps click-to-seek working underneath.
+  const overlay = document.createElement('canvas');
+  overlay.id = 'graph-dot-overlay';
+  overlay.style.cssText = 'position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none;';
+  canvas.parentElement.appendChild(overlay);
+  AppState._els.graphDotOverlay = overlay;
 }
 
-// Update Chart.js eval graph with current data
+// Cache chart pixel coords per move index — refreshed after every real chart update
+function syncGraphPixelCache() {
+  const chart = AppState.evalChart;
+  if (!chart || !chart.scales.x || !chart.scales.y) return;
+  const n = AppState.graphEvalHistory.length;
+  const cache = { x: new Array(n), y: new Array(n) };
+  for (let i = 0; i < n; i++) {
+    cache.x[i] = chart.scales.x.getPixelForValue(i);
+    const v = AppState.graphEvalHistory[i];
+    cache.y[i] = v === undefined ? null : chart.scales.y.getPixelForValue(Math.max(-11, Math.min(11, v)));
+  }
+  AppState._graphPixelCache = cache;
+}
+
+// Draw only the current-position dot — the whole graph cost of a navigation step
+function drawGraphDot() {
+  const overlay = AppState._els.graphDotOverlay;
+  if (!overlay) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const w = overlay.clientWidth;
+  const h = overlay.clientHeight;
+  const bw = Math.round(w * dpr);
+  const bh = Math.round(h * dpr);
+  if (overlay.width !== bw || overlay.height !== bh) {
+    overlay.width = bw;
+    overlay.height = bh;
+  }
+
+  const ctx = overlay.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  if (!AppState.gameLoaded || !AppState._graphPixelCache) return;
+
+  const cache = AppState._graphPixelCache;
+  const idx = AppState.inSideline ? AppState.sidelineBranchIndex : AppState.currentIndex;
+  if (idx < 0 || idx >= cache.x.length) return;
+  const y = cache.y[idx];
+  if (y === null || y === undefined) return;
+
+  ctx.beginPath();
+  ctx.arc(cache.x[idx], y, 5, 0, Math.PI * 2);
+  ctx.fillStyle = '#FF5722';
+  ctx.fill();
+}
+
+// Patch one move's classification badge in the notation without a full rebuild
+function patchNotationClassification(moveIndex) {
+  if (!AppState.gameLoaded) return;
+  if (moveIndex < 1 || moveIndex > AppState.pgnMainlineMoves.length) return;
+  const container = document.getElementById('ao-notation');
+  const span = container && container.querySelector(`.mainline-move[data-move-index="${moveIndex}"]`);
+  if (!span) {
+    AppState.notationDirty = true; // not rendered yet — full render on next updateDisplay
+    return;
+  }
+  const san = AppState.pgnMainlineMoves[moveIndex - 1];
+  const cls = AppState.moveClassifications[moveIndex];
+  if (cls && cls.symbol) {
+    span.textContent = san + cls.symbol;
+    span.style.color = cls.color;
+    span.style.fontWeight = 'bold';
+  } else {
+    span.textContent = san;
+    span.style.color = '';
+    span.style.fontWeight = '';
+  }
+}
+
+// Update Chart.js eval graph with current data.
+// Arrays are reallocated only when the game length changes; otherwise every
+// call mutates the existing arrays in place — no per-redraw allocation churn.
 function drawAnalysisEvalGraph() {
   const chart = AppState.evalChart;
   if (!chart) return;
 
   const evalHistory = AppState.graphEvalHistory;
   const len = evalHistory.length;
+  const d = chart.data;
 
-  const labels = [];
-  const evalData = [];
-  const classificationData = [];
-  const classificationColors = [];
-  const classificationBorderColors = [];
-  const classificationRadii = [];
-  const currentPosData = [];
-  const currentPosRadii = [];
+  if (d.labels.length !== len) {
+    d.labels = Array.from({ length: len }, (_, i) => i);
+    d.datasets[0].data = new Array(len);
+    d.datasets[1].data = new Array(len);
+    d.datasets[1].pointBackgroundColor = new Array(len);
+    d.datasets[1].pointBorderColor = new Array(len);
+    d.datasets[1].pointRadius = new Array(len);
+  }
+
+  const evalData = d.datasets[0].data;
+  const clsData = d.datasets[1].data;
+  const clsBg = d.datasets[1].pointBackgroundColor;
+  const clsBorder = d.datasets[1].pointBorderColor;
+  const clsRadius = d.datasets[1].pointRadius;
 
   for (let i = 0; i < len; i++) {
-    labels.push(i);
     const val = evalHistory[i];
     const evalVal = (val !== undefined) ? Math.max(-11, Math.min(11, val)) : null;
-    evalData.push(evalVal);
+    evalData[i] = evalVal;
 
     // Classification markers — only show blunders, brilliancies, and great moves
     const cls = AppState.moveClassifications[i];
-    classificationData.push(evalVal);
+    clsData[i] = evalVal;
     const showMarker = cls && cls.symbol && (cls.symbol === '??' || cls.symbol === '!!' || cls.symbol === '!');
-    if (showMarker) {
-      classificationColors.push(cls.color);
-      classificationBorderColors.push('#fff');
-      classificationRadii.push(4);
-    } else {
-      classificationColors.push('transparent');
-      classificationBorderColors.push('transparent');
-      classificationRadii.push(0);
-    }
-
-    currentPosData.push(evalVal);
-    const markerIndex = AppState.inSideline ? AppState.sidelineBranchIndex : AppState.currentIndex;
-    currentPosRadii.push(i === markerIndex ? 5 : 0);
+    clsBg[i] = showMarker ? cls.color : 'transparent';
+    clsBorder[i] = showMarker ? '#fff' : 'transparent';
+    clsRadius[i] = showMarker ? 4 : 0;
   }
 
-  chart.data.labels = labels;
-  chart.data.datasets[0].data = evalData;
-  chart.data.datasets[1].data = classificationData;
-  chart.data.datasets[1].pointBackgroundColor = classificationColors;
-  chart.data.datasets[1].pointBorderColor = classificationBorderColors;
-  chart.data.datasets[1].pointRadius = classificationRadii;
-  chart.data.datasets[2].data = currentPosData;
-  chart.data.datasets[2].pointRadius = currentPosRadii;
-
   chart.update('none');
+  syncGraphPixelCache();
+  drawGraphDot();
 }
 
 function rebuildGameFromMoves() {
@@ -1796,7 +1857,8 @@ function startGraphAnalysis(worker, positions) {
   AppState.graphWorker = worker;
   AppState.graphWorkerIdle = false;
   let idx = 0;
-  let pendingRedraw = false;
+  let redrawTimer = null;
+  const pendingBadges = new Set();
 
   // Safety timeout for entire analysis
   const totalTimeout = setTimeout(() => {
@@ -1809,16 +1871,21 @@ function startGraphAnalysis(worker, positions) {
   }, positions.length * 8000);
   AppState._graphWorkerTimeout = totalTimeout;
 
-  // Batch UI updates — coalesce redraws into a single rAF
-  function scheduleRedraw() {
-    if (pendingRedraw) return;
-    pendingRedraw = true;
-    requestAnimationFrame(() => {
-      pendingRedraw = false;
+  // Throttled UI updates — the eye can't use 60 intermediate repaints, so the
+  // chart redraws at most every GRAPH_REDRAW_MS while the engine grinds, and
+  // the notation gets per-move badge patches instead of full rebuilds.
+  function scheduleRedraw(moveIndex) {
+    if (moveIndex !== undefined) {
+      pendingBadges.add(moveIndex);
+      pendingBadges.add(moveIndex + 1); // next move's classification may shift too
+    }
+    if (redrawTimer) return;
+    redrawTimer = setTimeout(() => {
+      redrawTimer = null;
       drawAnalysisEvalGraph();
-      AppState.notationDirty = true;
-      updateAnalysisOutput();
-    });
+      pendingBadges.forEach(patchNotationClassification);
+      pendingBadges.clear();
+    }, GRAPH_REDRAW_MS);
   }
 
   function sendNext() {
@@ -1827,7 +1894,9 @@ function startGraphAnalysis(worker, positions) {
       AppState._graphWorkerTimeout = null;
       // Keep the worker warm (TT + loaded net) for the next game
       if (AppState.graphWorker === worker) AppState.graphWorkerIdle = true;
-      // Final redraw to ensure everything is rendered
+      // Final full render supersedes any pending throttled repaint
+      if (redrawTimer) { clearTimeout(redrawTimer); redrawTimer = null; }
+      pendingBadges.clear();
       drawAnalysisEvalGraph();
       AppState.notationDirty = true;
       updateAnalysisOutput();
@@ -1845,7 +1914,7 @@ function startGraphAnalysis(worker, positions) {
           AppState.graphEvalHistory[pos.moveIndex] = prevEval;
           updateMoveClassifications(pos.moveIndex);
           updateIncrementalAccuracy(pos.moveIndex);
-          scheduleRedraw();
+          scheduleRedraw(pos.moveIndex);
           idx++;
           setTimeout(sendNext, 0);
           return;
@@ -1862,7 +1931,7 @@ function startGraphAnalysis(worker, positions) {
           AppState.graphEvalHistory[pos.moveIndex] = evalScore;
           updateMoveClassifications(pos.moveIndex);
           updateIncrementalAccuracy(pos.moveIndex);
-          scheduleRedraw();
+          scheduleRedraw(pos.moveIndex);
         }
         idx++;
         setTimeout(sendNext, 0);
@@ -1930,7 +1999,7 @@ function startGraphAnalysis(worker, positions) {
             }
           }, { bestMove: info.pv.split(' ')[0], ponder: null }, info.depth);
         }
-        scheduleRedraw();
+        scheduleRedraw(pos.moveIndex);
       }
     }
   };
@@ -2034,9 +2103,12 @@ function resetBoard() {
   AppState.cachedAccuracyLength = 0;
   AppState._accuracySums = { whiteTotal: 0, whiteCount: 0, blackTotal: 0, blackCount: 0 };
   AppState.notationDirty = true;
-  if (AppState.graphWorker) {
+  AppState._graphPixelCache = null;
+  // Keep an idle graph worker warm across resets; kill only a mid-run one
+  if (AppState.graphWorker && !AppState.graphWorkerIdle) {
     try { AppState.graphWorker.terminate(); } catch (e) {}
     AppState.graphWorker = null;
+    AppState.graphWorkerIdle = false;
   }
   
   // Reset board
