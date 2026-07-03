@@ -4,12 +4,11 @@
     <title>Chess Analysis with Stockfish</title>
     <link rel="icon" type="image/png" href="/images/H-favicon.png"> 
     
-    <!-- Preload critical resources -->
-    <link rel="preload" href="js/stockfish-17-lite-single.js" as="fetch" crossorigin="anonymous">
+    <!-- Preload critical resources (all local — no CDN dependencies) -->
     <link rel="preload" href="js/chessboard-1.0.0.min.js" as="script">
     <link rel="preload" href="js/script.js" as="script">
-    <link rel="preload" href="https://code.jquery.com/jquery-3.6.0.min.js" as="script" crossorigin="anonymous">
-    <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js" as="script" crossorigin="anonymous">
+    <link rel="preload" href="js/vendor/jquery-3.6.0.min.js" as="script">
+    <link rel="preload" href="js/vendor/chess-0.10.3.min.js" as="script">
     
     <!-- Stylesheets -->
     <link rel="stylesheet" href="css/chessboard-1.0.0.min.css">
@@ -75,11 +74,11 @@
     </div><!-- /scale-wrapper -->
 
     <!-- Load dependencies first (jQuery and chess.js are needed by chessboard) -->
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <script src="js/vendor/jquery-3.6.0.min.js"></script>
+    <script src="js/vendor/chess-0.10.3.min.js"></script>
 
     <!-- Chart.js for eval graph -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script src="js/vendor/chart-4.4.7.umd.min.js"></script>
 
     <!-- Load chessboard after its dependencies -->
     <script src="js/chessboard-1.0.0.min.js"></script>

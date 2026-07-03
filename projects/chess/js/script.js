@@ -2,10 +2,19 @@
 // Constants
 const BOARD_SIZE = 500;
 const SQUARE_SIZE = BOARD_SIZE / 8;
-const ANALYSIS_DEBOUNCE_TIME = 200;
 const ANALYSIS_DEPTH = 18;
 const MULTI_PV_LINES = 3;
 const GRAPH_DEPTH = 22;
+const EVAL_CACHE_MAX = 2000;
+
+// Multi-threaded engines need SharedArrayBuffer, which needs cross-origin
+// isolation (COOP/COEP headers). chess.hjd.ai serves them; GitHub Pages can't,
+// so it falls back to the single-threaded builds automatically.
+const THREADS_SUPPORTED = typeof SharedArrayBuffer !== 'undefined' && !!self.crossOriginIsolated;
+const ENGINE_THREADS = THREADS_SUPPORTED
+  ? Math.min(Math.max((navigator.hardwareConcurrency || 4) - 2, 1), 8)
+  : 1;
+const ENGINE_HASH_MB = THREADS_SUPPORTED ? 256 : 128;
 
 // Accuracy calculation constants
 // Formula based on Lichess/Chess.com approach using win probability
@@ -25,8 +34,18 @@ const MOVE_CLASSIFICATION = {
   BLUNDER: { symbol: '??', color: '#ca3431', maxLoss: Infinity } // Loses 1.5+ pawns
 };
 
-// Engine configurations
-const ENGINES = {
+// Engine configurations — threaded SF 17.1 builds when isolated, single-threaded SF 17 otherwise
+// (filenames are content-hashed as shipped; the loader derives its .wasm path from its own URL)
+const ENGINES = THREADS_SUPPORTED ? {
+  lite: {
+    name: 'Stockfish 17.1 Lite',
+    script: 'js/stockfish-17.1-lite-51f59da.js'
+  },
+  full: {
+    name: 'Stockfish 17.1',
+    script: 'js/stockfish-17.1-8e4d048.js'
+  }
+} : {
   lite: {
     name: 'Stockfish 17 Lite',
     script: 'js/stockfish-17-lite-single.js'
@@ -76,11 +95,15 @@ const AppState = {
   stopRequested: false,        // Have we sent 'stop' and waiting for bestmove?
   // Performance caches
   fenCache: [],                  // FEN per position for O(1) navigation
+  evalCache: new Map(),          // FEN → {multipvResults, bestMoveInfo, depth, lines} — never re-search a known position
+  activeAnalysisFen: null,       // FEN of the analysis currently running (for cache writes)
+  _liveDisplayScheduled: false,  // rAF coalescing flag for live analysis display updates
   cachedAccuracy: null,          // Cached { white, black } accuracy
   cachedAccuracyLength: 0,       // Eval count when accuracy was last computed
   _accuracySums: { whiteTotal: 0, whiteCount: 0, blackTotal: 0, blackCount: 0 },
   notationDirty: true,           // Whether notation needs re-render
   graphWorker: null,             // Persistent worker for graph analysis
+  graphWorkerIdle: false,        // Worker alive and between runs — reusable
   _fullEnginePreloading: false,  // True while preloadFullEngine() worker is loading
   hasLoadedOnce: false,          // Skip init timeout on first load
   _lastArrowKey: '',             // Arrow fingerprint for skip-redraw optimisation
@@ -132,6 +155,15 @@ function initializeApp() {
     pgnInput: document.getElementById('pgn-input'),
   };
 
+  // Dropdown labels reflect the runtime-selected builds (threaded vs single)
+  const engineSelect = document.getElementById('engine-select');
+  if (engineSelect) {
+    Object.keys(ENGINES).forEach(key => {
+      const opt = engineSelect.querySelector(`option[value="${key}"]`);
+      if (opt) opt.textContent = ENGINES[key].name;
+    });
+  }
+
   // Set up event listeners
   setupEventListeners();
 
@@ -147,6 +179,26 @@ function initializeApp() {
   if (gameParam) {
     fetchLichessGame(gameParam);
   }
+}
+
+// Shared UCI options for every worker (live, preloaded, graph)
+function sendEngineOptions(worker) {
+  worker.postMessage('setoption name Threads value ' + ENGINE_THREADS);
+  worker.postMessage('setoption name Hash value ' + ENGINE_HASH_MB);
+}
+
+// Bank a finished analysis so this position is never searched again this session
+function cacheAnalysisResult(fen, multipvResults, bestMoveInfo, depth) {
+  if (!fen || typeof depth !== 'number' || depth <= 0) return;
+  const lines = Object.keys(multipvResults).length;
+  if (lines === 0) return;
+  const existing = AppState.evalCache.get(fen);
+  if (existing && (existing.depth > depth || (existing.depth === depth && existing.lines >= lines))) return;
+  if (AppState.evalCache.size >= EVAL_CACHE_MAX) {
+    AppState.evalCache.delete(AppState.evalCache.keys().next().value); // drop oldest
+  }
+  AppState.evalCache.delete(fen); // refresh insertion order
+  AppState.evalCache.set(fen, { multipvResults, bestMoveInfo, depth, lines });
 }
 
 // Stockfish initialization
@@ -201,7 +253,7 @@ function initializeStockfish() {
     };
     
     AppState.stockfish.postMessage('uci');
-    AppState.stockfish.postMessage('setoption name Hash value 128');
+    sendEngineOptions(AppState.stockfish);
     AppState.stockfish.postMessage('setoption name MultiPV value ' + MULTI_PV_LINES);
     AppState.stockfish.postMessage('isready');
     
@@ -293,9 +345,19 @@ function handleAnalysisInfo(message) {
   if (!info) return;
   
   AppState.multipvResults[info.multipv] = info;
-  
-  // Update display immediately for better responsiveness
-  updateDisplay();
+
+  // Coalesce display updates into one per frame — Stockfish emits dozens of
+  // info lines per second and each DOM/canvas repaint above ~60fps is wasted
+  scheduleLiveDisplayUpdate();
+}
+
+function scheduleLiveDisplayUpdate() {
+  if (AppState._liveDisplayScheduled) return;
+  AppState._liveDisplayScheduled = true;
+  requestAnimationFrame(() => {
+    AppState._liveDisplayScheduled = false;
+    updateDisplay();
+  });
 }
 
 function handleBestMove(message) {
@@ -310,20 +372,31 @@ function handleBestMove(message) {
   if (isCurrentAnalysis && AppState.engineEnabled) {
     const parts = message.split(' ');
     const bestMove = parts[1];
-    
+
     if (bestMove && bestMove !== '(none)') {
-      AppState.bestMoveInfo = { 
+      AppState.bestMoveInfo = {
         bestMove: bestMove,
         ponder: parts[3] || null
       };
     }
+
+    // Bank the completed search — revisiting this position is now free
+    const top = AppState.multipvResults[1];
+    if (top && typeof top.depth === 'number') {
+      cacheAnalysisResult(
+        AppState.activeAnalysisFen,
+        Object.assign({}, AppState.multipvResults),
+        AppState.bestMoveInfo,
+        top.depth
+      );
+    }
     updateDisplay();
   }
-  
+
   // CRITICAL: Check if there's a pending analysis waiting
   // This handles rapid navigation - start the queued analysis now
   if (AppState.pendingAnalysisFen && AppState.pendingAnalysisId !== null) {
-    setTimeout(() => tryStartAnalysis(), 10);
+    tryStartAnalysis();
   }
 }
 
@@ -524,6 +597,34 @@ function tryStartAnalysis() {
 
   AppState.isTablebasePosition = false;
 
+  // Cache path — serve work the engine has already done for this position.
+  // NOTE: activeAnalysisId is deliberately NOT set to analysisId here; any
+  // still-running search keeps a stale id, so its late info/bestmove messages
+  // are rejected and can't overwrite the cached result we just painted.
+  const cached = AppState.evalCache.get(fen);
+  if (cached) {
+    AppState.lastFen = fen;
+    AppState.multipvResults = Object.assign({}, cached.multipvResults);
+    AppState.bestMoveInfo = cached.bestMoveInfo;
+
+    if (cached.depth >= ANALYSIS_DEPTH && cached.lines >= MULTI_PV_LINES) {
+      // Full hit — nothing to compute; stop any stale search still burning CPU
+      AppState.pendingAnalysisFen = null;
+      AppState.pendingAnalysisId = null;
+      AppState.activeAnalysisId = null;
+      AppState.activeAnalysisFen = null;
+      AppState.isAnalysisInProgress = false;
+      if (AppState.engineBusy && AppState.stockfish && !AppState.stopRequested) {
+        AppState.stopRequested = true;
+        try { AppState.stockfish.postMessage('stop'); } catch (e) {}
+      }
+      updateDisplay();
+      return;
+    }
+    // Partial hit (graph prefetch: 1 deep line) — paint instantly, refine below
+    updateDisplay();
+  }
+
   // Stockfish path — needs engine ready
   if (!AppState.stockfish || !AppState.stockfishReady) return;
 
@@ -549,17 +650,21 @@ function tryStartAnalysis() {
 
   // Mark as active
   AppState.activeAnalysisId = analysisId;
+  AppState.activeAnalysisFen = fen;
   AppState.engineBusy = true;
   AppState.isAnalysisInProgress = true;
   AppState.lastFen = fen;
 
-  // Keep old eval for UI stability
-  const oldEval = AppState.multipvResults[1];
-  AppState.multipvResults = {};
-  if (oldEval) {
-    AppState.multipvResults[1] = oldEval;
+  // Keep old eval for UI stability. Cache-restored lines belong to THIS
+  // position, so keep all of them — incoming results overwrite per line.
+  if (!cached) {
+    const oldEval = AppState.multipvResults[1];
+    AppState.multipvResults = {};
+    if (oldEval) {
+      AppState.multipvResults[1] = oldEval;
+    }
+    AppState.bestMoveInfo = null;
   }
-  AppState.bestMoveInfo = null;
 
   try {
     AppState.stockfish.postMessage(`position fen ${fen}`);
@@ -1108,7 +1213,7 @@ function switchEngine(engineKey) {
       handleStockfishMessage(event);
     };
     AppState.stockfish.postMessage('ucinewgame');
-    AppState.stockfish.postMessage('setoption name Hash value 128');
+    sendEngineOptions(AppState.stockfish);
     AppState.stockfish.postMessage(`setoption name MultiPV value ${MULTI_PV_LINES}`);
     AppState.stockfish.postMessage('isready');
     AppState.stockfishReady = true;
@@ -1620,12 +1725,17 @@ function analyzeGraphPositions() {
     positions.push({ fen: tempGame.fen(), moveIndex: i + 1 });
   }
 
-  // Terminate any existing graph worker and its timeout
+  // Reuse the persistent graph worker when idle (skips WASM + NNUE re-init);
+  // only a worker still mid-run gets terminated and replaced
   if (AppState._graphWorkerTimeout) {
     clearTimeout(AppState._graphWorkerTimeout);
     AppState._graphWorkerTimeout = null;
   }
   if (AppState.graphWorker) {
+    if (AppState.graphWorkerIdle) {
+      startGraphAnalysis(AppState.graphWorker, positions);
+      return;
+    }
     try { AppState.graphWorker.terminate(); } catch (e) {}
     AppState.graphWorker = null;
   }
@@ -1660,7 +1770,7 @@ function analyzeGraphPositions() {
       };
 
       worker.postMessage('uci');
-      worker.postMessage('setoption name Hash value 128');
+      sendEngineOptions(worker);
       worker.postMessage('ucinewgame');
       worker.postMessage('isready');
     });
@@ -1684,6 +1794,7 @@ function analyzeGraphPositions() {
 
 function startGraphAnalysis(worker, positions) {
   AppState.graphWorker = worker;
+  AppState.graphWorkerIdle = false;
   let idx = 0;
   let pendingRedraw = false;
 
@@ -1714,8 +1825,8 @@ function startGraphAnalysis(worker, positions) {
     if (idx >= positions.length) {
       clearTimeout(totalTimeout);
       AppState._graphWorkerTimeout = null;
-      try { worker.terminate(); } catch (e) {}
-      if (AppState.graphWorker === worker) AppState.graphWorker = null;
+      // Keep the worker warm (TT + loaded net) for the next game
+      if (AppState.graphWorker === worker) AppState.graphWorkerIdle = true;
       // Final redraw to ensure everything is rendered
       drawAnalysisEvalGraph();
       AppState.notationDirty = true;
@@ -1736,7 +1847,7 @@ function startGraphAnalysis(worker, positions) {
           updateIncrementalAccuracy(pos.moveIndex);
           scheduleRedraw();
           idx++;
-          setTimeout(sendNext, 5);
+          setTimeout(sendNext, 0);
           return;
         }
       }
@@ -1754,7 +1865,7 @@ function startGraphAnalysis(worker, positions) {
           scheduleRedraw();
         }
         idx++;
-        setTimeout(sendNext, 5);
+        setTimeout(sendNext, 0);
       }).catch(() => {
         // Fallback: let Stockfish handle it
         const depth = pos.targetDepth || GRAPH_DEPTH;
@@ -1784,7 +1895,7 @@ function startGraphAnalysis(worker, positions) {
       sendNext();
     } else if (message.startsWith('bestmove')) {
       idx++;
-      setTimeout(sendNext, 5);
+      setTimeout(sendNext, 0);
     } else if (message.startsWith('info depth') && message.includes('score')) {
       const pos = positions[idx];
       const targetDepth = pos.targetDepth || GRAPH_DEPTH;
@@ -1804,6 +1915,21 @@ function startGraphAnalysis(worker, positions) {
         AppState.graphEvalHistory[pos.moveIndex] = evalScore;
         updateMoveClassifications(pos.moveIndex);
         updateIncrementalAccuracy(pos.moveIndex);
+
+        // Prefetch: bank this deep line so live playback paints it instantly.
+        // Same White-POV score convention as parseStockfishInfo.
+        if (info.pv && typeof info.depth === 'number') {
+          cacheAnalysisResult(pos.fen, {
+            1: {
+              depth: info.depth,
+              score: info.score,
+              scoreDisplay: info.mate !== undefined ? `Mate in ${Math.abs(info.mate)}` : info.score,
+              pv: info.pv,
+              multipv: 1,
+              mate: info.mate
+            }
+          }, { bestMove: info.pv.split(' ')[0], ponder: null }, info.depth);
+        }
         scheduleRedraw();
       }
     }
@@ -1814,11 +1940,16 @@ function startGraphAnalysis(worker, positions) {
     clearTimeout(totalTimeout);
     AppState._graphWorkerTimeout = null;
     try { worker.terminate(); } catch (e) {}
-    if (AppState.graphWorker === worker) AppState.graphWorker = null;
+    if (AppState.graphWorker === worker) {
+      AppState.graphWorker = null;
+      AppState.graphWorkerIdle = false;
+    }
   };
 
-  // Worker already initialised (readyok received) — start analysing
-  sendNext();
+  // Handshake kicks off the run: readyok → sendNext. Works for both fresh
+  // workers and reused idle ones (whose TT stays warm — entries are
+  // position-keyed, so results from a previous game remain valid).
+  worker.postMessage('isready');
 }
 
 function parseStockfishInfoForGraph(message, fen) {
@@ -1827,7 +1958,8 @@ function parseStockfishInfoForGraph(message, fen) {
   const info = {
     depth: null,
     score: null,
-    mate: undefined
+    mate: undefined,
+    pv: null
   };
 
   for (let i = 0; i < parts.length; i++) {
@@ -1840,6 +1972,10 @@ function parseStockfishInfoForGraph(message, fen) {
         break;
       case 'mate':
         info.mate = parseInt(parts[++i], 10);
+        break;
+      case 'pv':
+        info.pv = parts.slice(++i).join(' ');
+        i = parts.length;
         break;
     }
   }
@@ -2483,7 +2619,7 @@ function handleTablebaseResult(tb, fen) {
   updateDisplay();
 
   if (AppState.pendingAnalysisFen && AppState.pendingAnalysisId !== null) {
-    setTimeout(() => tryStartAnalysis(), 10);
+    tryStartAnalysis();
   }
 }
 
