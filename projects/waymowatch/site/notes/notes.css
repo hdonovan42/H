@@ -77,12 +77,7 @@
 }
 .loading { color:var(--grey); }
 
-#content .confuser-strip { float:right; width:186px; margin:4px 0 14px 22px;
-  display:flex; flex-direction:column; gap:10px; }
-#content .confuser-strip figure { margin:0; }
-#content .confuser-strip img { width:100%; border-radius:7px; display:block; }
-#content .confuser-strip figcaption { font-size:.8rem; color:var(--grey); text-align:center; margin-top:3px; }
-@media (max-width:640px) {
-  #content .confuser-strip { float:none; width:100%; flex-direction:row; }
-  #content .confuser-strip figure { flex:1; min-width:0; }
-}
+#content .confuser-strip { display:flex; flex-direction:row; gap:12px; margin:10px 0 4px; }
+#content .confuser-strip figure { margin:0; width:96px; flex:0 0 auto; min-width:0; }
+#content .confuser-strip img { width:100%; border-radius:6px; display:block; }
+#content .confuser-strip figcaption { font-size:.75rem; color:var(--grey); text-align:center; margin-top:3px; }
