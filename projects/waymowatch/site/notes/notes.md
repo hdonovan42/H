@@ -80,6 +80,10 @@ Every confirmed Waymo and every human-vetted non-Waymo (8,039 of them), scored b
 
 Between 0.3 and 0.6 the error count barely moves while capture climbs — that plateau is the payoff of training on the model's own mistakes. (The final live threshold locks after a human pass over the model's highest-scoring *unlabelled* candidates — the 0.67 lesson, applied in advance this time.)
 
+### Found in the archive
+
+Rescoring the full ~43,000-frame archive with RUN_3 recovered **16 confirmed Waymos the previous model had scored ≈0.0** — captured by the cameras all along, but invisible below the review threshold, so no human ever saw them. Each generation re-reads the whole archive and finds what its predecessor missed (RUN_1 recovered mislabelled Waymos from the hand-collected era; RUN_2's rescore surfaced another; RUN_3 found sixteen — and caught its first two live Waymos within twelve minutes of deployment). It cuts the other way too: the new model *disputes* a handful of old "non-Waymo" labels from the earliest bulk reviews — those go back to a human for a second look.
+
 ### Hands-free banking
 
 Since auto-banking began (anything the model scores ≥ 0.75 becomes a confirmed sighting with no human in the loop, subject to an undo email), **16% of all new confirmed Waymos have arrived hands-free — with zero errors. 100% accuracy so far.** Under RUN_3's score distribution the table above shows what a recalibrated cut buys: at 0.5, ~94% of sightings would bank themselves.
