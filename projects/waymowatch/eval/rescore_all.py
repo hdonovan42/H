@@ -34,15 +34,29 @@ def main():
                     help="frames per forward pass. Measured on a 4090 @704: 1->92fps, 32->230fps (3.2GB), "
                          "plateaus after (compute-bound). The list MUST be chunked by hand — ultralytics "
                          "stacks a whole-list source into ONE tensor and OOMs regardless of stream/batch.")
+    # SLICE MODE (RUN_3): repeated model.predict() calls leak host RAM (~2 MB/frame — ate 44 GB of a
+    # 62 GB box at ~20k frames and wedged it; RUN_2's 503 GB host masked it). Run the sweep as many
+    # SUBPROCESSES of --limit frames each (driver loops --skip); memory is returned at process exit
+    # whatever the leak mechanism, and per-slice part files make the sweep resumable.
+    ap.add_argument("--skip", type=int, default=0, help="skip this many (sorted) present frames")
+    ap.add_argument("--limit", type=int, default=0, help="score at most this many frames (0 = all)")
     a = ap.parse_args()
 
     rows = list(csv.DictReader(open(a.manifest)))
     by_frame = {}                                            # basename -> [manifest rows]
     for r in rows:
         by_frame.setdefault(r["frame_basename"], []).append(r)
-    present = [os.path.join(a.frames_dir, b) for b in by_frame if
-              os.path.exists(os.path.join(a.frames_dir, b))]
-    print(f"{len(rows)} candidates / {len(by_frame)} unique frames / {len(present)} present on disk")
+    present = sorted(os.path.join(a.frames_dir, b) for b in by_frame if
+                     os.path.exists(os.path.join(a.frames_dir, b)))
+    sliced = a.skip > 0 or a.limit > 0
+    if sliced:
+        present = present[a.skip:a.skip + a.limit] if a.limit else present[a.skip:]
+    print(f"{len(rows)} candidates / {len(by_frame)} unique frames / "
+          f"{len(present)} present{' in slice' if sliced else ' on disk'}")
+    if not present:
+        open(a.out, "w").close()                             # empty part = past the end; driver stops
+        print("empty slice -> wrote empty part")
+        return
 
     from ultralytics import YOLO
     model = YOLO(a.weights)
@@ -67,12 +81,18 @@ def main():
     dt = time.time() - t0
     print(f"scored {len(verdict)} frames in {dt:.0f}s ({len(verdict) / max(dt, 1):.1f} frames/s)")
 
+    slice_bases = {os.path.basename(p) for p in present}
     flds = list(rows[0].keys()) + ["run2_conf", "run2_bbox", "run2_n_dets"]
     with open(a.out, "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=flds)
         w.writeheader()
         for base, rs in by_frame.items():
             v = verdict.get(base)                           # absent => frame not on the box
+            if sliced and base not in slice_bases:
+                # slice mode: this part covers ONLY its own frames. Rows whose frame is missing
+                # from disk entirely belong to no slice, so the skip==0 part emits them (once).
+                if a.skip != 0 or os.path.exists(os.path.join(a.frames_dir, base)):
+                    continue
             for r in rs:
                 if v is None:
                     w.writerow(dict(r, run2_conf="", run2_bbox="", run2_n_dets=""))
