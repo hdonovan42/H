@@ -1,5 +1,25 @@
 # WaymoWatch — Changelog
 
+## RUN_3 SHIPPED — v3fullpolish live on VPS + homebox (2026-07-04)
+
+WaymoNet RUN_3 trained, gated, and cut over (full record: `train/GPU_RENT_NOTES.md` → "Run 3 —
+actual record"). Two-stage recipe: v3 on the pinned split = the measurement (gates PASS:
+box-recall 98.1% ≥ RUN_2's 97.1%, FP 1/495, night 23/23); **v3fullpolish** (all 498 boxes train,
+mosaic-off polish) = the ship artifact, sha `58104438c522`, deployed to `collector/best.pt` (VPS,
+in-process) + homebox dash with RUN_2 rollbacks (`best_run2.pt` both hosts); loop +
+`waymonet-infer` restarted, canary 0.866 vs 0.30 floor. Confuser ceiling on the labelled suite:
+RUN_2 0.568 → **0.080**; known-Waymo scores: 94% ≥0.5, 71% ≥0.75 (was 15.5%).
+
+- **Fitness trap discovered**: warm-started runs report best-by-fitness at epoch ~1 (untrained);
+  v3's fitness pick FAILED the confuser gate (0.775) — artifact selection is now BY THE GATES.
+- **Rescore leak incident**: the flat 42.8k sweep leaked ~2 MB/frame, ate 44 GB, wedged the box;
+  `rescore_all.py --skip/--limit` subprocess slices fixed it (flat ~1 GB, resumable).
+- **Pending (gated on the cutover review sheet, 32 cells emailed)**: verdicts on the new model's
+  top unlabelled scorers (0.88s that RUN_2 scored 0.0 — recovered Waymos or novel confusers) →
+  backlog score-load (tar-time `wn_scored_at` so the 04:00 audit self-heals drift) →
+  `threshold_report.py` → new AUTO_BANK_TH (0.75 held until then) → fix the 2 stale-frame
+  positives (#29664/#46871).
+
 ## RUN_3 handoff-ready: recipe baked into defaults + run sheet (2026-07-04)
 
 Prep for handing the training job to another session. **Both triggers now exceeded: 497 eligible

@@ -475,6 +475,44 @@ RUN_2-comparable record — file both sets of numbers.
       calls Waymo = recover them; confirmed Waymos scored ~0 = investigate (edge positives excluded)
 - [ ] CHANGELOG + run-lineage memory + commit/push; record the v3 baselines table next to RUN_2's
 
+## Run 3 — actual record (trained 2026-07-04, Vast.ai RTX 4090 62 GB-host, DESTROYED same day)
+**Dataset:** 498 boxes / 465 frames / 172 cams (29 multi-Waymo); split build 366+4653 train,
+99+495 val (pinned 28 cams); full build 465+5411 train. Hard negs run1 427 ×3 + run2 134 ×10.
+**Four runs, two-stage + polish:** v3 (split, warm-start RUN_2, stopped e31) → v3polish (15 ep
+mosaic-off, lr0 0.002) → v3full (full data, killed at e31 by design) → **v3fullpolish = SHIP**
+(sha `58104438c522`). Wall ~5 h incl. incidents, ~$1.75.
+
+**THE FITNESS TRAP (biggest lesson):** warm-started v3's best-by-fitness was **EPOCH 1** —
+mAP50-95 rewards box-tightness on positives and the warm start already had it; 30 epochs of
+confuser training never moved it, so `best.pt` was UNTRAINED weights and gated **FAIL** (confuser
+max 0.775 > RUN_2's 0.568!). `last.pt` carried the real training. **Warm-started runs: ALWAYS
+select by the gates over best/last/polish artifacts, NEVER by ultralytics fitness.** (Also why
+v3full was killed at e31: its in-sample val makes fitness rise forever — it would have run 100
+epochs of unvalidated drift.)
+
+**GATES (pinned val 99 frames/103 boxes/495 neg — all weights on IDENTICAL data):**
+| | box-rec @0.10/@0.20 | FP-neg @0.10 | confuser max | galleries | rec @0.75 |
+|---|---|---|---|---|---|
+| RUN_2 baseline | 97.1/96.1% | 4/495 | 0.568 | 0.000 | 15.5% |
+| v3-e1 (fitness pick) | 98.1/98.1% | 3/495 | **0.775 FAIL** | 0.020 | 15.5% |
+| v3-e31 | 98.1/97.1% | 1/495 | 0.304 | 0.310 | 54.4% |
+| v3polish-last (GATED PASS) | 98.1/97.1% | 1/495 | 0.432 | 0.025 | 69.9% |
+| **v3fullpolish (SHIP)** | 98.1/98.1% (in-sample) | 1/495 | **0.080** | 0.021 | — |
+
+Night box-recall 23/23 at both cuts. The mosaic-off polish measurably matters: restored gallery
+suppression (0.310→~0) and fattened the ≥0.75 tail (54→70%).
+
+**Full rescore (42,809 candidates, ship artifact):** 495/497 banked positives ≥0.10 (the 2 at 0.0 —
+#29664/#46871 — are the stale-frame-overwrite class, labels to fix pre-RUN_4). Known-Waymo
+distribution: **94% ≥0.5, 71% ≥0.75** (RUN_2: 15.5% ≥0.75). Top unlabelled: 0.88/0.88/0.70/0.67 —
+ALL scored 0.0 by RUN_2 — human-adjudicated via the cutover review sheet BEFORE the new
+AUTO_BANK_TH is set (the #40294 lesson, done right this time). Canary #40113 = 0.866 (floor 0.30).
+
+**Incidents (fixes live in the Gotchas + code):** the flat rescore leaked ~2 MB/frame of host RAM →
+44 GB → wedged the 62 GB box (sshd dead ~25 min; Vast console Restart + weights-first recovery);
+re-ran as `--skip/--limit` subprocess slices, flat 1 GB. Session restart killed all watchers
+mid-run — recovery = check the box's real state, never assume.
+
 ## Attached full rescore + RUN_1↔RUN_2 eval (RUN_2 onward)
 Score EVERY candidate with the new weights on the rented GPU (minutes) instead of ~5-9 h on the
 homebox, and diff it against RUN_1. Bolt onto the end of the train job (train → gate → rescore):
