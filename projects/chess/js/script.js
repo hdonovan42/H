@@ -16,9 +16,9 @@ const GRAPH_POOL_THREADS = 2; // per worker; single-threaded builds ignore this 
 const GRAPH_POOL_HASH_MB = 32;
 const GRAPH_POOL_ENGINE = 'full';    // same net as live analysis — evals/classifications match
 const GRAPH_SKETCH_NODES = 12000;    // sketch tasks: provisional curve, fully overwritten by polish
-const GRAPH_POLISH_NODES = 600000;   // pass 2 budget where classification is informative (≈ d18-20)
-const GRAPH_POLISH_NODES_DECIDED = 150000; // pass 2 budget deep inside decided positions
-const GRAPH_DECIDED_EVAL = 5;        // |eval| ≥ this = decided (win% sigmoid is flat, deltas are noise)
+const GRAPH_POLISH_NODES = 600000;   // uniform polish budget (≈ d18-20, full net) — uniform for ALL
+                                     // positions: classifications are deltas between adjacent evals,
+                                     // so mixed budgets systematically soften/flip badges
 const GRAPH_SKIP_DEPTH = 18;         // a result is final at depth ≥ this (or full polish budget) — matches live-engine depth so its results (e.g. the start position) are reused, keeping neighbour evals at uniform quality
 
 // Multi-threaded engines need SharedArrayBuffer, which needs cross-origin
@@ -1877,15 +1877,12 @@ async function runGraphPasses(positions) {
     // ONE queue, two kinds of task, no barrier between them. Sketch tasks
     // (tiny budget, STRIDED order 0,4,8,…,1,5,9,… so in-flight searches
     // spread across the whole game and spanGaps draws a coarse full-width
-    // curve within ~2s) sit at the front; polish tasks follow in game order.
-    // Workers flow straight from sketching into polishing — no idle barrier.
-    // Polish budgets resolve lazily at dispatch: deep inside decided
-    // stretches (position AND both neighbours sketched at |eval| ≥ 5) the
-    // win% sigmoid is flat and deltas are noise, so those get a reduced
-    // budget; everywhere informative gets the full uniform budget
-    // (classifications are deltas between adjacent evals — mixed budgets
-    // there inject phantom badge flips). A missing neighbour eval counts as
-    // NOT decided, so early dispatches err toward the full budget.
+    // curve within ~2s) sit at the front; polish tasks follow in game order
+    // at one uniform budget. Workers flow straight from sketching into
+    // polishing — no idle barrier.
+    // (A reduced budget for decided stretches was tried and REVERTED: it
+    // systematically softened blunder badges the deep reference shows —
+    // see stockfish-batch-eval-findings. Keep polish uniform.)
     const tasks = [];
     for (let r = 0; r < GRAPH_POOL_SIZE; r++) {
       for (let i = r; i < positions.length; i += GRAPH_POOL_SIZE) {
@@ -1905,18 +1902,6 @@ async function runGraphPasses(positions) {
   } finally {
     if (runId === AppState._graphRunId) AppState._graphRunActive = false;
   }
-}
-
-function graphPolishBudget(moveIndex) {
-  const absEval = i => {
-    const v = AppState.graphEvalHistory[i];
-    return v === undefined ? 0 : Math.abs(v);
-  };
-  const lastIdx = AppState.graphEvalHistory.length - 1;
-  const decided = absEval(moveIndex) >= GRAPH_DECIDED_EVAL &&
-    absEval(Math.max(0, moveIndex - 1)) >= GRAPH_DECIDED_EVAL &&
-    absEval(Math.min(lastIdx, moveIndex + 1)) >= GRAPH_DECIDED_EVAL;
-  return decided ? GRAPH_POLISH_NODES_DECIDED : GRAPH_POLISH_NODES;
 }
 
 // One pass over the task queue, every pool worker pulling from it
@@ -1941,7 +1926,7 @@ function runGraphPass(pool, tasks, opts, runId) {
       }
       const task = tasks[next++];
       const pos = task.pos;
-      const nodes = task.kind === 'sketch' ? GRAPH_SKETCH_NODES : graphPolishBudget(pos.moveIndex);
+      const nodes = task.kind === 'sketch' ? GRAPH_SKETCH_NODES : GRAPH_POLISH_NODES;
       const cacheMinDepth = task.kind === 'sketch' ? 12 : GRAPH_SKIP_DEPTH;
 
       // Forced move — only one legal reply, so the eval is the previous

@@ -73,3 +73,6 @@ from notes.txt is gone; Safari quietly falling back to single-threaded is expect
       13.6× best-pair (56-pos game, 3 baselines vs 3 runs); curve at ~2.5s
 - [x] Iterations v1→v11 documented in memory: stockfish-batch-eval-findings
 - [x] Regressions: nav 0 chart updates, dot pixel test, badges, accuracy 5/5
+- [x] REVERTED decided-stretch budget before ship (user call: badge fidelity > arbitrary
+      10× line) — final uniform 600k ≈ 9-12× depending on run; residual marker flips
+      proven threshold-noise via cache-depth diagnostic (polish runs everywhere, d18-21)

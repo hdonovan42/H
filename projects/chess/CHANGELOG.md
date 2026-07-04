@@ -4,9 +4,12 @@
 
 The graph fill was the slow part — one worker searching every position
 sequentially at fixed depth 22 (~minutes per game). Replaced with a pool
-architecture; measured **10.3× median / 11.9–13.6× per-pair** on a
-56-position game (3 baseline runs vs 3 new runs, plus probe-normalised
-10.4× to correct for machine drift). Curve visible in ~2.5s (was: minutes).
+architecture: **~9–12× measured** on a 56-position game (189.7s median
+baseline → 18–23s across runs on a noisy bench box; probe-normalised
+~9.5–10.4×). The interim config with adaptive decided-stretch budgets hit
+10.3× median but was reverted for badge fidelity — see below; the shipped
+uniform config trades ~1.1× for faithful classifications. Curve visible
+in ~2.5s (was: minutes).
 
 - **Pool of 4 full-net workers** (2 threads, 32MB hash each): separate
   positions parallelise perfectly; SMP inside one search scales sublinearly.
@@ -16,12 +19,15 @@ architecture; measured **10.3× median / 11.9–13.6× per-pair** on a
   0,4,8,…,1,5,9,… so spanGaps draws a full-width coarse curve in ~2s)
   followed by in-order polish tasks (600k nodes ≈ d18-20, full net);
   workers flow straight from sketching into polishing.
-- **Adaptive polish budget**: 150k nodes deep inside decided stretches
-  (position AND both neighbours |eval| ≥ 5) where the win% sigmoid is flat —
-  full uniform budget everywhere classification is informative. Deliberate
-  semantic: faint blunder badges deep inside an already-won crush may
-  soften vs the old d22 path (they were threshold noise — the old path
-  flipped them run-to-run too, verified with repeated baselines).
+- **Uniform polish budget everywhere.** A reduced budget for decided
+  stretches was built, measured, and REVERTED before shipping: it bought
+  ~1.1× at the cost of systematically softening blunder badges the deep
+  reference shows. Residual badge flips on moves that sit exactly on a
+  class threshold (e.g. a 1.5-pawn delta at +5.5 eval) are intrinsic SMP
+  noise — verified present in repeated baseline runs too, and a cache-depth
+  diagnostic confirmed polish genuinely runs everywhere (d18-21, no
+  sketch leakage). Win%-based classification would saturate these out —
+  future work.
 - Forced moves carry the previous eval (old-path behaviour restored);
   tablebase and evalCache short-circuits; polish PVs prefetched into
   evalCache for instant playback; pool kept warm between games,
