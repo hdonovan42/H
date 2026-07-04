@@ -8,6 +8,19 @@ const GRAPH_DEPTH = 22;
 const EVAL_CACHE_MAX = 2000;
 const GRAPH_REDRAW_MS = 250; // min interval between chart repaints during the graph pass
 
+// Graph worker pool — several small workers beat one big-threaded worker
+// because separate positions parallelise perfectly while SMP inside a single
+// search scales sublinearly (especially at small node budgets).
+const GRAPH_POOL_SIZE = 4;
+const GRAPH_POOL_THREADS = 2; // per worker; single-threaded builds ignore this cleanly
+const GRAPH_POOL_HASH_MB = 32;
+const GRAPH_POOL_ENGINE = 'full';    // same net as live analysis — evals/classifications match
+const GRAPH_SKETCH_NODES = 12000;    // sketch tasks: provisional curve, fully overwritten by polish
+const GRAPH_POLISH_NODES = 600000;   // pass 2 budget where classification is informative (≈ d18-20)
+const GRAPH_POLISH_NODES_DECIDED = 150000; // pass 2 budget deep inside decided positions
+const GRAPH_DECIDED_EVAL = 5;        // |eval| ≥ this = decided (win% sigmoid is flat, deltas are noise)
+const GRAPH_SKIP_DEPTH = 18;         // a result is final at depth ≥ this (or full polish budget) — matches live-engine depth so its results (e.g. the start position) are reused, keeping neighbour evals at uniform quality
+
 // Multi-threaded engines need SharedArrayBuffer, which needs cross-origin
 // isolation (COOP/COEP headers). chess.hjd.ai serves them; GitHub Pages can't,
 // so it falls back to the single-threaded builds automatically.
@@ -103,8 +116,9 @@ const AppState = {
   cachedAccuracyLength: 0,       // Eval count when accuracy was last computed
   _accuracySums: { whiteTotal: 0, whiteCount: 0, blackTotal: 0, blackCount: 0 },
   notationDirty: true,           // Whether notation needs re-render
-  graphWorker: null,             // Persistent worker for graph analysis
-  graphWorkerIdle: false,        // Worker alive and between runs — reusable
+  graphPool: [],                 // Parallel graph analysis workers (kept warm between games)
+  _graphRunId: 0,                // Bumped to cancel an in-flight graph run
+  _graphRunActive: false,        // A graph pass is currently running
   _graphPixelCache: null,        // Per-index pixel coords on the eval chart (for the dot overlay)
   _fullEnginePreloading: false,  // True while preloadFullEngine() worker is loading
   hasLoadedOnce: false,          // Skip init timeout on first load
@@ -1776,6 +1790,17 @@ async function fetchLichessGame(gameIdOrUrl) {
 }
 
 
+// ============================================================
+// Graph analysis — parallel worker pool, two-pass progressive fill
+// ============================================================
+// The old path searched positions sequentially at fixed depth 22 (~seconds
+// per position; minutes per game). SMP scales sublinearly inside one search,
+// but separate positions are embarrassingly parallel — so a pool of small
+// workers beats one big-threaded worker. Pass 1 (sketch) fills the whole
+// curve with cheap searches in a couple of seconds; pass 2 (polish) redoes
+// every point with a bigger node budget, finalises classifications and
+// prefetches PVs into evalCache. Cached positions skip the engine entirely.
+
 function analyzeGraphPositions() {
   const positions = [];
   const tempGame = new Chess();
@@ -1783,242 +1808,274 @@ function analyzeGraphPositions() {
   positions.push({ fen: tempGame.fen(), moveIndex: 0 });
   for (let i = 0; i < AppState.graphMainlineMoves.length; i++) {
     tempGame.move(AppState.graphMainlineMoves[i]);
-    positions.push({ fen: tempGame.fen(), moveIndex: i + 1 });
+    // Forced positions (≤1 legal reply) carry the previous eval — no search
+    positions.push({ fen: tempGame.fen(), moveIndex: i + 1, forced: tempGame.moves().length <= 1 });
   }
 
-  // Reuse the persistent graph worker when idle (skips WASM + NNUE re-init);
-  // only a worker still mid-run gets terminated and replaced
-  if (AppState._graphWorkerTimeout) {
-    clearTimeout(AppState._graphWorkerTimeout);
-    AppState._graphWorkerTimeout = null;
+  cancelGraphRun();
+  runGraphPasses(positions);
+}
+
+function cancelGraphRun() {
+  AppState._graphRunId++;
+  if (AppState._graphRunActive) {
+    // Mid-run — workers are busy on stale positions; hard-reset the pool.
+    // (An idle pool is left warm and reused by the next run.)
+    AppState.graphPool.forEach(w => { try { w.terminate(); } catch (e) {} });
+    AppState.graphPool = [];
+    AppState._graphRunActive = false;
   }
-  if (AppState.graphWorker) {
-    if (AppState.graphWorkerIdle) {
-      startGraphAnalysis(AppState.graphWorker, positions);
-      return;
+}
+
+function createGraphPoolWorker() {
+  return new Promise((resolve, reject) => {
+    let worker;
+    try {
+      worker = new Worker(ENGINES[GRAPH_POOL_ENGINE].script);
+    } catch (err) {
+      return reject(err);
     }
-    try { AppState.graphWorker.terminate(); } catch (e) {}
-    AppState.graphWorker = null;
-  }
-
-  // Promise-based worker factory: creates a worker, sends UCI init, resolves on readyok
-  function createGraphWorker(engineKey) {
-    return new Promise((resolve, reject) => {
-      let worker;
-      try {
-        worker = new Worker(ENGINES[engineKey].script);
-      } catch (err) {
-        return reject(err);
-      }
-
-      const readyTimeout = setTimeout(() => {
-        try { worker.terminate(); } catch (e) {}
-        reject(new Error(`${ENGINES[engineKey].name} graph worker timed out (no readyok within 15s)`));
-      }, 15000);
-
-      worker.onmessage = function(e) {
-        const msg = typeof e.data === 'string' ? e.data : e.data.data;
-        if (msg === 'readyok') {
-          clearTimeout(readyTimeout);
-          resolve(worker);
-        }
-      };
-
-      worker.onerror = function(err) {
-        clearTimeout(readyTimeout);
-        try { worker.terminate(); } catch (e) {}
-        reject(err);
-      };
-
-      worker.postMessage('uci');
-      sendEngineOptions(worker);
-      worker.postMessage('ucinewgame');
-      worker.postMessage('isready');
-    });
-  }
-
-  // Fallback chain: skip full engine if another is already preloading (avoid duplicate 67MB loads)
-  const tryEngine = AppState._fullEnginePreloading
-    ? createGraphWorker('lite')
-    : createGraphWorker('full').catch(fullErr => {
-        console.warn('Full engine failed for graph, falling back to lite:', fullErr);
-        return createGraphWorker('lite');
-      });
-
-  tryEngine.then(worker => {
-    startGraphAnalysis(worker, positions);
-  }).catch(err => {
-    console.error('All engines failed for graph analysis:', err);
-    showError('Graph analysis failed. Please refresh the page and try again.');
+    const readyTimeout = setTimeout(() => {
+      try { worker.terminate(); } catch (e) {}
+      reject(new Error('Graph pool worker init timeout'));
+    }, 20000);
+    worker.onmessage = function(e) {
+      const msg = typeof e.data === 'string' ? e.data : e.data.data;
+      if (msg === 'readyok') { clearTimeout(readyTimeout); resolve(worker); }
+    };
+    worker.onerror = function(err) {
+      clearTimeout(readyTimeout);
+      try { worker.terminate(); } catch (e) {}
+      reject(err);
+    };
+    worker.postMessage('uci');
+    worker.postMessage('setoption name Threads value ' + (THREADS_SUPPORTED ? GRAPH_POOL_THREADS : 1));
+    worker.postMessage('setoption name Hash value ' + GRAPH_POOL_HASH_MB);
+    worker.postMessage('isready');
   });
 }
 
-function startGraphAnalysis(worker, positions) {
-  AppState.graphWorker = worker;
-  AppState.graphWorkerIdle = false;
-  let idx = 0;
-  let redrawTimer = null;
-  const pendingBadges = new Set();
-
-  // Safety timeout for entire analysis
-  const totalTimeout = setTimeout(() => {
-    if (AppState.graphWorker === worker) {
-      console.warn('Graph analysis timed out');
-      try { worker.terminate(); } catch (e) {}
-      AppState.graphWorker = null;
-    }
-    AppState._graphWorkerTimeout = null;
-  }, positions.length * 8000);
-  AppState._graphWorkerTimeout = totalTimeout;
-
-  // Throttled UI updates — the eye can't use 60 intermediate repaints, so the
-  // chart redraws at most every GRAPH_REDRAW_MS while the engine grinds, and
-  // the notation gets per-move badge patches instead of full rebuilds.
-  function scheduleRedraw(moveIndex) {
-    if (moveIndex !== undefined) {
-      pendingBadges.add(moveIndex);
-      pendingBadges.add(moveIndex + 1); // next move's classification may shift too
-    }
-    if (redrawTimer) return;
-    redrawTimer = setTimeout(() => {
-      redrawTimer = null;
-      drawAnalysisEvalGraph();
-      pendingBadges.forEach(patchNotationClassification);
-      pendingBadges.clear();
-    }, GRAPH_REDRAW_MS);
+async function ensureGraphPool() {
+  if (AppState.graphPool.length > 0) return AppState.graphPool;
+  const results = await Promise.allSettled(
+    Array.from({ length: GRAPH_POOL_SIZE }, createGraphPoolWorker)
+  );
+  AppState.graphPool = results.filter(r => r.status === 'fulfilled').map(r => r.value);
+  if (AppState.graphPool.length === 0) {
+    throw new Error('All graph pool workers failed to initialise');
   }
+  return AppState.graphPool;
+}
 
-  function sendNext() {
-    if (idx >= positions.length) {
-      clearTimeout(totalTimeout);
-      AppState._graphWorkerTimeout = null;
-      // Keep the worker warm (TT + loaded net) for the next game
-      if (AppState.graphWorker === worker) AppState.graphWorkerIdle = true;
-      // Final full render supersedes any pending throttled repaint
-      if (redrawTimer) { clearTimeout(redrawTimer); redrawTimer = null; }
-      pendingBadges.clear();
-      drawAnalysisEvalGraph();
-      AppState.notationDirty = true;
-      updateAnalysisOutput();
-      return;
-    }
+async function runGraphPasses(positions) {
+  const runId = AppState._graphRunId;
+  AppState._graphRunActive = true;
+  try {
+    const pool = await ensureGraphPool();
+    if (runId !== AppState._graphRunId) return;
 
-    const pos = positions[idx];
-
-    // Forced move shortcut — only 1 legal move, carry forward previous eval
-    if (pos.moveIndex > 0) {
-      const tempCheck = new Chess(pos.fen);
-      if (tempCheck.moves().length <= 1) {
-        const prevEval = AppState.graphEvalHistory[pos.moveIndex - 1];
-        if (prevEval !== undefined) {
-          AppState.graphEvalHistory[pos.moveIndex] = prevEval;
-          updateMoveClassifications(pos.moveIndex);
-          updateIncrementalAccuracy(pos.moveIndex);
-          scheduleRedraw(pos.moveIndex);
-          idx++;
-          setTimeout(sendNext, 0);
-          return;
-        }
+    // ONE queue, two kinds of task, no barrier between them. Sketch tasks
+    // (tiny budget, STRIDED order 0,4,8,…,1,5,9,… so in-flight searches
+    // spread across the whole game and spanGaps draws a coarse full-width
+    // curve within ~2s) sit at the front; polish tasks follow in game order.
+    // Workers flow straight from sketching into polishing — no idle barrier.
+    // Polish budgets resolve lazily at dispatch: deep inside decided
+    // stretches (position AND both neighbours sketched at |eval| ≥ 5) the
+    // win% sigmoid is flat and deltas are noise, so those get a reduced
+    // budget; everywhere informative gets the full uniform budget
+    // (classifications are deltas between adjacent evals — mixed budgets
+    // there inject phantom badge flips). A missing neighbour eval counts as
+    // NOT decided, so early dispatches err toward the full budget.
+    const tasks = [];
+    for (let r = 0; r < GRAPH_POOL_SIZE; r++) {
+      for (let i = r; i < positions.length; i += GRAPH_POOL_SIZE) {
+        tasks.push({ pos: positions[i], kind: 'sketch' });
       }
     }
+    positions.forEach(pos => tasks.push({ pos, kind: 'polish' }));
+    await runGraphPass(pool, tasks, { depthCap: GRAPH_DEPTH }, runId);
+    if (runId !== AppState._graphRunId) return;
 
-    // Tablebase shortcut for ≤7 piece positions
-    if (countPieces(pos.fen) <= 7) {
-      queryTablebase(pos.fen).then(tb => {
-        if (tb) {
-          const turn = pos.fen.split(' ')[1];
-          const evalScore = tablebaseCategoryToEval(tb.category, tb.dtz, turn);
-          AppState.graphEvalHistory[pos.moveIndex] = evalScore;
-          updateMoveClassifications(pos.moveIndex);
-          updateIncrementalAccuracy(pos.moveIndex);
-          scheduleRedraw(pos.moveIndex);
-        }
-        idx++;
-        setTimeout(sendNext, 0);
-      }).catch(() => {
-        // Fallback: let Stockfish handle it
-        const depth = pos.targetDepth || GRAPH_DEPTH;
-        worker.postMessage(`position fen ${pos.fen}`);
-        worker.postMessage(`go depth ${depth}`);
-      });
-      return;
-    }
-
-    // Reduced depth for decided positions (eval ±5+) — sigmoid is flat, deep analysis is wasted
-    if (pos.moveIndex > 0) {
-      const prevEval = AppState.graphEvalHistory[pos.moveIndex - 1];
-      if (prevEval !== undefined && Math.abs(prevEval) >= 5) {
-        pos.targetDepth = 16;
-      }
-    }
-
-    const depth = pos.targetDepth || GRAPH_DEPTH;
-    worker.postMessage(`position fen ${pos.fen}`);
-    worker.postMessage(`go depth ${depth}`);
+    flushGraphRedraw();
+    AppState.notationDirty = true;
+    updateAnalysisOutput();
+  } catch (err) {
+    console.error('Graph analysis failed:', err);
+    showError('Graph analysis failed. Please refresh the page and try again.');
+  } finally {
+    if (runId === AppState._graphRunId) AppState._graphRunActive = false;
   }
+}
 
-  worker.onmessage = function(event) {
-    const message = typeof event.data === 'string' ? event.data : event.data.data;
+function graphPolishBudget(moveIndex) {
+  const absEval = i => {
+    const v = AppState.graphEvalHistory[i];
+    return v === undefined ? 0 : Math.abs(v);
+  };
+  const lastIdx = AppState.graphEvalHistory.length - 1;
+  const decided = absEval(moveIndex) >= GRAPH_DECIDED_EVAL &&
+    absEval(Math.max(0, moveIndex - 1)) >= GRAPH_DECIDED_EVAL &&
+    absEval(Math.min(lastIdx, moveIndex + 1)) >= GRAPH_DECIDED_EVAL;
+  return decided ? GRAPH_POLISH_NODES_DECIDED : GRAPH_POLISH_NODES;
+}
 
-    if (message === 'readyok') {
-      sendNext();
-    } else if (message.startsWith('bestmove')) {
-      idx++;
-      setTimeout(sendNext, 0);
-    } else if (message.startsWith('info depth') && message.includes('score')) {
-      const pos = positions[idx];
-      const targetDepth = pos.targetDepth || GRAPH_DEPTH;
-      if (!message.startsWith(`info depth ${targetDepth} `)) return;
-      const info = parseStockfishInfoForGraph(message, pos.fen);
-      if (info) {
-        let evalScore;
-        if (info.mate !== undefined) {
-          evalScore = info.mate > 0
-            ? Math.min(15, 10 + 5 / Math.abs(info.mate))
-            : Math.max(-15, -10 - 5 / Math.abs(info.mate));
-        } else {
-          evalScore = parseFloat(info.score);
-          evalScore = Math.max(-10, Math.min(10, evalScore));
-        }
+// One pass over the task queue, every pool worker pulling from it
+function runGraphPass(pool, tasks, opts, runId) {
+  return new Promise(resolve => {
+    let next = 0;
+    let active = 0;
+    let settled = false;
 
-        AppState.graphEvalHistory[pos.moveIndex] = evalScore;
-        updateMoveClassifications(pos.moveIndex);
-        updateIncrementalAccuracy(pos.moveIndex);
-
-        // Prefetch: bank this deep line so live playback paints it instantly.
-        // Same White-POV score convention as parseStockfishInfo.
-        if (info.pv && typeof info.depth === 'number') {
-          cacheAnalysisResult(pos.fen, {
-            1: {
-              depth: info.depth,
-              score: info.score,
-              scoreDisplay: info.mate !== undefined ? `Mate in ${Math.abs(info.mate)}` : info.score,
-              pv: info.pv,
-              multipv: 1,
-              mate: info.mate
-            }
-          }, { bestMove: info.pv.split(' ')[0], ponder: null }, info.depth);
-        }
-        scheduleRedraw(pos.moveIndex);
+    function maybeFinish() {
+      if (!settled && active === 0 &&
+          (next >= tasks.length || runId !== AppState._graphRunId)) {
+        settled = true;
+        resolve();
       }
     }
-  };
 
-  worker.onerror = function(err) {
-    console.warn('Graph worker error during analysis:', err);
-    clearTimeout(totalTimeout);
-    AppState._graphWorkerTimeout = null;
-    try { worker.terminate(); } catch (e) {}
-    if (AppState.graphWorker === worker) {
-      AppState.graphWorker = null;
-      AppState.graphWorkerIdle = false;
+    function pump(worker) {
+      if (runId !== AppState._graphRunId || next >= tasks.length) {
+        maybeFinish();
+        return;
+      }
+      const task = tasks[next++];
+      const pos = task.pos;
+      const nodes = task.kind === 'sketch' ? GRAPH_SKETCH_NODES : graphPolishBudget(pos.moveIndex);
+      const cacheMinDepth = task.kind === 'sketch' ? 12 : GRAPH_SKIP_DEPTH;
+
+      // Forced move — only one legal reply, so the eval is the previous
+      // position's eval; searching it would be pure waste (old-path behaviour)
+      if (pos.forced && AppState.graphEvalHistory[pos.moveIndex - 1] !== undefined) {
+        commitGraphEval(pos, AppState.graphEvalHistory[pos.moveIndex - 1]);
+        pump(worker);
+        maybeFinish();
+        return;
+      }
+      active++;
+
+      // Cache short-circuit — a deep-enough eval for this FEN already exists
+      const cached = AppState.evalCache.get(pos.fen);
+      if (cached && cached.depth >= cacheMinDepth && cached.multipvResults[1]) {
+        const e = cached.multipvResults[1];
+        commitGraphInfo(pos, { depth: cached.depth, score: e.score, mate: e.mate, pv: e.pv }, opts);
+        active--;
+        pump(worker);
+        maybeFinish();
+        return;
+      }
+
+      // Tablebase shortcut for ≤7-piece positions
+      if (countPieces(pos.fen) <= 7) {
+        queryTablebase(pos.fen).then(tb => {
+          if (runId !== AppState._graphRunId) { active--; maybeFinish(); return; }
+          if (tb) {
+            const turn = pos.fen.split(' ')[1];
+            commitGraphEval(pos, tablebaseCategoryToEval(tb.category, tb.dtz, turn));
+            active--;
+            pump(worker);
+            maybeFinish();
+          } else {
+            search(); // API empty — fall back to the engine
+          }
+        }).catch(() => {
+          if (runId === AppState._graphRunId) search();
+          else { active--; maybeFinish(); }
+        });
+        return;
+      }
+
+      search();
+
+      function search() {
+        let last = null;
+        worker.onmessage = function(e) {
+          const msg = typeof e.data === 'string' ? e.data : e.data.data;
+          if (msg.startsWith('info depth') && msg.includes('score') && msg.includes(' pv ')) {
+            const info = parseStockfishInfoForGraph(msg, pos.fen);
+            if (info) last = info; // keep the deepest line seen before bestmove
+          } else if (msg.startsWith('bestmove')) {
+            if (runId === AppState._graphRunId && last) commitGraphInfo(pos, last, opts);
+            active--;
+            pump(worker);
+            maybeFinish();
+          }
+        };
+        worker.onerror = function(err) {
+          console.warn('Graph pool worker died, continuing with remaining workers:', err);
+          try { worker.terminate(); } catch (e) {}
+          const i = AppState.graphPool.indexOf(worker);
+          if (i >= 0) AppState.graphPool.splice(i, 1);
+          active--;
+          maybeFinish();
+        };
+        worker.postMessage('position fen ' + pos.fen);
+        worker.postMessage('go depth ' + opts.depthCap + ' nodes ' + nodes);
+      }
     }
-  };
 
-  // Handshake kicks off the run: readyok → sendNext. Works for both fresh
-  // workers and reused idle ones (whose TT stays warm — entries are
-  // position-keyed, so results from a previous game remain valid).
-  worker.postMessage('isready');
+    pool.slice().forEach(pump);
+    maybeFinish();
+  });
+}
+
+// Commit a tablebase eval for a position
+function commitGraphEval(pos, evalScore) {
+  AppState.graphEvalHistory[pos.moveIndex] = evalScore;
+  updateMoveClassifications(pos.moveIndex);
+  updateIncrementalAccuracy(pos.moveIndex);
+  scheduleGraphRedraw(pos.moveIndex);
+}
+
+// Commit a parsed engine info line for a position (+ optional PV prefetch)
+function commitGraphInfo(pos, info, opts) {
+  let evalScore;
+  if (info.mate !== undefined) {
+    evalScore = info.mate > 0
+      ? Math.min(15, 10 + 5 / Math.abs(info.mate))
+      : Math.max(-15, -10 - 5 / Math.abs(info.mate));
+  } else {
+    evalScore = parseFloat(info.score);
+    evalScore = Math.max(-10, Math.min(10, evalScore));
+  }
+  AppState.graphEvalHistory[pos.moveIndex] = evalScore;
+  updateMoveClassifications(pos.moveIndex);
+  updateIncrementalAccuracy(pos.moveIndex);
+
+  if (info.pv && typeof info.depth === 'number') {
+    cacheAnalysisResult(pos.fen, {
+      1: {
+        depth: info.depth,
+        score: info.score,
+        scoreDisplay: info.mate !== undefined ? `Mate in ${Math.abs(info.mate)}` : info.score,
+        pv: info.pv,
+        multipv: 1,
+        mate: info.mate
+      }
+    }, { bestMove: info.pv.split(' ')[0], ponder: null }, info.depth);
+  }
+  scheduleGraphRedraw(pos.moveIndex);
+}
+
+// Throttled UI updates — chart repaint at most every GRAPH_REDRAW_MS, and
+// notation classification badges patched per move instead of full rebuilds
+let _graphRedrawTimer = null;
+const _graphPendingBadges = new Set();
+
+function scheduleGraphRedraw(moveIndex) {
+  if (moveIndex !== undefined) {
+    _graphPendingBadges.add(moveIndex);
+    _graphPendingBadges.add(moveIndex + 1); // next move's classification may shift too
+  }
+  if (_graphRedrawTimer) return;
+  _graphRedrawTimer = setTimeout(flushGraphRedraw, GRAPH_REDRAW_MS);
+}
+
+function flushGraphRedraw() {
+  if (_graphRedrawTimer) { clearTimeout(_graphRedrawTimer); _graphRedrawTimer = null; }
+  drawAnalysisEvalGraph();
+  _graphPendingBadges.forEach(patchNotationClassification);
+  _graphPendingBadges.clear();
 }
 
 function parseStockfishInfoForGraph(message, fen) {
@@ -2104,12 +2161,8 @@ function resetBoard() {
   AppState._accuracySums = { whiteTotal: 0, whiteCount: 0, blackTotal: 0, blackCount: 0 };
   AppState.notationDirty = true;
   AppState._graphPixelCache = null;
-  // Keep an idle graph worker warm across resets; kill only a mid-run one
-  if (AppState.graphWorker && !AppState.graphWorkerIdle) {
-    try { AppState.graphWorker.terminate(); } catch (e) {}
-    AppState.graphWorker = null;
-    AppState.graphWorkerIdle = false;
-  }
+  // Keeps an idle pool warm across resets; kills only a mid-run one
+  cancelGraphRun();
   
   // Reset board
   AppState.game.reset();

@@ -63,3 +63,13 @@ from notes.txt is gone; Safari quietly falling back to single-threaded is expect
 - [x] Bonus: resetBoard keeps idle graph worker warm
 - [x] Verified: dot pixel test (#FF5722 at cached coords), accuracy 5/5, 0 errors
 - [ ] D (optional, not built): replace Chart.js with hand-rolled canvas sparkline
+
+## Graph analysis 10× (2026-07-04, "iterate until x10")
+- [x] Parallel pool (4 × full-net × 2 threads) + node budgets replace sequential d22
+- [x] Unified task queue: strided 12k sketch → in-order 600k polish, no barrier
+- [x] Adaptive decided-stretch budget (150k when pos+both neighbours ≥ |5|)
+- [x] Forced-move carry, tablebase + evalCache short-circuits, warm pool
+- [x] MEASURED: 10.3× median raw, 10.4× probe-normalised, 11.9× worst-pair,
+      13.6× best-pair (56-pos game, 3 baselines vs 3 runs); curve at ~2.5s
+- [x] Iterations v1→v11 documented in memory: stockfish-batch-eval-findings
+- [x] Regressions: nav 0 chart updates, dot pixel test, badges, accuracy 5/5

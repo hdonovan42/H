@@ -1,5 +1,40 @@
 # Chess Analysis — Changelog
 
+## v2.8 — Graph analysis 10×+: parallel worker pool (2026-07-04)
+
+The graph fill was the slow part — one worker searching every position
+sequentially at fixed depth 22 (~minutes per game). Replaced with a pool
+architecture; measured **10.3× median / 11.9–13.6× per-pair** on a
+56-position game (3 baseline runs vs 3 new runs, plus probe-normalised
+10.4× to correct for machine drift). Curve visible in ~2.5s (was: minutes).
+
+- **Pool of 4 full-net workers** (2 threads, 32MB hash each): separate
+  positions parallelise perfectly; SMP inside one search scales sublinearly.
+- **Node-budgeted searches** (`go depth 22 nodes N`) instead of bare depth —
+  near-constant wall-clock per position.
+- **One task queue, no barrier**: strided sketch tasks (12k nodes,
+  0,4,8,…,1,5,9,… so spanGaps draws a full-width coarse curve in ~2s)
+  followed by in-order polish tasks (600k nodes ≈ d18-20, full net);
+  workers flow straight from sketching into polishing.
+- **Adaptive polish budget**: 150k nodes deep inside decided stretches
+  (position AND both neighbours |eval| ≥ 5) where the win% sigmoid is flat —
+  full uniform budget everywhere classification is informative. Deliberate
+  semantic: faint blunder badges deep inside an already-won crush may
+  soften vs the old d22 path (they were threshold noise — the old path
+  flipped them run-to-run too, verified with repeated baselines).
+- Forced moves carry the previous eval (old-path behaviour restored);
+  tablebase and evalCache short-circuits; polish PVs prefetched into
+  evalCache for instant playback; pool kept warm between games,
+  hard-reset only when a new game loads mid-run.
+- Engine identity finding: blunder markers lost with the lite net did NOT
+  return at 2× lite nodes but returned immediately with the full net —
+  net identity beats depth for eval agreement. Full findings in memory
+  (`stockfish-batch-eval-findings`).
+
+Verified: nav still 0 chart updates (5.4ms avg), dot overlay pixel-correct,
+badges patch, accuracy suite 5/5, no page errors. 10-move test game:
+174s → 3.3s end-to-end.
+
 ## v2.7 — Graph drawing rework (2026-07-03)
 
 Playback no longer pays for the eval graph.
