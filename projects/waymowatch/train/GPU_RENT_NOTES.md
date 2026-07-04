@@ -324,9 +324,67 @@ STAY at ~0 (proof the run1 ×3 down-weight didn't let them resurface); then `thr
 re-derives AUTO_BANK_TH from the live distribution.
 
 **Trigger status at ship time: 392/≈408 eligible boxes, 106 run2 hard negs (target 100–150) —
-the compound trigger is effectively MET.** Rental can be scheduled once the current review
-backlog is banked: rebuild + preflight + `confuser_gate.py --export`, bundle
-`train/ data/dataset_real/ data/confuser_suite/`, and run the bench hw-ablation + gates per plan.
+the compound trigger is effectively MET.** (2026-07-04 update: **497 boxes / 132 run2 hard negs /
+99-pos val — both triggers comfortably exceeded.** `train.py` defaults now BAKE the RUN_3 recipe:
+epochs 100 / close_mosaic 20 / workers 16; warm-start stays an explicit `--model` arg.)
+
+## RUN_3 — run sheet (execute in order; everything below assumes the locked plan above)
+
+### A. Off the clock (VPS + laptop) — BEFORE renting
+- [ ] Bank the outstanding review backlog (confirms AND rejects) — the dataset freezes at build time
+- [ ] All-positives audit contact sheet over the ~500 confirms (cheap insurance; last full audit at 38)
+- [ ] Rebuild + preflight on the VPS (defaults now bake run1 ×3 / run2 ×10 + the pinned val split,
+      and preflight validates the ACTUAL warm-start weights):
+      `.venv/bin/python dataset/build_real_dataset.py && .venv/bin/python train/preflight.py --model collector/best.pt`
+      → must print the PINNED-split line and "PREFLIGHT PASS"
+- [ ] Refresh the confuser suite (picks up the latest run2 hard negs):
+      `.venv/bin/python train/confuser_gate.py --export`
+- [ ] Rescore inputs: `tar czf /tmp/cand_frames.tgz -C data candidates` FIRST, then
+      `.venv/bin/python eval/export_score_manifest.py --out /tmp/run3_manifest.csv` (manifest after
+      the tar so every row has a frame)
+- [ ] Bundle: `cd ~/waymowatch && tar czf /tmp/waymonet_train.tgz train/ eval/ data/dataset_real/ data/confuser_suite/`
+      → pull bundle + cand_frames.tgz + run3_manifest.csv to the laptop
+- [ ] Warm-start weights = laptop `~/waymonet_run2/weights/best.pt` (== VPS `collector/best.pt`;
+      sanity: `sha256sum | head -c 12` must equal the live `wn_model_ver` **31ed16757c09**)
+- [ ] Vast: credit + the LAPTOP SSH pubkey at Account → SSH Keys
+
+### B. On the clock (RTX 4090, ~60–90 min, ~$0.50)
+- [ ] Rent: RTX 4090 · PyTorch template · ~30 GB disk · On-Demand · >99%; Direct SSH via the `>_` icon
+- [ ] Upload: `scp -P <port> waymonet_train.tgz cand_frames.tgz run3_manifest.csv best.pt root@<ip>:/workspace/`
+      → `cd /workspace && tar xzf waymonet_train.tgz && tar xzf cand_frames.tgz`
+- [ ] `/venv/main/bin/pip install 'ultralytics==8.4.63'` (REUSE `/venv/main` — never a fresh venv)
+- [ ] **TRAIN (warm-start)**:
+      `nohup /venv/main/bin/python /workspace/train/train.py --model /workspace/best.pt --name waymonet_real_v3 --device 0 > /workspace/train.log 2>&1 &`
+      (epochs 100 / close_mosaic 20 / workers 16 are the defaults now; add `--lr0 0.005` only if
+      the warm-start loss spikes in the first epochs)
+- [ ] **GATE — run BOTH weights on the SAME final val** (paths auto-resolve under /workspace):
+      `/venv/main/bin/python /workspace/train/eval_gate.py --weights /workspace/data/runs/waymonet_real_v3/weights/best.pt`
+      `/venv/main/bin/python /workspace/train/eval_gate.py --weights /workspace/best.pt`   ← RUN_2 baseline, identical data
+- [ ] **CONFUSER GATE — both weights**:
+      `/venv/main/bin/python /workspace/train/confuser_gate.py --weights <v3-best.pt>` (+ same with /workspace/best.pt)
+      **SHIP = v3 box-recall ≥ RUN_2's on the same val AND v3 confuser max < 0.67.** Either fails → no deploy.
+- [ ] Optional (idle GPU): the run1-weight ablation — pre-build variants on the VPS with
+      `build_real_dataset.py --hard-weight-run1 {1,5} --out data/dataset_hw_r1x{1,5}`, bundle them,
+      then `bench.py --name hw_r1x1 --data <variant>/dataset.yaml --epochs 100` + both gates per variant
+- [ ] Full rescore (~3 min): `/venv/main/bin/python /workspace/eval/rescore_all.py --weights <v3-best.pt> --frames-dir /workspace/candidates --manifest /workspace/run3_manifest.csv --out /workspace/run3_scored.csv --device 0`
+- [ ] Pull back: `rsync -az -e "ssh -p <port>" root@<ip>:/workspace/data/runs/waymonet_real_v3/ ~/waymonet_run3/` + `run3_scored.csv`
+- [ ] **DESTROY the instance** (trash icon, NOT Stop)
+
+### C. Post-rental cutover (ONLY if both gates passed)
+- [ ] Backups first: VPS `cp collector/best.pt collector/best_run2.pt`; homebox
+      `cp ~/waymonet-dash/best.pt ~/waymonet-dash/best_run2.pt` (one-copy rollback, as at RUN_2)
+- [ ] Deploy v3 `best.pt` → VPS `collector/best.pt` AND homebox `~/waymonet-dash/best.pt`
+- [ ] Restart: `ssh root@vps-hel1 "systemctl restart waymowatch-loop"` + homebox `waymonet-infer`;
+      **recheck the dash canary threshold** (v3 scores the canary differently)
+- [ ] Backlog re-score (also clears the stale-model ≥0.75 dead band — old-ver rows are excluded
+      from BOTH auto-bank and digest until re-scored): reset `wn_scored=0` on
+      `status IN ('new','near')`; the loop re-scores in-process
+- [ ] **Recalibrate AUTO_BANK_TH**: `eval/threshold_report.py` on the NEW distribution → edit the
+      constant in `collector/waymonet_digest.py` (0.75 is RUN_2-scoped) → rsync. The sha gate
+      re-keys to v3 automatically (it hashes `best.pt`)
+- [ ] Contradiction report: `eval/run2_report.py --csv run3_scored.csv --email` — rejects v3 now
+      calls Waymo = recover them; confirmed Waymos scored ~0 = investigate (edge positives excluded)
+- [ ] CHANGELOG + run-lineage memory + commit/push; record the v3 baselines table next to RUN_2's
 
 ## Attached full rescore + RUN_1↔RUN_2 eval (RUN_2 onward)
 Score EVERY candidate with the new weights on the rented GPU (minutes) instead of ~5-9 h on the

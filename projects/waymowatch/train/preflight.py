@@ -2,19 +2,30 @@
 """CPU pre-flight for the GPU training run — catch every crash for free, BEFORE renting.
 
 Validates, on this machine, everything train.py will do on the paid box:
-  1. dataset_real exists, yaml parses, every label parses with bbox in [0,1]
+  1. dataset exists, yaml parses, every label parses with bbox in [0,1]
   2. val split has positives AND backgrounds (eval_gate.py needs both)
-  3. the model cfg builds and the pretrained weights transfer into it
+  3. the model builds (cfg + transfer, or a warm-start .pt loads directly)
   4. one real forward pass at the training imgsz
 Exit code 0 = safe to rent.
+
+RUN_3+: preflight the ACTUAL warm-start path, e.g.
+  preflight.py --model collector/best.pt        # the deployed RUN_2 weights (same file you upload)
 """
+import argparse
 import glob
 import os
 import sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(BASE, "data", "dataset_real")
-MODEL, WEIGHTS, IMGSZ = "yolo26s-p2.yaml", "yolo26s.pt", 704
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--data", default=os.path.join(BASE, "data", "dataset_real"))
+ap.add_argument("--model", default="yolo26s-p2.yaml",
+                help="model cfg, or a .pt to warm-start from (mirrors train.py --model)")
+ap.add_argument("--weights", default="yolo26s.pt",
+                help="transfer weights for a .yaml cfg (ignored for a .pt --model)")
+a = ap.parse_args()
+DATA, MODEL, WEIGHTS, IMGSZ = a.data, a.model, a.weights, 704
 fail = 0
 
 
@@ -49,8 +60,11 @@ try:
     from ultralytics import YOLO
     import numpy as np
     m = YOLO(MODEL)
-    m.load(WEIGHTS)
-    check(True, f"{MODEL} builds + {WEIGHTS} transfers")
+    if MODEL.endswith(".yaml") and WEIGHTS:            # mirrors train.py: a .pt fine-tunes directly
+        m.load(WEIGHTS)
+        check(True, f"{MODEL} builds + {WEIGHTS} transfers")
+    else:
+        check(True, f"warm-start weights load: {MODEL}")
     m.predict(np.zeros((288, 352, 3), dtype=np.uint8), imgsz=IMGSZ, verbose=False)
     check(True, f"forward pass @ imgsz={IMGSZ}")
 except Exception as e:

@@ -1,5 +1,23 @@
 # WaymoWatch — Changelog
 
+## RUN_3 handoff-ready: recipe baked into defaults + run sheet (2026-07-04)
+
+Prep for handing the training job to another session. **Both triggers now exceeded: 497 eligible
+boxes (target ~408) / 132 run2 hard negs (target 100–150) / 99-positive pinned val.**
+
+- **`train.py` defaults now BAKE the RUN_3 recipe**: epochs 150→**100**, `close_mosaic`
+  15→**20** (was hardcoded — now a flag), `workers` **16** (new flag), optional `--lr0`.
+  Warm-start remains an explicit `--model <run2 best.pt>` (correct — path varies per box).
+- **`preflight.py`** now takes `--data`/`--model`/`--weights` and validates the ACTUAL warm-start
+  path (`--model collector/best.pt` loads + forward-passes the real artifact).
+- **RUN_3 run sheet added to GPU_RENT_NOTES** (A off-clock / B on-clock / C cutover, exact
+  commands): bank backlog → audit sheet → rebuild+preflight → suite export → bundle
+  (`train/ eval/ dataset_real/ confuser_suite/`) → warm-start train → gate BOTH weights on the
+  same final val → confuser gate both → rescore → destroy → scripted cutover with
+  threshold recalibration and backlog re-score.
+- **Verified end-to-end on the VPS**: fresh test build (4,992 train / 594 val, pinned 28-cam
+  split) + `preflight.py --model collector/best.pt` → "PREFLIGHT PASS — safe to rent".
+
 ## Auto-bank goes continuous — map fresh within the hour; 01:00 review preserved (2026-07-04)
 
 - **Hourly quiet auto-bank.** `auto_bank()` now banks every `≥ AUTO_BANK_TH (0.75)` candidate on the
