@@ -34,10 +34,11 @@ REAL_DIR = os.path.join(BASE, "data", "real_positives")    # WaymoNet-path confi
 HARD_DIR = os.path.join(BASE, "data", "hard_negatives", "run2")   # RUN_2-era rejects kept SEPARATE from the
 # RUN_1 hard negatives (data/hard_negatives/*): they're a different population — RUN_2's OWN false positives
 # (its current blind spots), vs RUN_1's, which RUN_2 already mostly suppresses. build_real_dataset globs both.
-AUTO_BANK_TH = 0.75   # auto-bank only NEAR-CERTAIN Waymos. The 0.22 "confuser ceiling" held only on
-                      # LABELLED rejects (the model effectively knew them); a NOVEL confuser (#40294)
-                      # scored 0.67 in production (2026-06-25), so the clean cut sits high. Anything below
-                      # -> manual review (no false-positive risk into the training set). Emailed at midnight.
+AUTO_BANK_TH = 0.70   # RUN_3 recalibration (2026-07-04, threshold_report + human-adjudicated ceiling):
+                      # confirmed-confuser ceiling = 0.638 (#100105); the tool's minimum-safe cut is 0.67
+                      # but a NOVEL confuser once hit 0.67 (#40294, RUN_2 era), so 0.70 buys double margin
+                      # for ~3% less hands-free. Banks ~76% of Waymos, 0 confirmed-confuser leaks.
+                      # Anything below -> manual review. RE-DERIVE after every retrain or big hard-neg bank.
 
 
 def _model_ver():

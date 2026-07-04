@@ -64,21 +64,29 @@ On the held-out gate: **98.1% recall** (RUN_2: 97.1%), 1 false positive in 495 b
 
 ### What a score means now
 
-Every confirmed Waymo and every human-vetted non-Waymo (8,039 of them), scored by the live model. Pick a cut: **left column as high as possible, right column as low as possible.**
+Every confirmed Waymo and every human-vetted non-Waymo (8,050 of them), scored by the live model. Pick a cut: **left column as high as possible, right column as low as possible.**
 
-| Score cut | Waymos captured | Non-Waymos wrongly captured (of 8,039) |
+<div class="confuser-strip">
+  <figure><img src="img/confuser_1.jpg" alt="The highest-scoring confirmed non-Waymo"><figcaption>the top confuser · 0.64</figcaption></figure>
+  <figure><img src="img/confuser_2.jpg" alt="Second highest-scoring confirmed non-Waymo"><figcaption>0.55</figcaption></figure>
+  <figure><img src="img/confuser_3.jpg" alt="Third highest-scoring confirmed non-Waymo"><figcaption>0.54</figcaption></figure>
+</div>
+
+| Score cut | Waymos captured | Non-Waymos<br>wrongly captured<br>(of 8,050) |
 |---|---|---|
 | 0.9 | 2% | 0 |
-| 0.8 | 58% | 2 |
-| 0.7 | 78% | 4 |
-| 0.6 | 88% | 4 |
-| **0.5** | **94%** | **4** |
-| 0.4 | 97% | 4 |
-| 0.3 | 99% | 5 |
-| 0.2 | 99.6% | 8 |
-| 0.1 | 99.6% | 11 |
+| 0.8 | 56% | 0 |
+| **0.7** | **76%** | **0** |
+| 0.6 | 85% | 1 |
+| 0.5 | 91% | 3 |
+| 0.4 | 95% | 5 |
+| 0.3 | 97% | 6 |
+| 0.2 | 98% | 14 |
+| 0.1 | 99% | 20 |
 
-Between 0.3 and 0.6 the error count barely moves while capture climbs — that plateau is the payoff of training on the model's own mistakes. (The final live threshold locks after a human pass over the model's highest-scoring *unlabelled* candidates — the 0.67 lesson, applied in advance this time.)
+The adjudication pass is done — and it cut both ways: the model *disputed four of its own training labels*, "non-Waymos" from the earliest bulk reviews that turned out to be real Waymos, recovered into the positives. What remains above 0.5 is genuinely hard: the three cars on the right are the highest-scoring confirmed non-Waymos in the archive. **The live cut is 0.70 — zero confirmed non-Waymos above it, ~76% of real Waymos banked hands-free.**
+
+<div style="clear:both"></div>
 
 ### Found in the archive
 
@@ -86,7 +94,7 @@ Rescoring the full ~43,000-frame archive with RUN_3 recovered **16 confirmed Way
 
 ### Hands-free banking
 
-Since auto-banking began (anything the model scores ≥ 0.75 becomes a confirmed sighting with no human in the loop, subject to an undo email), **16% of all new confirmed Waymos have arrived hands-free — with zero errors. 100% accuracy so far.** Under RUN_3's score distribution the table above shows what a recalibrated cut buys: at 0.5, ~94% of sightings would bank themselves.
+Since auto-banking began (anything the model scores above the cut becomes a confirmed sighting with no human in the loop, subject to an undo email), **16% of all new confirmed Waymos have arrived hands-free — with zero errors. 100% accuracy so far.** That was under RUN_2's cautious 0.75 cut; with RUN_3's separation the cut moved to **0.70** on 4 July — per the table, roughly **three-quarters of sightings now bank themselves**, with a 0.06 safety margin above the worst confirmed confuser.
 
 <div class="anet">
   <div class="a-io"><div class="a-t">608</div><div class="a-d">cameras</div></div>
