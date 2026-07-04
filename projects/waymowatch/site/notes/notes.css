@@ -76,8 +76,3 @@
   #content .anet .a-model { min-height:0; flex-basis:auto; width:220px; padding:24px 18px; }
 }
 .loading { color:var(--grey); }
-
-#content .confuser-strip { display:flex; flex-direction:row; gap:12px; margin:10px 0 4px; }
-#content .confuser-strip figure { margin:0; width:96px; flex:0 0 auto; min-width:0; }
-#content .confuser-strip img { width:100%; border-radius:6px; display:block; }
-#content .confuser-strip figcaption { font-size:.75rem; color:var(--grey); text-align:center; margin-top:3px; }

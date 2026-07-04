@@ -78,13 +78,9 @@ Every confirmed Waymo and every human-vetted non-Waymo (8,050 of them), scored b
 | 0.2 | 98% | 14 |
 | 0.1 | 99% | 20 |
 
-<div class="confuser-strip">
-  <figure><img src="img/confuser_1.jpg" alt="The highest-scoring confirmed non-Waymo"><figcaption>top confuser · 0.64</figcaption></figure>
-  <figure><img src="img/confuser_2.jpg" alt="Second highest-scoring confirmed non-Waymo"><figcaption>0.55</figcaption></figure>
-  <figure><img src="img/confuser_3.jpg" alt="Third highest-scoring confirmed non-Waymo"><figcaption>0.54</figcaption></figure>
-</div>
+<figure style="max-width:600px;margin:12px auto 6px"><img src="img/confusers_row.jpg" alt="Three of the highest-scoring confirmed non-Waymos: white vehicles with roof-mounted clutter"><figcaption>Three of the highest-scoring confirmed non-Waymos — 0.55 · 0.54 · 0.49. (The actual top confuser, 0.64, is a white car glimpsed through a tree.)</figcaption></figure>
 
-The adjudication pass is done — and it cut both ways: the model *disputed four of its own training labels*, "non-Waymos" from the earliest bulk reviews that turned out to be real Waymos, recovered into the positives. What remains above 0.5 is genuinely hard — pictured above, the three highest-scoring confirmed non-Waymos in the archive. **The live cut is 0.70 — zero confirmed non-Waymos above it, ~76% of real Waymos banked hands-free.**
+The adjudication pass is done — and it cut both ways: the model *disputed four of its own training labels*, "non-Waymos" from the earliest bulk reviews that turned out to be real Waymos, recovered into the positives. What remains above 0.5 is genuinely hard — pictured above: white vehicles carrying roof-mounted clutter. **The live cut is 0.70 — zero confirmed non-Waymos above it, ~76% of real Waymos banked hands-free.**
 
 ### Found in the archive
 
