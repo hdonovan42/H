@@ -94,7 +94,7 @@ Rescoring the full ~43,000-frame archive with RUN_3 recovered **16 confirmed Way
 
 ### Hands-free banking
 
-Since auto-banking began (anything the model scores above the cut becomes a confirmed sighting with no human in the loop, subject to an undo email), **16% of all new confirmed Waymos have arrived hands-free — with zero errors. 100% accuracy so far.** That was under RUN_2's cautious 0.75 cut; with RUN_3's separation the cut moved to **0.70** on 4 July — per the table, roughly **three-quarters of sightings now bank themselves**, with a 0.06 safety margin above the worst confirmed confuser.
+Anything the model scores above a set threshold becomes a confirmed sighting with no human in the loop (subject to an undo email). Since auto-banking began — **measured at a consistent 0.75 threshold throughout** — **16% of all new confirmed Waymos have arrived hands-free, with zero errors. 100% accuracy so far.** RUN_3's cleaner separation has allowed the threshold to be lowered to **0.70** (4 July): per the table, roughly **three-quarters of sightings should now bank themselves**, with a 0.06 safety margin above the worst confirmed confuser.
 
 <div class="anet">
   <div class="a-io"><div class="a-t">608</div><div class="a-d">cameras</div></div>
