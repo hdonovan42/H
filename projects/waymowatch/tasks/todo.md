@@ -1,3 +1,30 @@
+# QUEUED: post-RUN_3 serving roadmap (noted 2026-07-04, user-approved)
+
+Start only once the v3full cutover has a stable baseline (~2–3 days of live serving on the
+recalibrated AUTO_BANK_TH). **Rule: ONE change per observation window** — every item below
+shifts the score distribution or the compute workload, so each gets its own cycle-seconds
+check + `threshold_report.py` re-check before the next lands.
+
+1. **OpenVINO sequencing** (audit P1 #6): PyTorch→OV-FP32 first (equivalence check only —
+   scores must match within epsilon; ~1.3–1.5×), then INT8 (full gates + threshold
+   recalibration; ~2–2.7× total; BF16 fallback if quantisation eats the 2–6px dome).
+   Purpose: buys the compute budget for #2/#3. NB `wn_model_ver` must hash the SERVED
+   artifact, not best.pt, once they differ.
+2. **Multi-view take-max** (P1 #7, leak #2): score ~3 views/track {max-area, max-dome, last},
+   keep the max; drop the dome-conditioned re-score guard (`s > m[1]+0.01`). Biggest recall
+   lever; ×2–3 predicts/candidate → needs #1's headroom. Take-max lifts BOTH tails —
+   re-derive AUTO_BANK_TH after; expect a fuller review digest.
+3. **MIN_H 44→20, staged** (P1 #8 — "Waymos further from the camera"): admits distant
+   vehicles to the P2 model. Stage 44→32→24→20 watching cycle seconds (most compute-elastic
+   knob, hence last). Below ~28px the dome is sub-resolvable even to humans: expect
+   review-band growth, and CONFIRM TINY DETECTIONS ONLY WITH CORROBORATING PASSES (same
+   vehicle nearer/adjacent camera) — label purity of the positive set outranks one sighting.
+4. **Anytime (trivial, no observation window needed)**: digest max-age flush (force-send if
+   oldest pending >12 h); `special IS NULL` filter in `sightings_api.py` (eval-only positives
+   leak to the public map — flag to the dashboard session, map total drops ~5).
+
+---
+
 # Task: RUN_3 pre-rental work (from GPU_RENT_NOTES "Run 3 — plan", locked 2026-07-02)
 
 All CPU, off the clock. Goal: the eval upgrades + builder changes that must exist before the
