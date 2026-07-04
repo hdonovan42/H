@@ -330,30 +330,39 @@ epochs 100 / close_mosaic 20 / workers 16; warm-start stays an explicit `--model
 
 ## RUN_3 — run sheet (execute in order; everything below assumes the locked plan above)
 
-### A. Off the clock (VPS + laptop) — BEFORE renting
-- [ ] Bank the outstanding review backlog (confirms AND rejects) — the dataset freezes at build time
-- [ ] All-positives audit contact sheet over the ~500 confirms (cheap insurance; last full audit at 38)
-- [ ] Rebuild + preflight on the VPS (defaults now bake run1 ×3 / run2 ×10 + the pinned val split,
-      and preflight validates the ACTUAL warm-start weights):
-      `.venv/bin/python dataset/build_real_dataset.py && .venv/bin/python train/preflight.py --model collector/best.pt`
-      → must print the PINNED-split line and "PREFLIGHT PASS"
-- [ ] Refresh the confuser suite (picks up the latest run2 hard negs):
-      `.venv/bin/python train/confuser_gate.py --export`
-- [ ] Rescore inputs: `tar czf /tmp/cand_frames.tgz -C data candidates` FIRST, then
-      `.venv/bin/python eval/export_score_manifest.py --out /tmp/run3_manifest.csv` (manifest after
-      the tar so every row has a frame)
-- [ ] Bundle: `cd ~/waymowatch && tar czf /tmp/waymonet_train.tgz train/ eval/ data/dataset_real/ data/confuser_suite/`
-      → pull bundle + cand_frames.tgz + run3_manifest.csv to the laptop
-- [ ] Warm-start weights = laptop `~/waymonet_run2/weights/best.pt` (== VPS `collector/best.pt`;
-      sanity: `sha256sum | head -c 12` must equal the live `wn_model_ver` **31ed16757c09**)
-- [ ] Vast: credit + the LAPTOP SSH pubkey at Account → SSH Keys
+**TWO-STAGE DECISION (user, 2026-07-04 — "strongest possible model beats easy scoring"):** the
+pinned val withholds ~21% of positives (99/464 frames + 28 productive cameras) from training.
+So RUN_3 trains TWICE with the identical recipe: **v3 on the SPLIT build** (`dataset_real`) = the
+measurement run, gates + comparable numbers live here; **v3full on the FULL build**
+(`dataset_real_full`, every positive/negative trains, val duplicated in-sample) = the SHIP
+artifact. v3full is sanity-checked (confuser suite — the galleries are special-flagged and never
+train even in full mode — plus the full rescore: no banked positive may collapse), not
+recall-gated. Cost: one extra ~1 h / ~$0.50 run.
+
+### A. Off the clock (VPS + laptop) — DONE 2026-07-04 ✔
+- [x] Review backlog flushed: 3 pending candidates (conf 0.05–0.65) force-sent for verdict
+- [x] **PRE-TRAIN AUDIT sheets emailed** — all 497 training positives, 3 sheets, red box = the
+      training label; user replies `undo #id` for any non-Waymo. **⚠ Any undo (or new confirms
+      from the flushed 3) → re-run the two builds + preflight + re-bundle before renting (3
+      commands, ~5 min).** Silence = clean.
+- [x] Rebuilt BOTH datasets + preflighted the warm-start path (PREFLIGHT PASS on each):
+      `dataset_real` (split: 365+4627 train / 99+495 val) and
+      `dataset_real_full` (--full: 464+5385 train / in-sample val)
+- [x] Confuser suite refreshed: 189 frames (galleries 52 held-out + 132 run2 trained + 5 edge)
+- [x] Rescore inputs + bundle built on the VPS (`/tmp/cand_frames.tgz`, `/tmp/run3_manifest.csv`,
+      `/tmp/waymonet_train.tgz` incl. BOTH datasets + suite + train/ + eval/) and staged on the
+      laptop at `~/waymonet_run3_stage/`
+- [x] Warm-start weights on the laptop: `~/waymonet_run2/weights/best.pt` (== VPS
+      `collector/best.pt`; sha256[:12] must equal the live `wn_model_ver` **31ed16757c09**)
+- [ ] **USER: review the 4 emails** (1 review digest + 3 audit sheets)
+- [ ] **USER: Vast credit + the LAPTOP SSH pubkey** at Account → SSH Keys
 
 ### B. On the clock (RTX 4090, ~60–90 min, ~$0.50)
 - [ ] Rent: RTX 4090 · PyTorch template · ~30 GB disk · On-Demand · >99%; Direct SSH via the `>_` icon
 - [ ] Upload: `scp -P <port> waymonet_train.tgz cand_frames.tgz run3_manifest.csv best.pt root@<ip>:/workspace/`
       → `cd /workspace && tar xzf waymonet_train.tgz && tar xzf cand_frames.tgz`
 - [ ] `/venv/main/bin/pip install 'ultralytics==8.4.63'` (REUSE `/venv/main` — never a fresh venv)
-- [ ] **TRAIN (warm-start)**:
+- [ ] **STAGE 1 — TRAIN v3 (measurement run, SPLIT dataset, warm-start)**:
       `nohup /venv/main/bin/python /workspace/train/train.py --model /workspace/best.pt --name waymonet_real_v3 --device 0 > /workspace/train.log 2>&1 &`
       (epochs 100 / close_mosaic 20 / workers 16 are the defaults now; add `--lr0 0.005` only if
       the warm-start loss spikes in the first epochs)
@@ -362,18 +371,30 @@ epochs 100 / close_mosaic 20 / workers 16; warm-start stays an explicit `--model
       `/venv/main/bin/python /workspace/train/eval_gate.py --weights /workspace/best.pt`   ← RUN_2 baseline, identical data
 - [ ] **CONFUSER GATE — both weights**:
       `/venv/main/bin/python /workspace/train/confuser_gate.py --weights <v3-best.pt>` (+ same with /workspace/best.pt)
-      **SHIP = v3 box-recall ≥ RUN_2's on the same val AND v3 confuser max < 0.67.** Either fails → no deploy.
+      **PASS = v3 box-recall ≥ RUN_2's on the same val AND v3 confuser max < 0.67.** Either fails →
+      no deploy, no stage 2 — diagnose instead.
+- [ ] **STAGE 2 — REFIT v3full (SHIP artifact, FULL dataset, same recipe, same warm-start)**:
+      `nohup /venv/main/bin/python /workspace/train/train.py --model /workspace/best.pt --data /workspace/data/dataset_real_full/dataset.yaml --name waymonet_real_v3full --device 0 > /workspace/train2.log 2>&1 &`
+      (its val numbers are IN-SAMPLE — convergence signal only; do NOT quote them as recall)
+- [ ] **v3full sanity (not a recall gate)**:
+      `/venv/main/bin/python /workspace/train/confuser_gate.py --weights <v3full-best.pt>` must PASS
+      (the galleries never train, even in full mode — still a generalisation read)
+- [ ] Full rescore WITH THE SHIP ARTIFACT (~3 min): `/venv/main/bin/python /workspace/eval/rescore_all.py --weights <v3full-best.pt> --frames-dir /workspace/candidates --manifest /workspace/run3_manifest.csv --out /workspace/run3_scored.csv --device 0`
+      → sanity: no `status='waymo'` row may collapse to <0.10 (in-sample for v3full, so a collapse
+      = something is badly wrong)
 - [ ] Optional (idle GPU): the run1-weight ablation — pre-build variants on the VPS with
       `build_real_dataset.py --hard-weight-run1 {1,5} --out data/dataset_hw_r1x{1,5}`, bundle them,
       then `bench.py --name hw_r1x1 --data <variant>/dataset.yaml --epochs 100` + both gates per variant
-- [ ] Full rescore (~3 min): `/venv/main/bin/python /workspace/eval/rescore_all.py --weights <v3-best.pt> --frames-dir /workspace/candidates --manifest /workspace/run3_manifest.csv --out /workspace/run3_scored.csv --device 0`
-- [ ] Pull back: `rsync -az -e "ssh -p <port>" root@<ip>:/workspace/data/runs/waymonet_real_v3/ ~/waymonet_run3/` + `run3_scored.csv`
+- [ ] Pull back BOTH runs: `rsync -az -e "ssh -p <port>" root@<ip>:/workspace/data/runs/waymonet_real_v3/ ~/waymonet_run3/`
+      + same for `waymonet_real_v3full/ → ~/waymonet_run3full/` + `run3_scored.csv`
 - [ ] **DESTROY the instance** (trash icon, NOT Stop)
 
-### C. Post-rental cutover (ONLY if both gates passed)
+### C. Post-rental cutover (ONLY if v3 passed both gates AND v3full passed sanity)
+**The SHIP artifact is v3full** (trained on 100% of the data); v3's gate table is the honest,
+RUN_2-comparable record — file both sets of numbers.
 - [ ] Backups first: VPS `cp collector/best.pt collector/best_run2.pt`; homebox
       `cp ~/waymonet-dash/best.pt ~/waymonet-dash/best_run2.pt` (one-copy rollback, as at RUN_2)
-- [ ] Deploy v3 `best.pt` → VPS `collector/best.pt` AND homebox `~/waymonet-dash/best.pt`
+- [ ] Deploy **v3full** `best.pt` → VPS `collector/best.pt` AND homebox `~/waymonet-dash/best.pt`
 - [ ] Restart: `ssh root@vps-hel1 "systemctl restart waymowatch-loop"` + homebox `waymonet-infer`;
       **recheck the dash canary threshold** (v3 scores the canary differently)
 - [ ] Backlog re-score (also clears the stale-model ≥0.75 dead band — old-ver rows are excluded

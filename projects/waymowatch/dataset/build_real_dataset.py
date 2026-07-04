@@ -60,6 +60,11 @@ def main():
                     help=f"TRAIN oversample for RUN_2-era hard negs, run2/ dir (default {HARD_WEIGHT_RUN2})")
     ap.add_argument("--val-cams-file", default=VAL_CAMS_FILE,
                     help="pinned val-camera list (one per line); absent -> random by-camera split")
+    ap.add_argument("--full", action="store_true",
+                    help="FULL-TRAIN build (the SHIP artifact's dataset): every positive/negative "
+                         "also trains, val-cam content is duplicated into train. Val becomes "
+                         "IN-SAMPLE — a convergence signal only, NOT a generalisation measure. "
+                         "Gate on the split build first; refit on this with the same recipe.")
     a = ap.parse_args()
     random.seed(SEED)
     con = sqlite3.connect(a.db, timeout=60)
@@ -141,35 +146,41 @@ def main():
         os.makedirs(os.path.join(a.out, "images", s))
         os.makedirs(os.path.join(a.out, "labels", s))
 
+    # In --full mode a val-cam item lands in BOTH splits (train for strength, val as an
+    # in-sample convergence signal); otherwise exactly one split as before.
+    def dests(cam):
+        s = "val" if cam in val_cams else "train"
+        return ("train", "val") if (a.full and s == "val") else (s,)
+
     counts = {"train": {"pos": 0, "neg": 0}, "val": {"pos": 0, "neg": 0}}
     multi, boxes_total, val_meta = 0, 0, []
     for i, g in enumerate(pos):
         cam, fp, boxes = g["cam"], g["fp"], g["boxes"]
-        s = "val" if cam in val_cams else "train"
         im = cv2.imread(fp)
         if im is None:
             continue
         name = f"waymo_{i:04d}"
-        shutil.copy(fp, os.path.join(a.out, "images", s, name + ".jpg"))
-        open(os.path.join(a.out, "labels", s, name + ".txt"), "w").write(
-            "".join(yolo_line(b, im.shape[1], im.shape[0]) + "\n" for b in boxes))
-        counts[s]["pos"] += 1            # one image per frame; a frame may carry several boxes
+        for s in dests(cam):
+            shutil.copy(fp, os.path.join(a.out, "images", s, name + ".jpg"))
+            open(os.path.join(a.out, "labels", s, name + ".txt"), "w").write(
+                "".join(yolo_line(b, im.shape[1], im.shape[0]) + "\n" for b in boxes))
+            counts[s]["pos"] += 1        # one image per frame; a frame may carry several boxes
+            if s == "val":
+                val_meta.append((name + ".jpg", cam, g["at"]))
         boxes_total += len(boxes)
         if len(boxes) > 1:
             multi += 1
-        if s == "val":
-            val_meta.append((name + ".jpg", cam, g["at"]))
 
     # negatives: vetted rejects only, hardest (highest-scoring) first, capped per split
     target = {s: max(1, int(counts[s]["pos"] * NEG_RATIO)) for s in ("train", "val")}
-    seen = set()
+    seen = {"train": set(), "val": set()}
     for j, (cam, fp) in enumerate(rejects):
-        s = "val" if cam in val_cams else "train"
-        if counts[s]["neg"] >= target[s] or fp in seen:
-            continue
-        seen.add(fp)
-        shutil.copy(fp, os.path.join(a.out, "images", s, f"neg_{j:05d}.jpg"))
-        counts[s]["neg"] += 1   # no label file = background (Ultralytics convention)
+        for s in dests(cam):
+            if counts[s]["neg"] >= target[s] or fp in seen[s]:
+                continue
+            seen[s].add(fp)
+            shutil.copy(fp, os.path.join(a.out, "images", s, f"neg_{j:05d}.jpg"))
+            counts[s]["neg"] += 1   # no label file = background (Ultralytics convention)
 
     # hard negatives: model's own FPs — TRAIN oversampled BY PROVENANCE (run2 = the current model's
     # live blind spots get the full weight; run1 = largely already-suppressed cases get a light
@@ -177,12 +188,12 @@ def main():
     # VAL keeps everything x1 (undistorted FP rate).
     hard_counts = {"train": {"run1": 0, "run2": 0}, "val": {"run1": 0, "run2": 0}}
     for j, (cam, fp, prov) in enumerate(hard):
-        s = "val" if cam in val_cams else "train"
-        reps = hard_w[prov] if s == "train" else 1
-        for k in range(reps):
-            shutil.copy(fp, os.path.join(a.out, "images", s, f"neghard_{prov}_{j:05d}_{k:02d}.jpg"))
-        counts[s]["neg"] += reps
-        hard_counts[s][prov] += reps
+        for s in dests(cam):
+            reps = hard_w[prov] if s == "train" else 1
+            for k in range(reps):
+                shutil.copy(fp, os.path.join(a.out, "images", s, f"neghard_{prov}_{j:05d}_{k:02d}.jpg"))
+            counts[s]["neg"] += reps
+            hard_counts[s][prov] += reps
 
     open(os.path.join(a.out, "dataset.yaml"), "w").write(
         f"# WaymoNet REAL dataset — built from waymo.db (confirms + vetted rejects).\n"
@@ -197,6 +208,9 @@ def main():
     if counts["val"]["neg"] == 0:
         print("WARNING: no vetted negatives on the held-out cameras — eval_gate.py cannot "
               "measure FP rate. Review+bank a sheet covering the val cameras, then rebuild.")
+    if a.full:
+        print("FULL-TRAIN build: val content is DUPLICATED into train — val metrics are "
+              "IN-SAMPLE (convergence only). Gate generalisation on the split build.")
     print(f"dataset -> {a.out}")
     print(f"  positive images: {len(pos)} frames carrying {boxes_total} Waymo boxes "
           f"({multi} multi-Waymo frame{'s' if multi != 1 else ''})")
