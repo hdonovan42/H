@@ -340,21 +340,26 @@ train even in full mode — plus the full rescore: no banked positive may collap
 recall-gated. Cost: one extra ~1 h / ~$0.50 run.
 
 ### A. Off the clock (VPS + laptop) — DONE 2026-07-04 ✔
-- [x] Review backlog flushed: 3 pending candidates (conf 0.05–0.65) force-sent for verdict
-- [x] **PRE-TRAIN AUDIT sheets emailed** — all 497 training positives, 3 sheets, red box = the
-      training label; user replies `undo #id` for any non-Waymo. **⚠ Any undo (or new confirms
-      from the flushed 3) → re-run the two builds + preflight + re-bundle before renting (3
-      commands, ~5 min).** Silence = clean.
-- [x] Rebuilt BOTH datasets + preflighted the warm-start path (PREFLIGHT PASS on each):
-      `dataset_real` (split: 365+4627 train / 99+495 val) and
-      `dataset_real_full` (--full: 464+5385 train / in-sample val)
-- [x] Confuser suite refreshed: 189 frames (galleries 52 held-out + 132 run2 trained + 5 edge)
-- [x] Rescore inputs + bundle built on the VPS (`/tmp/cand_frames.tgz`, `/tmp/run3_manifest.csv`,
-      `/tmp/waymonet_train.tgz` incl. BOTH datasets + suite + train/ + eval/) and staged on the
-      laptop at `~/waymonet_run3_stage/`
-- [x] Warm-start weights on the laptop: `~/waymonet_run2/weights/best.pt` (== VPS
-      `collector/best.pt`; sha256[:12] must equal the live `wn_model_ver` **31ed16757c09**)
-- [ ] **USER: review the 4 emails** (1 review digest + 3 audit sheets)
+- [x] Review backlog flushed + VERDICTS BANKED: **#107660 confirmed** (conf 0.65 — a real Waymo
+      the model underscored; confirm-echo emailed, undo window open), **#107359 + #111270 →
+      hard_negatives/run2** (now 134)
+- [x] **PRE-TRAIN AUDIT: WAIVED for RUN_3 (user)** — 497 tiny cells at JamCam quality are not
+      human-adjudicable; banking already has rigorous guards (confirm-echo, undo, both-sides).
+      The operative positive-set safety net is the **v3full full-rescore collapse check** in
+      section B (no `status='waymo'` row < 0.10). **RUN_4 audit recipe (agreed): model-assisted —
+      after each run, audit at FULL resolution only (a) confirmed positives the new model scores
+      <0.10 (the rescore/contradiction report surfaces these) and (b) `wn_autobank=1` rows banked
+      since the last audit. ~1–2 small sheets instead of 500 cells.**
+- [x] Rebuilt BOTH datasets post-verdicts + preflighted the warm-start path (PREFLIGHT PASS ×2):
+      `dataset_real` (split: 366+4653 train / 99+495 val) and
+      `dataset_real_full` (--full: 465+5411 train / in-sample val) — **498 boxes / 465 frames /
+      172 cams; hard negs run1 427 ×3 + run2 134 ×10**
+- [x] Confuser suite refreshed post-verdicts: **191 frames** (52 held-out galleries + 134 run2
+      trained + 5 edge positives)
+- [x] Rescore inputs + bundle on the VPS (`/tmp/cand_frames.tgz` 4.7G / `/tmp/run3_manifest.csv`
+      42,809 rows / `/tmp/waymonet_train.tgz` 458M incl. BOTH datasets + suite + train/ + eval/),
+      staging to the laptop at **`~/waymonet_run3_stage/`** (+ warm-start `best.pt`,
+      sha256[:12] must equal the live `wn_model_ver` **31ed16757c09**)
 - [ ] **USER: Vast credit + the LAPTOP SSH pubkey** at Account → SSH Keys
 
 ### B. On the clock (RTX 4090, ~60–90 min, ~$0.50)
