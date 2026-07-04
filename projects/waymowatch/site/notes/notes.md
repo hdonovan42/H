@@ -66,17 +66,17 @@ On the held-out gate: **98.1% recall** (RUN_2: 97.1%), 1 false positive in 495 b
 
 Every confirmed Waymo and every human-vetted non-Waymo (8,050 of them), scored by the live model. Pick a cut: **left column as high as possible, right column as low as possible.**
 
-| Score cut | Waymos captured | Non-Waymos<br>wrongly captured<br>(of 8,050) |
+| Score cut | Waymos captured<br>(of 526) | Non-Waymos<br>wrongly captured<br>(of 8,050) |
 |---|---|---|
-| 0.9 | 2% | 0 |
-| 0.8 | 56% | 0 |
-| **0.7** | **76%** | **0** |
-| 0.6 | 85% | 1 |
-| 0.5 | 91% | 3 |
-| 0.4 | 95% | 5 |
-| 0.3 | 97% | 6 |
-| 0.2 | 98% | 14 |
-| 0.1 | 99% | 20 |
+| 0.9 | 2% (11) | 0 |
+| 0.8 | 56% (296) | 0 |
+| **0.7** | **76% (399)** | **0** |
+| 0.6 | 85% (447) | 1 |
+| 0.5 | 91% (480) | 3 |
+| 0.4 | 95% (500) | 5 |
+| 0.3 | 97% (510) | 6 |
+| 0.2 | 98% (516) | 14 |
+| 0.1 | 99% (519) | 20 |
 
 <figure style="max-width:560px;margin:12px auto 6px"><img src="img/confusers_row.jpg" style="width:100%" alt="Full frames of the three highest-scoring confirmed non-Waymos, model detection boxed in red"><figcaption>The three highest-scoring confirmed non-Waymos (full frames, the model's detection in red) — 0.64 · 0.55 · 0.54. The top one is a white car glimpsed through a tree.</figcaption></figure>
 
