@@ -393,19 +393,32 @@ recall-gated. Cost: one extra ~1 h / ~$0.50 run.
       staging to the laptop at **`~/waymonet_run3_stage/`** (+ warm-start `best.pt`,
       sha256[:12] must equal the live `wn_model_ver` **31ed16757c09**)
 - [ ] **USER: Vast credit + the LAPTOP SSH pubkey** at Account → SSH Keys
+- [ ] **USER (one-time, retires the RUN_3 key dance): add the VPS pubkey
+      (`ssh hq@vps-hel1 cat .ssh/id_ed25519.pub`) to the Vast ACCOUNT too** — the VPS is the
+      canonical data source and `on_rent.sh` pushes from it; in-instance authorized_keys edits get
+      wiped by Vast's resync
 
 ### B. On the clock (RTX 4090, ~60–90 min, ~$0.50)
+**Rent→spinning is ONE COMMAND now (RUN_3 lesson — 25 min of paid idle went to a 0.6 MB/s home
+uplink):** run **from the VPS**: `bash train/on_rent.sh <ssh_port> <ip> [run_name]` — pushes at
+Hetzner speed, extracts, installs pinned deps, launches stage 1, verifies the GPU is training.
+Prereq: the VPS pubkey on the Vast ACCOUNT (or append+run immediately — see Gotchas). The manual
+steps below remain as the reference / fallback.
 - [ ] Rent: RTX 4090 · PyTorch template · **40 GB disk** (RUN_3 peaks ~12 G in /workspace — frames
       tgz 4.7G + extracted 4.6G + both datasets; 30 G works but leaves no margin for ablation runs
       or a forgotten tgz) · On-Demand · >99%; Direct SSH via the `>_` icon
-- [ ] Upload: `scp -P <port> waymonet_train.tgz cand_frames.tgz run3_manifest.csv best.pt root@<ip>:/workspace/`
+- [ ] **`bash train/on_rent.sh <port> <ip>`** (from the VPS) — or manually:
+      `scp -P <port> waymonet_train.tgz cand_frames.tgz run3_manifest.csv best.pt root@<ip>:/workspace/`
       → `cd /workspace && tar xzf waymonet_train.tgz && tar xzf cand_frames.tgz && rm /workspace/*.tgz`
       (the rm claws back 5.2 G once extracted)
-- [ ] `/venv/main/bin/pip install 'ultralytics==8.4.63'` (REUSE `/venv/main` — never a fresh venv)
-- [ ] **STAGE 1 — TRAIN v3 (measurement run, SPLIT dataset, warm-start)**:
+- [ ] `/venv/main/bin/pip install 'ultralytics==8.4.63'` (REUSE `/venv/main` — never a fresh venv;
+      on_rent.sh does this)
+- [ ] **STAGE 1 — TRAIN v3 (measurement run, SPLIT dataset, warm-start)** (on_rent.sh launches this):
       `nohup /venv/main/bin/python /workspace/train/train.py --model /workspace/best.pt --name waymonet_real_v3 --device 0 > /workspace/train.log 2>&1 &`
       (epochs 100 / close_mosaic 20 / workers 16 are the defaults now; add `--lr0 0.005` only if
-      the warm-start loss spikes in the first epochs)
+      the warm-start loss spikes in the first epochs). NB the log will contain **AutoBatch CUDA-OOM
+      lines — that's the probe working, not a crash**; scope any log-watcher to the TAIL and pair it
+      with a process-alive check.
 - [ ] **GATE — run BOTH weights on the SAME final val** (paths auto-resolve under /workspace):
       `/venv/main/bin/python /workspace/train/eval_gate.py --weights /workspace/data/runs/waymonet_real_v3/weights/best.pt`
       `/venv/main/bin/python /workspace/train/eval_gate.py --weights /workspace/best.pt`   ← RUN_2 baseline, identical data
