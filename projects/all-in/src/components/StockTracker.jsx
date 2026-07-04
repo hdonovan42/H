@@ -33,6 +33,9 @@ export default function StockTracker() {
     return initialState.isRegularHours ? '1D' : '6M';
   });
   const [quote, setQuote] = useState(null);
+  // Wall-clock of the last price that actually landed (fetch, WS tick, poll,
+  // settle read) — NOT render time, so a frozen price shows its true age.
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [loading, setLoading] = useState(true);
   const [priceFlash, setPriceFlash] = useState(null);
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
@@ -195,6 +198,7 @@ export default function StockTracker() {
           sharesOutstanding: priceData.sharesOutstanding,
           forwardPE: priceData.forwardPE
         });
+        setLastUpdatedAt(Date.now());
 
         if (marketState.usingApi) {
           console.log(`Market: ${marketState.state.toUpperCase()} | ${symbol}: $${priceData.currentPrice.toFixed(2)}${priceData.extendedHoursPrice ? ` | Extended: $${priceData.extendedHoursPrice.toFixed(2)}` : ''}`);
@@ -474,6 +478,7 @@ export default function StockTracker() {
         if (v == null) return;
 
         setSettlingValue(v);
+        setLastUpdatedAt(Date.now());
         const reads = [...settleReadingsRef.current, v];
         settleReadingsRef.current = reads;
 
@@ -517,6 +522,7 @@ export default function StockTracker() {
     setWeeklyData([]);
     setMonthlyData([]);
     setQuote(null);
+    setLastUpdatedAt(null);
 
     // Reset the close-settle machine for the new ticker, then re-derive its phase.
     stopSettlePoll();
@@ -697,6 +703,7 @@ export default function StockTracker() {
                   l: Math.min(prev.l || newPrice, newPrice)
                 };
               });
+              setLastUpdatedAt(Date.now());
               setPriceFlash(null);
               requestAnimationFrame(() => setPriceFlash(direction));
             }
@@ -849,6 +856,7 @@ export default function StockTracker() {
               extendedHoursType: priceData.extendedHoursType
             };
           });
+          setLastUpdatedAt(Date.now());
 
           console.log(`Market: ${currentState.state.toUpperCase()} | ${ticker}: $${priceData.currentPrice.toFixed(2)} | Extended: $${priceData.extendedHoursPrice.toFixed(2)}`);
         }
@@ -890,6 +898,7 @@ export default function StockTracker() {
               volume: priceData.volume || prev.volume
             };
           });
+          setLastUpdatedAt(Date.now());
         }
       } catch (error) {
         console.error('Fallback poll error:', error);
@@ -975,7 +984,10 @@ export default function StockTracker() {
             volume: quote?.volume || dataWithToday[todayIndex].volume,
           };
         }
-      } else {
+      } else if (quote?.tradingDay === todayEST) {
+        // tradingDay guard: on a holiday evening the state reads POST_MARKET (the
+        // Alpaca clock can't distinguish it from a normal evening) but Yahoo's last
+        // intraday bar is still the previous trading day — don't invent a today row.
         dataWithToday.push({
           date: todayEST,
           open: quote?.o ?? currentPrice,
@@ -1198,7 +1210,7 @@ export default function StockTracker() {
         </div>
 
         <div className="timestamp">
-          Last updated: {dayjs().format('HH:mm MMM D.')}
+          Last updated: {lastUpdatedAt ? dayjs(lastUpdatedAt).format('HH:mm MMM D.') : '—'}
           <span style={{ marginLeft: '12px', opacity: 0.7 }}>
             Market: {currentMarketState.isRegularHours ? 'Open' : 'Closed'}
           </span>

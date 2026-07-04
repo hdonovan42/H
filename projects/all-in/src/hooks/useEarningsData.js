@@ -92,8 +92,11 @@ export function useEarningsData(ticker, options = {}) {
         error: null
       }));
 
-      // If we got a racing result with pending sources, schedule a merge fetch
-      if (mode === 'race' && result.pendingSources?.length > 0 && result.allResults > 1) {
+      // A live race returns a single unvalidated source — follow up with a merge
+      // so the cross-validated record replaces it. Usually a cheap hit: the worker
+      // background-merges the race losers into KV and serves that when fresh
+      // (result.mode === 'kv'), which needs no follow-up.
+      if (mode === 'race' && result.mode === 'race') {
         setTimeout(() => fetchEarnings('merge'), 3000);
       }
 

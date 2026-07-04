@@ -65,11 +65,15 @@ export const getMarketState = (clockData = null) => {
   // Use Alpaca clock data for accurate market status
   const { isOpen, nextOpen, nextClose } = clockData;
 
-  // Determine if today is a holiday:
-  // It's a weekday, market not open, and next open is not today
+  // Determine if today is a holiday: weekday, market not open, next open not today.
+  // Only decidable BEFORE the open — after the 4pm close next_open is always the
+  // next trading day, which would flag every ordinary evening as a holiday and
+  // force POST_MARKET to CLOSED. Trade-off: a holiday evening (16:00–20:00) reads
+  // POST_MARKET; the today-row guards against phantom rows via quote.tradingDay.
   const todayStr = now.format('YYYY-MM-DD');
   const nextOpenStr = nextOpen ? dayjs(nextOpen).tz(EST).format('YYYY-MM-DD') : null;
-  const isHoliday = !local.isWeekend && !isOpen && nextOpenStr !== todayStr;
+  const isBeforeOpen = local.timeInMinutes < MARKET_OPEN;
+  const isHoliday = !local.isWeekend && !isOpen && isBeforeOpen && nextOpenStr !== todayStr;
 
   let state;
 

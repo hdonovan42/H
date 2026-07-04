@@ -6,6 +6,9 @@ axiom-bootstrap.tar.gz
 # Build output / bundler artifacts
 dist/
 
+# Wrangler local dev state (miniflare KV/cache)
+.wrangler/
+
 # ML run outputs (e.g. YOLO runs/detect)
 runs/
 

@@ -30,7 +30,10 @@ function isEarningsNight(clockData) {
   if (!CONFIG.earningsDate) return false;
 
   const now = dayjs().tz(EST);
-  const earningsDay = dayjs(CONFIG.earningsDate).tz(EST);
+  // Parse the date IN EST — dayjs(date).tz(EST) parses at the viewer's local
+  // midnight then converts, which shifts the calendar day for anyone at/east of
+  // UTC (a UK viewer would never see earnings night arm).
+  const earningsDay = dayjs.tz(CONFIG.earningsDate, EST);
 
   // Must be same calendar day
   if (!now.isSame(earningsDay, 'day')) return false;
