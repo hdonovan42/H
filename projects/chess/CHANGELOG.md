@@ -1,5 +1,39 @@
 # Chess Analysis — Changelog
 
+## v2.9 — Accuracy standardised on Lichess, exactly (2026-07-04)
+
+User-reported: accuracy "wildly off" vs reputable sites. **Confirmed and
+root-caused.** The old aggregation deviated from Lichess's published
+algorithm in three ways (per-colour instead of combined volatility windows;
+weighting window averages instead of individual moves; harmonic mean over
+window averages instead of raw move accuracies). The harmonic deviation
+smoothed blunders out of the score — on identical evals, a game Lichess
+scores 57/65 came out 85/85. Mean error 3.3 points, max 28, worst exactly
+in blunder-heavy games; clean games agreed, which is why casual checks on
+good games looked fine.
+
+- Replaced with an **exact port of lila's `AccuracyPercent.gameAccuracy`**
+  (win% ±1000cp clamp, +1 uncertainty bonus, 100-on-improvement, per-move
+  volatility weights over the combined win% sequence with first-window
+  duplication, mean of weighted + harmonic means).
+- **Verified: ±0.5 of lichess.org's official numbers on 12 real
+  server-analysed games** (mean error 0.32), in-browser against the shipped
+  code, not a copy.
+- chess.com was the user's first preference but CAPS2 is proprietary and
+  unpublished — it cannot be standardised against, only curve-fit
+  approximated. Lichess is open source and exactly reproducible; note that
+  chess.com numbers will still read differently (their scale runs higher).
+- `tests/accuracy-test.js` rewritten: loads `script.js` itself (vm sandbox,
+  single source of truth) and regresses against the 12 official fixtures
+  (`tests/lichess-accuracy-fixtures.json`). Old synthetic-bot test retired.
+- Removed dead code: `computeWeightedAccuracy`, `calculateMoveAccuracy`,
+  `cpLossToAccuracy`, `evalToWinProbability`, `getAccuracyRating`,
+  `_accuracySums`.
+- Remaining caveat: displayed accuracy for a given game still differs
+  slightly from lichess.org's because our evals come from our own engine
+  pass (depth 18–20) rather than fishnet's — the formula is now exact, the
+  eval source is ours.
+
 ## v2.8 — Graph analysis 10×+: parallel worker pool (2026-07-04)
 
 The graph fill was the slow part — one worker searching every position

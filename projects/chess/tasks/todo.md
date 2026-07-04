@@ -76,3 +76,11 @@ from notes.txt is gone; Safari quietly falling back to single-threaded is expect
 - [x] REVERTED decided-stretch budget before ship (user call: badge fidelity > arbitrary
       10× line) — final uniform 600k ≈ 9-12× depending on run; residual marker flips
       proven threshold-noise via cache-depth diagnostic (polish runs everywhere, d18-21)
+
+## Accuracy standardisation (2026-07-04)
+- [x] Investigated user report "accuracy wildly off" — CONFIRMED: old aggregation
+      deviated from Lichess spec 3 ways; worst case 28 points (57/65 → 85/85)
+- [x] chess.com CAPS2 ruled out (proprietary, unpublished) — standardised on Lichess
+- [x] Exact port of lila AccuracyPercent.gameAccuracy; verified ±0.5 on 12 real
+      server-analysed games (in-browser, shipped code)
+- [x] tests/accuracy-test.js rewritten: loads script.js itself + 12 official fixtures
