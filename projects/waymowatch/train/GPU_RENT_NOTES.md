@@ -363,9 +363,12 @@ recall-gated. Cost: one extra ~1 h / ~$0.50 run.
 - [ ] **USER: Vast credit + the LAPTOP SSH pubkey** at Account → SSH Keys
 
 ### B. On the clock (RTX 4090, ~60–90 min, ~$0.50)
-- [ ] Rent: RTX 4090 · PyTorch template · ~30 GB disk · On-Demand · >99%; Direct SSH via the `>_` icon
+- [ ] Rent: RTX 4090 · PyTorch template · **40 GB disk** (RUN_3 peaks ~12 G in /workspace — frames
+      tgz 4.7G + extracted 4.6G + both datasets; 30 G works but leaves no margin for ablation runs
+      or a forgotten tgz) · On-Demand · >99%; Direct SSH via the `>_` icon
 - [ ] Upload: `scp -P <port> waymonet_train.tgz cand_frames.tgz run3_manifest.csv best.pt root@<ip>:/workspace/`
-      → `cd /workspace && tar xzf waymonet_train.tgz && tar xzf cand_frames.tgz`
+      → `cd /workspace && tar xzf waymonet_train.tgz && tar xzf cand_frames.tgz && rm /workspace/*.tgz`
+      (the rm claws back 5.2 G once extracted)
 - [ ] `/venv/main/bin/pip install 'ultralytics==8.4.63'` (REUSE `/venv/main` — never a fresh venv)
 - [ ] **STAGE 1 — TRAIN v3 (measurement run, SPLIT dataset, warm-start)**:
       `nohup /venv/main/bin/python /workspace/train/train.py --model /workspace/best.pt --name waymonet_real_v3 --device 0 > /workspace/train.log 2>&1 &`
