@@ -373,12 +373,20 @@ def main():
     shown = _build_frame_sheet(sheet_rows, sheet, cap=len(sheet_rows))
     lo, hi = rows[-1][1], rows[0][1]
     subj = f"WaymoWatch: WaymoNet flagged {shown} candidate(s) — FULL FRAMES (conf {lo:.2f}–{hi:.2f})"
+    # running tally of review volume (user-requested 2026-07-04): per-send log -> daily totals
+    con.execute("CREATE TABLE IF NOT EXISTS sent_log(sent_at TEXT, n INTEGER)")
+    today_prev = con.execute("SELECT COALESCE(SUM(n),0) FROM sent_log "
+                             "WHERE date(sent_at)=date('now')").fetchone()[0]
+    avg7 = con.execute("SELECT COALESCE(SUM(n),0)/7.0 FROM sent_log "
+                       "WHERE sent_at >= datetime('now','-7 days')").fetchone()[0]
     html = (
         f"<p><b>WaymoNet</b> flagged these <b>{shown}</b> candidate(s) (conf &ge; 0.03), highest first. "
         f"Each cell is the <b>FULL FRAME</b> with the model's box drawn in <b>red</b> and labelled "
         f"#id + conf — so you see the whole scene and exactly what the model detected, never a crop.</p>"
         f"<p>Reply with the <b>#</b> of any frame with a real Waymo (white Jaguar I-PACE, dark roof "
         f"dome). Everything you don't flag becomes a hard negative — the model curates its own dataset.</p>"
+        f"<p style='color:#888'>Review tally: <b>{today_prev + shown}</b> sent today · "
+        f"7-day avg {avg7:.0f}/day.</p>"
         f"<p style='color:#888'>Powered by TfL Open Data.</p>")
 
     if a.dry_run:
@@ -388,8 +396,9 @@ def main():
         ids = [r[0] for r in rows]
         con.execute("UPDATE candidates SET wn_sent=1 WHERE id IN (%s)"
                     % ",".join(str(int(i)) for i in ids))
+        con.execute("INSERT INTO sent_log VALUES(strftime('%Y-%m-%dT%H:%M:%SZ','now'), ?)", (shown,))
         con.commit()
-        print(f"sent {shown} WaymoNet candidate(s) for review (full frames); marked wn_sent=1")
+        print(f"sent {shown} candidate(s) for review; tally today: {today_prev + shown}")
     else:
         print("send failed or nothing to show — leaving wn_sent=0 for retry")
 
