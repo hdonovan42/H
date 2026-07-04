@@ -1,5 +1,27 @@
 # WaymoWatch — Changelog
 
+## Auto-bank goes continuous — map fresh within the hour; 01:00 review preserved (2026-07-04)
+
+- **Hourly quiet auto-bank.** `auto_bank()` now banks every `≥ AUTO_BANK_TH (0.75)` candidate on the
+  **hourly `:17` digest tick** (quiet — no email), so a high-confidence Waymo goes **live on the public
+  map within the hour** instead of waiting for the daily batch. The default digest path calls it before
+  the `< 0.75` review (`if not a.dry_run: auto_bank(con)`); `--dry-run` skips it (side-effect-free).
+- **The 01:00 review is UNCHANGED in purpose** (user's existing, liked digest) — only its *source*
+  moved. New `autobank_review()` (cron `0 0` switched `--auto-bank` → `--autobank-review`) emails the
+  Waymos auto-banked since the last review (via new `wn_autobank_sent` flag), reply `undo #id`. Banking
+  no longer happens *at* 01:00; 01:00 is now purely the false-positive catch.
+- **Safety preserved differently.** The old bank was email-gated (bank only on a delivered review email).
+  Now rows hit the map *before* review (deliberate — the map should feel live), and the invariant becomes
+  "never permanently un-reviewed": `autobank_review` marks a row shown only on a **delivered** email and
+  retries otherwise. Trade-off owned by the user: a novel confuser `≥0.75` could sit on the *public* map
+  until the next 01:00 review (low risk — no confirmed confuser has reached 0.75; worst novel = 0.67).
+- Migration: `wn_autobank_sent` column added; all existing autobanks initialised to reviewed=1 so the
+  first review doesn't re-email history. Verified: 8 pending `≥0.75` quiet-banked (map 427→435), dry-run
+  clean, `--autobank-review` → "nothing new".
+- **+36 confirmed Waymos / +16 hard negatives** (Jul 3 17:17 → Jul 4 15:17 backlog) → **502 waymo rows /
+  132 RUN_2 hard negs**. Low-id exceptions (#65999 @0.43 etc.) explained: parked-spot dedup reuses an old
+  row (updates frame/score/time in place) rather than inserting — so an old ID resurfaces refreshed.
+
 ## Notes: AlexNet-style application diagram (2026-07-03)
 
 User-designed pipeline diagram (`temp/waymonet_pipeline_alexnet_style.png`) implemented as
