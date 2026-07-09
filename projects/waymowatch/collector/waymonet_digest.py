@@ -31,9 +31,11 @@ from email_alert import send_email              # noqa: E402  (lightweight: requ
 
 MAX_CELLS = 200
 REAL_DIR = os.path.join(BASE, "data", "real_positives")    # WaymoNet-path confirms -> positives
-HARD_DIR = os.path.join(BASE, "data", "hard_negatives", "run2")   # RUN_2-era rejects kept SEPARATE from the
-# RUN_1 hard negatives (data/hard_negatives/*): they're a different population — RUN_2's OWN false positives
-# (its current blind spots), vs RUN_1's, which RUN_2 already mostly suppresses. build_real_dataset globs both.
+HARD_DIR = os.path.join(BASE, "data", "hard_negatives", "run3")   # rejects go to the CURRENT model's era dir.
+# RUN_3 is live (best.pt 58104438c522, cutover 2026-07-04) so its OWN false positives (current blind spots)
+# bank here, kept SEPARATE from run2/ and run1/ (data/hard_negatives/{run2,*}). Each era is a distinct
+# population — the live model's FPs are the highest-signal negatives; older eras it already suppresses.
+# build_real_dataset globs all eras (per-provenance weights). Repoint this at every model cutover.
 AUTO_BANK_TH = 0.70   # RUN_3 recalibration (2026-07-04, threshold_report + human-adjudicated ceiling):
                       # confirmed-confuser ceiling = 0.638 (#100105); the tool's minimum-safe cut is 0.67
                       # but a NOVEL confuser once hit 0.67 (#40294, RUN_2 era), so 0.70 buys double margin
