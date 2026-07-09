@@ -66,19 +66,17 @@ On the held-out gate: **98.1% recall** (RUN_2: 97.1%), 1 false positive in 495 b
 
 Every confirmed Waymo and every human-vetted non-Waymo (8,050 of them), scored by the live model. Pick a cut: **left column as high as possible, right column as low as possible.**
 
-| Score cut | Waymos captured<br>(of 526) | Non-Waymos<br>wrongly captured<br>(of 8,050) |
+| Score cut | Waymos captured | Non-Waymos<br>wrongly captured<br>(of 8,050) |
 |---|---|---|
-| 0.9 | 2% (11) *· 0%* | 0 *· 0* |
-| 0.8 | 56% (296) *· 7%* | 0 *· 0* |
-| **0.7** | **76% (399)** *· 26%* | **0** *· 0* |
-| 0.6 | 85% (447) *· 45%* | 1 *· 1* |
-| 0.5 | 91% (480) *· 61%* | 3 *· 2* |
-| 0.4 | 95% (500) *· 78%* | 5 *· 3* |
-| 0.3 | 97% (510) *· 84%* | 6 *· 8* |
-| 0.2 | 98% (516) *· 90%* | 14 *· 12* |
-| 0.1 | 99% (519) *· 93%* | 20 *· 31* |
-
-*Italics: RUN_2 scoring the same 526 Waymos and 8,050 non-Waymos.*
+| 0.9 | 2% | 0 |
+| 0.8 | 56% | 0 |
+| **0.7** | **76%** | **0** |
+| 0.6 | 85% | 1 |
+| 0.5 | 91% | 3 |
+| 0.4 | 95% | 5 |
+| 0.3 | 97% | 6 |
+| 0.2 | 98% | 14 |
+| 0.1 | 99% | 20 |
 
 <figure style="max-width:560px;margin:12px auto 6px"><img src="img/confusers_row.jpg" style="width:100%" alt="Full frames of the three highest-scoring confirmed non-Waymos, model detection boxed in red"><figcaption>The three highest-scoring confirmed non-Waymos (full frames, the model's detection in red) — 0.64 · 0.55 · 0.54. The top one is a white car glimpsed through a tree.</figcaption></figure>
 
@@ -107,5 +105,17 @@ Anything the model scores above a set threshold becomes a confirmed sighting wit
 WaymoNet is an object **detector**: per frame it emits boxes with a confidence ∈ [0, 1], and the threshold above decides what counts as a sighting — everything below it still queues for human review, so recall is never silently lost.
 
 ---
+
+Future Improvements
+- Split image into 4?
+- Car filter identifies a non waymo - model is then shown the image and the car the filter let through is not a waymo - waymo identifies some non-waymo object that even the filter knows is not a waymo.
+This 'bug' has the benefit that its less likely to screen out a waymo as it only has to pass on one of the presumably many cars present in frame - loose filter.
+
+
+
+
+
+---
+
 
 *Powered by TfL Open Data. WaymoNet is an independent research project, not affiliated with Waymo, Wayve, or Transport for London.*
