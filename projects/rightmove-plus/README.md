@@ -29,7 +29,11 @@ Scotland, Grade B+/B1/B2 NI) · green `NOT LISTED` (explicit statement, e.g. "ne
 nor situated within a conservation area") · amber `LISTED NEARBY?` (the description only
 mentions a listed building nearby — "opposite the Grade II listed church") · `CHECKING…`
 while the full description is being read. Hover a badge for the matching sentence.
-"show" in the pill reveals hidden cards dimmed instead of removed.
+
+**Filtered cards collapse to a slim badged strip by default** rather than disappearing:
+Rightmove paginates server-side (24 per page) before the filter runs, so outright removal
+makes a fully-filtered page look empty. The pill's style button cycles collapsed →
+removed → revealed (dimmed, full-size); the choice is remembered.
 
 ## How it works
 
@@ -66,6 +70,18 @@ browser and the tests.
 - Map view is not supported (list view only).
 
 ## CHANGELOG
+
+### 0.2.0 — 2026-07-09
+
+Empty-page workaround: filtering can't beat Rightmove's server-side pagination (a page whose
+24 results are all filtered rendered as just ads), so filtered cards now **collapse to a
+slim badged strip** by default instead of being removed; a pill button cycles collapsed /
+removed / revealed and persists. Filtered-but-unbadged cards (definitive clear under
+Only/Not-listed) get a grey `FILTERED` label so stubs are never mysterious. Also: cards
+whose id can't be read are fully reset (belt-and-braces against stale state), detail-fetch
+gaps are jittered with a 60 s queue backoff on 403/429/503, detector cache version bumped
+to flush anything cached by ≤0.1.1, and the extractor was verified against live rental
+pages (model path, correct verdicts).
 
 ### 0.1.1 — 2026-07-09
 

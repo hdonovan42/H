@@ -246,3 +246,15 @@ pill also fed the MutationObserver back into itself (~4 scans/sec, forever).
   a "seen" marker on a node as proof its state is current.
 - Rule: with a MutationObserver active, guard EVERY DOM write (compare-then-write) — an
   unconditional write of an identical value still emits mutation records and loops.
+
+## 2026-07-09 — Client-side filtering can't beat server-side pagination: collapse, don't remove (Rightmove Plus)
+Even after the React node-reuse fix, "empty pages" persisted — because they were the filter
+WORKING: Rightmove paginates server-side (24/page) before a content script ever runs, so a
+page whose results are all filtered out renders as nothing but ads and the pagination bar
+"doesn't know what's going on". Removal-based hiding structurally cannot fix this.
+- Rule: when filtering someone else's paginated list client-side, the default must be
+  collapse-in-place (slim labelled stub) so every page keeps its row count; full removal is
+  an opt-in style, not the default.
+- Rule: distinguish "extension broken" from "filter working, UX misleading" BEFORE patching —
+  reproduce the empty page and check whether hidden cards are yours (`.rmp-hidden` present)
+  or genuinely absent. v0.1.1 fixed a real bug but not the reported symptom.

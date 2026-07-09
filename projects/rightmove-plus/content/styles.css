@@ -30,6 +30,22 @@
 
 .rmp-hidden { display: none !important; }
 
+/* Default filtered style: collapse to a slim strip (the badge stays readable) so a page
+   whose results are all filtered never looks empty — Rightmove paginates server-side. */
+.rmp-stub {
+  height: 42px !important;
+  min-height: 0 !important;
+  max-height: 42px !important;
+  overflow: hidden !important;
+  opacity: 0.55;
+  filter: grayscale(0.9);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+}
+
+.rmp-stub::after {
+  top: 7px;
+}
+
 .rmp-ghost {
   opacity: 0.4;
   outline: 2px dashed #8b1a1a;

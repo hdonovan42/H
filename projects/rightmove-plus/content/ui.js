@@ -27,12 +27,21 @@
     ['unlisted', 'Not listed', 'Show only properties explicitly described as not listed'],
   ];
 
+  // Rightmove paginates server-side (24/page) BEFORE we filter, so removing cards outright
+  // leaves fully-filtered pages looking empty/broken. Default is therefore to COLLAPSE
+  // filtered cards to slim stubs; outright removal and full reveal are opt-in styles.
+  const RMP_STYLES = [
+    ['stub', 'collapsed', 'Filtered cards collapse to a slim strip'],
+    ['remove', 'removed', 'Filtered cards are removed entirely (fully-filtered pages will look empty)'],
+    ['reveal', 'revealed', 'Filtered cards stay full-size, dimmed'],
+  ];
+
   const verdicts = new Map();
   let mode = 'off';
-  let showHidden = false;
+  let hiddenStyle = 'stub';
   let pill = null;
   let countText = null;
-  let showBtn = null;
+  let styleBtn = null;
   const modeButtons = new Map();
 
   const nextDataMap = (() => {
@@ -91,6 +100,7 @@
     setFlag(card, 'rmp-host', false);
     setFlag(card, 'rmp-hidden', false);
     setFlag(card, 'rmp-ghost', false);
+    setFlag(card, 'rmp-stub', false);
     if (card.dataset.rmpTitled) {
       card.removeAttribute('title');
       delete card.dataset.rmpTitled;
@@ -110,7 +120,15 @@
       const found = [];
       for (const card of allCards()) {
         const id = cardId(card);
-        if (!id) continue;
+        if (!id) {
+          // Mid-render or ad slot: if we ever annotated this node, clean it fully so
+          // stale hidden state can't survive on a node we no longer recognise.
+          if (card.dataset.rmpId) {
+            resetCard(card);
+            setData(card, 'rmpId', null);
+          }
+          continue;
+        }
         if (card.dataset.rmpId !== id) {
           resetCard(card);
           setData(card, 'rmpId', id);
@@ -172,8 +190,10 @@
     return null; // definitive clear, or provisional clear while Off
   }
 
-  function paint(card, v) {
-    const label = chipLabel(v);
+  function paint(card, v, filtered) {
+    // A filtered card with nothing to say (definitive 'clear' under Only/Not-listed modes)
+    // still needs its stub explained.
+    const label = chipLabel(v) || (filtered ? 'FILTERED' : null);
     setData(card, 'rmpLabel', label);
     setData(card, 'rmpStatus', label ? v.status : null);
     setFlag(card, 'rmp-host', !!label);
@@ -198,11 +218,12 @@
         rmpEnqueueDetail(id, onVerdict);
         checking += 1;
       }
-      paint(card, v);
-      const hide = shouldHide(v);
-      setFlag(card, 'rmp-hidden', hide && !showHidden);
-      setFlag(card, 'rmp-ghost', hide && showHidden);
-      if (hide) hidden += 1;
+      const filtered = shouldHide(v);
+      paint(card, v, filtered);
+      setFlag(card, 'rmp-stub', filtered && hiddenStyle === 'stub');
+      setFlag(card, 'rmp-hidden', filtered && hiddenStyle === 'remove');
+      setFlag(card, 'rmp-ghost', filtered && hiddenStyle === 'reveal');
+      if (filtered) hidden += 1;
     }
     updatePill(hidden, checking);
   }
@@ -226,10 +247,26 @@
     if (!pill) return;
     const bits = [];
     if (checking) bits.push(checking + ' checking');
-    if (hidden) bits.push(hidden + ' hidden');
+    if (hidden) bits.push(hidden + ' filtered');
     setText(countText, bits.join(' · '));
     const display = hidden ? '' : 'none';
-    if (showBtn.style.display !== display) showBtn.style.display = display;
+    if (styleBtn.style.display !== display) styleBtn.style.display = display;
+  }
+
+  function setHiddenStyle(next) {
+    hiddenStyle = next;
+    try {
+      chrome.storage.sync.set({ rmpHiddenStyle: next });
+    } catch (e) { /* still works for this tab */ }
+    syncStyleBtn();
+    refresh();
+  }
+
+  function syncStyleBtn() {
+    if (!styleBtn) return;
+    const entry = RMP_STYLES.find(([value]) => value === hiddenStyle) || RMP_STYLES[0];
+    setText(styleBtn, entry[1]);
+    if (styleBtn.title !== entry[2]) styleBtn.title = entry[2];
   }
 
   function mountPill() {
@@ -255,18 +292,16 @@
     countText.className = 'rmp-count';
     pill.appendChild(countText);
 
-    showBtn = document.createElement('button');
-    showBtn.type = 'button';
-    showBtn.className = 'rmp-showlink';
-    showBtn.textContent = 'show';
-    showBtn.title = 'Reveal hidden cards (dimmed) instead of removing them';
-    showBtn.style.display = 'none';
-    showBtn.addEventListener('click', () => {
-      showHidden = !showHidden;
-      showBtn.textContent = showHidden ? 'mask' : 'show';
-      refresh();
+    styleBtn = document.createElement('button');
+    styleBtn.type = 'button';
+    styleBtn.className = 'rmp-showlink';
+    styleBtn.style.display = 'none';
+    styleBtn.addEventListener('click', () => {
+      const i = RMP_STYLES.findIndex(([value]) => value === hiddenStyle);
+      setHiddenStyle(RMP_STYLES[(i + 1) % RMP_STYLES.length][0]);
     });
-    pill.appendChild(showBtn);
+    pill.appendChild(styleBtn);
+    syncStyleBtn();
 
     // document.body is outside React's root, so appending here is safe.
     document.body.appendChild(pill);
@@ -277,16 +312,25 @@
 
   (async () => {
     try {
-      const got = await chrome.storage.sync.get({ rmpMode: 'off' });
+      const got = await chrome.storage.sync.get({ rmpMode: 'off', rmpHiddenStyle: 'stub' });
       if (RMP_MODES.some(([value]) => value === got.rmpMode)) mode = got.rmpMode;
-    } catch (e) { /* default to off */ }
+      if (RMP_STYLES.some(([value]) => value === got.rmpHiddenStyle)) hiddenStyle = got.rmpHiddenStyle;
+    } catch (e) { /* defaults stand */ }
     try {
       chrome.storage.onChanged.addListener((changes, area) => {
-        if (area === 'sync' && changes.rmpMode && changes.rmpMode.newValue !== mode) {
+        if (area !== 'sync') return;
+        let dirty = false;
+        if (changes.rmpMode && changes.rmpMode.newValue !== mode) {
           mode = changes.rmpMode.newValue;
           syncPill();
-          refresh();
+          dirty = true;
         }
+        if (changes.rmpHiddenStyle && changes.rmpHiddenStyle.newValue !== hiddenStyle) {
+          hiddenStyle = changes.rmpHiddenStyle.newValue;
+          syncStyleBtn();
+          dirty = true;
+        }
+        if (dirty) refresh();
       });
     } catch (e) { /* no cross-tab sync */ }
 

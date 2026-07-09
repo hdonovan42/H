@@ -1,7 +1,7 @@
 // Rightmove Plus — listed-building detection. Pure text logic, no DOM.
 // Loaded as a content script AND require()d by the node tests (see export guard at the bottom).
 
-const RMP_DETECT_VERSION = 1;
+const RMP_DETECT_VERSION = 2; // v2: flush any verdicts cached by ≤0.1.1's broken node handling
 
 // England/Wales: Grade I, II*, II. Scotland: Category A/B/C. Northern Ireland: Grade A, B+, B1, B2.
 const RMP_GRADE_MAP = {
