@@ -751,6 +751,20 @@ svg.leaflet-image-layer.leaflet-interactive path {
     text-decoration: underline;
     text-underline-offset: 2px;
   }
+  .key-close {
+    position: absolute;
+    top: 5px; right: 7px;
+    font: 400 13px/1 var(--body);
+    color: var(--grey);
+    background: none;
+    border: none;
+    padding: 2px;
+    cursor: pointer;
+  }
+  .key-close:hover, .key-close:focus-visible {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
 
   /* ---------- station-style sighting dots ---------- */
   .dot {
@@ -854,7 +868,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
     flex-direction: row-reverse;   /* ⓘ stays pinned right of the text */
     gap: 6px;
   }
-  .attrib-toggle {
+  .attrib-toggle, .key-restore {
     appearance: none;
     width: 24px; height: 24px;
     border-radius: 50%;
@@ -865,7 +879,13 @@ svg.leaflet-image-layer.leaflet-interactive path {
     cursor: pointer;
     box-shadow: 0 1px 4px rgba(22, 22, 31, 0.18);
   }
-  .attrib-toggle:hover { color: var(--ink); }
+  .attrib-toggle:hover, .key-restore:hover { color: var(--ink); }
+  /* minimised key: the ⓘ control's mirror image, bottom-left */
+  .key-restore {
+    position: absolute;
+    left: 14px; bottom: 10px;
+    z-index: 500;
+  }
   .attrib-text {
     display: none;
     background: rgba(255, 255, 255, 0.9);
@@ -880,7 +900,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
   .attrib-text a { color: #0078A8; }
 
   @media (max-width: 560px) {
-    .key { left: 10px; right: 10px; bottom: 18px; width: auto; }
+    .key { left: 10px; right: 10px; bottom: 10px; width: auto; }
+    .key-restore { left: 10px; }
     .attrib-text { white-space: normal; max-width: 60vw; }
   }
 </style>
@@ -889,12 +910,14 @@ svg.leaflet-image-layer.leaflet-interactive path {
 
 <div id="map" role="application" aria-label="Map of Waymo sightings in London"></div>
 
-<aside class="key" aria-label="Map key">
+<aside class="key" id="key" aria-label="Map key">
+  <button class="key-close" id="key-close" aria-label="Minimise map key">&times;</button>
   <div class="key-ringrow"><span class="ring ring-hour"></span> Past hour</div>
   <div class="key-ringrow"><span class="ring ring-today"></span> Past 24 hours</div>
   <div class="key-ringrow"><span class="ring ring-week"></span> Past week</div>
   <div class="key-foot" id="key-foot">Loading…</div>
 </aside>
+<button class="key-restore" id="key-restore" aria-label="Show map key" hidden>?</button>
 
 <script src="assets/leaflet.js"></script>
 <script>
@@ -1060,6 +1083,16 @@ function cameraMarker(group) {
 /* --- live feed: fetch confirmed sightings, poll for new ones --- */
 const foot = document.getElementById("key-foot");
 let lastPayload = "";
+
+/* × minimises the key to a ? button (the ⓘ's mirror); ? restores it */
+const key = document.getElementById("key");
+const keyRestore = document.getElementById("key-restore");
+document.getElementById("key-close").addEventListener("click", () => {
+  key.hidden = true; keyRestore.hidden = false; keyRestore.focus();
+});
+keyRestore.addEventListener("click", () => {
+  keyRestore.hidden = true; key.hidden = false;
+});
 let latestMarker = null;   /* marker holding the newest sighting */
 
 /* the foot's HTML is rewritten every poll, so delegate rather than
