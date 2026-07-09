@@ -740,13 +740,16 @@ svg.leaflet-image-layer.leaflet-interactive path {
   .foot-latest {
     font: inherit;
     letter-spacing: inherit;
-    color: #0078A8;
+    color: inherit;
     background: none;
     border: none;
     padding: 0;
+    cursor: pointer;
+  }
+  .foot-latest:hover, .foot-latest:focus-visible {
+    color: #0078A8;
     text-decoration: underline;
     text-underline-offset: 2px;
-    cursor: pointer;
   }
 
   /* ---------- station-style sighting dots ---------- */
