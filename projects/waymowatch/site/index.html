@@ -918,6 +918,17 @@ svg.leaflet-image-layer.leaflet-interactive path {
   <div class="key-foot" id="key-foot">Loading…</div>
 </aside>
 <button class="key-restore" id="key-restore" aria-label="Show map key" hidden>?</button>
+<script>
+/* initial key state, set before first paint so nothing flashes:
+   mobile always starts minimised; desktop remembers the last
+   choice (open by default) */
+(() => {
+  let min = window.matchMedia("(max-width: 560px)").matches;
+  if (!min) { try { min = localStorage.getItem("keyMinimised") === "1"; } catch {} }
+  document.getElementById("key").hidden = min;
+  document.getElementById("key-restore").hidden = !min;
+})();
+</script>
 
 <script src="assets/leaflet.js"></script>
 <script>
@@ -1084,14 +1095,16 @@ function cameraMarker(group) {
 const foot = document.getElementById("key-foot");
 let lastPayload = "";
 
-/* × minimises the key to a ? button (the ⓘ's mirror); ? restores it */
+/* × minimises the key to a ? button (the ⓘ's mirror); ? restores it.
+   The choice persists for desktop loads; mobile always starts closed. */
 const key = document.getElementById("key");
 const keyRestore = document.getElementById("key-restore");
+const storeKeyState = min => { try { localStorage.setItem("keyMinimised", min ? "1" : "0"); } catch {} };
 document.getElementById("key-close").addEventListener("click", () => {
-  key.hidden = true; keyRestore.hidden = false; keyRestore.focus();
+  key.hidden = true; keyRestore.hidden = false; keyRestore.focus(); storeKeyState(true);
 });
 keyRestore.addEventListener("click", () => {
-  keyRestore.hidden = true; key.hidden = false;
+  keyRestore.hidden = true; key.hidden = false; storeKeyState(false);
 });
 let latestMarker = null;   /* marker holding the newest sighting */
 
