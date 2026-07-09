@@ -1,0 +1,80 @@
+/* Rightmove Plus */
+
+.rmp-host {
+  position: relative;
+}
+
+.rmp-chip {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 30;
+  font: 600 11px/1.7 "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  letter-spacing: 0.03em;
+  padding: 0 8px;
+  border-radius: 3px;
+  color: #fff;
+  background: rgba(60, 60, 60, 0.8);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.rmp-chip-listed { background: #8b1a1a; }
+.rmp-chip-mention { background: #a05a00; }
+.rmp-chip-unlisted { background: #1d6b3a; }
+.rmp-chip-unknown,
+.rmp-chip-clear,
+.rmp-chip-pending { background: rgba(60, 60, 60, 0.8); }
+
+.rmp-hidden { display: none !important; }
+
+.rmp-ghost {
+  opacity: 0.4;
+  outline: 2px dashed #8b1a1a;
+  outline-offset: -2px;
+}
+
+.rmp-pill {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 2147483000;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #1c1c1e;
+  color: #eee;
+  font: 12px/1.5 "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.rmp-pill-label { color: #9a9aa0; }
+
+.rmp-pill button {
+  font: inherit;
+  background: #2c2c2e;
+  color: #ddd;
+  border: 1px solid #444;
+  border-radius: 5px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.rmp-pill button:hover { border-color: #777; }
+
+.rmp-pill button.rmp-active {
+  background: #0a84ff;
+  border-color: #0a84ff;
+  color: #fff;
+}
+
+.rmp-count { color: #9a9aa0; }
+
+.rmp-pill button.rmp-showlink {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #9a9aa0;
+  text-decoration: underline;
+}

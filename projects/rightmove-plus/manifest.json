@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Rightmove Plus",
+  "version": "0.1.0",
+  "description": "Extra search filters for Rightmove — hide or isolate listed buildings.",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.rightmove.co.uk/property-for-sale/find.html*",
+        "https://www.rightmove.co.uk/property-to-rent/find.html*",
+        "https://www.rightmove.co.uk/new-homes-for-sale/find.html*",
+        "https://www.rightmove.co.uk/find.html*"
+      ],
+      "js": [
+        "content/detect.js",
+        "content/extract.js",
+        "content/cache.js",
+        "content/fetcher.js",
+        "content/ui.js"
+      ],
+      "css": ["content/styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": ["storage"]
+}
