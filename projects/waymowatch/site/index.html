@@ -876,9 +876,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
 <div id="map" role="application" aria-label="Map of Waymo sightings in London"></div>
 
 <aside class="key" aria-label="Map key">
-  <div class="key-ringrow"><span class="ring ring-hour"></span> Seen in the past hour</div>
-  <div class="key-ringrow"><span class="ring ring-today"></span> Seen today</div>
-  <div class="key-ringrow"><span class="ring ring-week"></span> Seen this week</div>
+  <div class="key-ringrow"><span class="ring ring-hour"></span> Past hour</div>
+  <div class="key-ringrow"><span class="ring ring-today"></span> Past 24 hours</div>
+  <div class="key-ringrow"><span class="ring ring-week"></span> Past week</div>
   <div class="key-foot" id="key-foot">Loading…</div>
 </aside>
 
@@ -908,13 +908,13 @@ const fmtDate = iso => new Date(iso).toLocaleDateString("en-GB",
 const fmtTime = iso => new Date(iso).toLocaleTimeString("en-GB",
   { timeZone: LONDON, hour: "2-digit", minute: "2-digit" });
 
-/* hour / today / week drive the ring colours; anything older
-   than today renders grey alongside this week's */
+/* hour / today / week drive the ring colours — rolling windows,
+   matching the key labels; anything older than 24h renders grey
+   alongside this week's */
 function recency(iso) {
-  const t = Date.parse(iso);
-  if (Date.now() - t < 3600e3) return "hour";
-  const day = ms => new Date(ms).toLocaleDateString("en-GB", { timeZone: LONDON });
-  return day(t) === day(Date.now()) ? "today" : "week";
+  const age = Date.now() - Date.parse(iso);
+  if (age < 3600e3) return "hour";
+  return age < 86400e3 ? "today" : "week";
 }
 
 /* ============================================================
