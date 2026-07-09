@@ -1,5 +1,16 @@
 // Rightmove Plus — orchestration: card discovery, badges, filter pill, SPA-nav handling.
 //
+// Rightmove is a React (Next.js) app: it REUSES card DOM nodes across pagination and can
+// re-render any of them at will. Two hard rules keep us compatible:
+//   1. Never insert children into React-managed nodes. Badges are ::after pseudo-elements
+//      driven by data attributes — React leaves attributes it didn't render alone, and there
+//      is no extra DOM for its reconciler to trip over.
+//   2. Every scan is idempotent and re-derives everything from the DOM. A reused node is
+//      recognised by its property id changing; all our attributes are recomputed each pass,
+//      so stale hidden/badge state can never leak from one page of results to the next.
+// All DOM writes are guarded (write only on real change) so our own MutationObserver never
+// feeds back into another scan.
+//
 // Verdict lifecycle per property id:
 //   tier 1 (free): card text + __NEXT_DATA__ summary/keyFeatures → 'listed' is definitive
 //     (an explicit claim on the card is enough); anything else stays provisional because a
@@ -33,6 +44,26 @@
     }
   })();
 
+  // ---- guarded DOM writes ------------------------------------------------
+
+  function setFlag(el, cls, on) {
+    if (el.classList.contains(cls) !== on) el.classList.toggle(cls, on);
+  }
+
+  function setData(el, key, value) {
+    if (value == null || value === '') {
+      if (el.dataset[key] !== undefined) delete el.dataset[key];
+    } else if (el.dataset[key] !== value) {
+      el.dataset[key] = value;
+    }
+  }
+
+  function setText(el, s) {
+    if (el.textContent !== s) el.textContent = s;
+  }
+
+  // ---- card discovery ----------------------------------------------------
+
   function rmpDebounce(fn, ms) {
     let timer = null;
     return () => {
@@ -53,6 +84,19 @@
     return document.querySelectorAll('div[data-testid^="propertyCard-"]');
   }
 
+  // Strip everything of ours off a node (fresh node, or one React reused for another property).
+  function resetCard(card) {
+    setData(card, 'rmpLabel', null);
+    setData(card, 'rmpStatus', null);
+    setFlag(card, 'rmp-host', false);
+    setFlag(card, 'rmp-hidden', false);
+    setFlag(card, 'rmp-ghost', false);
+    if (card.dataset.rmpTitled) {
+      card.removeAttribute('title');
+      delete card.dataset.rmpTitled;
+    }
+  }
+
   let scanning = false;
   let rescanWanted = false;
 
@@ -63,22 +107,23 @@
     }
     scanning = true;
     try {
-      const fresh = [];
+      const found = [];
       for (const card of allCards()) {
         const id = cardId(card);
         if (!id) continue;
-        card.dataset.rmpId = id;
-        if (card.dataset.rmpSeen !== '1') {
-          card.dataset.rmpSeen = '1';
-          fresh.push({ card, id });
+        if (card.dataset.rmpId !== id) {
+          resetCard(card);
+          setData(card, 'rmpId', id);
         }
+        found.push({ card, id });
       }
-      if (fresh.length) {
-        if (!pill) mountPill();
-        const lookup = fresh.map((f) => f.id).filter((id) => !verdicts.has(id));
-        const cached = await rmpCacheGetMany(lookup);
+      if (found.length && !pill) mountPill();
+
+      const missing = found.filter((f) => !verdicts.has(f.id));
+      if (missing.length) {
+        const cached = await rmpCacheGetMany([...new Set(missing.map((f) => f.id))]);
         for (const id of Object.keys(cached)) verdicts.set(id, cached[id]);
-        for (const { card, id } of fresh) {
+        for (const { card, id } of missing) {
           if (verdicts.has(id)) continue;
           const text = (nextDataMap.get(id) || '') + '. ' + (card.textContent || '');
           const v = rmpDetectListed(text);
@@ -103,6 +148,8 @@
     refresh();
   }
 
+  // ---- painting ----------------------------------------------------------
+
   function shouldHide(v) {
     if (!v.definitive) return false; // never hide while still checking
     if (v.status === 'unknown') return false; // never hide what we couldn't read
@@ -125,22 +172,19 @@
     return null; // definitive clear, or provisional clear while Off
   }
 
-  function paintChip(card, v) {
+  function paint(card, v) {
     const label = chipLabel(v);
-    let chip = card.querySelector(':scope > .rmp-chip');
-    if (!label) {
-      if (chip) chip.remove();
-      return;
+    setData(card, 'rmpLabel', label);
+    setData(card, 'rmpStatus', label ? v.status : null);
+    setFlag(card, 'rmp-host', !!label);
+    const tip = label && v.snippet ? '“' + v.snippet + '”' : null;
+    if (tip) {
+      if (card.getAttribute('title') !== tip) card.setAttribute('title', tip);
+      setData(card, 'rmpTitled', '1');
+    } else if (card.dataset.rmpTitled) {
+      card.removeAttribute('title');
+      delete card.dataset.rmpTitled;
     }
-    card.classList.add('rmp-host');
-    if (!chip) {
-      chip = document.createElement('div');
-      card.appendChild(chip);
-    }
-    chip.className = 'rmp-chip rmp-chip-' + v.status;
-    chip.textContent = label;
-    if (v.snippet) chip.title = '“' + v.snippet + '”';
-    else chip.removeAttribute('title');
   }
 
   function refresh() {
@@ -154,14 +198,16 @@
         rmpEnqueueDetail(id, onVerdict);
         checking += 1;
       }
-      paintChip(card, v);
+      paint(card, v);
       const hide = shouldHide(v);
-      card.classList.toggle('rmp-hidden', hide && !showHidden);
-      card.classList.toggle('rmp-ghost', hide && showHidden);
+      setFlag(card, 'rmp-hidden', hide && !showHidden);
+      setFlag(card, 'rmp-ghost', hide && showHidden);
       if (hide) hidden += 1;
     }
     updatePill(hidden, checking);
   }
+
+  // ---- pill --------------------------------------------------------------
 
   function setMode(next) {
     mode = next;
@@ -173,7 +219,7 @@
   }
 
   function syncPill() {
-    for (const [value, btn] of modeButtons) btn.classList.toggle('rmp-active', value === mode);
+    for (const [value, btn] of modeButtons) setFlag(btn, 'rmp-active', value === mode);
   }
 
   function updatePill(hidden, checking) {
@@ -181,8 +227,9 @@
     const bits = [];
     if (checking) bits.push(checking + ' checking');
     if (hidden) bits.push(hidden + ' hidden');
-    countText.textContent = bits.join(' · ');
-    showBtn.style.display = hidden ? '' : 'none';
+    setText(countText, bits.join(' · '));
+    const display = hidden ? '' : 'none';
+    if (showBtn.style.display !== display) showBtn.style.display = display;
   }
 
   function mountPill() {
@@ -221,9 +268,12 @@
     });
     pill.appendChild(showBtn);
 
+    // document.body is outside React's root, so appending here is safe.
     document.body.appendChild(pill);
     syncPill();
   }
+
+  // ---- init --------------------------------------------------------------
 
   (async () => {
     try {

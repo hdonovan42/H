@@ -230,3 +230,19 @@ DB corruption or stored-data loss (integrity `ok`, WAL checkpointed clean).
   acting on infrastructure.
 - Rule: for anything user-facing and identity-like (domains, names, URLs, branding),
   treat MY proposal as unconfirmed until the user names it back explicitly.
+
+## 2026-07-09 — Content scripts on React/Next.js sites: never own their DOM nodes (Rightmove Plus)
+v0.1.0 broke Rightmove's pagination: pages rendered "empty with just ads". Root cause was
+treating React-managed card nodes as mine — stamping per-property state (`dataset.rmpSeen`,
+`rmp-hidden` classes, appended chip <div>s) onto nodes that React REUSES across SPA
+pagination. Page 2 inherited page 1's hidden/badge state, and the "seen" flag made the
+scanner skip the recycled nodes entirely. An unguarded `textContent` write in the status
+pill also fed the MutationObserver back into itself (~4 scans/sec, forever).
+- Rule: on framework-rendered pages, annotate via attributes only (data-* + classes) and
+  render decorations as CSS ::after pseudo-elements — never appendChild into nodes the
+  framework reconciles.
+- Rule: scans must be idempotent and re-derive identity from content each pass (detect node
+  reuse by the extracted id changing, then fully reset that node's annotations). Never use
+  a "seen" marker on a node as proof its state is current.
+- Rule: with a MutationObserver active, guard EVERY DOM write (compare-then-write) — an
+  unconditional write of an identical value still emits mutation records and loops.

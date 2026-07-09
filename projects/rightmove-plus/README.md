@@ -67,6 +67,16 @@ browser and the tests.
 
 ## CHANGELOG
 
+### 0.1.1 — 2026-07-09
+
+Fix: pagination broke (pages showed empty, stale badges). Root cause: Rightmove's React app
+reuses card DOM nodes across pages, so per-node state (`rmpSeen`, hidden classes, injected
+chip elements) leaked from one page to the next, and a MutationObserver feedback loop from
+unguarded pill text writes kept rescanning. Now: badges are `::after` pseudo-elements driven
+by data attributes (no children ever inserted into React-managed nodes), every scan is
+idempotent (node reuse detected by property-id change → full reset), and every DOM write is
+guarded to only fire on real change.
+
 ### 0.1.0 — 2026-07-09
 
 First working version. Listed-building detection with four filter modes (Off / Hide /

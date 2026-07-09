@@ -1,10 +1,14 @@
 /* Rightmove Plus */
 
+/* Badges are ::after pseudo-elements fed by data attributes — we never insert children
+   into React-managed card nodes, so React reconciliation can't trip over us. */
+
 .rmp-host {
   position: relative;
 }
 
-.rmp-chip {
+.rmp-host::after {
+  content: attr(data-rmp-label);
   position: absolute;
   top: 8px;
   left: 8px;
@@ -16,14 +20,13 @@
   color: #fff;
   background: rgba(60, 60, 60, 0.8);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+  pointer-events: none;
 }
 
-.rmp-chip-listed { background: #8b1a1a; }
-.rmp-chip-mention { background: #a05a00; }
-.rmp-chip-unlisted { background: #1d6b3a; }
-.rmp-chip-unknown,
-.rmp-chip-clear,
-.rmp-chip-pending { background: rgba(60, 60, 60, 0.8); }
+.rmp-host[data-rmp-status="listed"]::after { background: #8b1a1a; }
+.rmp-host[data-rmp-status="mention"]::after { background: #a05a00; }
+.rmp-host[data-rmp-status="unlisted"]::after { background: #1d6b3a; }
 
 .rmp-hidden { display: none !important; }
 
