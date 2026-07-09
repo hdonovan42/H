@@ -710,7 +710,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
     position: absolute;
     left: 14px; bottom: 26px;
     z-index: 500;
-    width: 198px;
+    width: max-content;
     background: #FFFFFF;
     border: 1px solid var(--hairline);
     border-top: 4px solid var(--blue);
@@ -736,6 +736,17 @@ svg.leaflet-image-layer.leaflet-interactive path {
     font-size: 11px;
     color: var(--grey);
     letter-spacing: 0.02em;
+  }
+  .foot-latest {
+    font: inherit;
+    letter-spacing: inherit;
+    color: #0078A8;
+    background: none;
+    border: none;
+    padding: 0;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
   }
 
   /* ---------- station-style sighting dots ---------- */
@@ -1046,6 +1057,13 @@ function cameraMarker(group) {
 /* --- live feed: fetch confirmed sightings, poll for new ones --- */
 const foot = document.getElementById("key-foot");
 let lastPayload = "";
+let latestMarker = null;   /* marker holding the newest sighting */
+
+/* the foot's HTML is rewritten every poll, so delegate rather than
+   binding to a button that keeps getting replaced */
+foot.addEventListener("click", (e) => {
+  if (e.target.closest(".foot-latest") && latestMarker) latestMarker.openPopup();
+});
 
 async function refreshSightings() {
   try {
@@ -1065,11 +1083,18 @@ async function refreshSightings() {
         if (!byCam.has(s.camera_id)) byCam.set(s.camera_id, []);
         byCam.get(s.camera_id).push(s);
       });
-      byCam.forEach(g => markers.addLayer(cameraMarker(g)));
+      byCam.forEach(g => {
+        const m = cameraMarker(g);
+        markers.addLayer(m);
+        /* groups are newest-first, so the newest sighting overall
+           is the head of its camera's group */
+        if (g[0].id === rows[0].id) latestMarker = m;
+      });
     }
     foot.innerHTML = rows.length
       ? `${rows.length} confirmed sighting${rows.length === 1 ? "" : "s"},<br>` +
-        `latest ${fmtDate(rows[0].captured_at)} ${fmtTime(rows[0].captured_at)}`
+        `latest <button class="foot-latest" title="Show the latest sighting on the map">` +
+        `${fmtDate(rows[0].captured_at)} ${fmtTime(rows[0].captured_at)}</button>`
       : "No confirmed sightings yet";
   } catch (err) {
     if (!foot.textContent || foot.textContent === "Loading…")
