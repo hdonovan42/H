@@ -332,6 +332,57 @@ async function proxyFetch(targetUrl, headers = {}) {
 }
 
 // ============================================================
+// YAHOO CRUMB AUTH
+// ============================================================
+
+// Yahoo's quote/quoteSummary APIs require a cookie + crumb handshake (the v8
+// chart API does not). The pair is cached at module level so warm isolates
+// skip the handshake; a 401/403 forces one refresh and retry.
+// UA only — getcrumb serves text/plain and 406s an Accept: application/json
+const YAHOO_CRUMB_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+};
+let yahooAuth = null;
+
+async function getYahooAuth(force = false) {
+  if (!force && yahooAuth && Date.now() - yahooAuth.fetchedAt < 6 * 60 * 60 * 1000) return yahooAuth;
+  const cookieResp = await fetch('https://fc.yahoo.com', { headers: YAHOO_CRUMB_HEADERS, redirect: 'manual' });
+  const cookie = (cookieResp.headers.get('set-cookie') || '').split(';')[0];
+  if (!cookie) throw new Error('Yahoo cookie handshake failed');
+  const crumbResp = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
+    headers: { ...YAHOO_CRUMB_HEADERS, 'Cookie': cookie },
+  });
+  const crumb = (await crumbResp.text()).trim();
+  if (!crumbResp.ok || !crumb || crumb.includes('<')) {
+    throw new Error(`Yahoo crumb handshake failed (HTTP ${crumbResp.status}: ${crumb.slice(0, 100)})`);
+  }
+  yahooAuth = { cookie, crumb, fetchedAt: Date.now() };
+  return yahooAuth;
+}
+
+async function fetchYahooEarnings(symbol) {
+  const qsUrl = (crumb) =>
+    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=calendarEvents&crumb=${encodeURIComponent(crumb)}`;
+  let auth = await getYahooAuth();
+  let resp = await fetch(qsUrl(auth.crumb), { headers: { ...YAHOO_CRUMB_HEADERS, 'Cookie': auth.cookie } });
+  if (resp.status === 401 || resp.status === 403) {
+    auth = await getYahooAuth(true);
+    resp = await fetch(qsUrl(auth.crumb), { headers: { ...YAHOO_CRUMB_HEADERS, 'Cookie': auth.cookie } });
+  }
+  if (!resp.ok) throw new Error(`Yahoo quoteSummary HTTP ${resp.status}`);
+  const data = await resp.json();
+  const earnings = data?.quoteSummary?.result?.[0]?.calendarEvents?.earnings;
+  const dates = earnings?.earningsDate || [];
+  return {
+    symbol,
+    earningsDate: dates[0]?.fmt || null,
+    // Estimated dates sometimes arrive as a [start, end] range
+    earningsDateEnd: dates.length > 1 ? dates[dates.length - 1]?.fmt : null,
+    isEstimate: earnings?.isEarningsDateEstimate ?? null,
+  };
+}
+
+// ============================================================
 // MAIN WORKER EXPORT
 // ============================================================
 
@@ -1741,10 +1792,31 @@ export default {
       // YAHOO ROUTES
       // ============================================================
 
-      // GET /yahoo-quote/:symbol - Extended hours prices
-      if (path.startsWith('/yahoo-quote/')) {
+      // GET /yahoo-earnings/:symbol - Next earnings date via quoteSummary
+      // (cookie+crumb). Edge-cached 6h: earnings dates move rarely.
+      // Replaces the dead /yahoo-quote route (Yahoo removed v6/finance/quote).
+      if (path.startsWith('/yahoo-earnings/')) {
+        const cache = caches.default;
+        const cached = await cache.match(request);
+        if (cached) {
+          return new Response(cached.body, {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
         const symbol = path.split('/')[2];
-        return proxyFetch(`https://query1.finance.yahoo.com/v6/finance/quote?symbols=${symbol}`, yahooHeaders);
+        try {
+          const data = await fetchYahooEarnings(symbol);
+          const response = new Response(JSON.stringify(data), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=21600' },
+          });
+          ctx.waitUntil(cache.put(request, response.clone()));
+          return response;
+        } catch (e) {
+          return new Response(JSON.stringify({ error: e.message }), {
+            status: 502,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
       }
 
       // GET /yahoo/:symbol - Chart data

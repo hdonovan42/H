@@ -73,6 +73,40 @@ export const fetchSharesOutstanding = async (symbol) => {
   }
 };
 
+// Next earnings date for a symbol, via the worker's Yahoo quoteSummary proxy.
+// Dates move rarely, so cache per symbol for 6 hours.
+export const fetchEarningsDate = async (symbol) => {
+  const cacheKey = `earnings_date_${symbol}`;
+  const cached = localStorage.getItem(cacheKey);
+  if (cached) {
+    try {
+      const { data, timestamp } = JSON.parse(cached);
+      if (Date.now() - timestamp < 6 * 60 * 60 * 1000) {
+        return data;
+      }
+    } catch (e) {
+      console.warn('Clearing corrupted earnings cache for', symbol);
+      localStorage.removeItem(cacheKey);
+    }
+  }
+
+  try {
+    const response = await fetchWithTimeout(`${WORKER_URL}/yahoo-earnings/${symbol}`);
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (!data?.earningsDate) return null;
+
+    const result = { earningsDate: data.earningsDate, isEstimate: !!data.isEstimate };
+
+    try { localStorage.setItem(cacheKey, JSON.stringify({ data: result, timestamp: Date.now() })); } catch (e) { /* storage full */ }
+
+    return result;
+  } catch (e) {
+    console.warn('fetchEarningsDate failed:', e.message);
+    return null;
+  }
+};
+
 export const fetchYahooQuote = async (symbol, { noCache = false } = {}) => {
   try {
     // Cache-buster for the close-settle poll: the worker leaves range=1d uncached,

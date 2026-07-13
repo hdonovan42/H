@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import StockChart from './StockChart';
-import { WORKER_URL, EST, EARNINGS_DATE, SETTLE_POLL_INTERVAL_MS, SETTLE_STABLE_K, SETTLE_TIMEOUT_MS, SETTLE_COLD_WINDOW_MIN } from '../utils/config';
+import { WORKER_URL, EST, SETTLE_POLL_INTERVAL_MS, SETTLE_STABLE_K, SETTLE_TIMEOUT_MS, SETTLE_COLD_WINDOW_MIN } from '../utils/config';
 import { dayjs, getMarketState, getTodayEST, MarketState } from '../utils/marketState';
 import { getCachedData, setCachedData, clearCaches } from '../utils/cache';
-import { fetchPriceData, fetchMarketClock } from '../utils/api';
+import { fetchPriceData, fetchMarketClock, fetchEarningsDate } from '../utils/api';
 import { PHASE, determineInitialPhase, isStable, resolvePrice } from '../utils/pricePhase';
 import '../styles/stock-tracker.css';
 
@@ -38,6 +38,7 @@ export default function StockTracker() {
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
   const [sharesCount, setSharesCount] = useState('');
   const [companyName, setCompanyName] = useState('');
+  const [earnings, setEarnings] = useState(null);
   const [chartCache, setChartCache] = useState({});
   const [currentMarketState, setCurrentMarketState] = useState(getMarketState());
   const [clockData, setClockData] = useState(null);
@@ -578,6 +579,18 @@ export default function StockTracker() {
       fetchMaxRangeData(ticker);
     }
   }, [ticker, fetchChartData, fetchMaxRangeData]);
+
+  // Next earnings date is per-symbol; clear before fetching so a slow
+  // response never shows the previous ticker's date.
+  useEffect(() => {
+    if (!ticker) return;
+    let cancelled = false;
+    setEarnings(null);
+    fetchEarningsDate(ticker).then(result => {
+      if (!cancelled) setEarnings(result);
+    });
+    return () => { cancelled = true; };
+  }, [ticker]);
 
   // WebSocket connection
   useEffect(() => {
@@ -1125,7 +1138,7 @@ export default function StockTracker() {
               <div className="stat-row"><span className="stat-label">Forward P/E</span><span className="stat-value">{forwardPE > 0 ? forwardPE.toFixed(2) : 'N/A'}</span></div>
               <div className="stat-row">
                 {ticker === 'TSLA' ? <a href="earnings.html" className="stat-label earnings-link">Earnings Date</a> : <span className="stat-label">Earnings Date</span>}
-                <span className="stat-value">{dayjs(EARNINGS_DATE).format('MMM D, YYYY')}</span>
+                <span className="stat-value">{earnings?.earningsDate ? `${dayjs(earnings.earningsDate).format('MMM D, YYYY')}${earnings.isEstimate ? ' (est.)' : ''}` : 'N/A'}</span>
               </div>
             </div>
           </div>

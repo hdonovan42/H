@@ -89,7 +89,7 @@ CLOSED:      overnight, weekends, holidays
 
 ## Worker Routes
 
-**Price/Quote**: `/yahoo/:symbol`, `/yahoo-quote/:symbol`, `/finnhub/ws-url`, `/finnhub/quote/:symbol`, `/finnhub/metric/:symbol`
+**Price/Quote**: `/yahoo/:symbol`, `/yahoo-earnings/:symbol` (next earnings date via cookie+crumb quoteSummary), `/finnhub/ws-url`, `/finnhub/quote/:symbol`, `/finnhub/metric/:symbol`
 **News**: `/news/TSLA`, `/news/update`, `/news/reset`, `/news/cnbc/:ticker`, `/tweets/:username`
 **Earnings**: `/earnings/unified/:symbol?mode=race|merge`, `/earnings/stored/:symbol/:quarter?`, `/earnings/manual/:symbol/:quarter`
 **FMP**: `/fmp/shares-float/:symbol`, `/fmp/analyst-estimates/:symbol`, `/fmp/earnings-surprises/:symbol`, `/fmp/sp500-weight`
