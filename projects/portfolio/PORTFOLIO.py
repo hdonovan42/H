@@ -127,16 +127,12 @@ def fetch_price(ticker: str) -> Optional[float]:
     except (requests.RequestException, ValueError):
         pass
     try:
-        r = requests.get(f"{WORKER_BASE}/yahoo-quote/{ticker}", timeout=5)
+        # Yahoo v8 chart via the worker (the old /yahoo-quote route is gone)
+        r = requests.get(f"{WORKER_BASE}/yahoo/{ticker}?interval=1d&range=1d", timeout=5)
         if r.ok:
-            data = r.json()
-            result = data.get("quoteResponse", {}).get("result") or data.get("result") or []
+            result = (r.json().get("chart") or {}).get("result") or []
             if result:
-                price = (
-                    result[0].get("regularMarketPrice")
-                    or result[0].get("postMarketPrice")
-                    or result[0].get("preMarketPrice")
-                )
+                price = (result[0].get("meta") or {}).get("regularMarketPrice")
                 if price:
                     return float(price)
     except (requests.RequestException, ValueError):
