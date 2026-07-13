@@ -258,3 +258,19 @@ page whose results are all filtered out renders as nothing but ads and the pagin
 - Rule: distinguish "extension broken" from "filter working, UX misleading" BEFORE patching —
   reproduce the empty page and check whether hidden cards are yours (`.rmp-hidden` present)
   or genuinely absent. v0.1.1 fixed a real bug but not the reported symptom.
+
+## 2026-07-13 — "Dead code" removal must grep call sites; sandbox suites don't prove the page runs (Chess v2.9→v2.9.1)
+v2.9 deleted six "dead" accuracy functions; one (`updateIncrementalAccuracy`, a one-line
+cache invalidator) still had TWO live call sites in the graph commit path. Every graph run
+after that threw `ReferenceError` — popup ("Graph analysis failed… refresh") when the first
+commit was synchronous, silently frozen graph otherwise. It shipped because verification ran
+`tests/accuracy-test.js` (vm sandbox, calls accuracy functions directly) and an in-browser
+fixture check of the formula — neither ever executed a real graph pass.
+- Rule: before deleting a function as dead, grep the file for its NAME and treat any hit as
+  live; after the batch delete, re-grep every deleted name — zero hits or it isn't done.
+- Rule: a vm-sandbox unit suite proves the functions compute, not that the page runs. After
+  editing a browser code path, drive that actual feature once in a real browser (now cheap:
+  `node tests/graph-smoke.js` does a full headless graph pass) before declaring verified.
+- Rule: when a feature has a catch-all error popup, a `ReferenceError` from ANY callee
+  surfaces as that generic popup — on "X failed" reports, read the console error first; the
+  popup text says which try/catch fired, not what broke.

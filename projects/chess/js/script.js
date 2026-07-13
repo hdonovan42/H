@@ -1998,7 +1998,9 @@ function runGraphPass(pool, tasks, opts, runId) {
 function commitGraphEval(pos, evalScore) {
   AppState.graphEvalHistory[pos.moveIndex] = evalScore;
   updateMoveClassifications(pos.moveIndex);
-  updateIncrementalAccuracy(pos.moveIndex);
+  // Polish overwrites sketch evals without changing the defined-eval count,
+  // so the count check alone won't refresh accuracy — force a recompute
+  AppState.cachedAccuracy = null;
   scheduleGraphRedraw(pos.moveIndex);
 }
 
@@ -2015,7 +2017,7 @@ function commitGraphInfo(pos, info, opts) {
   }
   AppState.graphEvalHistory[pos.moveIndex] = evalScore;
   updateMoveClassifications(pos.moveIndex);
-  updateIncrementalAccuracy(pos.moveIndex);
+  AppState.cachedAccuracy = null; // see commitGraphEval
 
   if (info.pv && typeof info.depth === 'number') {
     cacheAnalysisResult(pos.fen, {

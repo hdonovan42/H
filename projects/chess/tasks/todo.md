@@ -77,6 +77,18 @@ from notes.txt is gone; Safari quietly falling back to single-threaded is expect
       10× line) — final uniform 600k ≈ 9-12× depending on run; residual marker flips
       proven threshold-noise via cache-depth diagnostic (polish runs everywhere, d18-21)
 
+## v2.9.1 hotfix — graph crash (2026-07-13)
+- [x] User report: "Graph analysis failed. Please refresh the page" popup on graph runs
+- [x] Root cause: v2.9 deleted updateIncrementalAccuracy() but left 2 call sites in the
+      graph commit path → ReferenceError on every eval commit (sync commit → popup;
+      async commit → uncaught throw, stalled workers, frozen graph)
+- [x] Fix: inlined AppState.cachedAccuracy = null at both commit sites (still required —
+      polish overwrites sketch evals without changing the defined-eval count)
+- [x] tests/graph-smoke.js added: real headless in-browser graph pass (the coverage gap
+      that let v2.9 ship this)
+- [x] Verified: bug reproduced on pre-fix copy (popup + ReferenceError, 1/25 evals);
+      fixed tree completes 25/25, accuracy renders, accuracy suite 12/12, smoke PASS
+
 ## Accuracy standardisation (2026-07-04)
 - [x] Investigated user report "accuracy wildly off" — CONFIRMED: old aggregation
       deviated from Lichess spec 3 ways; worst case 28 points (57/65 → 85/85)

@@ -1,5 +1,29 @@
 # Chess Analysis — Changelog
 
+## v2.9.1 — Fix graph crash introduced by v2.9 (2026-07-13)
+
+User-reported: every graph run died with the "Graph analysis failed. Please
+refresh the page and try again." popup. Root cause: v2.9's dead-code removal
+deleted `updateIncrementalAccuracy()` (a one-line accuracy-cache invalidator)
+but left both call sites in the graph commit path — a `ReferenceError` on
+every eval commit. When the first commit came synchronously (cached/forced
+position — position 0 nearly always is), the error rejected the pass promise
+→ popup; async commits from `bestmove` threw uncaught and stalled workers →
+frozen graph. Reproduced headlessly on v2.9, gone after the fix.
+
+- Inlined the invalidation (`AppState.cachedAccuracy = null`) at both commit
+  sites. Still needed despite the eval-count check: polish overwrites sketch
+  evals without changing the defined count, so a mid-run accuracy would
+  otherwise stay stale.
+- **New: `tests/graph-smoke.js`** — end-to-end headless graph run (GitHub
+  Pages-style static serve + coi-serviceworker isolation, real engine pool,
+  full sketch+polish pass, asserts zero popups/page errors and a fully
+  populated eval history). This is the test v2.9 lacked: the accuracy suite
+  runs `script.js` in a vm sandbox and never executes the graph path.
+- Verified: pre-fix code reproduces the exact popup + `ReferenceError`
+  (graph dead at 1/25 evals); fixed code completes 25/25 with accuracy
+  rendered; `tests/accuracy-test.js` still 12/12.
+
 ## v2.9 — Accuracy standardised on Lichess, exactly (2026-07-04)
 
 User-reported: accuracy "wildly off" vs reputable sites. **Confirmed and
