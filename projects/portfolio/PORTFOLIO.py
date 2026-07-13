@@ -161,25 +161,25 @@ def render_value_table(positions: dict[str, int]) -> Table:
     table.add_column("Quantity", justify="right", style="green")
     table.add_column("Price (USD)", justify="right")
     table.add_column("Value (USD)", justify="right", style="bold")
-    total = 0.0
-    any_missing = False
+    table.add_column("Weight", justify="right")
     if not positions:
-        table.add_row("—", "—", "—", "—")
-    else:
-        for ticker in sorted(positions):
-            qty = positions[ticker]
-            price = fetch_price(ticker)
-            if price is None:
-                any_missing = True
-                table.add_row(ticker, str(qty), "—", "—")
-            else:
-                value = price * qty
-                total += value
-                table.add_row(ticker, str(qty), f"{price:,.2f}", f"{value:,.2f}")
-        table.add_section()
-        table.add_row("TOTAL", "", "", f"{total:,.2f}")
-    if any_missing:
-        table.caption = "[yellow]some prices unavailable — total excludes them[/yellow]"
+        table.add_row("—", "—", "—", "—", "—")
+        return table
+    rows = [(ticker, positions[ticker], fetch_price(ticker)) for ticker in sorted(positions)]
+    total = sum(price * qty for _, qty, price in rows if price is not None)
+    # heaviest first; unpriced rows sink to the bottom (alphabetical among themselves)
+    rows.sort(key=lambda r: -(r[2] * r[1]) if r[2] is not None else float("inf"))
+    for ticker, qty, price in rows:
+        if price is None:
+            table.add_row(ticker, str(qty), "—", "—", "—")
+        else:
+            value = price * qty
+            weight = f"{value / total * 100:.1f}%" if total else "—"
+            table.add_row(ticker, str(qty), f"{price:,.2f}", f"{value:,.2f}", weight)
+    table.add_section()
+    table.add_row("TOTAL", "", "", f"{total:,.2f}", "100.0%" if total else "—")
+    if any(price is None for _, _, price in rows):
+        table.caption = "[yellow]some prices unavailable — total & weights exclude them[/yellow]"
     return table
 
 
@@ -256,7 +256,7 @@ def cli(ctx: click.Context) -> None:
 
     \b
     Other commands:
-        portfolio value      current holdings, live prices + total value
+        portfolio value      current holdings, live prices, weights + total value
         portfolio history    full transaction ledger (with recorded prices)
         portfolio            interactive prompt (action / ticker / qty / price)
     """
@@ -318,7 +318,7 @@ def sell(ticker: str, quantity: str, price: tuple[str, ...]) -> None:
 
 @cli.command()
 def value() -> None:
-    """Show current portfolio with live prices and total value."""
+    """Show current portfolio with live prices, weights and total value."""
     state = load_state()
     console.print(render_value_table(state["positions"]))
 

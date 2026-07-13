@@ -22,7 +22,8 @@ so your ledger stays in sync (and backed up) across every machine you use.
   `os.replace`d into place, so an interrupted run can't corrupt your ledger.
 - **Live prices** come from a Cloudflare Worker proxy
   (`dry-poetry-72b5.donovanh59.workers.dev`): Finnhub first, Yahoo as fallback.
-  Tickers whose price can't be fetched are shown as `—` and excluded from the total.
+  Tickers whose price can't be fetched are shown as `—` and excluded from the
+  total and the weights.
 
 ## Setup (first run on a new machine)
 
@@ -67,7 +68,7 @@ The CLI refuses to run until the data vault exists locally. Bootstrapping is two
 portfolio buy AAPL 10 @ 401.00   # buy 10 AAPL at $401.00
 portfolio sell AAPL 4 @ 415.50   # sell 4 (refuses if you hold fewer than 4)
 portfolio buy AAPL 10            # no price → asks: current price or enter your own
-portfolio value                  # current holdings with live prices + total value
+portfolio value                  # holdings with live prices, weights + total (heaviest first)
 portfolio history                # full transaction ledger (with recorded prices)
 portfolio                        # no subcommand → interactive prompt
 ```
