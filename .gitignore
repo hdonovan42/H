@@ -24,3 +24,6 @@ projects/all-in/exports/TSLA_Volume_2020_Present.xlsx
 
 # Rightmove Plus test fixtures — scraped pages, regenerate with test/fetch-fixtures.sh
 projects/rightmove-plus/test/fixtures/
+
+# Wrangler local dev state (local KV, caches, tmp bundles)
+.wrangler/

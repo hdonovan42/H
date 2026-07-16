@@ -11,7 +11,7 @@ Load context and begin working on the All-In stock tracker. If arguments are pro
 
 ## Project Overview
 
-Real-time stock price tracker dashboard focused on TSLA. Mission: make hjd.ai the go-to destination for checking TSLA price instead of Yahoo Finance or Perplexity. Three apps: main tracker, TSLA news aggregator, and earnings dashboard.
+Real-time stock price tracker dashboard focused on TSLA. Mission: make hjd.ai the go-to destination for checking TSLA price instead of Yahoo Finance or Perplexity. Four apps: main tracker, TSLA news aggregator, earnings dashboard, and compare page (TSLA divestment analysis + accounts).
 
 - **Repo path**: `projects/all-in/`
 - **Live**: https://hjd.ai/projects/all-in/
@@ -22,18 +22,19 @@ Real-time stock price tracker dashboard focused on TSLA. Mission: make hjd.ai th
 
 ### Frontend (React + Vite)
 
-Three entry points:
+Four entry points:
 - `index.html` → Stock tracker (StockTracker.jsx + StockChart.jsx)
 - `tsla.html` → TSLA news aggregator (TeslaNews.jsx)
 - `earnings.html` → Earnings dashboard (EarningsControlCentre.jsx)
+- `compare.html` → Compare page (CompareTracker.jsx + CompareChart.jsx + AccountPanel.jsx): up to 5 symbols vs TSLA (swap-rate TSLA÷X / ratio / indexed, 3M/6M/1Y, default 1Y), what-if portfolio table, magic-link accounts with up to 20 named portfolios
 
 Base path: `/projects/all-in/`
 
 ### Backend (Cloudflare Worker)
 
-Single file: `worker.js` (~1750 lines). Proxies all API calls, handles news collection (cron every 30 min), earnings data racing, caching.
+Single file: `worker.js` (~2100 lines). Proxies all API calls, handles news collection (cron every 30 min), earnings data racing, caching, magic-link auth + per-account portfolio storage.
 
-3 KV namespaces: `NEWS_STORE`, `EARNINGS_STORE`, `SEEN_URLS`
+4 KV namespaces: `NEWS_STORE`, `EARNINGS_STORE`, `SEEN_URLS`, `AUTH_STORE` (login/session token hashes, `account:<email>` portfolio blobs, sign-in rate-limit counters)
 
 ### Data Sources
 
@@ -55,6 +56,10 @@ Single file: `worker.js` (~1750 lines). Proxies all API calls, handles news coll
 | `src/components/StockChart.jsx` | SVG chart (~400 lines): line/candle, zoom, hover tooltip |
 | `src/components/TeslaNews.jsx` | News feed UI with source filters |
 | `src/components/EarningsControlCentre.jsx` | Earnings dashboard with live conference call |
+| `src/components/CompareTracker.jsx` | Compare page: multi-symbol state, ratio maths, portfolio table |
+| `src/components/CompareChart.jsx` | Multi-series SVG chart (swap/ratio/indexed modes) |
+| `src/components/AccountPanel.jsx` | Magic-link sign-in + saved-portfolio manager |
+| `src/utils/accountApi.js` | Session storage + auth/portfolio API wrappers |
 | `src/components/earnings/` | Earnings subcomponents (data, price, chart, video, transcript, twitter, news) |
 | `src/hooks/useEarningsData.js` | Earnings data fetching hook (multi-source racing) |
 | `src/utils/api.js` | API calls to worker |
@@ -95,6 +100,7 @@ CLOSED:      overnight, weekends, holidays
 **FMP**: `/fmp/shares-float/:symbol`, `/fmp/analyst-estimates/:symbol`, `/fmp/earnings-surprises/:symbol`, `/fmp/sp500-weight`
 **Market**: `/clock`, `/trades/:symbol`, `/bars/:symbol`
 **Misc**: `/exchange-rate`, `/transcripts/:ticker/:quarter`
+**Accounts**: `POST /auth/request` (magic link via Resend; 503 until `RESEND_API_KEY_ENV` set; rate-limited 5/hour per IP+email), `POST /auth/verify` (single-use token → 90-day session), `GET /portfolios`, `POST /portfolios/save|rename|delete` (Bearer session; unique names, max 20). Local dev: `npx wrangler dev --port 8787 --var DEV_ECHO_LINK:1` echoes the link instead of emailing; pair with `VITE_WORKER_URL=http://localhost:8787 npm run dev`.
 
 ## Earnings Racing
 
@@ -130,6 +136,7 @@ ALPACA_KEY_ID_ENV, ALPACA_SECRET_KEY_ENV
 FINNHUB_API_KEY_ENV
 FMP_API_KEY_ENV
 ALPHA_VANTAGE_KEY_ENV
+RESEND_API_KEY_ENV      # magic-link email; sender constant SIGNIN_FROM in worker.js
 ```
 
 ## Rules

@@ -9,12 +9,13 @@ const SEEN_VERSION = "v4";
 // UTILITY FUNCTIONS
 // ============================================================
 
+async function sha256Hex(input) {
+  const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function hashUrl(url) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(url);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
+  return (await sha256Hex(url)).slice(0, 32);
 }
 
 async function isUrlSeen(env, url) {
@@ -332,6 +333,92 @@ async function proxyFetch(targetUrl, headers = {}) {
 }
 
 // ============================================================
+// ACCOUNTS — magic-link auth + saved portfolios (AUTH_STORE)
+// ============================================================
+// KV keys (values holding tokens are stored as SHA-256 hashes, never raw):
+//   login:<sha256(token)>   -> { email }            TTL 15 min, deleted on use
+//   session:<sha256(token)> -> { email, created }   TTL 90 days
+//   account:<email>         -> { portfolios: { name: { data, updatedAt } } }
+//   rl:ip:<ip> / rl:email:<email> -> request counter, TTL 1 hour
+
+const SIGNIN_FROM = 'All-In <signin@send.hjd.ai>'; // must match the Resend-verified domain
+const ALLOWED_LINK_ORIGINS = ['https://hjd.ai', 'http://localhost:5173'];
+const MAX_PORTFOLIOS = 20;
+
+function jsonResponse(payload, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+  });
+}
+
+function randomToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Bearer session token -> { email } | null
+async function getSession(request, env) {
+  const auth = request.headers.get('Authorization') || '';
+  if (!auth.startsWith('Bearer ')) return null;
+  const token = auth.slice(7).trim();
+  if (!token) return null;
+  return env.AUTH_STORE.get(`session:${await sha256Hex(token)}`, { type: 'json' });
+}
+
+// Increment an hourly counter; false once the cap is hit
+async function bumpRateLimit(env, key, max = 5) {
+  const count = parseInt(await env.AUTH_STORE.get(key), 10) || 0;
+  if (count >= max) return false;
+  await env.AUTH_STORE.put(key, String(count + 1), { expirationTtl: 3600 });
+  return true;
+}
+
+function validPortfolioName(raw) {
+  const name = typeof raw === 'string' ? raw.trim() : '';
+  return name.length >= 1 && name.length <= 40 ? name : null;
+}
+
+// Accept only the working-state shape the compare page saves
+function sanitisePortfolioData(data) {
+  if (!data || typeof data !== 'object' || !Array.isArray(data.symbols)) return null;
+  const symbols = data.symbols
+    .filter(s => typeof s === 'string' && /^[A-Z.^-]{1,8}$/.test(s))
+    .slice(0, 4);
+  const numMap = (obj) => {
+    const out = {};
+    if (obj && typeof obj === 'object') {
+      for (const [k, v] of Object.entries(obj)) {
+        if (k.length <= 8 && /^\d*\.?\d*$/.test(String(v)) && String(v).length <= 16) out[k] = String(v);
+      }
+    }
+    return out;
+  };
+  return { symbols, shares: numMap(data.shares), priceOverrides: numMap(data.priceOverrides) };
+}
+
+async function sendSignInEmail(env, to, link) {
+  try {
+    const resp = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${env.RESEND_API_KEY_ENV}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: SIGNIN_FROM,
+        to: [to],
+        subject: 'Your All-In sign-in link',
+        text: `Sign in to All-In:\n\n${link}\n\nThe link is valid for 15 minutes and can be used once. If you didn't request it, ignore this email.`,
+        html: `<p>Sign in to <strong>All-In</strong>:</p><p><a href="${link}">${link}</a></p><p style="color:#666">The link is valid for 15 minutes and can be used once. If you didn't request it, ignore this email.</p>`,
+      }),
+    });
+    if (!resp.ok) console.error('Resend send failed:', resp.status, await resp.text());
+    return resp.ok;
+  } catch (e) {
+    console.error('Resend send error:', e.message);
+    return false;
+  }
+}
+
+// ============================================================
 // YAHOO CRUMB AUTH
 // ============================================================
 
@@ -406,6 +493,112 @@ export default {
         'APCA-API-KEY-ID': ALPACA_KEY_ID,
         'APCA-API-SECRET-KEY': ALPACA_SECRET_KEY,
       };
+
+      // ---- Accounts: magic-link auth ----
+
+      // POST /auth/request { email, origin } -> email a single-use sign-in link
+      if (request.method === 'POST' && path === '/auth/request') {
+        try {
+          const body = await request.json();
+          const email = (body.email || '').trim().toLowerCase();
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            return jsonResponse({ error: 'Enter a valid email address' }, 400);
+          }
+          const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+          if (!(await bumpRateLimit(env, `rl:ip:${ip}`)) || !(await bumpRateLimit(env, `rl:email:${email}`))) {
+            return jsonResponse({ error: 'Too many sign-in requests — try again in an hour' }, 429);
+          }
+          const token = randomToken();
+          await env.AUTH_STORE.put(`login:${await sha256Hex(token)}`, JSON.stringify({ email }), { expirationTtl: 900 });
+          const origin = ALLOWED_LINK_ORIGINS.includes(body.origin) ? body.origin : ALLOWED_LINK_ORIGINS[0];
+          const link = `${origin}/projects/all-in/compare.html?login=${token}`;
+          // wrangler dev --var DEV_ECHO_LINK:1 only — the deployed worker never echoes tokens
+          if (env.DEV_ECHO_LINK === '1') return jsonResponse({ success: true, link });
+          if (!env.RESEND_API_KEY_ENV) return jsonResponse({ error: 'Email sign-in is not configured yet' }, 503);
+          const sent = await sendSignInEmail(env, email, link);
+          if (!sent) return jsonResponse({ error: 'Could not send the email — try again shortly' }, 502);
+          return jsonResponse({ success: true });
+        } catch (e) {
+          return jsonResponse({ error: e.message }, 400);
+        }
+      }
+
+      // POST /auth/verify { token } -> single-use exchange for a 90-day session
+      if (request.method === 'POST' && path === '/auth/verify') {
+        try {
+          const { token } = await request.json();
+          if (!token) return jsonResponse({ error: 'Missing token' }, 400);
+          const loginKey = `login:${await sha256Hex(token)}`;
+          const login = await env.AUTH_STORE.get(loginKey, { type: 'json' });
+          if (!login?.email) return jsonResponse({ error: 'Link expired or already used' }, 401);
+          await env.AUTH_STORE.delete(loginKey);
+          const sessionToken = randomToken();
+          await env.AUTH_STORE.put(
+            `session:${await sha256Hex(sessionToken)}`,
+            JSON.stringify({ email: login.email, created: Date.now() }),
+            { expirationTtl: 60 * 60 * 24 * 90 }
+          );
+          return jsonResponse({ sessionToken, email: login.email });
+        } catch (e) {
+          return jsonResponse({ error: e.message }, 400);
+        }
+      }
+
+      // ---- Accounts: saved portfolios (Bearer session required) ----
+      if (path === '/portfolios' || path.startsWith('/portfolios/')) {
+        const session = await getSession(request, env);
+        if (!session?.email) return jsonResponse({ error: 'Unauthorized' }, 401);
+        const accountKey = `account:${session.email}`;
+        const account = (await env.AUTH_STORE.get(accountKey, { type: 'json' })) || { portfolios: {} };
+
+        // GET /portfolios -> the whole account blob (portfolio data is tiny)
+        if (request.method === 'GET' && path === '/portfolios') {
+          return jsonResponse({ email: session.email, portfolios: account.portfolios });
+        }
+
+        try {
+          const body = await request.json();
+
+          // POST /portfolios/save { name, data } — same name overwrites; new names capped
+          if (request.method === 'POST' && path === '/portfolios/save') {
+            const name = validPortfolioName(body.name);
+            const data = sanitisePortfolioData(body.data);
+            if (!name || !data) return jsonResponse({ error: 'Invalid portfolio name or data' }, 400);
+            if (!account.portfolios[name] && Object.keys(account.portfolios).length >= MAX_PORTFOLIOS) {
+              return jsonResponse({ error: `Portfolio limit reached (${MAX_PORTFOLIOS})` }, 409);
+            }
+            account.portfolios[name] = { data, updatedAt: Date.now() };
+            await env.AUTH_STORE.put(accountKey, JSON.stringify(account));
+            return jsonResponse({ success: true, portfolios: account.portfolios });
+          }
+
+          // POST /portfolios/rename { from, to } — names are unique per account
+          if (request.method === 'POST' && path === '/portfolios/rename') {
+            const from = typeof body.from === 'string' ? body.from.trim() : '';
+            const to = validPortfolioName(body.to);
+            if (!to) return jsonResponse({ error: 'Invalid new name' }, 400);
+            if (!account.portfolios[from]) return jsonResponse({ error: 'Portfolio not found' }, 404);
+            if (to === from) return jsonResponse({ success: true, portfolios: account.portfolios });
+            if (account.portfolios[to]) return jsonResponse({ error: 'That name is already taken' }, 409);
+            account.portfolios[to] = account.portfolios[from];
+            delete account.portfolios[from];
+            await env.AUTH_STORE.put(accountKey, JSON.stringify(account));
+            return jsonResponse({ success: true, portfolios: account.portfolios });
+          }
+
+          // POST /portfolios/delete { name }
+          if (request.method === 'POST' && path === '/portfolios/delete') {
+            const name = typeof body.name === 'string' ? body.name.trim() : '';
+            if (!account.portfolios[name]) return jsonResponse({ error: 'Portfolio not found' }, 404);
+            delete account.portfolios[name];
+            await env.AUTH_STORE.put(accountKey, JSON.stringify(account));
+            return jsonResponse({ success: true, portfolios: account.portfolios });
+          }
+        } catch (e) {
+          return jsonResponse({ error: e.message }, 400);
+        }
+        return jsonResponse({ error: 'Invalid endpoint' }, 404);
+      }
 
       const yahooHeaders = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',

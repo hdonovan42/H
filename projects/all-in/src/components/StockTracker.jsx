@@ -3,21 +3,9 @@ import StockChart from './StockChart';
 import { WORKER_URL, EST, SETTLE_POLL_INTERVAL_MS, SETTLE_STABLE_K, SETTLE_TIMEOUT_MS, SETTLE_COLD_WINDOW_MIN } from '../utils/config';
 import { dayjs, getMarketState, getTodayEST, MarketState } from '../utils/marketState';
 import { getCachedData, setCachedData, clearCaches } from '../utils/cache';
-import { fetchPriceData, fetchMarketClock, fetchEarningsDate } from '../utils/api';
+import { fetchPriceData, fetchMarketClock, fetchEarningsDate, backfillLatestClose, parseYahooBars } from '../utils/api';
 import { PHASE, determineInitialPhase, isStable, resolvePrice } from '../utils/pricePhase';
 import '../styles/stock-tracker.css';
-
-// Yahoo intermittently returns the latest completed daily bar with a null `close`
-// (open/high/low/volume present) while the official close sits in
-// meta.regularMarketPrice — observed 2026-06-26, where the day then vanished from
-// the spreadsheet entirely. Backfill that one bar from meta so the null-close
-// filter keeps it. No-op once Yahoo populates the real close, or if no bar matches.
-const backfillLatestClose = (rows, meta) => {
-  const price = meta?.regularMarketPrice;
-  if (price == null || meta?.regularMarketTime == null) return rows;
-  const closeDate = dayjs.unix(meta.regularMarketTime).tz(EST).format('YYYY-MM-DD');
-  return rows.map(r => (r.close == null && r.date === closeDate ? { ...r, close: price } : r));
-};
 
 export default function StockTracker() {
   const [ticker, setTicker] = useState('TSLA');
@@ -208,22 +196,6 @@ export default function StockTracker() {
       console.error('Error:', error);
     }
     setLoading(false);
-  };
-
-  // Parse Yahoo chart response into row objects
-  const parseYahooBars = (chartResult) => {
-    const timestamps = chartResult.timestamp;
-    const q = chartResult.indicators.quote[0];
-    if (!timestamps || !q) return [];
-    const rows = timestamps.map((t, i) => ({
-      date: dayjs.unix(t).tz(EST).format('YYYY-MM-DD'),
-      open: q.open[i],
-      high: q.high[i],
-      low: q.low[i],
-      close: q.close[i],
-      volume: q.volume[i] || 0
-    }));
-    return backfillLatestClose(rows, chartResult.meta).filter(d => d.close !== null);
   };
 
   // Merge and dedupe historical data, sorted oldest-first
@@ -1086,9 +1058,12 @@ export default function StockTracker() {
       <div className="container">
         <header className="header">
           <div className="ticker-display">{companyName || ticker}</div>
-          <form className="ticker-form" onSubmit={handleTickerSubmit}>
-            <input type="text" className="ticker-input" value={inputTicker} onChange={(e) => setInputTicker(e.target.value)} placeholder="TICKER" maxLength={5} />
-          </form>
+          <div className="header-right">
+            <a href="compare.html" className="page-link">compare</a>
+            <form className="ticker-form" onSubmit={handleTickerSubmit}>
+              <input type="text" className="ticker-input" value={inputTicker} onChange={(e) => setInputTicker(e.target.value)} placeholder="TICKER" maxLength={5} />
+            </form>
+          </div>
         </header>
 
         <div className="top-row">

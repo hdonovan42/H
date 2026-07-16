@@ -11,6 +11,7 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
         tsla: resolve(__dirname, 'tsla.html'),
         earnings: resolve(__dirname, 'earnings.html'),
+        compare: resolve(__dirname, 'compare.html'),
       },
     },
   },

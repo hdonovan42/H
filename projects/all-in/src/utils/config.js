@@ -1,4 +1,5 @@
-export const WORKER_URL = 'https://dry-poetry-72b5.donovanh59.workers.dev';
+// VITE_WORKER_URL lets local testing target `wrangler dev` (http://localhost:8787)
+export const WORKER_URL = import.meta.env?.VITE_WORKER_URL || 'https://dry-poetry-72b5.donovanh59.workers.dev';
 export const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
 export const EST = 'America/New_York';
 export const EARNINGS_DATE = '2026-04-22';
