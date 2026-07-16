@@ -83,6 +83,14 @@ export default function CompareChart({ series, axisDates, mode, onModeChange, ra
         const step = Math.ceil(labels.length / 6);
         return labels.filter((_, i) => i % step === 0);
       }
+    } else if (range === '5Y') {
+      const seen = new Set();
+      axisDates.forEach((d, i) => {
+        const year = dayjs(d).year();
+        if (seen.has(year)) return;
+        seen.add(year);
+        labels.push({ label: String(year).slice(-2), x: calcX(i) });
+      });
     } else {
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       const seen = new Set();

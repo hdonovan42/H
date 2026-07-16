@@ -13,8 +13,8 @@ const MAX_SYMBOLS = 5; // including TSLA
 // NOT stock_/shares_ prefixed — clearCaches() on the tracker page wipes those
 const STORAGE_KEY = 'compare_portfolio_v1';
 const QUOTE_POLL_MS = 60 * 1000;
-const RANGES = ['3M', '6M', '1Y'];
-const RANGE_TRADING_DAYS = { '3M': 63, '6M': 126, '1Y': 252 };
+const RANGES = ['3M', '6M', 'YTD', '1Y', '5Y'];
+const RANGE_TRADING_DAYS = { '3M': 63, '6M': 126, '1Y': 252, '5Y': 1260 }; // YTD slices by date instead
 
 const REF_COLOR = '#1a1a1a';
 const COLOR_POOL = ['#2d5f8a', '#b8860b', '#7d4a8d', '#2f6f6a'];
@@ -79,7 +79,7 @@ export default function CompareTracker() {
     (async () => {
       const fetched = await Promise.all(allSymbols.map(async sym => {
         try {
-          const res = await fetch(`${WORKER_URL}/yahoo/${sym}?range=1y&interval=1d`);
+          const res = await fetch(`${WORKER_URL}/yahoo/${sym}?range=5y&interval=1d`);
           const json = await res.json();
           const result = json?.chart?.result?.[0];
           return [sym, result ? parseYahooBars(result) : []];
@@ -166,7 +166,10 @@ export default function CompareTracker() {
       return map;
     };
 
-    const axis = tslaBars.slice(-RANGE_TRADING_DAYS[range]).map(b => b.date);
+    const inRange = range === 'YTD'
+      ? tslaBars.filter(b => b.date >= `${dayjs().tz(EST).year()}-01-01`)
+      : tslaBars.slice(-RANGE_TRADING_DAYS[range]);
+    const axis = inRange.map(b => b.date);
     const tslaMap = closeMap(REF);
     const drawn = mode === 'indexed' ? [REF, ...symbols] : symbols;
     const short = [];
