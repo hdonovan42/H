@@ -338,7 +338,8 @@ async function proxyFetch(targetUrl, headers = {}) {
 // KV keys (values holding tokens are stored as SHA-256 hashes, never raw):
 //   login:<sha256(token)>   -> { email }            TTL 15 min, deleted on use
 //   session:<sha256(token)> -> { email, created }   TTL 90 days
-//   account:<email>         -> { portfolios: { name: { data, updatedAt } } }
+//   account:<email>         -> { portfolios: { name: { data, updatedAt } }, order: [names] }
+//                              order[0] is the default portfolio the page auto-loads
 //   rl:ip:<ip> / rl:email:<email> -> request counter, TTL 1 hour
 
 const SIGNIN_FROM = 'All-In <signin@send.hjd.ai>'; // must match the Resend-verified domain
@@ -374,6 +375,14 @@ async function bumpRateLimit(env, key, max = 5) {
   return true;
 }
 
+// Keep order a permutation of the portfolio names (drops stale, appends missing)
+function normalisePortfolioOrder(account) {
+  const names = Object.keys(account.portfolios);
+  const order = (Array.isArray(account.order) ? account.order : []).filter(n => names.includes(n));
+  names.forEach(n => { if (!order.includes(n)) order.push(n); });
+  account.order = order;
+}
+
 function validPortfolioName(raw) {
   const name = typeof raw === 'string' ? raw.trim() : '';
   return name.length >= 1 && name.length <= 40 ? name : null;
@@ -384,7 +393,7 @@ function sanitisePortfolioData(data) {
   if (!data || typeof data !== 'object' || !Array.isArray(data.symbols)) return null;
   const symbols = data.symbols
     .filter(s => typeof s === 'string' && /^[A-Z.^-]{1,8}$/.test(s))
-    .slice(0, 4);
+    .slice(0, 7); // non-TSLA symbols; 8 including the pinned TSLA
   const numMap = (obj) => {
     const out = {};
     if (obj && typeof obj === 'object') {
@@ -550,10 +559,11 @@ export default {
         if (!session?.email) return jsonResponse({ error: 'Unauthorized' }, 401);
         const accountKey = `account:${session.email}`;
         const account = (await env.AUTH_STORE.get(accountKey, { type: 'json' })) || { portfolios: {} };
+        normalisePortfolioOrder(account);
 
         // GET /portfolios -> the whole account blob (portfolio data is tiny)
         if (request.method === 'GET' && path === '/portfolios') {
-          return jsonResponse({ email: session.email, portfolios: account.portfolios });
+          return jsonResponse({ email: session.email, portfolios: account.portfolios, order: account.order });
         }
 
         try {
@@ -568,8 +578,9 @@ export default {
               return jsonResponse({ error: `Portfolio limit reached (${MAX_PORTFOLIOS})` }, 409);
             }
             account.portfolios[name] = { data, updatedAt: Date.now() };
+            if (!account.order.includes(name)) account.order.push(name);
             await env.AUTH_STORE.put(accountKey, JSON.stringify(account));
-            return jsonResponse({ success: true, portfolios: account.portfolios });
+            return jsonResponse({ success: true, portfolios: account.portfolios, order: account.order });
           }
 
           // POST /portfolios/rename { from, to } — names are unique per account
@@ -578,12 +589,13 @@ export default {
             const to = validPortfolioName(body.to);
             if (!to) return jsonResponse({ error: 'Invalid new name' }, 400);
             if (!account.portfolios[from]) return jsonResponse({ error: 'Portfolio not found' }, 404);
-            if (to === from) return jsonResponse({ success: true, portfolios: account.portfolios });
+            if (to === from) return jsonResponse({ success: true, portfolios: account.portfolios, order: account.order });
             if (account.portfolios[to]) return jsonResponse({ error: 'That name is already taken' }, 409);
             account.portfolios[to] = account.portfolios[from];
             delete account.portfolios[from];
+            account.order[account.order.indexOf(from)] = to; // rename keeps its position
             await env.AUTH_STORE.put(accountKey, JSON.stringify(account));
-            return jsonResponse({ success: true, portfolios: account.portfolios });
+            return jsonResponse({ success: true, portfolios: account.portfolios, order: account.order });
           }
 
           // POST /portfolios/delete { name }
@@ -591,8 +603,23 @@ export default {
             const name = typeof body.name === 'string' ? body.name.trim() : '';
             if (!account.portfolios[name]) return jsonResponse({ error: 'Portfolio not found' }, 404);
             delete account.portfolios[name];
+            account.order = account.order.filter(n => n !== name);
             await env.AUTH_STORE.put(accountKey, JSON.stringify(account));
-            return jsonResponse({ success: true, portfolios: account.portfolios });
+            return jsonResponse({ success: true, portfolios: account.portfolios, order: account.order });
+          }
+
+          // POST /portfolios/reorder { order } — must be a permutation of the saved names;
+          // order[0] becomes the default portfolio
+          if (request.method === 'POST' && path === '/portfolios/reorder') {
+            const order = Array.isArray(body.order) ? body.order : null;
+            const names = Object.keys(account.portfolios);
+            const valid = order && order.length === names.length
+              && new Set(order).size === order.length
+              && order.every(n => names.includes(n));
+            if (!valid) return jsonResponse({ error: 'Invalid order' }, 400);
+            account.order = order;
+            await env.AUTH_STORE.put(accountKey, JSON.stringify(account));
+            return jsonResponse({ success: true, portfolios: account.portfolios, order: account.order });
           }
         } catch (e) {
           return jsonResponse({ error: e.message }, 400);

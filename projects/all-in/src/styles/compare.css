@@ -68,6 +68,11 @@
 .portfolio-saved-list { display: flex; flex-direction: column; margin: 8px 0 10px; border-top: 1px solid #e8e5dc; }
 .portfolio-saved-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid #e8e5dc; flex-wrap: wrap; }
 .portfolio-saved-name { font-size: 13px; font-weight: 600; min-width: 110px; }
+.drag-handle { color: #b5b1a6; cursor: grab; font-size: 13px; user-select: none; }
+.portfolio-saved-row[draggable] { cursor: grab; }
+.portfolio-saved-row.dragging { opacity: 0.4; }
+.portfolio-saved-row.drag-over { box-shadow: inset 0 2px 0 #1a1a1a; }
+.default-tag { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: #2d5a3d; border: 1px solid #2d5a3d; padding: 1px 5px; margin-left: 8px; vertical-align: 2px; }
 .portfolio-saved-summary { font-size: 11px; color: #666; flex: 1; min-width: 180px; letter-spacing: 0.3px; }
 .portfolio-saved-date { font-size: 11px; color: #999; }
 

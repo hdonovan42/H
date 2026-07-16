@@ -64,3 +64,5 @@ export const renamePortfolio = (from, to) =>
   call('/portfolios/rename', { method: 'POST', body: { from, to } });
 export const deletePortfolio = (name) =>
   call('/portfolios/delete', { method: 'POST', body: { name } });
+export const reorderPortfolios = (order) =>
+  call('/portfolios/reorder', { method: 'POST', body: { order } });

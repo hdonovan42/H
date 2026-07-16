@@ -31,6 +31,13 @@ New fourth app: **compare.html** — TSLA divestment analysis (framed from an al
 - **Resend configured same day**: send.hjd.ai verified (DKIM/SPF/MX, eu-west-1) via the Resend Cloudflare wizard; send-only API key stored as `RESEND_API_KEY_ENV`. Production sign-in emails confirmed delivering.
 - **What to watch**: the 5/hour sign-in rate limit (per IP and per email) when testing repeatedly — counters live in AUTH_STORE under `rl:*` and can be deleted with `wrangler kv key delete` if needed.
 
+### Same-day follow-ups
+- Account panel moved below the portfolio table
+- Saved-portfolio rows show total value + per-ticker weights (fetches prices for symbols outside the working set)
+- YTD and 5Y chart ranges (bars now fetched at 5y daily; YTD slices by calendar date)
+- **Drag-and-drop reorder** of saved portfolios; the top one is the **default** that auto-loads when the page opens (`order` array in the account blob + `POST /portfolios/reorder`; renames keep their position)
+- Ticker limit raised to **8** (TSLA + 7); three colours added to the series palette
+
 ## Earlier milestones (summary)
 
 - **2026-07-13** — Per-symbol earnings date in the stats panel (was a hardcoded TSLA constant)

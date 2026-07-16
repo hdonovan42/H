@@ -9,7 +9,7 @@ import '../styles/compare.css';
 
 const REF = 'TSLA';
 const DEFAULT_SYMBOLS = ['SPCX', 'GOOGL', 'PLTR'];
-const MAX_SYMBOLS = 5; // including TSLA
+const MAX_SYMBOLS = 8; // including TSLA
 // NOT stock_/shares_ prefixed — clearCaches() on the tracker page wipes those
 const STORAGE_KEY = 'compare_portfolio_v1';
 const QUOTE_POLL_MS = 60 * 1000;
@@ -17,7 +17,7 @@ const RANGES = ['3M', '6M', 'YTD', '1Y', '5Y'];
 const RANGE_TRADING_DAYS = { '3M': 63, '6M': 126, '1Y': 252, '5Y': 1260 }; // YTD slices by date instead
 
 const REF_COLOR = '#1a1a1a';
-const COLOR_POOL = ['#2d5f8a', '#b8860b', '#7d4a8d', '#2f6f6a'];
+const COLOR_POOL = ['#2d5f8a', '#b8860b', '#7d4a8d', '#2f6f6a', '#a1503c', '#9c5069', '#6f6d20'];
 
 const MODE_CAPTIONS = {
   swap: 'TSLA ÷ stock — how many shares of each one TSLA share buys. A peak means TSLA is rich relative to that stock: the moment a partial divestment buys the most.',
@@ -234,6 +234,14 @@ export default function CompareTracker() {
 
   const fmtMoney = (v) => '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+  // Stable identity: AccountPanel auto-loads the default portfolio from an
+  // effect that depends on this callback
+  const loadPortfolio = useCallback((data) => {
+    setSymbols(data.symbols);
+    setShares(data.shares || {});
+    setPriceOverrides(data.priceOverrides || {});
+  }, []);
+
   return (
     <div className="page-wrapper">
       {loading && <div className="loading"><div className="loading-text">Loading comparison...</div></div>}
@@ -349,11 +357,7 @@ export default function CompareTracker() {
         <AccountPanel
           workingState={{ symbols, shares, priceOverrides }}
           quotes={quotes}
-          onLoadPortfolio={(data) => {
-            setSymbols(data.symbols);
-            setShares(data.shares || {});
-            setPriceOverrides(data.priceOverrides || {});
-          }}
+          onLoadPortfolio={loadPortfolio}
         />
 
         {lastUpdated && (

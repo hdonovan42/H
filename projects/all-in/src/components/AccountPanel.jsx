@@ -4,7 +4,7 @@ import { fetchYahooQuote } from '../utils/api';
 import {
   getStoredSession, storeSession, clearSession,
   requestLink, verifyToken, getPortfolios,
-  savePortfolio, renamePortfolio, deletePortfolio, MAX_PORTFOLIOS,
+  savePortfolio, renamePortfolio, deletePortfolio, reorderPortfolios, MAX_PORTFOLIOS,
 } from '../utils/accountApi';
 
 const REF = 'TSLA'; // implicit first symbol of every saved portfolio
@@ -15,6 +15,9 @@ const REF = 'TSLA'; // implicit first symbol of every saved portfolio
 export default function AccountPanel({ workingState, quotes, onLoadPortfolio }) {
   const [session, setSession] = useState(getStoredSession);
   const [portfolios, setPortfolios] = useState({});
+  const [order, setOrder] = useState([]); // user-chosen row order; order[0] = default portfolio
+  const [dragIndex, setDragIndex] = useState(null);
+  const [overIndex, setOverIndex] = useState(null);
   const [email, setEmail] = useState('');
   const [saveName, setSaveName] = useState('');
   const [renaming, setRenaming] = useState(null); // { from, to }
@@ -74,10 +77,16 @@ export default function AccountPanel({ workingState, quotes, onLoadPortfolio }) 
 
   const fmtTotal = (v) => '$' + v.toLocaleString('en-US', { maximumFractionDigits: 0 });
 
+  const applyBlob = useCallback((r) => {
+    setPortfolios(r.portfolios);
+    setOrder(r.order ?? Object.keys(r.portfolios));
+  }, []);
+
   const signOut = useCallback(() => {
     clearSession();
     setSession(null);
     setPortfolios({});
+    setOrder([]);
     setRenaming(null);
     setConfirmDelete(null);
     setStatus(null);
@@ -115,14 +124,24 @@ export default function AccountPanel({ workingState, quotes, onLoadPortfolio }) 
     })();
   }, []);
 
+  // Fetch the account on sign-in/page open and auto-load the default
+  // portfolio (first in the user's order) into the working table
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
     getPortfolios()
-      .then(r => { if (!cancelled) setPortfolios(r.portfolios); })
+      .then(r => {
+        if (cancelled) return;
+        applyBlob(r);
+        const first = (r.order ?? Object.keys(r.portfolios))[0];
+        if (first && r.portfolios[first]) {
+          onLoadPortfolio(r.portfolios[first].data);
+          setStatus({ kind: 'info', text: `Loaded default portfolio “${first}”` });
+        }
+      })
       .catch(err => { if (!cancelled) handleApiError(err); });
     return () => { cancelled = true; };
-  }, [session, handleApiError]);
+  }, [session, handleApiError, applyBlob, onLoadPortfolio]);
 
   const handleRequestLink = async (e) => {
     e.preventDefault();
@@ -139,7 +158,7 @@ export default function AccountPanel({ workingState, quotes, onLoadPortfolio }) 
     setBusy(false);
   };
 
-  const names = Object.keys(portfolios).sort((a, b) => a.localeCompare(b));
+  const names = order;
   const trimmedSaveName = saveName.trim();
   const nameExists = !!portfolios[trimmedSaveName];
   const atCap = !nameExists && names.length >= MAX_PORTFOLIOS;
@@ -151,7 +170,7 @@ export default function AccountPanel({ workingState, quotes, onLoadPortfolio }) 
     setStatus(null);
     try {
       const r = await savePortfolio(trimmedSaveName, workingState);
-      setPortfolios(r.portfolios);
+      applyBlob(r);
       setStatus({ kind: 'info', text: `Saved “${trimmedSaveName}”` });
       setSaveName('');
     } catch (err) {
@@ -174,7 +193,7 @@ export default function AccountPanel({ workingState, quotes, onLoadPortfolio }) 
     setStatus(null);
     try {
       const r = await renamePortfolio(renaming.from, to);
-      setPortfolios(r.portfolios);
+      applyBlob(r);
       setRenaming(null);
     } catch (err) {
       handleApiError(err); // 409 "That name is already taken" stays visible while editing
@@ -192,11 +211,29 @@ export default function AccountPanel({ workingState, quotes, onLoadPortfolio }) 
     setConfirmDelete(null);
     try {
       const r = await deletePortfolio(name);
-      setPortfolios(r.portfolios);
+      applyBlob(r);
     } catch (err) {
       handleApiError(err);
     }
     setBusy(false);
+  };
+
+  // Drag-and-drop reorder: optimistic local move, server confirms (or revert)
+  const commitReorder = async (from, to) => {
+    setDragIndex(null);
+    setOverIndex(null);
+    if (from == null || to == null || from === to) return;
+    const prev = order;
+    const next = [...order];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setOrder(next);
+    try {
+      applyBlob(await reorderPortfolios(next));
+    } catch (err) {
+      setOrder(prev);
+      handleApiError(err);
+    }
   };
 
   if (!session) {
@@ -230,7 +267,7 @@ export default function AccountPanel({ workingState, quotes, onLoadPortfolio }) 
 
       {names.length > 0 && (
         <div className="portfolio-saved-list">
-          {names.map(name => renaming?.from === name ? (
+          {names.map((name, i) => renaming?.from === name ? (
             <form key={name} className="portfolio-saved-row" onSubmit={submitRename}>
               <input
                 autoFocus
@@ -244,8 +281,18 @@ export default function AccountPanel({ workingState, quotes, onLoadPortfolio }) 
               <button className="account-btn" type="button" onClick={() => setRenaming(null)}>Cancel</button>
             </form>
           ) : (
-            <div key={name} className="portfolio-saved-row">
-              <span className="portfolio-saved-name">{name}</span>
+            <div
+              key={name}
+              className={`portfolio-saved-row ${dragIndex === i ? 'dragging' : ''} ${overIndex === i && dragIndex !== null && dragIndex !== i ? 'drag-over' : ''}`}
+              draggable
+              onDragStart={e => { setDragIndex(i); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', name); }}
+              onDragOver={e => { e.preventDefault(); if (overIndex !== i) setOverIndex(i); }}
+              onDrop={e => { e.preventDefault(); commitReorder(dragIndex, i); }}
+              onDragEnd={() => { setDragIndex(null); setOverIndex(null); }}
+              title={i === 0 ? 'Default portfolio — loads when the page opens' : 'Drag to reorder; the top portfolio loads by default'}
+            >
+              <span className="drag-handle" aria-hidden="true">⠿</span>
+              <span className="portfolio-saved-name">{name}{i === 0 && <span className="default-tag">default</span>}</span>
               <span className="portfolio-saved-summary">
                 {summaries[name] === null
                   ? '…'
