@@ -288,15 +288,6 @@ export default function CompareTracker() {
           ))}
         </div>
 
-        <AccountPanel
-          workingState={{ symbols, shares, priceOverrides }}
-          onLoadPortfolio={(data) => {
-            setSymbols(data.symbols);
-            setShares(data.shares || {});
-            setPriceOverrides(data.priceOverrides || {});
-          }}
-        />
-
         <div className="box portfolio-box">
           <div className="portfolio-title">Portfolio</div>
           <div className="portfolio-scroll">
@@ -351,6 +342,15 @@ export default function CompareTracker() {
             </div>
           </div>
         </div>
+
+        <AccountPanel
+          workingState={{ symbols, shares, priceOverrides }}
+          onLoadPortfolio={(data) => {
+            setSymbols(data.symbols);
+            setShares(data.shares || {});
+            setPriceOverrides(data.priceOverrides || {});
+          }}
+        />
 
         {lastUpdated && (
           <div className="timestamp">Last updated {lastUpdated.tz(EST).format('h:mm:ss A')} EST</div>

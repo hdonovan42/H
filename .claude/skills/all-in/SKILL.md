@@ -100,7 +100,7 @@ CLOSED:      overnight, weekends, holidays
 **FMP**: `/fmp/shares-float/:symbol`, `/fmp/analyst-estimates/:symbol`, `/fmp/earnings-surprises/:symbol`, `/fmp/sp500-weight`
 **Market**: `/clock`, `/trades/:symbol`, `/bars/:symbol`
 **Misc**: `/exchange-rate`, `/transcripts/:ticker/:quarter`
-**Accounts**: `POST /auth/request` (magic link via Resend; 503 until `RESEND_API_KEY_ENV` set; rate-limited 5/hour per IP+email), `POST /auth/verify` (single-use token → 90-day session), `GET /portfolios`, `POST /portfolios/save|rename|delete` (Bearer session; unique names, max 20). Local dev: `npx wrangler dev --port 8787 --var DEV_ECHO_LINK:1` echoes the link instead of emailing; pair with `VITE_WORKER_URL=http://localhost:8787 npm run dev`.
+**Accounts**: `POST /auth/request` (magic link via Resend from signin@send.hjd.ai — domain verified 2026-07-16; rate-limited 5/hour per IP+email, counters in AUTH_STORE `rl:*`), `POST /auth/verify` (single-use token → 90-day session), `GET /portfolios`, `POST /portfolios/save|rename|delete` (Bearer session; unique names, max 20). Local dev: `npx wrangler dev --port 8787 --var DEV_ECHO_LINK:1` echoes the link instead of emailing; pair with `VITE_WORKER_URL=http://localhost:8787 npm run dev`.
 
 ## Earnings Racing
 

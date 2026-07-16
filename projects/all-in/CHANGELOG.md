@@ -28,7 +28,8 @@ New fourth app: **compare.html** — TSLA divestment analysis (framed from an al
 ### Deployment
 - Frontend: push to main → GitHub Pages. Worker: `npm run deploy:worker` (done at ship time).
 - Baseline at ship (15–16 Jul 2026): TSLA ~$390, SPCX ~$132, GOOGL ~$355, PLTR ~$134; swap rates ≈ 2.97 / 1.10 / 2.91.
-- **What to watch / remaining setup**: Resend account + verified sending domain (default `send.hjd.ai`; `SIGNIN_FROM` constant in worker.js must match) + `npx wrangler secret put RESEND_API_KEY_ENV`. Until then production sign-in returns 503 by design. Watch the 5/hour rate limit if testing sign-ins repeatedly.
+- **Resend configured same day**: send.hjd.ai verified (DKIM/SPF/MX, eu-west-1) via the Resend Cloudflare wizard; send-only API key stored as `RESEND_API_KEY_ENV`. Production sign-in emails confirmed delivering.
+- **What to watch**: the 5/hour sign-in rate limit (per IP and per email) when testing repeatedly — counters live in AUTH_STORE under `rl:*` and can be deleted with `wrangler kv key delete` if needed.
 
 ## Earlier milestones (summary)
 
