@@ -345,6 +345,7 @@ export default function CompareTracker() {
 
         <AccountPanel
           workingState={{ symbols, shares, priceOverrides }}
+          quotes={quotes}
           onLoadPortfolio={(data) => {
             setSymbols(data.symbols);
             setShares(data.shares || {});

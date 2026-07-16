@@ -1,15 +1,18 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { dayjs } from '../utils/marketState';
+import { fetchYahooQuote } from '../utils/api';
 import {
   getStoredSession, storeSession, clearSession,
   requestLink, verifyToken, getPortfolios,
   savePortfolio, renamePortfolio, deletePortfolio, MAX_PORTFOLIOS,
 } from '../utils/accountApi';
 
+const REF = 'TSLA'; // implicit first symbol of every saved portfolio
+
 // Sign-in strip + saved-portfolio manager for the compare page.
 // Signed out: email -> magic sign-in link. Signed in: save the working
 // portfolio under a unique name (max 20), load/rename/delete saved ones.
-export default function AccountPanel({ workingState, onLoadPortfolio }) {
+export default function AccountPanel({ workingState, quotes, onLoadPortfolio }) {
   const [session, setSession] = useState(getStoredSession);
   const [portfolios, setPortfolios] = useState({});
   const [email, setEmail] = useState('');
@@ -18,6 +21,58 @@ export default function AccountPanel({ workingState, onLoadPortfolio }) {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [status, setStatus] = useState(null); // { kind: 'info' | 'error', text }
   const [busy, setBusy] = useState(false);
+  const [extraQuotes, setExtraQuotes] = useState({}); // { SYM: price | null } for saved symbols outside the working set
+
+  // A saved portfolio can hold symbols the page isn't currently tracking —
+  // fetch their prices once so every row's value/weights can be computed
+  useEffect(() => {
+    const needed = new Set([REF]);
+    Object.values(portfolios).forEach(p => (p.data?.symbols || []).forEach(s => needed.add(s)));
+    const missing = [...needed].filter(s => quotes[s]?.price == null && !(s in extraQuotes));
+    if (!missing.length) return;
+    let cancelled = false;
+    (async () => {
+      const fetched = await Promise.all(missing.map(async s => [s, (await fetchYahooQuote(s))?.regularMarketPrice ?? null]));
+      if (!cancelled) setExtraQuotes(prev => ({ ...prev, ...Object.fromEntries(fetched) }));
+    })();
+    return () => { cancelled = true; };
+  }, [portfolios, quotes, extraQuotes]);
+
+  // Per-portfolio summary: total value + "TICKER (weight%)" per priced holding.
+  // null while a needed price is still loading.
+  const summaries = useMemo(() => {
+    const priceOf = (sym, overrides) => {
+      const override = parseFloat(overrides?.[sym]);
+      if (!isNaN(override)) return override;
+      return quotes[sym]?.price ?? extraQuotes[sym] ?? null;
+    };
+    const out = {};
+    for (const [name, { data }] of Object.entries(portfolios)) {
+      const holdings = [];
+      let total = 0;
+      let pending = false;
+      for (const sym of [REF, ...(data?.symbols || [])]) {
+        const shareCount = parseFloat(data?.shares?.[sym]) || 0;
+        if (shareCount <= 0) continue;
+        const price = priceOf(sym, data?.priceOverrides);
+        if (price == null) {
+          pending = !(sym in extraQuotes); // null after a failed fetch = skip; undefined = still loading
+          if (pending) break;
+          continue;
+        }
+        const value = shareCount * price;
+        total += value;
+        holdings.push({ sym, value });
+      }
+      out[name] = pending ? null : {
+        total,
+        parts: holdings.map(h => `${h.sym} (${((h.value / total) * 100).toFixed(1)}%)`).join(', '),
+      };
+    }
+    return out;
+  }, [portfolios, quotes, extraQuotes]);
+
+  const fmtTotal = (v) => '$' + v.toLocaleString('en-US', { maximumFractionDigits: 0 });
 
   const signOut = useCallback(() => {
     clearSession();
@@ -191,6 +246,13 @@ export default function AccountPanel({ workingState, onLoadPortfolio }) {
           ) : (
             <div key={name} className="portfolio-saved-row">
               <span className="portfolio-saved-name">{name}</span>
+              <span className="portfolio-saved-summary">
+                {summaries[name] === null
+                  ? '…'
+                  : summaries[name]?.total > 0
+                    ? `${fmtTotal(summaries[name].total)} · ${summaries[name].parts}`
+                    : '—'}
+              </span>
               <span className="portfolio-saved-date">{dayjs(portfolios[name].updatedAt).format('D MMM')}</span>
               <button className="account-btn" onClick={() => handleLoad(name)} disabled={busy}>Load</button>
               <button className="account-btn" onClick={() => { setRenaming({ from: name, to: name }); setConfirmDelete(null); }} disabled={busy}>Rename</button>

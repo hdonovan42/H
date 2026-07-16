@@ -67,12 +67,14 @@
 .account-status.error { color: #a50e0e; }
 .portfolio-saved-list { display: flex; flex-direction: column; margin: 8px 0 10px; border-top: 1px solid #e8e5dc; }
 .portfolio-saved-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid #e8e5dc; flex-wrap: wrap; }
-.portfolio-saved-name { font-size: 13px; font-weight: 600; flex: 1; min-width: 120px; }
+.portfolio-saved-name { font-size: 13px; font-weight: 600; min-width: 110px; }
+.portfolio-saved-summary { font-size: 11px; color: #666; flex: 1; min-width: 180px; letter-spacing: 0.3px; }
 .portfolio-saved-date { font-size: 11px; color: #999; }
 
 @media (max-width: 700px) {
   .account-input { width: 100%; }
   .portfolio-saved-name { flex-basis: 100%; }
+  .portfolio-saved-summary { flex-basis: 100%; }
 
   .compare-symbols { padding: 12px 14px; }
   .chip-add-form { width: 100%; }
