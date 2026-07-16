@@ -10,7 +10,9 @@ Plan: ~/.claude/plans/cheerful-wandering-sifakis.md — approved 2026-07-16
 - [x] D. Frontend: VITE_WORKER_URL override, accountApi.js, AccountPanel.jsx, CompareTracker wiring, compare.css
 - [x] E. Headless UI verify vs local worker: sign-in via link, token stripped from URL, save/load/rename-conflict/two-click-delete/reload-session/sign-out/reused-link all pass; build clean
 - [x] F. Docs: CHANGELOG.md (new), SKILL.md update, this file's review
-- [ ] G. Ship: commit + push (live), deploy worker, live smoke, Resend checklist to user
+- [x] G. Shipped 2026-07-16: commit 6b55ccc pushed, worker version c519c8e1 deployed, live smoke
+      clean (1Y default, chart renders, sign-in shows expected "not configured" 503).
+      REMAINING (user): Resend signup → verify send.hjd.ai → `npx wrangler secret put RESEND_API_KEY_ENV`
 
 **v2 review**: production email sending blocked on user's Resend setup by design (503 + friendly
 UI message until `RESEND_API_KEY_ENV` is set). SIGNIN_FROM = signin@send.hjd.ai — must match the
