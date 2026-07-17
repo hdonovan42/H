@@ -20,9 +20,9 @@ const REF_COLOR = '#1a1a1a';
 const COLOR_POOL = ['#2d5f8a', '#b8860b', '#7d4a8d', '#2f6f6a', '#a1503c', '#9c5069', '#6f6d20'];
 
 const MODE_CAPTIONS = {
-  swap: 'TSLA ÷ stock — how many shares of each one TSLA share buys. A peak means TSLA is rich relative to that stock: the moment a partial divestment buys the most.',
-  ratio: 'Stock ÷ TSLA — each price as a multiple of TSLA’s. A rising line is outperforming TSLA.',
-  indexed: 'All prices rebased to 100 at the start of the range, TSLA included — pure relative performance.',
+  swap: 'TSLA ÷ stock — how many shares each TSLA share buys. Higher is better for divestment.',
+  ratio: 'Stock ÷ TSLA — each price as a multiple of TSLA’s. Lower is better for divestment.',
+  indexed: 'Performance since the start of the range, all rebased to 100.',
 };
 
 const loadStored = () => {
@@ -152,9 +152,9 @@ export default function CompareTracker() {
 
   // Series derivation: x-axis = TSLA's trading dates in range; a point exists only
   // where the needed closes exist, which clips short-history listings (SPCX) cleanly
-  const { series, axisDates, shortHistory } = useMemo(() => {
+  const { series, axisDates } = useMemo(() => {
     const tslaBars = bars[REF];
-    if (!tslaBars?.length) return { series: [], axisDates: [], shortHistory: [] };
+    if (!tslaBars?.length) return { series: [], axisDates: [] };
 
     const today = dayjs().tz(EST).format('YYYY-MM-DD');
     const closeMap = (sym) => {
@@ -172,7 +172,6 @@ export default function CompareTracker() {
     const axis = inRange.map(b => b.date);
     const tslaMap = closeMap(REF);
     const drawn = mode === 'indexed' ? [REF, ...symbols] : symbols;
-    const short = [];
 
     const out = drawn.map(sym => {
       const map = sym === REF ? tslaMap : closeMap(sym);
@@ -188,11 +187,10 @@ export default function CompareTracker() {
         const base = points[0].value;
         points = points.map(p => ({ ...p, value: 100 * p.value / base }));
       }
-      if (points.length && points[0].i > 0) short.push({ symbol: sym, from: points[0].date });
       return { symbol: sym, color: colorMap[sym], points };
     }).filter(s => s.points.length >= 2);
 
-    return { series: out, axisDates: axis, shortHistory: short };
+    return { series: out, axisDates: axis };
   }, [bars, quotes, mode, range, symbols, colorMap]);
 
   const formatValue = useCallback((v) => {
@@ -292,11 +290,6 @@ export default function CompareTracker() {
             formatValue={formatValue}
           />
           <div className="chart-caption">{MODE_CAPTIONS[mode]}</div>
-          {shortHistory.map(s => (
-            <div key={s.symbol} className="chart-footnote">
-              {s.symbol} plotted from its first trading day in range ({dayjs(s.from).format('D MMM YYYY')})
-            </div>
-          ))}
         </div>
 
         <div className="box portfolio-box">
