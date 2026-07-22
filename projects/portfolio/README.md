@@ -70,6 +70,7 @@ portfolio sell AAPL 4 @ 415.50   # sell 4 (refuses if you hold fewer than 4)
 portfolio buy AAPL 10            # no price → asks: current price or enter your own
 portfolio value                  # holdings with live prices, weights + total (heaviest first)
 portfolio history                # full transaction ledger (with recorded prices)
+portfolio riskfree 1994-03-15    # US T-bill return from a date → today
 portfolio                        # no subcommand → interactive prompt
 ```
 
@@ -85,6 +86,37 @@ portfolio buy AAPL 10
 Tickers are upper-cased automatically. Quantities must be integers ≥ 1 and prices
 must be > 0. `buy` and `sell` print a before/after positions table and the committed
 message. Run `portfolio --help` for the full command reference.
+
+## Risk-free comparison (`riskfree`)
+
+What would continuously reinvested short-term US Treasury bills — the standard
+risk-free benchmark — have returned between any two dates since **July 1926**?
+Use it to gauge an investment's *excess* return over the risk-free alternative.
+
+```bash
+portfolio riskfree 1994-03-15                  # from a date → today
+portfolio riskfree 1990 2000                   # between two dates (YYYY / YYYY-MM / YYYY-MM-DD)
+portfolio riskfree 2015 --amount 10000         # growth of $10k instead of $1
+portfolio riskfree 2015 --vs AAPL              # vs a ticker (Yahoo adjusted closes)
+portfolio riskfree 2015 --vs 412%              # vs a return you supply
+```
+
+Output: growth of $1 (or `--amount`), total return, annualised %/yr — and with
+`--vs`, the comparison's same numbers plus **excess vs risk-free in pp/yr**.
+
+- **Data**: Ken French's monthly 1-month T-bill return series (July 1926 →
+  ~2-month publication lag), extended to today with FRED's daily 3-month bill
+  yields (`DTB3`). Whole months compound exactly; partial months are pro-rated
+  by day; any days past the last published yield are carried forward at the
+  latest rate (flagged in the caption).
+- **Cache**: parsed series lives in `~/.cache/portfolio/riskfree.json`,
+  refreshed after 7 days (`--refresh` forces it); if a download fails, the
+  stale cache is used with a warning. No API keys required.
+- **`--vs TICKER`** uses Yahoo adjusted closes via the same Cloudflare Worker
+  as live prices — split- and dividend-adjusted, so it approximates total
+  return. The exact trade dates used are shown in the output.
+- Sanity anchor: `riskfree 1926-07-01` → $1 grows to ~$25 (matches the
+  published Ibbotson/SBBI T-bill figure).
 
 ## Files
 
