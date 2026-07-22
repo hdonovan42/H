@@ -56,6 +56,8 @@ export default function CompareTracker() {
   const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [currency, setCurrency] = useState('USD');
+  const [exchangeRate, setExchangeRate] = useState(null);
 
   const allSymbols = useMemo(() => [REF, ...symbols], [symbols]);
 
@@ -114,6 +116,18 @@ export default function CompareTracker() {
     const id = setInterval(() => { if (!document.hidden) pollQuotes(); }, QUOTE_POLL_MS);
     return () => clearInterval(id);
   }, [pollQuotes]);
+
+  // Exchange rate for the value column's USD/GBP toggle (same as the main page)
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${WORKER_URL}/exchange-rate`);
+        if (res.ok) setExchangeRate((await res.json()).rate);
+      } catch {
+        setExchangeRate(0.79); // Fallback rate
+      }
+    })();
+  }, []);
 
   // Persist the what-if portfolio (durable user input, no TTL)
   useEffect(() => {
@@ -210,9 +224,11 @@ export default function CompareTracker() {
     const prevClose = quotes[sym]?.previousClose || null;
     const change = live != null && prevClose ? live - prevClose : null;
     const changePct = change != null ? (change / prevClose) * 100 : null;
-    return { sym, live, override, price, value, change, changePct };
+    return { sym, live, override, price, value, change, changePct, shareNum };
   });
   const totalValue = rows.reduce((sum, r) => sum + r.value, 0);
+  const totalDayChange = rows.reduce((sum, r) => sum + (r.change != null ? r.change * r.shareNum : 0), 0);
+  const hasDayChange = rows.some(r => r.change != null && r.shareNum > 0);
 
   const setShareCount = (sym, raw) => {
     if (/^\d*\.?\d*$/.test(raw)) setShares(prev => ({ ...prev, [sym]: raw }));
@@ -234,7 +250,23 @@ export default function CompareTracker() {
     });
   };
 
-  const fmtMoney = (v) => '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const currencySymbol = currency === 'USD' ? '$' : '£';
+  const handleCurrencyToggle = () => setCurrency(c => (c === 'USD' ? 'GBP' : 'USD'));
+  const convertValue = useCallback((usdValue) => (
+    currency === 'GBP' && exchangeRate ? Math.round(usdValue * exchangeRate) : Math.round(usdValue)
+  ), [currency, exchangeRate]);
+
+  // Value cell contents: value with clickable currency symbol, then the day's
+  // money change — mirrors the main-page spreadsheet (only the first symbol toggles)
+  const valueCell = (value, dayChange) => (
+    <>
+      <span className="currency-toggle" onClick={handleCurrencyToggle} title={`Click to show in ${currency === 'USD' ? 'GBP' : 'USD'}`}>{currencySymbol}</span>
+      {convertValue(value).toLocaleString()}
+      {dayChange != null && (
+        <span className={dayChange >= 0 ? 'positive' : 'negative'}> | {dayChange >= 0 ? '+' : ''}{currencySymbol}{convertValue(Math.round(dayChange)).toLocaleString()}</span>
+      )}
+    </>
+  );
 
   // Stable identity: AccountPanel auto-loads the default portfolio from an
   // effect that depends on this callback
@@ -344,7 +376,9 @@ export default function CompareTracker() {
                       ? `${r.change >= 0 ? '+' : ''}${r.change.toFixed(2)} (${r.change >= 0 ? '+' : ''}${r.changePct.toFixed(2)}%)`
                       : '—'}
                   </div>
-                  <div className="portfolio-cell portfolio-value">{r.value > 0 ? fmtMoney(r.value) : '—'}</div>
+                  <div className="portfolio-cell portfolio-value">
+                    {r.value > 0 ? valueCell(r.value, r.change != null && r.shareNum > 0 ? r.change * r.shareNum : null) : '—'}
+                  </div>
                   <div className="portfolio-cell">{totalValue > 0 && r.value > 0 ? ((r.value / totalValue) * 100).toFixed(1) + '%' : '—'}</div>
                 </div>
               ))}
@@ -353,7 +387,9 @@ export default function CompareTracker() {
                 <div className="portfolio-cell" />
                 <div className="portfolio-cell" />
                 <div className="portfolio-cell" />
-                <div className="portfolio-cell portfolio-value">{totalValue > 0 ? fmtMoney(totalValue) : '—'}</div>
+                <div className="portfolio-cell portfolio-value">
+                  {totalValue > 0 ? valueCell(totalValue, hasDayChange ? totalDayChange : null) : '—'}
+                </div>
                 <div className="portfolio-cell">{totalValue > 0 ? '100.0%' : '—'}</div>
               </div>
             </div>
