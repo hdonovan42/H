@@ -206,7 +206,11 @@ export default function CompareTracker() {
     const price = override != null ? (parseFloat(override) || 0) : live;
     const shareNum = parseFloat(shares[sym]) || 0;
     const value = price != null ? shareNum * price : 0;
-    return { sym, live, override, price, value };
+    // Most recent day change on the live quote (independent of any manual override)
+    const prevClose = quotes[sym]?.previousClose || null;
+    const change = live != null && prevClose ? live - prevClose : null;
+    const changePct = change != null ? (change / prevClose) * 100 : null;
+    return { sym, live, override, price, value, change, changePct };
   });
   const totalValue = rows.reduce((sum, r) => sum + r.value, 0);
 
@@ -253,12 +257,13 @@ export default function CompareTracker() {
         <div className="box compare-symbols">
           <div className="symbol-chips">
             <span className="symbol-chip">
-              <span className="chip-swatch" style={{ background: REF_COLOR }} />{REF}
+              <span className="chip-swatch" style={{ background: REF_COLOR }} />
+              <a className="ticker-link" href={`index.html?symbol=${REF}`} title={`Open ${REF} in the tracker`}>{REF}</a>
             </span>
             {symbols.map(sym => (
               <span key={sym} className="symbol-chip">
                 <span className="chip-swatch" style={{ background: colorMap[sym] }} />
-                {sym}
+                <a className="ticker-link" href={`index.html?symbol=${sym}`} title={`Open ${sym} in the tracker`}>{sym}</a>
                 <button className="chip-remove" onClick={() => removeSymbol(sym)} aria-label={`Remove ${sym}`}>×</button>
               </span>
             ))}
@@ -300,13 +305,15 @@ export default function CompareTracker() {
                 <div>Symbol</div>
                 <div>Shares</div>
                 <div>Price $</div>
+                <div>Chg</div>
                 <div>Value</div>
                 <div>Weight</div>
               </div>
               {rows.map(r => (
                 <div key={r.sym} className="portfolio-row">
                   <div className="portfolio-cell portfolio-symbol">
-                    <span className="chip-swatch" style={{ background: colorMap[r.sym] }} />{r.sym}
+                    <span className="chip-swatch" style={{ background: colorMap[r.sym] }} />
+                    <a className="ticker-link" href={`index.html?symbol=${r.sym}`} title={`Open ${r.sym} in the tracker`}>{r.sym}</a>
                   </div>
                   <div className="portfolio-cell">
                     <input
@@ -332,12 +339,18 @@ export default function CompareTracker() {
                       <button className="price-reset" onClick={() => resetOverride(r.sym)} title="Reset to live price">↺</button>
                     )}
                   </div>
+                  <div className={`portfolio-cell portfolio-change ${r.change != null ? (r.change >= 0 ? 'positive' : 'negative') : ''}`}>
+                    {r.change != null
+                      ? `${r.change >= 0 ? '+' : ''}${r.change.toFixed(2)} (${r.change >= 0 ? '+' : ''}${r.changePct.toFixed(2)}%)`
+                      : '—'}
+                  </div>
                   <div className="portfolio-cell portfolio-value">{r.value > 0 ? fmtMoney(r.value) : '—'}</div>
                   <div className="portfolio-cell">{totalValue > 0 && r.value > 0 ? ((r.value / totalValue) * 100).toFixed(1) + '%' : '—'}</div>
                 </div>
               ))}
               <div className="portfolio-row portfolio-total">
                 <div className="portfolio-cell">Total</div>
+                <div className="portfolio-cell" />
                 <div className="portfolio-cell" />
                 <div className="portfolio-cell" />
                 <div className="portfolio-cell portfolio-value">{totalValue > 0 ? fmtMoney(totalValue) : '—'}</div>

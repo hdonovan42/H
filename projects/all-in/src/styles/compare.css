@@ -7,6 +7,8 @@
 .symbol-chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .symbol-chip { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #d0cdc4; background: #f5f3ed; padding: 6px 10px; font-size: 12px; font-weight: 600; letter-spacing: 1px; }
 .chip-swatch { width: 10px; height: 10px; display: inline-block; flex: 0 0 auto; }
+.ticker-link { color: inherit; text-decoration: none; }
+.ticker-link:hover { text-decoration: underline; }
 .chip-remove { background: none; border: none; font-family: inherit; font-size: 14px; color: #888; cursor: pointer; padding: 0 0 0 2px; line-height: 1; }
 .chip-remove:hover { color: #a50e0e; }
 .chip-add-input { background: transparent; border: 1px dashed #b5b1a6; padding: 6px 10px; font-family: inherit; font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; width: 110px; }
@@ -28,8 +30,9 @@
 .portfolio-box { }
 .portfolio-title { padding: 12px 16px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; font-weight: 600; color: #666; border-bottom: 1px solid #d0cdc4; }
 .portfolio-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.portfolio-grid { min-width: 480px; }
-.portfolio-header, .portfolio-row { display: grid; grid-template-columns: 110px 130px 160px 1fr 90px; }
+.portfolio-grid { min-width: 620px; }
+.portfolio-header, .portfolio-row { display: grid; grid-template-columns: 110px 120px 150px 150px 1fr 90px; }
+.portfolio-change { font-size: 12px; white-space: nowrap; }
 .portfolio-header { background: #e8e5dc; border-bottom: 1px solid #d0cdc4; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; font-weight: 600; }
 .portfolio-header > div { padding: 10px; border-right: 1px solid #d0cdc4; text-align: center; }
 .portfolio-header > div:last-child { border-right: none; }
@@ -83,7 +86,7 @@
   .compare-symbols { padding: 12px 14px; }
   .chip-add-form { width: 100%; }
   .chip-add-input { width: 100%; }
-  .portfolio-header, .portfolio-row { grid-template-columns: 90px 100px 140px 1fr 70px; }
+  .portfolio-header, .portfolio-row { grid-template-columns: 90px 90px 130px 130px 1fr 70px; }
   .portfolio-cell { padding: 6px 6px; font-size: 12px; }
   .compare-chart-box { padding: 12px 8px 8px; }
 }

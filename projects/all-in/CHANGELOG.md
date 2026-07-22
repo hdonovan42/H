@@ -1,5 +1,10 @@
 # All-In — Changelog
 
+## 2026-07-22 — Compare page polish
+
+- Portfolio table gains a **Chg** column next to price: most recent day change, absolute then percent, green/red like the main-page spreadsheet (computed from the live quote, unaffected by manual price overrides)
+- **Tickers are clickable** (chips + portfolio rows) → opens the main tracker for that stock; the tracker now supports `index.html?symbol=XYZ` deep links and keeps the param in sync when switching tickers
+
 ## 2026-07-16 — Compare page, magic-link accounts, named portfolios
 
 New fourth app: **compare.html** — TSLA divestment analysis (framed from an all-in TSLA position).

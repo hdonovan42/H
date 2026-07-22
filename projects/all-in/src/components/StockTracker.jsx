@@ -8,7 +8,11 @@ import { PHASE, determineInitialPhase, isStable, resolvePrice } from '../utils/p
 import '../styles/stock-tracker.css';
 
 export default function StockTracker() {
-  const [ticker, setTicker] = useState('TSLA');
+  // ?symbol=GOOGL deep-links the tracker to a stock (used by the compare page)
+  const [ticker, setTicker] = useState(() => {
+    const sym = (new URLSearchParams(window.location.search).get('symbol') || '').toUpperCase();
+    return /^[A-Z.^-]{1,8}$/.test(sym) ? sym : 'TSLA';
+  });
   const [inputTicker, setInputTicker] = useState('');
   const [data, setData] = useState([]);
   const [chartData, setChartData] = useState([]);
@@ -1010,9 +1014,11 @@ export default function StockTracker() {
   const handleTickerSubmit = (e) => {
     e.preventDefault();
     if (inputTicker.trim()) {
-      setTicker(inputTicker.toUpperCase());
+      const sym = inputTicker.toUpperCase();
+      setTicker(sym);
       setInputTicker('');
       setSharesCount('');
+      window.history.replaceState({}, '', window.location.pathname + (sym === 'TSLA' ? '' : `?symbol=${sym}`));
     }
   };
 
