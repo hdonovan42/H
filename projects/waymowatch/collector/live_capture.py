@@ -454,8 +454,9 @@ def ingest(con, embed, cen, cam_id, best):
                 # view with a dome-better-but-WaymoNet-worse one (the #46871 regression). Take the MAX
                 # WaymoNet view (leak #2). Scoring failure (wsc=0) also keeps the existing verdict.
                 wc, wb, wsc = wn_safe(frm)
-                oldwc = con.execute("SELECT COALESCE(wn_conf,-1.0) FROM candidates WHERE id=?",
-                                    (m[0],)).fetchone()[0]
+                oldwc, oldcp, oldfp = con.execute(
+                    "SELECT COALESCE(wn_conf,-1.0), crop_path, frame_path FROM candidates WHERE id=?",
+                    (m[0],)).fetchone()
                 if wsc and wc >= oldwc:
                     cv2.imwrite(cp, car)
                     fsha = write_frame(fpth, frm)
@@ -466,6 +467,18 @@ def ingest(con, embed, cen, cam_id, best):
                                  json.dumps(list(bbox)), now, "new" if promote else m[3], fsha,
                                  round(wc, 4), json.dumps(wb) if wb else None, 1 if wc >= WN_FLOOR else 0,
                                  _WN_VER, fsha, now, m[0]))
+                    # ORPHAN LEAK (fixed 2026-08-07): the row now points at the new-stamped pair,
+                    # so the superseded jpgs are unreachable — unlink them or they leak forever
+                    # (~4,800 files/day; 430,412 orphans / 9.04 GB by the time the disk filled).
+                    # Safe here because this branch only runs on UNSENT rows (`not m[5]` above) —
+                    # a sent row's image is frozen evidence and is never overwritten.
+                    for old in (oldcp, oldfp):
+                        if old and os.path.abspath(old) not in (os.path.abspath(cp),
+                                                                os.path.abspath(fpth)):
+                            try:
+                                os.remove(old)
+                            except OSError:
+                                pass        # already gone / racing retention — harmless
                     merged += 1
                     m[1], m[2], m[4], m[6] = s, e, list(bbox), now
                     if promote:

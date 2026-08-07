@@ -274,3 +274,30 @@ fixture check of the formula — neither ever executed a real graph pass.
 - Rule: when a feature has a catch-all error popup, a `ReferenceError` from ANY callee
   surfaces as that generic popup — on "X failed" reports, read the console error first; the
   popup text says which try/catch fired, not what broke.
+
+## 2026-08-07 — A WAL database turns "disk full" into a total, silent outage (WaymoWatch)
+The VPS disk hit 100% and WaymoWatch went dark for 17 days: loop crash-looping 42,758×,
+waymonet.com 500ing, zero review emails. All three from ONE cause — `waymo.db` is WAL, so
+SQLite must write `-wal`/`-shm` **even to READ**. A full disk therefore makes every SELECT
+raise `disk I/O error`, so every consumer fails simultaneously and none can report why.
+- Rule: on any multi-symptom outage (site + jobs + emails all dead at once), check `df -h`
+  FIRST. Three independent-looking failures with one timestamp is a shared-resource signature,
+  not three bugs. Freeing space restored all three instantly, before any code was touched.
+- Rule: a service whose storage grows unboundedly on the same disk as its database is a
+  dead-man's switch. The alarm must fire on FREE SPACE with headroom to act — a check that
+  needs the DB cannot run once the DB is the thing that's broken.
+
+## 2026-08-07 — Derive the archive filter from the data, not from the pipeline's current shape (WaymoWatch)
+Fixing the above meant archiving only "what matters". The obvious filter — what WaymoNet
+flagged (`wn_hit=1`) — would have silently destroyed the entire 8,055-strong vetted training
+negative set: **8,019 of 8,055 rejects are `wn_hit=0`**, because they were vetted in June under
+the OLD dome-score review, before WaymoNet became the verdict path. The correct filter is
+status-based AND hit-based. The user's question ("we have many negatives — should we keep only
+positives + candidates?") is what prompted the check.
+- Rule: before a retention/archive filter deletes anything, run the filter as a SELECT and
+  count what it would drop **per category** (status, era, provenance). Curated data banked by
+  an older pipeline generation will not carry the current generation's markers.
+- Rule: when the user proposes a different cut, price it against the measured data rather than
+  arguing from the design. Here their proposal bought ~50 days vs ~25 — but the same query
+  proved negatives had already frozen naturally (7,976 in June → 79 in July), so the real win
+  was elsewhere. Quantify first; the runway table settled it in one table.

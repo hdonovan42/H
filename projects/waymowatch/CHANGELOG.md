@@ -1,5 +1,47 @@
 # WaymoWatch — Changelog
 
+## DISK-FULL OUTAGE FIXED — archive is keep-set only, ~107× leaner (2026-08-07)
+
+**17-day total outage (21 Jul 10:12 UTC → 7 Aug), one root cause.** The VPS disk hit 100%; because
+`waymo.db` is WAL, SQLite must write `-wal`/`-shm` **even to read**, so every query raised
+`disk I/O error` and took down all three surfaces at once: the loop crash-looped **42,758×**, the
+sightings API 500'd (**waymonet.com down**), and `waymonet_digest.py` died in `auto_bank()` before
+sending (**no review emails**). **No data lost** — `quick_check` ok, 1,239 confirmed waymos intact,
+all 615 pending-review crops present.
+
+**What filled it:** `backup_github.sh` archived *every* candidate jpg forever (`--ignore-existing`,
+no `--delete`) and committed hourly, so `.git` held a second full copy — **45G of a 75G disk**
+(19G tree + 27G history), growing ~323 MB/day. Only **~1.3%** of candidates ever register a
+WaymoNet detection (measured from a pre-outage snapshot: 4,200–6,700 candidates/day → 59–91
+`wn_hit`).
+
+- **Archive is now keep-set only** (user decision): `status IN ('waymo','reject') OR wn_hit=1 OR
+  wn_sent=1`, plus real_positives/hard_negatives/special/CSVs. **~3 MB/day (~107×)**; archive
+  45G → **918M**. Raw non-hit funnel stays local, fully reviewable and re-scorable for its 7-day
+  retention window, but is never made permanent. CSVs still snapshot **every** row, so the full
+  funnel record survives as metadata.
+- **GOTCHA THAT NEARLY COST THE NEGATIVE CORPUS: 8,019 of 8,055 rejects are `wn_hit=0`** — vetted
+  in June under the OLD dome-score review, before WaymoNet became the verdict path. A hits-only
+  filter would have destroyed the entire training negative set. The filter MUST stay status-based
+  as well as hit-based. (Related: reject accrual has already frozen naturally — 7,976 in June vs
+  79 in July — so no hard-freeze rule was added; a new hard negative from a WaymoNet FP is still
+  wanted.)
+- **Merge-path orphan leak plugged** (`ingest()`): the merge branch wrote a *new-stamped* crop+frame
+  and repointed the row **without unlinking the superseded pair** (~4,800 files/day). Safe to unlink
+  there because the branch only runs on UNSENT rows.
+- **`collector/reap_orphans.py`** (new): deletes candidate jpgs no row references, with a `--grace`
+  window so it can never race the live loop's write-then-INSERT. One-off reap: **430,496 files /
+  9.04 GB** (95% of `data/candidates`). Weekly cron, Sun 05:30.
+- **Guards**: `backup_github.sh` aborts below 4 GB free (fail loudly, never fill the disk);
+  `check_loop_health` emails a DISK LOW alarm below 8 GB, checked **first and before any query** so
+  it still fires while there is room to act.
+- **Non-destructive throughout**: no force-push. The tip was rebuilt on `origin/main` (so 1.1 GB of
+  doomed raw-funnel commits were never pushed) and the local repo re-cloned `--depth 1`. Every
+  pruned jpg remains recoverable from GitHub history.
+
+**Disk 100% → 24% used (55 GB free). Runway ~5 days → effectively unbounded (~6 MB/day).**
+Full diagnosis: `tasks/waymowatch-disk-outage-2026-08-07.md`.
+
 ## RUN_3 SHIPPED — v3fullpolish live on VPS + homebox (2026-07-04)
 
 WaymoNet RUN_3 trained, gated, and cut over (full record: `train/GPU_RENT_NOTES.md` → "Run 3 —

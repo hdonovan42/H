@@ -264,8 +264,31 @@ def check_loop_health(con):
        days — e.g. a DB lock — with no signal; that is how 2 days of captures were lost.
     2) SCORING blackout: wn_safe swallows every failure (rows land wn_scored=0, wn_hit=0), so a
        persistent break (corrupt best.pt, ultralytics error) means candidates keep flowing but NONE
-       reach the digest or auto-bank — capture-health stays green while detection is fully dark."""
+       reach the digest or auto-bank — capture-health stays green while detection is fully dark.
+    3) DISK exhaustion: waymo.db is WAL, so SQLite must write -wal/-shm even to READ — a full disk
+       makes every query raise `disk I/O error` and takes down the loop, the sightings API and this
+       digest together. That is exactly the 21 Jul - 7 Aug 2026 outage (17 days, 42,758 crash-
+       restarts). Checked FIRST and before any query, so the warning still goes out while there is
+       room to act; by the time the disk is actually full nothing here can run at all."""
+    import shutil
     import time
+    DISK_WARN_GB = 8.0
+    try:
+        free_gb = shutil.disk_usage(BASE).free / 1e9
+    except OSError:
+        free_gb = None
+    if free_gb is not None and free_gb < DISK_WARN_GB:
+        _alarm(".disk_alarm",
+               f"WaymoWatch DISK LOW — {free_gb:.1f} GB free",
+               f"<p><b>Only {free_gb:.1f} GB free on the VPS</b> (warn below {DISK_WARN_GB:.0f} GB). "
+               f"waymo.db is WAL, so a FULL disk makes even reads fail with 'disk I/O error' and "
+               f"silently kills the capture loop, waymonet.com and this digest at once.</p>"
+               f"<p>Check the usual suspects: <code>du -xh --max-depth=1 /home/hq | sort -rh | head</code>. "
+               f"Reclaim with <code>.venv/bin/python collector/reap_orphans.py</code> (jpgs with no "
+               f"row) and check <code>/home/hq/waymo-backup</code> is not re-growing — the archive is "
+               f"keep-set only since 2026-08-07 and should sit under ~1 GB.</p>"
+               f"<p style='color:#888'>Powered by TfL Open Data.</p>",
+               throttle_h=6.0)
     STALL_HOURS = 2.0
     row = con.execute("SELECT MAX(captured_at) FROM candidates").fetchone()
     latest = row[0] if row and row[0] else None
