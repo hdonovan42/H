@@ -39,7 +39,17 @@ WaymoNet detection (measured from a pre-outage snapshot: 4,200–6,700 candidate
   doomed raw-funnel commits were never pushed) and the local repo re-cloned `--depth 1`. Every
   pruned jpg remains recoverable from GitHub history.
 
-**Disk 100% → 24% used (55 GB free). Runway ~5 days → effectively unbounded (~6 MB/day).**
+**Training dataset verified complete ON DISK** (the reaper only ever touched files no row
+referenced): 1,234 training positives + 8,003 training negatives with **0 missing crops and 0
+missing frames**, real_positives 2,466, special 113, both built YOLO sets present (~1.4 GB total).
+**`hard_negatives` had 4 pairs that existed only in the archive** — deleted from disk back in June,
+surviving purely because the archive is append-only; restored, so local is now primary everywhere
+and GitHub is redundancy. Also set `gc.auto=500` + a weekly repack on the archive repo: 24 hourly
+`candidates.csv` commits leave ~15 MB/day of loose objects that pack to ~0.44 MB/day.
+
+**Disk 100% → 24% used (54.8 GB free). Growth ~420 MB/day → ~10 MB/day; runway ~5 days → ~14
+years.** The long-term constraint is no longer disk but the `wn_hit` review pool, which is
+retention-exempt and accrues ~75/day regardless of review.
 Full diagnosis: `tasks/waymowatch-disk-outage-2026-08-07.md`.
 
 ## RUN_3 SHIPPED — v3fullpolish live on VPS + homebox (2026-07-04)

@@ -115,6 +115,57 @@ review email delivered (9 candidates, conf 0.03–0.67) · `real_positives` 2,46
 - **No hard-freeze on negatives.** Accrual already fell 7,976 (Jun) → 79 (Jul) on its own, and a
   new hard negative from a WaymoNet false positive is still worth banking.
 
+### Training dataset: verified complete ON DISK (not just GitHub)
+
+The reaper only ever deleted files **no DB row referenced**, so training data was never in scope.
+Verified explicitly afterwards:
+
+| On disk | count | missing |
+|---|---|---|
+| Training positives (`waymo`, `special IS NULL`) | 1,234 | **0 crops, 0 frames** |
+| Training negatives (`reject`, `special IS NULL`) | 8,003 | **0 crops, 0 frames** |
+| incl. specials | 1,239 / 8,055 | 0 / 0 |
+| `real_positives` | 2,466 | matches archive |
+| `hard_negatives` | **1,168** | matches archive **after restoring 8** |
+| `special` | 113 | matches archive |
+| Built YOLO sets | `dataset_real` 224 MB + `dataset_real_full` 258 MB | present |
+
+**`hard_negatives` had 4 pairs (8 files) that existed ONLY in the archive** — deleted from disk
+some time in June and surviving purely because the archive is append-only. Restored to disk with
+`rsync --ignore-existing` from `waymo-backup/images/hard_negatives/`. Local is now the primary
+copy everywhere; GitHub is redundancy. Total training footprint on disk ~1.4 GB.
+
+### Runway (measured, not estimated)
+
+**54.8 GB free (24% used).** Permanent growth:
+
+| Term | /day |
+|---|---|
+| Local candidate jpgs (`wn_hit` is retention-exempt, ~75/day × 40.8 KB) | 3.1 MB |
+| Archive working tree (same files) | 3.1 MB |
+| Archive `.git` blobs (JPEGs don't compress) | 3.1 MB |
+| Archive CSV churn (packed) | 0.44 MB |
+| `waymo.db` rows kept forever | 0.45 MB |
+| **Total** | **~10 MB/day** (~3.7 GB/year) |
+
+One-time: `data/candidates` held only 1,990 transient rows post-outage; at the pre-outage rate it
+refills to a **~1.5 GB** 7-day plateau over the following week. **Runway ≈ 53 GB ÷ 10 MB/day ≈
+14 years** (was ~5 days: 42× lower growth, 25× more free space).
+
+The real long-term term is not disk: the `wn_hit` review pool is retention-exempt and accrues
+~75/day (~27k rows/year) whether reviewed or not. That becomes a review-throughput question long
+before a storage one.
+
+### Git housekeeping
+
+Measured empirically: 24 hourly commits of `candidates.csv` leave **~15 MB/day of loose objects
+that pack to ~0.44 MB/day**. Left alone that sawtooths to ~1.4 GB before git's default
+`gc.auto=6700` triggers. Set `gc.auto=500` + `gc.autoDetach=false` on the archive repo and added a
+weekly repack (Sun 06:00, alongside the reaper at Sun 05:30).
+
+Hourly cron backup verified end-to-end on the new script:
+`2026-08-07T12:37:06Z pushed: 11887 rows, 23560 jpgs (56094 MB free)`.
+
 ### Follow-ups (not done, not blocking)
 
 - **GitHub repo is still ~26 GB** — well past the 5 GB soft limit, since history was preserved.
