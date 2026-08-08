@@ -1569,16 +1569,25 @@ export default {
         const mode = url.searchParams.get('mode') || 'race';
         const ALPHAVANTAGE_KEY = env.ALPHA_VANTAGE_KEY_ENV;
 
-        // Check KV first for manually-pushed or recently-merged data
+        // Check KV first for manually-pushed or recently-merged data.
+        // Manual data always wins. A recently-merged record is served too — this is
+        // what surfaces the background cross-validation: poll N races (single
+        // source), the losers merge into KV via waitUntil, and poll N+1 gets the
+        // validated record. The freshness window keeps a race running roughly once
+        // a minute so the record can't go stale on earnings night.
+        const KV_FRESH_MS = 60 * 1000;
         if (env.EARNINGS_STORE) {
-          const latestKey = await env.EARNINGS_STORE.get(`earnings:${symbol}:latest`);
-          if (latestKey) {
-            const stored = await env.EARNINGS_STORE.get(latestKey, { type: 'json' });
-            if (stored && stored.manual) {
-              // Manual data takes priority - serve it immediately
+          try {
+            const latestKey = await env.EARNINGS_STORE.get(`earnings:${symbol}:latest`);
+            const stored = latestKey
+              ? await env.EARNINGS_STORE.get(latestKey, { type: 'json' })
+              : null;
+            const isFresh = stored?.lastUpdated &&
+              (Date.now() - Date.parse(stored.lastUpdated)) < KV_FRESH_MS;
+            if (stored && (stored.manual || isFresh)) {
               return new Response(JSON.stringify({
                 mode: 'kv',
-                source: 'manual',
+                source: stored.manual ? 'manual' : 'merged',
                 data: stored,
                 confidence: stored.confidence || 'single',
                 discrepancies: stored.discrepancies || []
@@ -1586,6 +1595,9 @@ export default {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
               });
             }
+          } catch (e) {
+            // Corrupt KV blob must not 500 the endpoint — fall through to live fetch
+            console.error('earnings KV read failed, falling through:', e.message);
           }
         }
 
@@ -1754,8 +1766,9 @@ export default {
 
         // Build source array - Calendar first (fastest for fresh earnings), then history + EDGAR
         // Note: FMP v3 endpoints are deprecated (legacy), removed
+        const calendarPromise = fetchFinnhubCalendar();
         const sources = [
-          fetchFinnhubCalendar(),
+          calendarPromise,
           fetchFinnhub(),
           fetchEdgar()
         ];
@@ -1766,9 +1779,19 @@ export default {
         }
 
         if (mode === 'race') {
-          // True race: return first successful result immediately
+          // Biased race: the calendar source gets a short head start. It is the
+          // only source pinned to a freshly-released quarter (7-day actuals
+          // window) and carries both EPS and revenue — right after a release the
+          // other sources can still hold LAST quarter and must not win on
+          // latency. If the calendar errors ("no actuals yet") the head start
+          // costs nothing and we fall through to a true race.
           try {
-            const first = await Promise.any(
+            const CALENDAR_HEAD_START_MS = 1500;
+            const calendarFirst = await Promise.race([
+              calendarPromise.then(r => (r.error || !r.data) ? null : r),
+              new Promise(resolve => setTimeout(() => resolve(null), CALENDAR_HEAD_START_MS))
+            ]);
+            const first = calendarFirst || await Promise.any(
               sources.map(s => s.then(r => {
                 if (r.error || !r.data) throw r;
                 return r;
