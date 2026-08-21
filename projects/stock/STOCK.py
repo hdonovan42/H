@@ -144,8 +144,8 @@ def chart_lines(points: list[tuple[int, float]], prev: float,
     latest = datetime.fromtimestamp(points[-1][0], EXCHANGE_TZ)
     axis_gap = max(1, width - 10)
     lines.append(f"[dim]{' ' * 10}{opened:%H:%M}{' ' * axis_gap}{latest:%H:%M}[/dim]")
-    lines.append("[dim]· prev close[/dim]" if prev_row is not None
-                 else f"[dim]prev close {prev:,.2f} — outside today's range[/dim]")
+    if prev_row is not None:          # only worth a legend when the rule is drawn
+        lines.append("[dim]· prev close[/dim]")
     return lines
 
 

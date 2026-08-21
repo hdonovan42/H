@@ -50,8 +50,8 @@ it you're down. Here AAPL opened above and crossed under mid-morning.
 
 The chart is scaled to the session's own high/low, not to include prev close:
 on a big gap day (TSLA +5%) anchoring to prev close flattens the whole line
-into a squiggle. When prev close falls outside the session range it's reported
-underneath as a number instead of drawn.
+into a squiggle. When prev close falls outside the session range the rule is
+simply omitted — the header already carries the number.
 
 Border and status go red when the market is closed, and the subtitle gains
 `· last close` so a stale price can't be mistaken for a live one. **The chart
