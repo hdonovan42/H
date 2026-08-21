@@ -27,3 +27,7 @@ projects/rightmove-plus/test/fixtures/
 
 # Wrangler local dev state (local KV, caches, tmp bundles)
 .wrangler/
+
+# Claude Code machine-local overrides (permissions per machine)
+.claude/settings.local.json
+**/.claude/settings.local.json

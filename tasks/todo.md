@@ -1,32 +1,31 @@
-# WaymoWatch — detection pipeline migration (in-process synchronous scoring)
+# Migration: WSL working copy → native Ubuntu clone (Option A)
 
-**Goal:** WaymoNet as the PRIMARY detector, scored **synchronously in-process on the VPS**,
-**frame-hash-bound**. Eliminate the lazy worker, homebox live-serving, the HTTP hop, the stale-frame
-race, and the dome *gate*. (Approved 2026-06-22; recall audit: model ~96% capable vs 15% captured.)
+Old tree `/home/h/H/hjd.ai` was a **git-less snapshot** copied from WSL.
+Verified against `hdonovan42/H`: 720 tracked files, 712 byte-identical,
+**0 locally modified**, 8 missing (dotfiles). Nothing unique was at risk.
 
-## Increment 0 — prerequisites
-- [x] Enable `earlyoom` on the VPS (root)
-- [x] Put `best.pt` on the VPS (`collector/best.pt`)
-- [x] Map the injection point (`live_capture.ingest`)
+## Steps
 
-## Increment 1 — in-process synchronous scoring + cutover  [DONE, shipped v0.9.0 / d492eef]
-- [x] Load WaymoNet once in `live_capture` (lazy, CPU)
-- [x] Score each candidate in-process at capture; write verdict + `frame_sha`/`wn_frame_sha` atomically
-- [x] Schema: `frame_sha`, `wn_frame_sha` (+ wn_* audit cols)
-- [x] Best-view update re-scores in-process (no stale 0)
-- [x] Offline-test vs homebox (#45157 → 0.642) + deploy + verify live (frame_sha == wn_frame_sha)
-- [x] Drain the 12k email backlog (digest emailed recovered Waymos incl. 0.78)
-- [x] CUTOVER: retire lazy worker (cron removed + killed); keep `waymonet-infer` for the dash only
-- [ ] **score-every-view take-max** (leak #2) — currently scores the funnel's area-best view, one frame/track
+- [x] Verify local tree has no unpushed work (file-by-file vs origin/main)
+- [x] Clone `hdonovan42/H` → `~/dev/hjd.ai` (restores .git, .gitignore,
+      .github/workflows/deploy.yml, .claude/skills/*)
+- [ ] Migrate gitignored local-only payload (NOT in git, irreplaceable):
+      - [ ] projects/waymowatch/data/   (474M training dataset)
+      - [ ] projects/waymowatch/eval/   (39M)
+      - [ ] projects/waymowatch/*.pt    (25M model weights)
+      - [ ] runs/                       (11M YOLO output)
+      - [ ] temp/, dist/
+      - [ ] .claude/settings.local.json  ×3
+- [ ] Do NOT migrate: node_modules/, .venv/ (3.3G, WSL-pathed, regenerable),
+      __pycache__/ (1821 dirs), *:Zone.Identifier (9 Windows artifacts)
+- [ ] Track Claude Code config properly:
+      - [ ] promote merged permissions → tracked `.claude/settings.json`
+      - [ ] gitignore `.claude/settings.local.json` (machine-local by design)
+      - [ ] delete `.claude/claude.md` (byte-identical dup of CLAUDE.md)
+- [ ] Repoint `~/.local/bin/portfolio` at the new path
+- [ ] Verify: portfolio CLI works, git status clean, deploy workflow intact
+- [ ] Quarantine old tree → `~/H.OLD-WSL/` (delete after a soak period)
 
-## Increment 2 — safety net + cleanup
-- [ ] `frame_sha`/`model_ver` periodic re-score sweep (IN-PROCESS on the VPS; replaces the worker's
-      straggler role for rare in-process failures + enables targeted re-score on a new model). Retire scan_rejects one-offs.
-- [ ] Demote dome to ranking-only / retire the legacy dome digest — **AFTER RUN_2 eval** (still catches
-      model misses, e.g. #45157)
-- [ ] CHANGELOG [x v0.9.0] + memory [x] updates
+## Review
 
-## Notes
-- `best.pt` → `collector/best.pt` on the VPS; loop RSS ~0.66 G, ~0.06 core; earlyoom ON
-- Restart loop = bracketed `pkill -f 'live_capture.py --[l]oop'` (own ssh call) → `run_watch.sh` `*/6` respawns
-- RUN_2: deploy its `best.pt` to `collector/best.pt` + restart loop; the sweep then re-scores by `model_ver`
+(filled in on completion)

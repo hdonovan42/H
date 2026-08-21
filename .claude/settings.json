@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(npx eslint:*)",
+      "Bash(tree:*)",
+      "Bash(wc:*)",
+      "WebSearch",
+      "WebFetch(domain:dry-poetry-72b5.donovanh59.workers.dev)",
+      "WebFetch(domain:query1.finance.yahoo.com)"
+    ]
+  }
+}
