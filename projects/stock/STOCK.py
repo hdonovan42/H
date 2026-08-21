@@ -28,9 +28,10 @@ WORKER_BASE = "https://dry-poetry-72b5.donovanh59.workers.dev"
 TIMEOUT = 5
 RETRIES = 3
 
-# One Yahoo call carries every field below. Finnhub was measured at ~906ms
-# median against Yahoo's ~94ms and adds nothing we display, so it isn't used.
-QUOTE_URL = WORKER_BASE + "/yahoo/{}?interval=1d&range=1d"
+# One Yahoo call carries every field below *and* the intraday series. Finnhub
+# was measured at ~906ms median against Yahoo's ~94ms and adds nothing we
+# display, so it isn't used. 5m bars: 78 per session, a natural terminal width.
+QUOTE_URL = WORKER_BASE + "/yahoo/{}?interval=5m&range=1d"
 
 EXCHANGE_TZ = ZoneInfo("America/New_York")
 OPEN_MINUTE, CLOSE_MINUTE = 9 * 60 + 30, 16 * 60   # 09:30–16:00 ET
@@ -52,6 +53,9 @@ def fetch(ticker: str) -> Optional[dict]:
                 price = float(meta["regularMarketPrice"])
                 prev = float(meta.get("chartPreviousClose") or price)
                 opens = [o for o in (bars.get("open") or []) if o is not None]
+                closes = bars.get("close") or []
+                points = [(t, c) for t, c in zip(result.get("timestamp", []), closes)
+                          if c is not None]
                 return {
                     "ticker": meta.get("symbol", ticker),
                     "name": meta.get("longName") or meta.get("shortName") or ticker,
@@ -64,6 +68,7 @@ def fetch(ticker: str) -> Optional[dict]:
                     "traded_at": meta.get("regularMarketTime", 0),
                     "change": price - prev,
                     "change_pct": (price - prev) / prev * 100 if prev else 0.0,
+                    "points": points,
                 }
         except (requests.RequestException, ValueError, KeyError, IndexError, TypeError):
             pass
@@ -82,6 +87,68 @@ def market_open(quote: dict) -> tuple[bool, datetime]:
     return in_session and fresh, now
 
 
+# Braille cells pack a 2x4 grid of dots, so one character row is 4 plot rows
+# and one column is 2 — a far truer line than block characters manage.
+BRAILLE = ((0x01, 0x08), (0x02, 0x10), (0x04, 0x20), (0x40, 0x80))
+CHART_ROWS = 7
+
+
+def chart_lines(points: list[tuple[int, float]], prev: float,
+                colour: str, width: int) -> list[str]:
+    """Braille line chart of the session. Scaled to the session's own range —
+    including prev close would flatten the line on a big gap day — with prev
+    drawn as a dotted rule when it happens to fall inside that range."""
+    values = [v for _, v in points]
+    stride = len(values) / width
+    sample = [values[min(len(values) - 1, int(i * stride))] for i in range(width)]
+
+    low, high = min(sample), max(sample)
+    pad = (high - low) * 0.08 or 1.0
+    low, high = low - pad, high + pad
+    span = high - low
+    height = CHART_ROWS * 4
+
+    grid = [[0] * width for _ in range(CHART_ROWS)]
+
+    def dot(x: int, y: int) -> None:
+        if 0 <= y < height and 0 <= x < width * 2:
+            grid[y // 4][x // 2] |= BRAILLE[y % 4][x % 2]
+
+    previous_y = None
+    for i, value in enumerate(sample):
+        y = int((high - value) / span * (height - 1))
+        x = i * 2
+        if previous_y is not None:  # join consecutive samples into a line
+            for fill in range(min(previous_y, y), max(previous_y, y) + 1):
+                dot(x, fill)
+        dot(x, y)
+        dot(x + 1, y)
+        previous_y = y
+
+    prev_row = int((high - prev) / span * (height - 1)) // 4 if low <= prev <= high else None
+
+    lines = []
+    for row, cells in enumerate(grid):
+        drawn = "".join(chr(0x2800 + c) if c else " " for c in cells)
+        if row == prev_row:
+            drawn = "".join(c if c != " " else "[dim]·[/dim]" for c in drawn)
+        if row == 0:
+            label = f"{high:>9,.2f}"
+        elif row == CHART_ROWS - 1:
+            label = f"{low:>9,.2f}"
+        else:
+            label = " " * 9
+        lines.append(f"[dim]{label}[/dim] [{colour}]{drawn}[/{colour}]")
+
+    opened = datetime.fromtimestamp(points[0][0], EXCHANGE_TZ)
+    latest = datetime.fromtimestamp(points[-1][0], EXCHANGE_TZ)
+    axis_gap = max(1, width - 10)
+    lines.append(f"[dim]{' ' * 10}{opened:%H:%M}{' ' * axis_gap}{latest:%H:%M}[/dim]")
+    lines.append("[dim]· prev close[/dim]" if prev_row is not None
+                 else f"[dim]prev close {prev:,.2f} — outside today's range[/dim]")
+    return lines
+
+
 def render(quote: dict, plain: bool) -> None:
     is_open, now = market_open(quote)
     status = "[bold green]● OPEN[/bold green]" if is_open else "[bold red]● CLOSED[/bold red]"
@@ -98,9 +165,16 @@ def render(quote: dict, plain: bool) -> None:
              for label, key in (("open", "open"), ("high", "high"), ("low", "low"), ("prev", "prev"))
              if quote.get(key) is not None]
     body = f"[bold white]${quote['price']:,.2f}[/bold white]   {delta}\n" + "   ".join(stats)
+
+    points = quote.get("points") or []
+    if is_open and len(points) >= 3:
+        width = max(24, min(56, console.width - 24))
+        body += "\n\n" + "\n".join(chart_lines(points, quote["prev"], colour, width))
+
     stale = "" if is_open else "  ·  last close"
     console.print(Panel(body, title=f"{quote['name']} ({quote['ticker']})",
-                        subtitle=f" {status}  ·  {quote['exchange']}  ·  {now:%H:%M %Z}{stale} ",
+                        subtitle=f" {status}  ·  {quote['exchange']}  ·  {now:%H:%M %Z}{stale}"
+                                 + (" · 5m bars " if (is_open and len(points) >= 3) else " "),
                         border_style=colour, padding=(1, 2), box=box.ROUNDED, expand=False))
 
 

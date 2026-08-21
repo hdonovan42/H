@@ -11,7 +11,7 @@ an answer.
 ## Usage
 
 ```bash
-stock TSLA          # price, day move, market status
+stock TSLA          # price, day move, market status, intraday chart
 stock TSLA --plain  # one line, no box — for scripting
 ```
 
@@ -24,8 +24,40 @@ stock TSLA --plain  # one line, no box — for scripting
 ╰─────────  ● OPEN  ·  NasdaqGS  ·  14:07 EDT  ──────────╯
 ```
 
+While the market is open you also get the session so far, drawn in braille —
+each character packs a 2x4 dot grid, so it's a real line rather than a bar
+approximation:
+
+```
+╭───────────────────────── Apple Inc. (AAPL) ──────────────────────────╮
+│  $309.02   -2.28 (-0.73%)                                            │
+│  open 312.05   high 312.38   low 307.01   prev 311.30                │
+│                                                                      │
+│     312.15                         ⣀⡀ ⡖⣆⡀⣀⡀         ⣀⣀⣀⡀             │
+│            ·······················⡖⠃⠉⠓⠃·⠉⠁⠉⠓⠋⠉⡇⣀⣀⡤⠖⠒⠃··⠉⠓⣆⡀········  │
+│                                ⡤⡄⡏⠁           ⠓⠃          ⠓⠦⡄        │
+│                             ⡤⠏⠉⠁⠉⠁                          ⠉⠉⠓⠒⠦⣄⡀  │
+│                          ⡤⠖⠋⠁                                     ⠉  │
+│            ⠒⠋⠉⡇  ⡤⠤⣄⡖⠦⠤⠖⠋⠁                                           │
+│     306.96    ⠉⠓⠋⠁                                                   │
+│            09:30                                              14:16  │
+│  · prev close                                                        │
+╰───────────  ● OPEN  ·  NasdaqGS  ·  14:16 EDT · 5m bars  ────────────╯
+```
+
+The dotted rule is yesterday's close — above it you're up on the day, below
+it you're down. Here AAPL opened above and crossed under mid-morning.
+
+The chart is scaled to the session's own high/low, not to include prev close:
+on a big gap day (TSLA +5%) anchoring to prev close flattens the whole line
+into a squiggle. When prev close falls outside the session range it's reported
+underneath as a number instead of drawn.
+
 Border and status go red when the market is closed, and the subtitle gains
-`· last close` so a stale price can't be mistaken for a live one.
+`· last close` so a stale price can't be mistaken for a live one. **The chart
+only appears while the market is open** — a finished session replayed flat
+isn't much use for sizing a trade — and it's skipped in the first few minutes
+of trading, before there are enough bars to draw.
 
 Lowercase works (`stock tsla`), and a trailing `?` is stripped if you type one.
 Note that bare `stock tsla?` is a shell glob — quote it, or just leave it off.
@@ -49,7 +81,10 @@ since yesterday, so it correctly reports CLOSED.
 
 ## Speed
 
-One HTTP call, ~0.2s end to end including Python startup.
+One HTTP call, ~0.2s end to end including Python startup — the chart is free.
+The intraday series and the quote metadata arrive in the same response, so
+asking for `interval=5m` instead of `interval=1d` costs about 20ms and saves
+a second request.
 
 Only Yahoo (via the Cloudflare Worker) is used. Finnhub was measured at ~906ms
 median against Yahoo's ~94ms and supplies nothing that isn't already in the
@@ -63,7 +98,7 @@ retry up to 3 times on *parse* failure, not just on HTTP status.
 
 | File | Purpose |
 |------|---------|
-| `STOCK.py` | The whole tool (~130 lines). |
+| `STOCK.py` | The whole tool (~200 lines). |
 | `requirements.txt` | `click`, `rich`, `requests` — same three as PORTFOLIO. |
 
 ## Install
