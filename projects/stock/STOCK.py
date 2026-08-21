@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import time
 from datetime import datetime
+from math import floor, log10
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -87,6 +88,16 @@ def market_open(quote: dict) -> tuple[bool, datetime]:
     return in_session and fresh, now
 
 
+def sig3(value: float) -> str:
+    """Three significant figures, in plain notation — 365.63 -> 366,
+    45.678 -> 45.7, 3409.5 -> 3,410. `%.3g` would give 3.41e+03."""
+    if not value:
+        return "0"
+    places = 2 - floor(log10(abs(value)))
+    rounded = round(value, places)
+    return f"{rounded:,.{max(places, 0)}f}"
+
+
 # Braille cells pack a 2x4 grid of dots, so one character row is 4 plot rows
 # and one column is 2 — a far truer line than block characters manage.
 BRAILLE = ((0x01, 0x08), (0x02, 0x10), (0x04, 0x20), (0x40, 0x80))
@@ -133,9 +144,9 @@ def chart_lines(points: list[tuple[int, float]], prev: float,
         if row == prev_row:
             drawn = "".join(c if c != " " else "[dim]·[/dim]" for c in drawn)
         if row == 0:
-            label = f"{high:>9,.2f}"
+            label = f"{sig3(high):>9}"
         elif row == CHART_ROWS - 1:
-            label = f"{low:>9,.2f}"
+            label = f"{sig3(low):>9}"
         else:
             label = " " * 9
         lines.append(f"[dim]{label}[/dim] [{colour}]{drawn}[/{colour}]")
