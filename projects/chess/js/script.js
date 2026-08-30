@@ -14,6 +14,15 @@ const GRAPH_REDRAW_MS = 250; // min interval between chart repaints during the g
 const GRAPH_POOL_SIZE = 4;
 const GRAPH_POOL_THREADS = 2; // per worker; single-threaded builds ignore this cleanly
 const GRAPH_POOL_HASH_MB = 32;
+// Pool workers boot in two stages (see ensureGraphPool). The first one does the
+// real ~79MB download on a cold cache and gets a budget sized for a slow link;
+// the rest start from the HTTP cache and only need enough to compile the net.
+const GRAPH_POOL_FIRST_INIT_TIMEOUT_MS = 120000;
+const GRAPH_POOL_INIT_TIMEOUT_MS = 45000;
+const GRAPH_POOL_LAST_RESORT_TIMEOUT_MS = 240000; // solo attempt before giving up entirely
+const GRAPH_POOL_WARM_BOOT_MS = 15000;   // a boot slower than this, AFTER one already pulled the
+                                         // net, means HTTP caching isn't helping (warm ≈ 1.3-5s)
+const GRAPH_STALL_TIMEOUT_MS = 90000;     // no task completing for this long = the pass is wedged
 const GRAPH_POOL_ENGINE = 'full';    // same net as live analysis — evals/classifications match
 const GRAPH_SKETCH_NODES = 12000;    // sketch tasks: provisional curve, fully overwritten by polish
 const GRAPH_POLISH_NODES = 600000;   // uniform polish budget (≈ d18-20, full net) — uniform for ALL
@@ -108,6 +117,13 @@ const AppState = {
   cachedAccuracyLength: 0,       // Eval count when accuracy was last computed
   notationDirty: true,           // Whether notation needs re-render
   graphPool: [],                 // Parallel graph analysis workers (kept warm between games)
+  _graphWorkers: new Set(),      // EVERY live pool worker, tracked from birth — including ones
+                                 // still initialising, so a cancel can terminate them too
+  _graphPoolPromise: null,       // In-flight ensureGraphPool(), so two loads share one init
+  _graphPoolAborts: new Set(),   // Rejectors for inits still waiting on 'readyok', so a cancel
+                                 // settles them now instead of leaving them to time out
+  _graphPoolGen: 0,              // Bumped when the pool is destroyed; init results from an
+                                 // older generation are terminated instead of adopted
   _graphRunId: 0,                // Bumped to cancel an in-flight graph run
   _graphRunActive: false,        // A graph pass is currently running
   _graphPixelCache: null,        // Per-index pixel coords on the eval chart (for the dot overlay)
@@ -201,10 +217,13 @@ function cacheAnalysisResult(fen, multipvResults, bestMoveInfo, depth) {
   if (lines === 0) return;
   const existing = AppState.evalCache.get(fen);
   if (existing && (existing.depth > depth || (existing.depth === depth && existing.lines >= lines))) return;
+  // Drop `fen` FIRST: on a sketch→polish depth upgrade the key is already
+  // present, and evicting before the delete threw out an unrelated entry to
+  // make room for one that needed none.
+  AppState.evalCache.delete(fen); // refresh insertion order
   if (AppState.evalCache.size >= EVAL_CACHE_MAX) {
     AppState.evalCache.delete(AppState.evalCache.keys().next().value); // drop oldest
   }
-  AppState.evalCache.delete(fen); // refresh insertion order
   AppState.evalCache.set(fen, { multipvResults, bestMoveInfo, depth, lines });
 }
 
@@ -1806,18 +1825,42 @@ function analyzeGraphPositions() {
   runGraphPasses(positions);
 }
 
+// Terminate one worker and forget it everywhere. Safe to call twice.
+function discardGraphWorker(worker) {
+  try { worker.terminate(); } catch (e) {}
+  AppState._graphWorkers.delete(worker);
+  const i = AppState.graphPool.indexOf(worker);
+  if (i >= 0) AppState.graphPool.splice(i, 1);
+}
+
+// Tear the pool down completely, including workers still initialising.
+function destroyGraphPool() {
+  AppState._graphPoolGen++;
+  Array.from(AppState._graphPoolAborts).forEach(abort => abort());
+  AppState._graphPoolAborts.clear();
+  Array.from(AppState._graphWorkers).forEach(w => { try { w.terminate(); } catch (e) {} });
+  AppState._graphWorkers.clear();
+  AppState.graphPool = [];
+  AppState._graphPoolPromise = null;
+  AppState._graphRunActive = false;
+}
+
 function cancelGraphRun() {
   AppState._graphRunId++;
-  if (AppState._graphRunActive) {
-    // Mid-run — workers are busy on stale positions; hard-reset the pool.
-    // (An idle pool is left warm and reused by the next run.)
-    AppState.graphPool.forEach(w => { try { w.terminate(); } catch (e) {} });
-    AppState.graphPool = [];
-    AppState._graphRunActive = false;
+  // Hard-reset whenever a run is mid-flight OR a pool init is still pending.
+  // The init case matters: _graphRunActive is set before `await ensureGraphPool()`
+  // resolves, so the old code's `graphPool.forEach(terminate)` ran against a still
+  // EMPTY array and terminated nothing. Loading a second PGN while the first was
+  // still spinning up therefore orphaned four full-net workers (~79MB net + 32MB
+  // hash each) that stayed alive and unreachable for the life of the tab — the
+  // leak behind both the slowdown and the eventual OOM crash.
+  // (An idle, fully-built pool is still left warm and reused by the next run.)
+  if (AppState._graphRunActive || AppState._graphPoolPromise) {
+    destroyGraphPool();
   }
 }
 
-function createGraphPoolWorker() {
+function createGraphPoolWorker(timeoutMs) {
   return new Promise((resolve, reject) => {
     let worker;
     try {
@@ -1825,19 +1868,39 @@ function createGraphPoolWorker() {
     } catch (err) {
       return reject(err);
     }
-    const readyTimeout = setTimeout(() => {
-      try { worker.terminate(); } catch (e) {}
-      reject(new Error('Graph pool worker init timeout'));
-    }, 20000);
+    // Tracked from birth, so a cancel during init can still reach it
+    AppState._graphWorkers.add(worker);
+
+    let settled = false;
+    function settle(ok, payload) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(readyTimeout);
+      AppState._graphPoolAborts.delete(abort);
+      worker.onmessage = null;
+      worker.onerror = null;
+      if (ok) {
+        resolve(worker);
+      } else {
+        discardGraphWorker(worker);
+        reject(payload);
+      }
+    }
+    // A terminated worker never answers 'isready', so without this a cancelled
+    // init would sit pending until its full timeout elapsed.
+    const abort = () => settle(false, new Error('Graph pool init cancelled'));
+    AppState._graphPoolAborts.add(abort);
+
+    const readyTimeout = setTimeout(
+      () => settle(false, new Error('Graph pool worker init timeout')),
+      timeoutMs || GRAPH_POOL_INIT_TIMEOUT_MS
+    );
     worker.onmessage = function(e) {
       const msg = typeof e.data === 'string' ? e.data : e.data.data;
-      if (msg === 'readyok') { clearTimeout(readyTimeout); resolve(worker); }
+      if (msg === 'readyok') settle(true);
     };
-    worker.onerror = function(err) {
-      clearTimeout(readyTimeout);
-      try { worker.terminate(); } catch (e) {}
-      reject(err);
-    };
+    worker.onerror = function(err) { settle(false, err); };
+
     worker.postMessage('uci');
     worker.postMessage('setoption name Threads value ' + (THREADS_SUPPORTED ? GRAPH_POOL_THREADS : 1));
     worker.postMessage('setoption name Hash value ' + GRAPH_POOL_HASH_MB);
@@ -1845,16 +1908,124 @@ function createGraphPoolWorker() {
   });
 }
 
+// Bring the pool up to GRAPH_POOL_SIZE. Tops up a pool that lost workers to
+// crashes (it used to accept ANY non-empty pool, so a run that lost three of
+// four workers left every later run in that session single-worker — a silent,
+// permanent 4x slowdown). Concurrent callers share one in-flight init.
+//
+// Workers are started in TWO STAGES, and that is the whole point of this
+// function. Booting all four at once gave them ONE shared deadline starting at
+// t=0, while the ~75MB net still had to arrive; below ~30-40Mbps the download
+// outlasted the 20s timeout and all four failed TOGETHER, so ensureGraphPool
+// threw and the graph showed "Graph analysis failed" on an ordinary single PGN
+// load. Measured cold-cache: HEAD popped at 30/20/10Mbps, survived 40 with
+// only 3.1s of margin.
+//
+// Staging separates the two costs. Stage 1 is the one worker that actually
+// waits for the network, so it gets a budget sized for a slow link; stage 2
+// starts from the warmed HTTP cache and returns in ~1.3s, so it keeps a tight
+// cap. Measured with the staged boot: 4/4 at every link from 200Mbps down to
+// 5Mbps, no popup, and ~1-2s of extra wall clock on fast links (inside
+// run-to-run noise).
+//
+// NOTE: with normal cache headers (which GitHub Pages sends) the browser
+// already coalesces the four concurrent fetches — total bytes are ~75MB either
+// way, so staging does NOT work by moving less data. It works by giving the
+// one unavoidable download a deadline it can meet. Do not "simplify" this back
+// into a parallel boot on the theory that the bytes are the same.
 async function ensureGraphPool() {
-  if (AppState.graphPool.length > 0) return AppState.graphPool;
-  const results = await Promise.allSettled(
-    Array.from({ length: GRAPH_POOL_SIZE }, createGraphPoolWorker)
-  );
-  AppState.graphPool = results.filter(r => r.status === 'fulfilled').map(r => r.value);
-  if (AppState.graphPool.length === 0) {
-    throw new Error('All graph pool workers failed to initialise');
+  if (AppState.graphPool.length >= GRAPH_POOL_SIZE) return AppState.graphPool;
+  if (AppState._graphPoolPromise) return AppState._graphPoolPromise;
+
+  const gen = AppState._graphPoolGen;
+
+  // Adopt freshly built workers, unless the pool was destroyed while we waited.
+  const adopt = born => {
+    if (gen !== AppState._graphPoolGen) {
+      born.forEach(w => { try { w.terminate(); } catch (e) {} AppState._graphWorkers.delete(w); });
+      return false;
+    }
+    born.forEach(w => { if (!AppState.graphPool.includes(w)) AppState.graphPool.push(w); });
+    return true;
+  };
+
+  AppState._graphPoolPromise = (async () => {
+    // Boot A — one worker alone, warming the HTTP cache for the rest.
+    // It gets a long budget because it does the real downloading.
+    let bootMs = 0, bootOk = false, recovered = false;
+    if (AppState.graphPool.length === 0) {
+      const startedAt = Date.now();
+      try {
+        const first = await createGraphPoolWorker(GRAPH_POOL_FIRST_INIT_TIMEOUT_MS);
+        bootMs = Date.now() - startedAt;
+        bootOk = true;
+        if (!adopt([first])) return [];
+      } catch (err) {
+        console.warn('First graph pool worker failed to initialise:', err);
+        if (gen !== AppState._graphPoolGen) return [];
+      }
+    }
+
+    // Boot B (recovery) — boot A failed, so do NOT fan out yet. Its failure
+    // already showed the bytes aren't arriving fast enough, and parallel
+    // attempts split the same pipe: four of them each re-download the whole net
+    // and all miss. Measured at 10Mbps with caching off, four contending
+    // attempts burned 120s and ~450MB and failed, and a solo attempt then
+    // finished in 70s. So retry solo, with the most generous budget we allow.
+    if (!bootOk && AppState.graphPool.length === 0) {
+      const startedAt = Date.now();
+      try {
+        const solo = await createGraphPoolWorker(GRAPH_POOL_LAST_RESORT_TIMEOUT_MS);
+        bootMs = Date.now() - startedAt;
+        bootOk = true;
+        recovered = true;
+        if (!adopt([solo])) return [];
+      } catch (err) {
+        console.warn('Solo graph pool worker failed to initialise:', err);
+        if (gen !== AppState._graphPoolGen) return [];
+      }
+    }
+
+    // Fan out for the remaining workers, normally served from cache in ~1.3s.
+    //
+    // Budget: boot A's duration is the honest signal for how much room these
+    // need. A budget is a CEILING, not a wait — a worker that loads in 1.3s is
+    // unaffected by a large one — so err generous.
+    //
+    // Skipped entirely when we only got here via recovery AND that recovery was
+    // slow. Boot A had already pulled the net by then, so a solo boot still
+    // taking tens of seconds means HTTP caching is not helping at all (a hard
+    // reload disables it outright). These workers would each re-download ~79MB
+    // and time out anyway; keep the small pool and let a later run top it up.
+    // A slow boot A on its own does NOT imply this — with caching healthy, a
+    // 31.5s first download is still followed by 1.3s cache hits.
+    // (Gated on the pool being non-empty rather than on bootOk, so topping up a
+    // pool that lost workers — where no boot runs at all — still fans out.)
+    const missing = GRAPH_POOL_SIZE - AppState.graphPool.length;
+    const cacheIsHelping = !recovered || bootMs <= GRAPH_POOL_WARM_BOOT_MS;
+    if (missing > 0 && AppState.graphPool.length > 0 && cacheIsHelping) {
+      const fanOutTimeout = Math.min(
+        GRAPH_POOL_FIRST_INIT_TIMEOUT_MS,
+        Math.max(GRAPH_POOL_INIT_TIMEOUT_MS, bootMs * 2)
+      );
+      const results = await Promise.allSettled(
+        Array.from({ length: missing }, () => createGraphPoolWorker(fanOutTimeout))
+      );
+      const born = results.filter(r => r.status === 'fulfilled').map(r => r.value);
+      if (!adopt(born)) return [];
+    }
+
+    if (AppState.graphPool.length === 0) {
+      throw new Error('All graph pool workers failed to initialise');
+    }
+    return AppState.graphPool;
+  })();
+
+  try {
+    return await AppState._graphPoolPromise;
+  } finally {
+    if (gen === AppState._graphPoolGen) AppState._graphPoolPromise = null;
   }
-  return AppState.graphPool;
 }
 
 async function runGraphPasses(positions) {
@@ -1901,11 +2072,33 @@ function runGraphPass(pool, tasks, opts, runId) {
     let active = 0;
     let settled = false;
 
+    // Watchdog: several paths can leave the queue with no worker able to make
+    // progress (a worker terminated while idle still sits in the pool and never
+    // answers its 'go'). Rather than hang the pass forever — the graph silently
+    // freezing half-drawn — give up and let the caller paint what it has.
+    let stallTimer = null;
+    function armStall() {
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        if (settled) return;
+        console.warn('Graph pass stalled with', tasks.length - next, 'tasks left; finishing early');
+        finish();
+      }, GRAPH_STALL_TIMEOUT_MS);
+    }
+    function finish() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(stallTimer);
+      resolve();
+    }
+
     function maybeFinish() {
-      if (!settled && active === 0 &&
-          (next >= tasks.length || runId !== AppState._graphRunId)) {
-        settled = true;
-        resolve();
+      if (settled) return;
+      // No live worker can pull another task, so waiting is pointless.
+      const stuck = AppState.graphPool.length === 0;
+      if (active === 0 &&
+          (next >= tasks.length || runId !== AppState._graphRunId || stuck)) {
+        finish();
       }
     }
 
@@ -1915,6 +2108,7 @@ function runGraphPass(pool, tasks, opts, runId) {
         return;
       }
       const task = tasks[next++];
+      armStall(); // progress made — reset the wedge detector
       const pos = task.pos;
       const nodes = task.kind === 'sketch' ? GRAPH_SKETCH_NODES : GRAPH_POLISH_NODES;
       const cacheMinDepth = task.kind === 'sketch' ? 12 : GRAPH_SKIP_DEPTH;
@@ -1964,6 +2158,28 @@ function runGraphPass(pool, tasks, opts, runId) {
 
       function search() {
         let last = null;
+        // One decrement per task, whatever happens. The old code left the
+        // previous search's onerror armed on an idle worker, so a worker dying
+        // between tasks decremented `active` for a task already accounted for —
+        // driving the counter negative (active === 0 unreachable → hang) or to
+        // zero early (partial graph published as if complete).
+        let taskDone = false;
+        function endTask(pullNext) {
+          if (taskDone) return;
+          taskDone = true;
+          worker.onmessage = null;
+          // While idle this worker owes us nothing, but if it dies we must still
+          // drop it from the pool or pump() will hand it a task it can't answer.
+          worker.onerror = function(err) {
+            console.warn('Idle graph pool worker died:', err);
+            discardGraphWorker(worker);
+            maybeFinish();
+          };
+          active--;
+          if (pullNext) pump(worker);
+          maybeFinish();
+        }
+
         worker.onmessage = function(e) {
           const msg = typeof e.data === 'string' ? e.data : e.data.data;
           if (msg.startsWith('info depth') && msg.includes('score') && msg.includes(' pv ')) {
@@ -1971,24 +2187,23 @@ function runGraphPass(pool, tasks, opts, runId) {
             if (info) last = info; // keep the deepest line seen before bestmove
           } else if (msg.startsWith('bestmove')) {
             if (runId === AppState._graphRunId && last) commitGraphInfo(pos, last, opts);
-            active--;
-            pump(worker);
-            maybeFinish();
+            endTask(true);
           }
         };
         worker.onerror = function(err) {
           console.warn('Graph pool worker died, continuing with remaining workers:', err);
-          try { worker.terminate(); } catch (e) {}
-          const i = AppState.graphPool.indexOf(worker);
-          if (i >= 0) AppState.graphPool.splice(i, 1);
-          active--;
-          maybeFinish();
+          discardGraphWorker(worker);
+          // Dead worker: its pump chain ends here. The survivors keep draining
+          // the queue, and maybeFinish() now resolves rather than hanging if
+          // this was the last one standing.
+          endTask(false);
         };
         worker.postMessage('position fen ' + pos.fen);
         worker.postMessage('go depth ' + opts.depthCap + ' nodes ' + nodes);
       }
     }
 
+    armStall();
     pool.slice().forEach(pump);
     maybeFinish();
   });
@@ -2591,11 +2806,18 @@ async function queryTablebase(fen) {
   }
   try {
     const response = await fetch(`https://tablebase.lichess.ovh/standard?fen=${encodeURIComponent(fen)}`);
-    if (!response.ok) return null;
+    if (!response.ok) {
+      // Cache the miss too. Four pool workers hammering this endpoint get
+      // rate-limited, and without this every 429 was re-requested by both the
+      // sketch and the polish task for the same FEN, forever.
+      AppState.tablebaseCache.set(fen, null);
+      return null;
+    }
     const data = await response.json();
     AppState.tablebaseCache.set(fen, data);
     return data;
   } catch (e) {
+    AppState.tablebaseCache.set(fen, null);
     return null;
   }
 }
