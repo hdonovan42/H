@@ -7,5 +7,5 @@ set -e
 cd "$(dirname "$0")"
 rsync -z root@vps-hel1:/var/www/waymonet/notes/notes.md ./notes/notes.md
 # --chown: the sightings API (user hq) writes notes/ — root rsync must not hand it to uid 1000
-rsync -az --exclude deploy.sh --chown=hq:hq ./ root@vps-hel1:/var/www/waymonet/
+rsync -az --exclude deploy.sh --exclude "*.tpl.html" --exclude "build_*.py" --chown=hq:hq ./ root@vps-hel1:/var/www/waymonet/
 echo "deployed -> https://waymonet.com   (notes: https://waymonet.com/notes, editor: /notes/edit)"

@@ -1,5 +1,51 @@
 # WaymoWatch — Changelog
 
+## CARTO key added + geofence demo at /geofence.html (2026-09-01)
+
+**The map's basemap started showing "API KEY REQUIRED" stamped across every tile.** Not an
+expired key and not a quota: we never had a key, and in **late Aug 2026 CARTO began requiring
+one on the raster endpoint**, watermarking unauthenticated tiles. Tiles still returned HTTP 200
+— it is a watermark, not an outage — and Fastly's 180-day cache meant it crept in as old clean
+tiles aged out, which is why it looked sudden. Same change hit Home Assistant and Grafana Geomap.
+
+- **Key on the tile URL**, `light_all` path unchanged: CARTO's own instructions point at
+  `rastertiles/voyager`, which is a **different basemap style** — taking it verbatim would have
+  silently reskinned Positron to Voyager. Verified across subdomains a–d, `1x`/`@2x`, z10–z16;
+  a deliberately bogus key returns the watermarked tile, so the key is genuinely being validated.
+- Free tier is **5M tiles/month** across raster + vector. At 293 unique visitors/day we are
+  comfortably under 1M. **CARTO are retiring raster PNG** — the banked exit is still the
+  Greater-London PMTiles extract (132 MB; 44 MB watch-zone).
+
+**`site/geofence.html` (new, noindex)** — a frozen-snapshot demo for estimating Waymo's London
+geofence, built by `site/build_geofence.py` (public API for passes + `waymo.db` over SSH for the
+cameras that have never seen one). Toggle recomputes hull, cells and stats live:
+
+| | Past week | All time |
+|---|---|---|
+| Passes | 284 | 2,112 |
+| Cameras hit | 129 / 621 | 294 / 621 |
+| Occupied 500 m cells | 98 | 201 |
+| Convex hull | 145.5 km² | **258.4 km² (99.8 sq mi)** |
+
+- **The negative space is the point.** A hull drawn from hits alone cannot be falsified, so the
+  **343 polled cameras with zero confirmed passes** are plotted too. They crowd the hull to the
+  **south and west** — those edges are evidenced.
+- **The north and east edges are ours, not Waymo's.** The hull runs up against `ZONE`
+  (51.42–51.58, −0.36–0.06, `live_capture.py:48`); the page detects this and says so. Widening
+  the box is the only way to find the real boundary on those sides.
+- Hull area landing on **99.8 sq mi** against Waymo's reported ~100 sq mi is striking but not yet
+  a result: a convex hull overstates (it fills the gaps between extremes), the genuinely observed
+  area is **201 × 0.25 = 50.2 km²**, and two hull vertices are clipped by our own box.
+
+**Found in passing, not yet fixed:** `recency()` (`site/index.html:962`) buckets everything older
+than 24 h as `"week"`, and the key labels that ring "Past week" — so a 10 June pass has been
+rendering as a past-week sighting for months. The map has always plotted every sighting ever;
+only the label is wrong.
+
+`site/deploy.sh` gained `--exclude "*.tpl.html" --exclude "build_*.py"` so demo sources are not
+published to the webroot.
+
+
 ## DISK-FULL OUTAGE FIXED — archive is keep-set only, ~107× leaner (2026-08-07)
 
 **17-day total outage (21 Jul 10:12 UTC → 7 Aug), one root cause.** The VPS disk hit 100%; because

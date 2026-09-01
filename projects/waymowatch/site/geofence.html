@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WaymoNet · Geofence estimate</title>
+<meta name="description" content="Every confirmed Waymo sighting in London since June 2026, with the observed testing footprint — a demo view for estimating Waymo's London geofence." />
+<meta name="robots" content="noindex,nofollow" />
+<link rel="icon" type="image/png" href="assets/favicon.png" />
+<link rel="preconnect" href="https://a.basemaps.cartocdn.com" />
+<link rel="preconnect" href="https://b.basemaps.cartocdn.com" />
+<link rel="preload" href="assets/hammersmith-one-latin.woff2" as="font" type="font/woff2" crossorigin />
+<style>
+/* Leaflet 1.9.4 — leaflet.css inlined (BSD-2-Clause) */
+/* required styles */
+
+.leaflet-pane,
+.leaflet-tile,
+.leaflet-marker-icon,
+.leaflet-marker-shadow,
+.leaflet-tile-container,
+.leaflet-pane > svg,
+.leaflet-pane > canvas,
+.leaflet-zoom-box,
+.leaflet-image-layer,
+.leaflet-layer {
+	position: absolute;
+	left: 0;
+	top: 0;
+	}
+.leaflet-container {
+	overflow: hidden;
+	}
+.leaflet-tile,
+.leaflet-marker-icon,
+.leaflet-marker-shadow {
+	-webkit-user-select: none;
+	   -moz-user-select: none;
+	        user-select: none;
+	  -webkit-user-drag: none;
+	}
+/* Prevents IE11 from highlighting tiles in blue */
+.leaflet-tile::selection {
+	background: transparent;
+}
+/* Safari renders non-retina tile on retina better with this, but Chrome is worse */
+.leaflet-safari .leaflet-tile {
+	image-rendering: -webkit-optimize-contrast;
+	}
+/* hack that prevents hw layers "stretching" when loading new tiles */
+.leaflet-safari .leaflet-tile-container {
+	width: 1600px;
+	height: 1600px;
+	-webkit-transform-origin: 0 0;
+	}
+.leaflet-marker-icon,
+.leaflet-marker-shadow {
+	display: block;
+	}
+/* .leaflet-container svg: reset svg max-width decleration shipped in Joomla! (joomla.org) 3.x */
+/* .leaflet-container img: map is broken in FF if you have max-width: 100% on tiles */
+.leaflet-container .leaflet-overlay-pane svg {
+	max-width: none !important;
+	max-height: none !important;
+	}
+.leaflet-container .leaflet-marker-pane img,
+.leaflet-container .leaflet-shadow-pane img,
+.leaflet-container .leaflet-tile-pane img,
+.leaflet-container img.leaflet-image-layer,
+.leaflet-container .leaflet-tile {
+	max-width: none !important;
+	max-height: none !important;
+	width: auto;
+	padding: 0;
+	}
+
+.leaflet-container img.leaflet-tile {
+	/* See: https://bugs.chromium.org/p/chromium/issues/detail?id=600120 */
+	mix-blend-mode: plus-lighter;
+}
+
+.leaflet-container.leaflet-touch-zoom {
+	-ms-touch-action: pan-x pan-y;
+	touch-action: pan-x pan-y;
+	}
+.leaflet-container.leaflet-touch-drag {
+	-ms-touch-action: pinch-zoom;
+	/* Fallback for FF which doesn't support pinch-zoom */
+	touch-action: none;
+	touch-action: pinch-zoom;
+}
+.leaflet-container.leaflet-touch-drag.leaflet-touch-zoom {
+	-ms-touch-action: none;
+	touch-action: none;
+}
+.leaflet-container {
+	-webkit-tap-highlight-color: transparent;
+}
+.leaflet-container a {
+	-webkit-tap-highlight-color: rgba(51, 181, 229, 0.4);
+}
+.leaflet-tile {
+	filter: inherit;
+	visibility: hidden;
+	}
+.leaflet-tile-loaded {
+	visibility: inherit;
+	}
+.leaflet-zoom-box {
+	width: 0;
+	height: 0;
+	-moz-box-sizing: border-box;
+	     box-sizing: border-box;
+	z-index: 800;
+	}
+/* workaround for https://bugzilla.mozilla.org/show_bug.cgi?id=888319 */
+.leaflet-overlay-pane svg {
+	-moz-user-select: none;
+	}
+
+.leaflet-pane         { z-index: 400; }
+
+.leaflet-tile-pane    { z-index: 200; }
+.leaflet-overlay-pane { z-index: 400; }
+.leaflet-shadow-pane  { z-index: 500; }
+.leaflet-marker-pane  { z-index: 600; }
+.leaflet-tooltip-pane   { z-index: 650; }
+.leaflet-popup-pane   { z-index: 700; }
+
+.leaflet-map-pane canvas { z-index: 100; }
+.leaflet-map-pane svg    { z-index: 200; }
+
+.leaflet-vml-shape {
+	width: 1px;
+	height: 1px;
+	}
+.lvml {
+	behavior: url(#default#VML);
+	display: inline-block;
+	position: absolute;
+	}
+
+
+/* control positioning */
+
+.leaflet-control {
+	position: relative;
+	z-index: 800;
+	pointer-events: visiblePainted; /* IE 9-10 doesn't have auto */
+	pointer-events: auto;
+	}
+.leaflet-top,
+.leaflet-bottom {
+	position: absolute;
+	z-index: 1000;
+	pointer-events: none;
+	}
+.leaflet-top {
+	top: 0;
+	}
+.leaflet-right {
+	right: 0;
+	}
+.leaflet-bottom {
+	bottom: 0;
+	}
+.leaflet-left {
+	left: 0;
+	}
+.leaflet-control {
+	float: left;
+	clear: both;
+	}
+.leaflet-right .leaflet-control {
+	float: right;
+	}
+.leaflet-top .leaflet-control {
+	margin-top: 10px;
+	}
+.leaflet-bottom .leaflet-control {
+	margin-bottom: 10px;
+	}
+.leaflet-left .leaflet-control {
+	margin-left: 10px;
+	}
+.leaflet-right .leaflet-control {
+	margin-right: 10px;
+	}
+
+
+/* zoom and fade animations */
+
+.leaflet-fade-anim .leaflet-popup {
+	opacity: 0;
+	-webkit-transition: opacity 0.2s linear;
+	   -moz-transition: opacity 0.2s linear;
+	        transition: opacity 0.2s linear;
+	}
+.leaflet-fade-anim .leaflet-map-pane .leaflet-popup {
+	opacity: 1;
+	}
+.leaflet-zoom-animated {
+	-webkit-transform-origin: 0 0;
+	    -ms-transform-origin: 0 0;
+	        transform-origin: 0 0;
+	}
+svg.leaflet-zoom-animated {
+	will-change: transform;
+}
+
+.leaflet-zoom-anim .leaflet-zoom-animated {
+	-webkit-transition: -webkit-transform 0.25s cubic-bezier(0,0,0.25,1);
+	   -moz-transition:    -moz-transform 0.25s cubic-bezier(0,0,0.25,1);
+	        transition:         transform 0.25s cubic-bezier(0,0,0.25,1);
+	}
+.leaflet-zoom-anim .leaflet-tile,
+.leaflet-pan-anim .leaflet-tile {
+	-webkit-transition: none;
+	   -moz-transition: none;
+	        transition: none;
+	}
+
+.leaflet-zoom-anim .leaflet-zoom-hide {
+	visibility: hidden;
+	}
+
+
+/* cursors */
+
+.leaflet-interactive {
+	cursor: pointer;
+	}
+.leaflet-grab {
+	cursor: -webkit-grab;
+	cursor:    -moz-grab;
+	cursor:         grab;
+	}
+.leaflet-crosshair,
+.leaflet-crosshair .leaflet-interactive {
+	cursor: crosshair;
+	}
+.leaflet-popup-pane,
+.leaflet-control {
+	cursor: auto;
+	}
+.leaflet-dragging .leaflet-grab,
+.leaflet-dragging .leaflet-grab .leaflet-interactive,
+.leaflet-dragging .leaflet-marker-draggable {
+	cursor: move;
+	cursor: -webkit-grabbing;
+	cursor:    -moz-grabbing;
+	cursor:         grabbing;
+	}
+
+/* marker & overlays interactivity */
+.leaflet-marker-icon,
+.leaflet-marker-shadow,
+.leaflet-image-layer,
+.leaflet-pane > svg path,
+.leaflet-tile-container {
+	pointer-events: none;
+	}
+
+.leaflet-marker-icon.leaflet-interactive,
+.leaflet-image-layer.leaflet-interactive,
+.leaflet-pane > svg path.leaflet-interactive,
+svg.leaflet-image-layer.leaflet-interactive path {
+	pointer-events: visiblePainted; /* IE 9-10 doesn't have auto */
+	pointer-events: auto;
+	}
+
+/* visual tweaks */
+
+.leaflet-container {
+	background: #ddd;
+	outline-offset: 1px;
+	}
+.leaflet-container a {
+	color: #0078A8;
+	}
+.leaflet-zoom-box {
+	border: 2px dotted #38f;
+	background: rgba(255,255,255,0.5);
+	}
+
+
+/* general typography */
+.leaflet-container {
+	font-family: "Helvetica Neue", Arial, Helvetica, sans-serif;
+	font-size: 12px;
+	font-size: 0.75rem;
+	line-height: 1.5;
+	}
+
+
+/* general toolbar styles */
+
+.leaflet-bar {
+	box-shadow: 0 1px 5px rgba(0,0,0,0.65);
+	border-radius: 4px;
+	}
+.leaflet-bar a {
+	background-color: #fff;
+	border-bottom: 1px solid #ccc;
+	width: 26px;
+	height: 26px;
+	line-height: 26px;
+	display: block;
+	text-align: center;
+	text-decoration: none;
+	color: black;
+	}
+.leaflet-bar a,
+.leaflet-control-layers-toggle {
+	background-position: 50% 50%;
+	background-repeat: no-repeat;
+	display: block;
+	}
+.leaflet-bar a:hover,
+.leaflet-bar a:focus {
+	background-color: #f4f4f4;
+	}
+.leaflet-bar a:first-child {
+	border-top-left-radius: 4px;
+	border-top-right-radius: 4px;
+	}
+.leaflet-bar a:last-child {
+	border-bottom-left-radius: 4px;
+	border-bottom-right-radius: 4px;
+	border-bottom: none;
+	}
+.leaflet-bar a.leaflet-disabled {
+	cursor: default;
+	background-color: #f4f4f4;
+	color: #bbb;
+	}
+
+.leaflet-touch .leaflet-bar a {
+	width: 30px;
+	height: 30px;
+	line-height: 30px;
+	}
+.leaflet-touch .leaflet-bar a:first-child {
+	border-top-left-radius: 2px;
+	border-top-right-radius: 2px;
+	}
+.leaflet-touch .leaflet-bar a:last-child {
+	border-bottom-left-radius: 2px;
+	border-bottom-right-radius: 2px;
+	}
+
+/* layers control */
+
+.leaflet-control-layers {
+	box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+	background: #fff;
+	border-radius: 5px;
+	}
+.leaflet-control-layers-toggle {
+	background-image: url(images/layers.png);
+	width: 36px;
+	height: 36px;
+	}
+.leaflet-retina .leaflet-control-layers-toggle {
+	background-image: url(images/layers-2x.png);
+	background-size: 26px 26px;
+	}
+.leaflet-touch .leaflet-control-layers-toggle {
+	width: 44px;
+	height: 44px;
+	}
+.leaflet-control-layers .leaflet-control-layers-list,
+.leaflet-control-layers-expanded .leaflet-control-layers-toggle {
+	display: none;
+	}
+.leaflet-control-layers-expanded .leaflet-control-layers-list {
+	display: block;
+	position: relative;
+	}
+.leaflet-control-layers-expanded {
+	padding: 6px 10px 6px 6px;
+	color: #333;
+	background: #fff;
+	}
+.leaflet-control-layers-scrollbar {
+	overflow-y: scroll;
+	overflow-x: hidden;
+	padding-right: 5px;
+	}
+.leaflet-control-layers-selector {
+	margin-top: 2px;
+	position: relative;
+	top: 1px;
+	}
+.leaflet-control-layers label {
+	display: block;
+	font-size: 13px;
+	font-size: 1.08333em;
+	}
+.leaflet-control-layers-separator {
+	height: 0;
+	border-top: 1px solid #ddd;
+	margin: 5px -10px 5px -6px;
+	}
+
+/* Default icon URLs */
+.leaflet-default-icon-path { /* used only in path-guessing heuristic, see L.Icon.Default */
+	background-image: url(images/marker-icon.png);
+	}
+
+
+/* attribution and scale controls */
+
+.leaflet-container .leaflet-control-attribution {
+	background: #fff;
+	background: rgba(255, 255, 255, 0.8);
+	margin: 0;
+	}
+.leaflet-control-attribution,
+.leaflet-control-scale-line {
+	padding: 0 5px;
+	color: #333;
+	line-height: 1.4;
+	}
+.leaflet-control-attribution a {
+	text-decoration: none;
+	}
+.leaflet-control-attribution a:hover,
+.leaflet-control-attribution a:focus {
+	text-decoration: underline;
+	}
+.leaflet-attribution-flag {
+	display: inline !important;
+	vertical-align: baseline !important;
+	width: 1em;
+	height: 0.6669em;
+	}
+.leaflet-left .leaflet-control-scale {
+	margin-left: 5px;
+	}
+.leaflet-bottom .leaflet-control-scale {
+	margin-bottom: 5px;
+	}
+.leaflet-control-scale-line {
+	border: 2px solid #777;
+	border-top: none;
+	line-height: 1.1;
+	padding: 2px 5px 1px;
+	white-space: nowrap;
+	-moz-box-sizing: border-box;
+	     box-sizing: border-box;
+	background: rgba(255, 255, 255, 0.8);
+	text-shadow: 1px 1px #fff;
+	}
+.leaflet-control-scale-line:not(:first-child) {
+	border-top: 2px solid #777;
+	border-bottom: none;
+	margin-top: -2px;
+	}
+.leaflet-control-scale-line:not(:first-child):not(:last-child) {
+	border-bottom: 2px solid #777;
+	}
+
+.leaflet-touch .leaflet-control-attribution,
+.leaflet-touch .leaflet-control-layers,
+.leaflet-touch .leaflet-bar {
+	box-shadow: none;
+	}
+.leaflet-touch .leaflet-control-layers,
+.leaflet-touch .leaflet-bar {
+	border: 2px solid rgba(0,0,0,0.2);
+	background-clip: padding-box;
+	}
+
+
+/* popup */
+
+.leaflet-popup {
+	position: absolute;
+	text-align: center;
+	margin-bottom: 20px;
+	}
+.leaflet-popup-content-wrapper {
+	padding: 1px;
+	text-align: left;
+	border-radius: 12px;
+	}
+.leaflet-popup-content {
+	margin: 13px 24px 13px 20px;
+	line-height: 1.3;
+	font-size: 13px;
+	font-size: 1.08333em;
+	min-height: 1px;
+	}
+.leaflet-popup-content p {
+	margin: 17px 0;
+	margin: 1.3em 0;
+	}
+.leaflet-popup-tip-container {
+	width: 40px;
+	height: 20px;
+	position: absolute;
+	left: 50%;
+	margin-top: -1px;
+	margin-left: -20px;
+	overflow: hidden;
+	pointer-events: none;
+	}
+.leaflet-popup-tip {
+	width: 17px;
+	height: 17px;
+	padding: 1px;
+
+	margin: -10px auto 0;
+	pointer-events: auto;
+
+	-webkit-transform: rotate(45deg);
+	   -moz-transform: rotate(45deg);
+	    -ms-transform: rotate(45deg);
+	        transform: rotate(45deg);
+	}
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+	background: white;
+	color: #333;
+	box-shadow: 0 3px 14px rgba(0,0,0,0.4);
+	}
+.leaflet-container a.leaflet-popup-close-button {
+	position: absolute;
+	top: 0;
+	right: 0;
+	border: none;
+	text-align: center;
+	width: 24px;
+	height: 24px;
+	font: 16px/24px Tahoma, Verdana, sans-serif;
+	color: #757575;
+	text-decoration: none;
+	background: transparent;
+	}
+.leaflet-container a.leaflet-popup-close-button:hover,
+.leaflet-container a.leaflet-popup-close-button:focus {
+	color: #585858;
+	}
+.leaflet-popup-scrolled {
+	overflow: auto;
+	}
+
+.leaflet-oldie .leaflet-popup-content-wrapper {
+	-ms-zoom: 1;
+	}
+.leaflet-oldie .leaflet-popup-tip {
+	width: 24px;
+	margin: 0 auto;
+
+	-ms-filter: "progid:DXImageTransform.Microsoft.Matrix(M11=0.70710678, M12=0.70710678, M21=-0.70710678, M22=0.70710678)";
+	filter: progid:DXImageTransform.Microsoft.Matrix(M11=0.70710678, M12=0.70710678, M21=-0.70710678, M22=0.70710678);
+	}
+
+.leaflet-oldie .leaflet-control-layers,
+.leaflet-oldie .leaflet-popup-content-wrapper,
+.leaflet-oldie .leaflet-popup-tip {
+	border: 1px solid #999;
+	}
+
+
+/* div icon */
+
+.leaflet-div-icon {
+	background: #fff;
+	border: 1px solid #666;
+	}
+
+
+/* Tooltip */
+/* Base styles for the element that has a tooltip */
+.leaflet-tooltip {
+	position: absolute;
+	padding: 6px;
+	background-color: #fff;
+	border: 1px solid #fff;
+	border-radius: 3px;
+	color: #222;
+	white-space: nowrap;
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	-ms-user-select: none;
+	user-select: none;
+	pointer-events: none;
+	box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+	}
+.leaflet-tooltip.leaflet-interactive {
+	cursor: pointer;
+	pointer-events: auto;
+	}
+.leaflet-tooltip-top:before,
+.leaflet-tooltip-bottom:before,
+.leaflet-tooltip-left:before,
+.leaflet-tooltip-right:before {
+	position: absolute;
+	pointer-events: none;
+	border: 6px solid transparent;
+	background: transparent;
+	content: "";
+	}
+
+/* Directions */
+
+.leaflet-tooltip-bottom {
+	margin-top: 6px;
+}
+.leaflet-tooltip-top {
+	margin-top: -6px;
+}
+.leaflet-tooltip-bottom:before,
+.leaflet-tooltip-top:before {
+	left: 50%;
+	margin-left: -6px;
+	}
+.leaflet-tooltip-top:before {
+	bottom: 0;
+	margin-bottom: -12px;
+	border-top-color: #fff;
+	}
+.leaflet-tooltip-bottom:before {
+	top: 0;
+	margin-top: -12px;
+	margin-left: -6px;
+	border-bottom-color: #fff;
+	}
+.leaflet-tooltip-left {
+	margin-left: -6px;
+}
+.leaflet-tooltip-right {
+	margin-left: 6px;
+}
+.leaflet-tooltip-left:before,
+.leaflet-tooltip-right:before {
+	top: 50%;
+	margin-top: -6px;
+	}
+.leaflet-tooltip-left:before {
+	right: 0;
+	margin-right: -12px;
+	border-left-color: #fff;
+	}
+.leaflet-tooltip-right:before {
+	left: 0;
+	margin-left: -12px;
+	border-right-color: #fff;
+	}
+
+/* Printing */
+
+@media print {
+	/* Prevent printers from removing background-images of controls. */
+	.leaflet-control {
+		-webkit-print-color-adjust: exact;
+		print-color-adjust: exact;
+		}
+	}
+
+</style>
+<style>
+  /* Hammersmith One (latin) — self-hosted, SIL OFL 1.1 (assets/OFL-HammersmithOne.txt) */
+  @font-face {
+    font-family: "Hammersmith One";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url(assets/hammersmith-one-latin.woff2) format("woff2");
+  }
+
+  :root {
+    --paper: #FBFAF7;
+    --ink: #16161F;
+    --blue: #000F9F;
+    --red: #E32017;
+    --grey: #6E6E73;
+    --hairline: #D9D7D0;
+    --display: "Hammersmith One", "Gill Sans", sans-serif;
+    --body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: var(--body);
+    color: var(--ink);
+    background: var(--paper);
+    -webkit-font-smoothing: antialiased;
+  }
+  #map { position: absolute; inset: 0; background: var(--paper); }
+
+  /* --- control panel --- */
+  .panel {
+    position: absolute; z-index: 500;
+    top: 14px; left: 14px; width: 268px;
+    max-height: calc(100% - 28px); overflow-y: auto;
+    background: rgba(251, 250, 247, 0.96);
+    border: 1px solid var(--hairline);
+    padding: 14px 15px 12px;
+    font-size: 12.5px; line-height: 1.45;
+  }
+  .panel h1 {
+    font-family: var(--display); font-weight: 400;
+    font-size: 17px; margin: 0 0 2px; letter-spacing: 0.01em;
+  }
+  .panel .sub { color: var(--grey); font-size: 11.5px; margin: 0 0 11px; }
+  .panel h2 {
+    font-size: 10.5px; letter-spacing: 0.09em; text-transform: uppercase;
+    color: var(--grey); font-weight: 600;
+    margin: 13px 0 6px; padding-top: 10px; border-top: 1px solid var(--hairline);
+  }
+  .panel h2:first-of-type { border-top: 0; padding-top: 0; }
+
+  /* segmented toggle — the headline control */
+  .seg { display: flex; border: 1px solid var(--ink); }
+  .seg button {
+    flex: 1; appearance: none; cursor: pointer;
+    font-family: var(--body); font-size: 12px; font-weight: 600;
+    padding: 7px 4px; border: 0; background: transparent; color: var(--ink);
+    transition: background 120ms ease, color 120ms ease;
+  }
+  .seg button + button { border-left: 1px solid var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+  .seg button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+  /* stats */
+  .stats { margin-top: 11px; }
+  .stat { display: flex; justify-content: space-between; gap: 10px; padding: 2.5px 0; }
+  .stat dt { color: var(--grey); }
+  .stat dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .stat.big dd { font-size: 15px; }
+
+  /* layer checkboxes */
+  .layers label {
+    display: flex; align-items: center; gap: 8px;
+    padding: 3px 0; cursor: pointer;
+  }
+  .layers input { margin: 0; accent-color: var(--blue); flex: none; }
+  .swatch { width: 13px; height: 13px; flex: none; border-radius: 50%; }
+  .sw-sight { background: var(--blue); opacity: 0.75; }
+  .sw-cold  { background: transparent; border: 1.5px solid #C4C2BB; }
+  .sw-hull  { border-radius: 0; background: rgba(227, 32, 23, 0.10); border: 1.5px solid var(--red); }
+  .sw-grid  { border-radius: 0; background: rgba(0, 15, 159, 0.16); border: 1px solid rgba(0,15,159,.45); }
+  .sw-zone  { border-radius: 0; background: transparent; border: 1.5px dashed var(--grey); }
+
+  .note {
+    margin: 11px 0 0; padding-top: 10px; border-top: 1px solid var(--hairline);
+    color: var(--grey); font-size: 11px; line-height: 1.5;
+  }
+  .note strong { color: var(--ink); font-weight: 600; }
+  .note a { color: var(--blue); }
+
+  .panel-toggle {
+    position: absolute; z-index: 500; top: 14px; left: 14px;
+    appearance: none; cursor: pointer;
+    background: rgba(251, 250, 247, 0.96); border: 1px solid var(--hairline);
+    font-family: var(--display); font-size: 13px; color: var(--ink);
+    padding: 7px 11px;
+  }
+
+  /* map marks */
+  .sight-dot {
+    border-radius: 50%;
+    background: rgba(0, 15, 159, 0.34);
+    border: 1.5px solid var(--blue);
+  }
+  .cold-dot { border-radius: 50%; background: transparent; border: 1.5px solid #C4C2BB; }
+
+  .leaflet-container { background: var(--paper); font-family: var(--body); }
+  .leaflet-popup-content-wrapper { border-radius: 2px; }
+  .leaflet-popup-content { margin: 9px 12px; font-size: 12.5px; line-height: 1.45; }
+  .pop-name { font-family: var(--display); font-size: 13.5px; margin-bottom: 2px; }
+  .pop-line { color: var(--grey); font-size: 11.5px; }
+
+  .attrib {
+    position: absolute; z-index: 500; right: 0; bottom: 0;
+    background: rgba(251, 250, 247, 0.9); border-top: 1px solid var(--hairline);
+    border-left: 1px solid var(--hairline);
+    font-size: 10.5px; color: var(--grey); padding: 4px 8px;
+  }
+  .attrib a { color: var(--grey); }
+
+  @media (max-width: 620px) {
+    .panel { width: calc(100% - 28px); max-height: 54%; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<button class="panel-toggle" id="panel-restore" hidden>Controls</button>
+
+<section class="panel" id="panel" aria-label="Geofence controls">
+  <h1>Geofence estimate</h1>
+  <p class="sub">Confirmed Waymo passes · demo</p>
+
+  <h2>Time window</h2>
+  <div class="seg" role="group" aria-label="Time window">
+    <button id="btn-week" aria-pressed="false">Past week</button>
+    <button id="btn-all"  aria-pressed="true">All time</button>
+  </div>
+
+  <dl class="stats" id="stats"></dl>
+
+  <h2>Layers</h2>
+  <div class="layers">
+    <label><input type="checkbox" id="l-sight" checked><span class="swatch sw-sight"></span> Sightings</label>
+    <label><input type="checkbox" id="l-grid"><span class="swatch sw-grid"></span> Occupied cells (500 m)</label>
+    <label><input type="checkbox" id="l-hull" checked><span class="swatch sw-hull"></span> Convex hull</label>
+    <label><input type="checkbox" id="l-cold"><span class="swatch sw-cold"></span> Watched, never hit</label>
+    <label><input type="checkbox" id="l-zone"><span class="swatch sw-zone"></span> Our polling box</label>
+  </div>
+
+  <p class="note" id="caveat"></p>
+</section>
+
+<div class="attrib">
+  Powered by TfL Open Data · &copy; <a href="https://carto.com/attributions">CARTO</a>,
+  &copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>
+</div>
+
+<script src="assets/leaflet.js"></script>
+<script>
+/* ------------------------------------------------------------------ *
+ * WaymoNet geofence demo.
+ *
+ * Every confirmed pass is baked into DATA below at build time (see
+ * site/build_geofence.py) — this page makes no API call, so it is a
+ * frozen snapshot, not the live feed.
+ *
+ * The point of the page: the public map already plots every sighting
+ * ever, but it says nothing about where Waymo *doesn't* go. A footprint
+ * drawn from hits alone is unfalsifiable. So we also plot the cameras we
+ * poll that have never once seen a Waymo — the negative space is what
+ * turns a scatter of dots into a boundary you can argue for.
+ * ------------------------------------------------------------------ */
+const DATA = {"epoch":"2026-06-01T00:00:00Z","generated":"2026-09-01T16:55:46Z","latest":"2026-09-01T16:11:56Z","polled":621,"zone":{"lat0":51.42,"lat1":51.58,"lon0":-0.36,"lon1":0.06},"cams":[[51.60067,-0.01594,0,1,"A406 Billet Upass E"],[51.5421,0.00524,1,1,"Romford Rd / Tennyson Rd"],[51.5096,-0.13484,1,1,"Piccadilly Circus"],[51.4742,-0.02073,1,1,"Blackheath Rd/Greenwich High Rd"],[51.6216,-0.27384,0,1,"Edgware Way / Broadfields Ave"],[51.4946,-0.1957,1,1,"Cromwell Rd/Earls Court Rd"],[51.514,-0.15409,1,1,"Oxford St/Orchard St"],[51.441,-0.10633,1,1,"A205 Tulse Hill/ Thurlow Park Rd"],[51.4949,-0.12891,1,1,"Horseferry Rd/Marsham St"],[51.3741,-0.09646,0,1,"George St/Wellesley Rd"],[51.51188,0.18383,0,1,"Ferry Lane"],[51.3456,-0.11434,0,1,"A23 Purley Way/Edgehill Rd"],[51.5613,-0.20345,1,1,"A41 Hendon Way/Cricklewood Lane"],[51.5021,-0.22886,1,1,"Goldhawk Rd/Hammersmith Grove"],[51.4452,-0.12418,1,1,"A205 Christchurch Rd/A23 Brixton H"],[51.4972,-0.14465,1,1,"Buckingham Palace Rd/Eaton Lane"],[51.5048,-0.09535,1,1,"Southwark St/Southwark Bdge Rd"],[51.424,-0.17185,1,0,"A24 South of Trevelyan Rd"],[51.4963,-0.14243,1,1,"Victoria St/Wilton Rd"],[51.4408,-0.06361,1,1,"A205 E of Sydenham Hill"],[51.4089,0.01086,0,1,"A21 London Rd/Tweedy Rd"],[51.458,-0.18139,1,1,"Wandsworth Common North"],[51.3672,-0.11608,0,0,"Stafford Rd/Epsom Rd"],[51.483,-0.11599,1,1,"Kennington Oval"],[51.5393,-0.00055,1,1,"Stratford Broadway/Gt Eastern Rd"],[51.45795,0.08007,0,1,"A2 Riefld/Rochstr"],[51.5319,-0.10642,1,1,"Angel Islington"],[51.4887,-0.13477,1,1,"St Georges Sq/Lupus St"],[51.5232,-0.10792,1,1,"Farringdon Rd opp Ray St"],[51.4908,-0.20694,1,0,"North End Rd/Talgarth Rd"],[51.524,-0.14568,1,1,"A501 W of Park Sq East"],[51.3324,-0.12398,0,1,"Brighton Road"],[51.4896,-0.19005,1,1,"Old Brompton Rd / Earls Court Rd"],[51.6799,-0.05135,0,1,"Grt Cambridge Rd/Bullsmore Ln"],[51.5046,-0.08342,1,1,"Tooley St/Bermondsey St"],[51.4459,-0.01723,1,0,"A205 Brownhill Rd/Plassey Rd"],[51.4659,-0.21408,1,1,"Putney High St/Lwr Richmond Rd"],[51.5526,-0.05272,1,1,"Lwr Clapton/Powerscroft"],[51.4372,-0.15762,1,1,"Balham High Rd/Drakefield Rd"],[51.5106,-0.37085,0,1,"Uxbridge Rd/Park View Rd"],[51.4422,-0.15409,1,1,"Balham High Rd/Balham Pk Rd"],[51.4814,-0.451,0,1,"A4 West of Sipson Road"],[51.568,-0.09933,1,1,"Seven Sisters Rd/Alexandria Grove"],[51.4976,-0.14207,1,0,"Bressenden Place / Stag Place"],[51.5317,-0.29256,1,1,"Hanger Lane"],[51.55903,-0.00218,1,1,"A12 Colville R 3732A"],[51.5623,-0.11041,1,1,"Seven Sisters Rd Op Yonge Pk"],[51.368,-0.11885,0,1,"Purley Way/Croydon Road"],[51.5243,-0.17652,1,1,"Edgeware Rd/Madia Ave"],[51.5239,-0.07727,1,1,"A10 North of Holywell Ln"],[51.5271,-0.0255,1,1,"Bow Rd/Alfred St"],[51.5049,0.03964,1,1,"Connaught Bridge/Connaught Rd"],[51.5328,-0.107,1,0,"White Lion St / Upper St"],[51.6145,-0.06816,0,0,"Sterling Way Slip/Victoria St"],[51.4371,-0.0185,1,1,"A21 Bromley Rd/Newquay Rd"],[51.4723,-0.16512,1,1,"Battersea Pk Rd/Battersea Brg"],[51.4811,-0.18307,1,1,"Tadema Rd Sth Kings Rd"],[51.5702,-0.07297,1,1,"Stamford Hill/Dunsmure Road"],[51.4833,-0.32614,1,1,"A4 Great W Rd/Syon Ln"],[51.4897,-0.13145,1,1,"Vauxhall Brd Rd/Drummond Gt"],[51.5798,-0.07978,1,1,"Seven Sisters Rd/St Ann"],[51.4881,-0.07669,1,1,"Old Kent Rd/Albany Rd"],[51.48,-0.4118,0,1,"A4 Bath Rd/The Avenue"],[51.4839,-0.49248,0,1,"A4 Colnbrook/Stanwell Moor Rd"],[51.5006,-0.2843,1,1,"A406 Gunnersbury Ave/Gunnersbury Ln"],[51.4861,-0.07211,1,1,"Old Kent Rd/Glengall Rd"],[51.5571,-0.07466,1,1,"Stoke Newington Rd/Evering Rd"],[51.58451,0.0397,0,0,"M11/A406 N/Bnd 109A"],[51.5482,-0.04448,1,0,"Homerton High St/Digby Road"],[51.5579,-0.11958,1,1,"Seven Sisters Rd/Holloway Rd"],[51.3916,-0.11798,0,1,"Thornton Rd/Broughton Rd"],[51.4344,-0.12845,1,1,"A23 Streatham H Rd/Kingscourt Rd"],[51.5198,-0.18509,1,1,"Harrow Rd/Westbourne Terrace"],[51.5107,-0.11512,1,1,"Victoria Embkmt/Temple Place"],[51.6151,-0.12769,0,1,"A406/Telford Rd/Bowes Rd"],[51.51414,0.00238,1,0,"EIDT East Ramp"],[51.6019,-0.23509,0,1,"Watford Way/Great North Way"],[51.557,-0.05594,1,1,"Lr Clapton Rd/Thislewaite Rd"],[51.335,-0.11268,0,1,"A22 Godstone Rd/Dale Rd"],[51.4954,-0.17937,1,1,"A4 Cromwell Rd/Queens Gate"],[51.5826,-0.22677,0,1,"Hendon Way/Queens Road"],[51.4374,-0.38065,0,1,"A312 Hampton Rd York Way"],[51.45101,0.10832,0,1,"PARK MEAD"],[51.4305,-0.16531,1,1,"Upper Tooting Rd/Kellino St"],[51.5112,-0.07301,1,1,"Goodmans Yard/ Mansell Street"],[51.4501,0.02976,1,1,"A205 Westhorne Av/Sidcup Rd"],[51.4388,-0.24865,1,1,"Roehampton Vale/Stag Lane"],[51.4838,-0.16356,1,1,"Chelsea Embankment/Royal Hosp Rd"],[51.3779,-0.10251,0,1,"Tamworth Rd/North End Rd"],[51.4075,-0.19236,0,1,"A24 Morden Rd/Dorset Road"],[51.52965,-0.0142,1,1,"Bow Rd Flyover"],[51.4712,-0.12362,1,1,"A3 Clapham Rd/Lingham St"],[51.5955,0.01088,0,1,"Waterworks R/B"],[51.4335,-0.0178,1,1,"A21 Bromley Rd/Bellingham Rd"],[51.4745,-0.12035,1,1,"A3 Clapham Rd/Stockwell Park Rd"],[51.4391,0.05007,1,1,"Court Rd/Sidcup Rd"],[51.4453,-0.39974,0,1,"Uxbridge Road/Browells Lane"],[51.4799,-0.10755,1,1,"Camberwell New Rd/Foxley Rd"],[51.5736,-0.08793,1,0,"Seven Sisters Rd/Amhurst Pk"],[51.5443,0.00026,1,1,"Great Eastern Rd/Angel Lane Bridge"],[51.5033,-0.15099,1,1,"Hyde Park Corner/Park Lane"],[51.5148,-0.06227,1,1,"Commercial Rd/New Rd"],[51.4107,-0.12273,0,0,"A23 London Road/Norbury Crescent"],[51.4643,-0.2734,1,1,"A205 Upper Rmond Rd/Carlton Rd"],[51.3398,-0.11739,0,1,"A23 Purley Cross/A23 Foxley Lane"],[51.57394,0.02384,1,1,"A12 GGT W Appr 4002A"],[51.6007,-0.01663,0,1,"A406 CROOKED BILLET"],[51.5497,0.04485,1,1,"Romford Rd / Carlton Rd"],[51.54476,-0.03214,1,1,"A12 Wick Road"],[51.5192,-0.1693,1,0,"Edgware Road / Praed Street"],[51.4737,-0.08359,1,1,"Peckham Rd E of Vestry Rd"],[51.3668,-0.11831,0,1,"A23/Epsom Road"],[51.56848,0.00745,1,1,"A12 Lstone E 3860A"],[51.4496,-0.33026,1,1,"London Rd/Arragon Rd"],[51.3846,-0.21282,0,1,"Stonecot Hill/Hill Top"],[51.4843,-0.12684,1,1,"Nine Elms"],[51.5289,-0.07774,1,1,"A10 North of Waterson St"],[51.547,0.03182,1,1,"Romford Rd / Green St"],[51.5127,-0.15787,1,1,"A4202 Park Lane/North Row"],[51.4837,-0.00014,1,1,"Trafalgar Rd/Greenwich Pk St"],[51.4918,-0.09814,1,1,"Walworth Rd/Heygate St"],[51.435,-0.0178,1,1,"A21 Bromley Rd/Callander Rd"],[51.5246,-0.03482,1,1,"Burdett Rd/Mile End Rd"],[51.5113,-0.1283,1,1,"Charing Cross Rd/Cranbourne St"],[51.394,-0.11425,0,1,"London Road/Raymead Avenue"],[51.5199,-0.05565,1,1,"Mile End Rd/Cambridge Heath Rd"],[51.61461,-0.0733,0,1,"Fore St West Ramp"],[51.5487,-0.399,0,1,"A40 Western Ave/West End Rd"],[51.5294,-0.13854,1,1,"H.Stead Rd/Cardington St"],[51.5318,-0.12093,1,1,"Caledonian R/Caledonia S"],[51.4403,-0.12581,1,1,"A23 Streatham H/Barrhill Rd"],[51.4351,0.06308,0,1,"A20 Sidcup Rd/Coyler Close"],[51.5243,-0.14038,1,1,"Euston Rd/Conway St"],[51.5236,-0.15811,1,1,"Baker St/S of Park Rd"],[51.5283,-0.12807,1,1,"A501 W of Mabledon Place"],[51.4586,-0.19554,1,1,"Armoury Wy/Wandsworth Plain"],[51.4762,-0.14847,1,0,"Battersea Pk Rd/Queenstown Rd"],[51.5764,0.06064,0,1,"A12 Eastern Av/Beehive Lane"],[51.4812,-0.13804,1,1,"Nine Elms Ln/Cringle St"],[51.4614,-0.11563,1,1,"Acre Lane/Coldharbour Lane"],[51.5204,-0.19227,1,1,"A40(M) Paddington Slip"],[51.5133,-0.39109,0,1,"Delamare Rd/Broadway"],[51.445,-0.02012,1,0,"Catford One Way/Rushey Green"],[51.4631,-0.41537,0,1,"The Causeway / Faggs Rd"],[51.5143,-0.05451,1,1,"Commercial Rd/Dean Cross St"],[51.45533,0.04847,1,1,"A2 Eltham West E/B"],[51.3419,-0.31786,0,1,"Leatherhead Rd/Fairoak Lane"],[51.5559,-0.07467,1,1,"A10 North of Walford Rd"],[51.5101,0.00205,1,1,"Lwr Lea Crossing/Blackwall Way"],[51.4516,0.17875,0,1,"Crayford Rd/Crayford Way"],[51.47,-0.17175,1,1,"York Road/Falcon Road"],[51.4753,-0.04715,1,1,"A2 New Cross Rd/Besson St"],[51.59,-0.20008,0,1,"A406 NCR Henlys Corner"],[51.3752,-0.30359,0,1,"A3 Hook Rise/A243 Hook Rd"],[51.5114,-0.00758,1,1,"A13/A102 EIDR"],[51.45861,0.07559,0,1,"A2 Riefield Road"],[51.5303,0.09318,0,1,"A13 Alfreds Way/Movers Ln"],[51.57595,0.04396,1,1,"A12/M11 Redbrdg 100A"],[51.387,-0.12104,0,1,"A23 south of Thornton Ave"],[51.5132,-0.04356,1,0,"Commercial Rd/Westport St"],[51.3785,-0.1,0,1,"Poplar Walk/Wellesley Rd"],[51.3716,-0.09636,0,1,"Park Lane/Barclay Rd"],[51.5571,-0.19561,1,1,"A41 Sth of Fortune Grn Rd"],[51.5732,-0.07268,1,0,"Stamford Hill/Amhurst Pk"],[51.4909,-0.23286,1,1,"A4 Great W Rd/Macbeth St"],[51.4695,0.05439,1,1,"A205 north of Broad Walk"],[51.4018,-0.19698,0,1,"Crown Lane/Grasmere Avenue"],[51.4747,-0.15454,1,1,"Battersea Park Rd/Forfar Rd"],[51.5755,0.09367,0,1,"A12 Eastern Av/Brook Rd"],[51.46422,0.0307,1,1,"A2 Kidbrooke Junction"],[51.5477,-0.106,1,1,"Holloway Rd Nth/Furlong Rd"],[51.5218,-0.04605,1,1,"Mile End Rd/Globe Rd"],[51.5596,-0.07422,1,1,"A10 North of Tyssen Road"],[51.50825,-0.02122,1,1,"Limehouse Tnl Aspen Way"],[51.5096,-0.35525,1,1,"Uxbridge Road/Greenford Road"],[51.5043,-0.11464,1,1,"York Road opp Mepham St"],[51.523,-0.15271,1,1,"Marylebone Rd/York Gate"],[51.5858,-0.18285,0,1,"Falloden Way/Northway/Hill Rise"],[51.4346,-0.1615,1,1,"Upper Tooting Rd/Topsham Rd"],[51.5702,-0.02527,1,1,"Lea Bridge Rd/Markhouse Rd"],[51.5343,-0.13926,1,1,"H.Stead Rd/Mornington Cr"],[51.5363,-0.14681,1,1,"Prince Albert Rd/Parkway"],[51.5149,-0.06808,1,1,"Commercial Rd/Gowers Walk"],[51.454,-0.33709,1,0,"Whitton Rd/Chertsey Rd"],[51.5295,-0.09677,1,1,"City Rd by Central St"],[51.4793,-0.11531,1,1,"A3 Clapham Rd/Crewdson Rd"],[51.5352,0.00881,1,1,"Manor Rd/New Plaistow Rd"],[51.4327,-0.16385,1,1,"Upper Tooting Rd/Ansell Rd"],[51.4966,-0.14156,1,1,"Victoria St/Bressenden Place"],[51.5527,-0.25521,1,1,"A406 NCR/Grt Central Way"],[51.4902,-0.10411,1,1,"Kennington Pk Rd/Penton Pl"],[51.50984,-0.00254,1,0,"EIDT West Ramp Gantry"],[51.499,-0.10493,1,1,"Blackfriars Rd/St George"],[51.5124,-0.032,1,0,"A13 Commercial Road/Salmon Lane"],[51.56,-0.11566,1,1,"Seven Sisters Rd by Sussex Way"],[51.5072,-0.10443,1,1,"Blackfriars Rd/Stamford St"],[51.5606,-0.07056,1,1,"A10 North of Brooke Road"],[51.4167,-0.17875,0,1,"Priory Rd/Christchurch Rd"],[51.5274,-0.07797,1,1,"Kingsland Rd/Hackney Rd"],[51.45562,0.08867,0,1,"A2 Falconwood"],[51.5114,-0.11924,1,1,"Strand/Lancaster Place"],[51.4907,-0.21425,1,1,"Talgarth Rd/Gliddon Rd"],[51.452,-0.14787,1,1,"Balham Hill/Hazelbourne Road"],[51.3708,-0.0973,0,1,"Croydon Flyover/Fell Rd"],[51.5828,-0.09972,0,1,"Green Lanes- St Ann"],[51.4517,-0.12151,1,1,"Brixton Hill / Elm Park"],[51.3736,-0.09692,0,1,"Park Lane/Park St"],[51.5252,-0.07732,1,1,"Shoreditch High St/Batemans Row"],[51.5525,-0.18751,1,1,"Finchley Rd/Alvanley Grdns"],[51.5417,-0.19768,1,0,"A5 Kilburn High Rd/Willesden Ln"],[51.5262,-0.275,1,0,"A40 /Near Mansfield Rd"],[51.56607,0.00594,1,1,"A12 Dyers Hl E 3830A"],[51.5157,-0.1261,1,1,"Shaftesbury Ave/High Holborn"],[51.54821,-0.02874,1,1,"A12 East Cross Route"],[51.5152,-0.17638,1,1,"Craven Rd/Eastborne Terrace"],[51.4623,-0.13729,1,0,"Clapham High St/Venn St"],[51.4839,-0.06639,1,1,"Old Kent Rd/St James Rd"],[51.5294,-0.11572,1,1,"Kings X Rd / Swinton St"],[51.4868,-0.10738,1,1,"Kennington Pk Rd/Braganza St"],[51.45705,0.06597,0,1,"A2 Glenesk/Rochester"],[51.4916,-0.1359,1,1,"Vauxhall Brd Rd/Stanford St"],[51.4624,-0.0089,1,1,"A20 Lee High Rd/Belmont Hill"],[51.51129,-0.01077,1,1,"A13 Cotton St"],[51.4609,-0.13953,1,1,"A3 Clapham Cmon Southside/Long Rd"],[51.4198,-0.128,0,1,"A23 Streatham H Rd/Streatham Cmn"],[51.5656,-0.10288,1,1,"Seven Sisters Rd/Wilberforce Rd"],[51.4135,-0.19269,0,1,"A24 Morden Rd/Merantun Way"],[51.5896,-0.0643,0,1,"MONUMENT WAY/PARK VIEW ROAD"],[51.4813,-0.1663,1,1,"Albert Bridge Rd"],[51.5169,-0.2912,1,1,"Hanger Lane/Queens Parade"],[51.4772,-0.10062,1,1,"Camberwell New Rd/Lotian Rd"],[51.61647,-0.09136,0,1,"A406/A10 U/Pass West"],[51.5217,0.02102,1,1,"Barking Rd/Chargable Lane"],[51.4085,-0.12186,0,0,"London Rd/Craignish Av"],[51.4653,-0.11407,1,1,"A23 Brixton Rd/Stockwell Rd"],[51.5303,0.03772,1,1,"Barking Rd/Green St"],[51.4913,-0.22749,1,1,"Hammersmith Bridge Rd"],[51.534,-0.10518,1,1,"Upper St Nth/Duncan St"],[51.5117,-0.02756,1,0,"East India Dock Rd/Amoy Pl"],[51.4607,-0.16652,1,1,"Battersea Rise/Northcote Rd"],[51.551,-0.00402,1,1,"Major Rd/Crownfield Rd"],[51.4671,-0.09088,1,1,"Denmark Hill/Champion Pk"],[51.509,-0.06752,1,1,"The Highway/Vaughan Way"],[51.60356,-0.02199,0,1,"A406 Golf Range"],[51.466,-0.11345,1,1,"Brixton Rd/Stockwell Pk"],[51.5646,-0.13213,1,1,"Holloway Rd Sth/Hargrave Rd"],[51.3768,-0.22177,0,1,"London Rd / Staines Av"],[51.5212,-0.04894,1,1,"Mile End Rd/Cephas Ave"],[51.4967,-0.14379,1,1,"Victoria St / Buckingham Palace Rd"],[51.4807,-0.42447,0,1,"Bath Rd / Oxford Ave"],[51.5547,-0.01696,1,1,"Ruckholt Rd/Sherrin Rd"],[51.5144,-0.1494,1,0,"Oxford St/Davies St"],[51.4423,-0.3654,0,1,"Hospital Bridge Rd"],[51.617,-0.0866,0,0,"Grt Cambridge Rd/A406 NCR Rabout"],[51.5925,-0.23451,0,1,"Watford Way / Aerodrome Rd"],[51.5428,-0.17517,1,1,"A41 Finchley Rd/115 Swiss Cottage"],[51.5154,-0.21691,1,1,"A3220 Northern Roundabout"],[51.4951,-0.18254,1,1,"A4 Cromwell Rd/Gloucester Rd"],[51.5262,-0.08771,1,1,"City Road/Old Street"],[51.4872,-0.25186,1,1,"A4 Hogarth Roundabout"],[51.51575,0.01067,1,1,"NEWHAM WAY - FORTY ACRE LANE"],[51.3835,-0.12116,0,1,"Purley Way/Newman Rd"],[51.5011,-0.09317,1,1,"Borough High St/Grt Dover St"],[51.6341,-0.06968,0,1,"Grt Cambridge Rd/Bury St"],[51.5322,-0.31016,1,1,"Western Ave/Alperton Lane"],[51.5606,-0.25377,1,1,"Neasden Ln North/A406"],[51.59314,0.03633,0,1,"CHARLIE BROWNS ROUNDABOUT"],[51.55969,-0.2538,1,0,"A406 Neasden Lane"],[51.52,-0.10586,1,1,"Farringdon Rd/Cowcross St"],[51.45496,0.04955,1,1,"A2 Eltham West W/B"],[51.4422,-0.03345,1,1,"Stanstead Rd/Blythe Hill Lane"],[51.465,-0.26212,1,1,"A205 Upper Rmond Rd/East Sheen Ave"],[51.3603,-0.11737,0,1,"A23 Purley Way/Queensway"],[51.4378,-0.12696,1,0,"A23 Streatham Hill/Sternhold Ave"],[51.4798,-0.14879,1,1,"Queenstwn Rd/Chelsea Bridge"],[51.5628,-0.12724,1,0,"Holloway Rd Nth Rupert Rd"],[51.5414,-0.17552,1,1,"Finchley Rd Sth of Hillgrove Rd"],[51.4918,-0.28207,1,1,"Chiswick Roundabout (Northside)"],[51.4647,-0.26725,1,1,"A205 Upper RMond Rd/Sheen Lane"],[51.4606,-0.21706,1,1,"Upper Richmond Rd/Putney Hill"],[51.5279,-0.2158,1,1,"Harrow Rd/Kilburn Lane"],[51.532,-0.23728,1,1,"Scrubs Lane/Harrow Rd"],[51.4363,-0.12771,1,1,"A23 Streatham H Rd/Mnt Ephrian Rd"],[51.5017,-0.17481,1,1,"Kensington Rd/Exhibition Rd"],[51.4734,-0.08757,1,0,"Camberwell Ch St/Vicarage Grve"],[51.4989,0.06368,0,1,"Pier Road/Woolwich Ferry"],[51.4821,-0.17321,1,1,"Battersea Bridge/Cheyne Wk"],[51.4927,-0.20043,1,1,"Warwick Rd/W Cromwell Rd"],[51.4864,-0.12372,1,1,"Vauxhall Cross"],[51.5128,-0.00081,1,1,"East India Dock Rd/Leamouth Rd"],[51.5109,-0.02134,1,0,"East India Dock Rd/Upper Nth St"],[51.4606,-0.11628,1,1,"A23 Brixton Hill/Effra Rd"],[51.4541,-0.14608,1,1,"Clapham Common Southside"],[51.4812,-0.11065,1,1,"Camberwell New Rd/Brixton Rd"],[51.594,-0.06943,0,1,"Bruce Grove"],[51.4651,-0.24949,1,1,"A205 Upper Rmond Rd/Vine Rd"],[51.4401,-0.05056,1,1,"A205 Waldram Pk Rd/Westbourne Dr"],[51.4914,-0.10283,1,1,"Kennington Lane/Newington Butts"],[51.5231,-0.17438,1,1,"A5 Edgware Rd/Cuthbert St"],[51.4655,-0.12967,1,1,"A3 Clapham Road/B221 Bedford Road"],[51.571,0.01577,1,1,"HIGH ROAD LEYTONSTONE/BUSH ROAD"],[51.4583,-0.19202,1,1,"Ram St/Barchard St"],[51.47979,0.02157,1,1,"A102 Woolwich Rd (S)"],[51.425,-0.00454,1,0,"Bromley Rd/Oakridge Ln"],[51.5015,-0.22201,1,1,"Shepherds Bush Rd/Westwick Gdns"],[51.5669,-0.07286,1,1,"A10 Stamford Hill/Lampard Grove"],[51.4826,-0.12416,1,1,"South Lambeth Rd/Miles St"],[51.45575,0.0572,1,1,"A2 Eltham East W/B"],[51.4739,-0.0665,1,1,"Peckham Hg St wof Clayton Rd"],[51.4832,-0.13308,1,1,"Nine Elms Ln/Ponton Rd"],[51.5144,-0.0741,1,1,"Whitechapel High St/Mansell St"],[51.5089,-0.15462,1,1,"Park Lane South of Mount Street"],[51.4901,-0.22326,1,1,"Fulham Palace Rd(Coroners Crt)"],[51.5078,-0.14052,1,1,"Piccadilly/St James St"],[51.59636,0.0227,0,0,"Gates Br/Waterworks E"],[51.51689,0.02795,1,1,"Prince Regents Lane W"],[51.5022,-0.15854,1,1,"A4 Knightsbridge by Albert Gate"],[51.4728,-0.01474,1,0,"A2 Blackheath Hill/Plumbridge St"],[51.6433,-0.25442,0,1,"A1 Barnet Wy/Barnet Ln"],[51.3662,0.05311,0,1,"Farnborough Common/Croydon Rd"],[51.4498,-0.01692,1,1,"A21 North of Davenport Rd"],[51.48858,0.01447,1,1,"A102 Woolwich Rd (N)"],[51.6218,-0.25478,0,1,"A1 Barnet Wy/A41 Edgware Wy"],[51.6154,-0.24215,0,1,"Watford Way/Mill Hill Circus"],[51.4355,-0.15937,1,1,"Tooting Bec Rd / A24"],[51.5724,-0.09077,1,1,"Seven Sisters Rd/Woodberry Grove"],[51.5648,0.0052,1,1,"A12 Madeira Rd 3815A"],[51.5427,0.00926,1,1,"Romford Rd / Vicarage Lane"],[51.4658,-0.11663,1,1,"Stockwell Rd/Chantrey Rd"],[51.4837,-0.16731,1,1,"Chelsea Embankment/Albert Brdg"],[51.4944,-0.14217,1,1,"Wilton Road / Bridge Place"],[51.56233,0.05681,1,1,"ROMFORD ROAD"],[51.5955,0.19637,0,1,"A12 Eastern Ave/Heath Drive"],[51.416,-0.25097,0,1,"Beverley Way/Coombe Lane Flyover"],[51.4446,-0.02393,1,1,"Catford Hill/Dogget Rd"],[51.4728,-0.16235,1,1,"Battersea Pk Rd/Albert Bridge"],[51.61429,-0.06135,0,1,"Fore St East Ramp"],[51.5267,-0.13849,1,1,"H.Stead Rd/Drummond St"],[51.5205,-0.05217,1,1,"Mile End Rd/Cleveland Way"],[51.49638,0.00262,1,1,"A102 Tunnel Avenue"],[51.4629,-0.18602,1,1,"Wandworth Bridge/York Rd"],[51.3996,-0.24355,0,1,"A3 Kingston Bp/Burlington Rd"],[51.5314,-0.11401,1,1,"Pentonville Road / Penton Rise"],[51.502,-0.19082,1,1,"Kensington High St/Church St"],[51.5191,-0.12116,1,1,"Southampton Row/Vernon Place"],[51.5865,0.17314,0,1,"A12 Eastern Avenue/A125 North St"],[51.4719,0.00024,1,0,"Shooters Hill Rd/Charlton Way"],[51.5391,-0.14265,1,1,"Camden High St/Kentish Town Rd"],[51.4957,-0.17359,1,1,"Exhibition Rd/Cromwell Rd"],[51.4291,-0.16703,1,1,"Tooting High St/Selkirk Rd"],[51.4745,-0.03458,1,1,"A20 Lewisham Way/Parkfield Rd"],[51.5952,0.01072,0,1,"A406 WATERWORKS RDB"],[51.5446,-0.00354,1,0,"Montfichet Rd/Hitchcock Lane/Car Park C"],[51.4926,0.08607,0,1,"Pettman Crescent/Western Way"],[51.4434,-0.06749,1,1,"Lordship Ln/Dulwich Cmn"],[51.5282,-0.09177,1,0,"City Road w of Bath St"],[51.4968,-0.08186,1,1,"Twr Brdge Rd/Grange Rd"],[51.5326,-0.05701,1,1,"Hackney Rd/Camb Heath Rd"],[51.6127,-0.12114,0,1,"Bowes Rd/Brownlow Rd"],[51.493,-0.22387,1,1,"Hammersmith Bway/Shepherds Bush Rd"],[51.4741,-0.11272,1,1,"A23 Brixton Rd/Hillyard St"],[51.4567,-0.19224,1,1,"A3 East Of Garratt Lane"],[51.5939,-0.18521,0,1,"A504 Est End Rd/A406 Nth Circ Rd"],[51.544,-0.17502,1,0,"Swiss Cottage/Finchley Rd"],[51.4987,-0.11242,1,1,"Baylis Rd/Westminster Bridge Rd"],[51.5229,-0.04004,1,1,"Mile End Rd/Harford St"],[51.591,-0.21176,0,1,"A1/A504 Finchley Lane"],[51.5406,-0.07668,1,1,"A10 South of St Peters Way"],[51.4692,-0.1125,1,1,"A23 Brixton Rd/Wynne Rd"],[51.5425,-0.37841,0,0,"Target Roundabout/Church St"],[51.5462,-0.06941,1,1,"Graham Rd/Dalston Lane"],[51.3648,-0.11848,0,1,"A23/Stafford Road"],[51.50327,0.21103,0,1,"Wennington Viaduct W"],[51.5869,0.22454,0,1,"A127/Squirrels Heath Drive"],[51.4441,-0.16815,1,1,"Trinity Rd/Bellevue Rd"],[51.4985,-0.06964,1,1,"Jamaica Rd E of Abbey St"],[51.52919,0.08953,0,1,"Movers Lane West"],[51.45622,0.05905,1,1,"A2 Eltham East E/B"],[51.4744,-0.04327,1,1,"A2 New Cross Rd/Nettleton Rd"],[51.4569,-0.18921,1,1,"East Hill/East Of Fairfield St"],[51.53981,-0.27846,1,1,"A406 Ace Cafe"],[51.5205,-0.17899,1,1,"A40(M) Eastern End"],[51.3794,-0.28063,0,1,"Kingston-Tolworth Roundabout"],[51.5176,-0.1415,1,0,"Mortimer St/Gt Portland St"],[51.55491,-0.00785,1,1,"A12 Temple Mls 3672B"],[51.4978,0.00289,1,1,"Millennium Wy/Edmund Halley Wy"],[51.4777,-0.11667,1,1,"A3 Clapham Rd/Caldwell St"],[51.5444,-0.07616,1,0,"A10 Kingsland Rd/Stamford St"],[51.5066,-0.15277,1,1,"Park Lane Opposite Stanhope Gate"],[51.4913,-0.08167,1,1,"Old Kent Rd/Hendre Rd"],[51.3762,-0.01769,0,1,"High St/Sherwood Way W Wickham"],[51.49909,-0.0561,1,1,"A200 Jamaica Road"],[51.5041,-0.21833,1,1,"Holland Park Roundabout"],[51.5646,-0.10464,1,1,"Sevn Sistrs Rd/Blackstock Rd"],[51.4793,-0.40988,0,1,"Bath Rd/Berkeley Avenue"],[51.3847,-0.18932,0,1,"A217 / Rose Hill R.bout"],[51.4409,-0.02073,1,1,"A21 Bromley Rd/Penerley Rd"],[51.5148,-0.16237,1,1,"Edgware Rd S of Upper Berkeley St"],[51.51484,-0.00869,1,1,"A12 Carradale House"],[51.5528,0.05376,1,1,"Romford Rd/ Rabbits Rd"],[51.5808,-0.21202,0,1,"A406/Golders Grn Rd"],[51.4754,-0.02898,1,1,"A2 New Cross Rd/Florence Rd"],[51.535,-0.0056,1,1,"High Street/Rick Roberts Way"],[51.5818,-0.15644,0,1,"A1 Archway Rd/Bakers Ln"],[51.5163,-0.06894,1,1,"Whitechapel Rd/White Church Ln"],[51.5054,-0.14559,1,1,"Piccadilly/Whitehorse St"],[51.5886,-0.20659,0,0,"A406/Great North Way"],[51.5919,-0.07001,0,1,"A10 High Rd/Forster Rd"],[51.4757,-0.04707,1,1,"A2 New Cross Rd/Billington Rd"],[51.578,-0.08271,1,1,"Seven Sis Rd/Moreton Rd"],[51.4886,-0.19275,1,1,"Old Brompton Rd/Finboro Rd"],[51.5207,-0.16483,1,1,"A40 Marbone Rd/Old Marbone Rd"],[51.4586,0.00287,1,1,"Lee High Rd/Old Rd"],[51.5465,-0.1039,1,1,"Holloway Rd/Highbury Corner"],[51.5706,-0.09614,1,1,"Seven Sisters Rd/Manor House"],[51.5391,-0.07662,1,1,"A10 / Downham Road"],[51.5189,-0.22793,1,1,"Scrubs Lane/North Pole Rd"],[51.5205,0.16846,0,1,"Marsh Way"],[51.50841,-0.00388,1,0,"ASPEN WAY - BLACKWALL WAY"],[51.4798,-0.1145,1,1,"A3 Clapham Rd/Handforth Street"],[51.55185,-0.26117,1,1,"A406 Brentfield Rd"],[51.527,-0.08051,1,1,"Curtain Rd / Old Street"],[51.57013,-0.2373,1,1,"A406 Staples Corner Approach"],[51.4823,-0.11264,1,1,"Harleyford St/Ken Pk Rd"],[51.5265,-0.08414,1,1,"Old Street/Gt Eastern St"],[51.56322,0.00348,1,1,"A12 Dyers Hl W 3793A"],[51.4757,-0.03625,1,1,"A2 New Cross Rd/Lewisham Way"],[51.5168,-0.40116,0,1,"THE PARKWAY / UXBRIDGE ROAD"],[51.5369,-0.11649,1,1,"Caledonian R/Copnhagen S"],[51.497,-0.14555,1,1,"Gnor Gdns/Buckingham Palace Rd"],[51.5039,-0.08136,1,1,"Tooley St/Abbots Lane"],[51.4456,-0.33001,1,1,"Heath Rd/King St Parade"],[51.4469,-0.01896,1,1,"A21 Rushey Grn/Ringstead Rd"],[51.49652,0.00205,1,1,"A102 Tunnel House S"],[51.5228,-0.0776,1,1,"Shoreditch High St/Commercial St"],[51.5239,-0.1341,1,1,"University St/Gower St"],[51.5064,-0.26049,1,1,"The Vale / Eastman Rd"],[51.5901,0.04919,0,1,"Woodford Ave / Clayhall Ave"],[51.4575,-0.18575,1,1,"East Hill/Geraldinie Rd"],[51.442,-0.08418,1,1,"A205 Dulwich Common/College Rd"],[51.4878,0.0311,1,0,"Woolwich Rd/Charlton Church Lane"],[51.5686,-0.13639,1,1,"Archway Rd/Gladsmuir Rd"],[51.5129,-0.22523,1,0,"Wood Lane/South Africa Road"],[51.4975,-0.22253,1,1,"Shepherd Bush Rd/Brook Green"],[51.5308,-0.12265,1,1,"Euston Rd/Grays Inn Rd"],[51.4598,-0.00401,1,1,"A20 Lee High Rd/Belmont Park"],[51.5217,-0.15924,1,1,"A501 E of Gloucester Pl"],[51.4551,0.153,0,1,"Watling St/Gravel Hill"],[51.51749,0.03219,1,1,"Prince Regents Lane Jn"],[51.52708,0.07776,0,1,"Beckton East"],[51.5455,-0.17752,1,1,"Finchley Road/Canfield Place"],[51.5312,-0.07699,1,1,"A10 North of Shenfield St"],[51.5249,-0.13839,1,1,"Euston Rd/Tottenham Court Rd"],[51.6067,-0.08554,0,1,"A10 Grt Cambridge Rd/Devonshire H Ln"],[51.463,-0.49324,0,1,"Airport Way/Stanwellmore Rd"],[51.51189,-0.02849,1,1,"A13 Burdett Rd"],[51.4985,-0.11747,1,1,"Lambeth Plc Rd/Royal St"],[51.5213,-0.17168,1,0,"A5 Edgware Rd/Broadley St"],[51.61593,-0.08272,0,1,"A406/A10 U/Pass East"],[51.5312,0.13762,0,1,"Pooles Lane West"],[51.512,-0.06927,1,1,"Leman St / Prescot St"],[51.4925,0.0454,1,1,"Woolwich Rd/Warspite Rd"],[51.3169,-0.13864,0,1,"Brighton Rd A23 Coulsdon Bypass"],[51.59498,0.01478,0,1,"Waterworks W/B Off-Slip"],[51.4837,-0.21956,1,1,"Fulham Palace Rd/Lillie Rd"],[51.5435,-0.01109,1,0,"Westfield Ave/International Way/Car Park A"],[51.4163,-0.12528,0,1,"A23 Streatham H Rd/Heathdene Rd"],[51.4823,0.06202,0,1,"A205 Woolwich Common Rd/Ngale pl"],[51.4697,-0.12007,1,1,"Stockwell Rd/Stockwell Ln"],[51.4598,-0.17159,1,1,"Battersea Rise/Bolingbrooke Gr"],[51.4014,-0.11851,0,1,"London Rd/Wharfedale Gardens"],[51.5575,-0.12007,1,0,"Parkhurst Rd by Holloway Rd"],[51.4781,-0.37244,0,1,"A4 Great West Rd/A3063 Sutton Ln"],[51.5349,-0.07688,1,1,"A10 South of Laburnum St"],[51.4904,-0.19621,1,1,"Warwick Rd/Earls Crt Station"],[51.5812,0.14109,0,1,"A12 Eastern Av/Whalebone Ln"],[51.4079,0.01713,0,1,"Tweedy Rd E of Sherman Rd"],[51.5239,-0.1445,1,1,"Marylebone Rd/Great Portland Street"],[51.514,-0.05251,1,1,"Commercial Rd/Jubilee St"],[51.5619,-0.05748,1,1,"A107 Upper Clapton Rd/Southwold Rd"],[51.483,-0.06422,1,1,"Old Kent Rd/Peckham Pk R"],[51.4599,-0.21293,1,1,"Upper Richmond Rd/Oxford Rd"],[51.5814,0.16445,0,1,"A12 Eastern Ave/Mawney Road"],[51.4875,-0.26709,1,1,"A4 Great West Rd/Sutton Crt Rd"],[51.5149,-0.2263,1,1,"Wood Lane/A40 Westway"],[51.4824,-0.0946,1,1,"Camberwell Rd/Albany Rd"],[51.5934,0.21576,0,0,"Eastern Ave / Gallows Corner"],[51.5831,-0.07226,0,0,"Tottenham High Road / Seven Sisters Rd"],[51.5018,-0.15163,1,1,"Grosvenor Pl/Hyde Pk Cnr"],[51.5997,-0.11118,0,1,"High Rd Wood Grn-Ewart Grove"],[51.51533,0.00814,1,1,"Silvertown Way"],[51.523,-0.03432,1,1,"Burdett Rd/Hamlets Way"],[51.5117,-0.29217,1,1,"Hanger Lane/Uxbridge Rd"],[51.4967,-0.20537,1,1,"Kensington Hi St/Warwick Rd"],[51.4423,-0.04327,1,1,"A205 W of Brockley Rise"],[51.57128,-0.23189,1,1,"A406 Staples Corner"],[51.564,-0.05929,1,1,"Upper Clapton Rd/Rossington St"],[51.50706,-0.0162,1,1,"ASPEN WAY - UPPER BANK STREET"],[51.5823,0.11658,0,1,"A12 Eastern Av/Barley Lane"],[51.4522,-0.10133,1,1,"Herne Hill/Norwood Rd"],[51.52123,-0.01031,1,1,"A12 Blackwall Tunnel Nthern App/Gillender St"],[51.5192,-0.07464,1,1,"Commercial St/Brushfield"],[51.5636,-0.07325,1,1,"A10 North of Northwold Rd"],[51.5584,-0.00707,1,1,"High Rd/Ruckholt Rd"],[51.5952,-0.071,0,1,"Bruce Grove/Woodside Gardens"],[51.44912,0.11974,0,1,"A2 Danson"],[51.5246,-0.111,1,1,"Rosebery Av/Mount Pleasant"],[51.427,-0.13128,1,1,"A23 Streatham H Rd/Stanthorp Rd"],[51.5367,-0.14074,1,1,"Camden High St/Mary Tce"],[51.4486,-0.22172,1,1,"A3 Tibett Crn/Withycombe Rd"],[51.5451,-0.03549,1,1,"Kenworthy Rd/Brookfield Rd/Wick Rd"],[51.50847,-0.0223,1,1,"Limehouse Tnl East Portal E/B"],[51.5533,-0.12327,1,1,"Camden Rd/Hillmarton Rd"],[51.5763,0.06674,0,0,"A12 Eastern Ave/Gants Hill R-About"],[51.4783,-0.11223,1,1,"Brixton Rd/Island Place"],[51.4666,-0.42189,0,1,"A30 Hatton Cross"],[51.5463,-0.1792,1,1,"Finchley Rd/Goldhurst Terrace"],[51.4751,-0.39441,0,1,"A4 Bath Rd/Henlys Rabout"],[51.427,-0.01055,1,1,"A21 Bromley Rd/Beckenham Hl Rd"],[51.5458,-0.03353,1,0,"A12 East Cross Route/Benn St"],[51.4647,-0.30039,1,1,"Kew Rd/Twickemham Rd"],[51.6112,-0.13544,0,1,"A406 North Circular Rd/Telford Rd/Bounds Green Rd"],[51.4902,-0.12259,1,1,"Albert Emb/Tinworth St"],[51.4937,-0.04832,1,1,"Lower Rd/Rotherhithe Old Rd"],[51.4768,-0.1684,1,1,"Battersea Brdg Rd/Ethelburga St"],[51.5196,-0.18874,1,1,"Harrow Rd/Lord Hills Bridge"],[51.4644,-0.26661,1,1,"Sheen Lane/Larches Av"],[51.6592,-0.05914,0,1,"A10/Carterhatch Lane"],[51.5593,-0.19686,1,1,"Finchley Road/Hendon Way"],[51.4257,-0.13105,1,1,"A23 Streatham H Rd/Hopton Rd"],[51.4883,-0.07644,1,1,"Old Kent Rd/Humphrey St"],[51.475,-0.03958,1,1,"A2 New Cross Rd/St James"],[51.60037,-0.00925,0,1,"A406 Fulbourne Road"],[51.485,-0.1092,1,1,"Kennington Pk Rd/Kennington Rd"],[51.474,-0.07443,1,1,"Peckham Rd/Kelly Ave/Lyndhrst Wy"],[51.5244,-0.08028,1,1,"Gt Eastern St/Curtain Rd"],[51.4562,-0.40933,0,1,"A312 south of Rosslyn Av"],[51.5541,-0.05403,1,1,"Lower Clapton Rd/Rowhill Rd"],[51.5097,-0.05876,1,1,"The Highway/Wapping Lane"],[51.5524,-0.1119,1,1,"Holloway Rd S of Hornsey Rd"],[51.4828,-0.28693,1,1,"Kew Rd/Mortlake Rd"],[51.5011,-0.12628,1,1,"Parliament Square"],[51.4818,-0.21805,1,1,"Fulham Palace Rd/Lysia St"],[51.4638,-0.01076,1,1,"Lewisham High St/Rennell St"],[51.522,-0.1576,1,1,"Baker St/ Marylebone Rd"],[51.52558,-0.01169,1,0,"A12 Bromley-by-Bow"],[51.5173,-0.06668,1,1,"Whitechapel Rd / Plumbers Row"],[51.4941,-0.09159,1,1,"New Kent Rd / Balfour St"],[51.5631,-0.10827,1,1,"Seven Sisters Rd by Fonthill Rd"],[51.573,0.01641,1,1,"HOLLYBUSH HILL GMAN RBOUT"],[51.5135,-0.02767,1,1,"Burdett Rd/Dod St"],[51.4749,-0.09507,1,1,"Camberwell N/Rd/Camberwell Pas"],[51.5069,-0.10845,1,1,"Stamford St/Broadwall"],[51.498,-0.10376,1,1,"London Rd/Thomas Doyle St"],[51.5131,-0.12914,1,1,"Charing Cross Rd / Cambridge Circus"],[51.5149,-0.25655,1,1,"A40 Western Ave/Gibbon Rd"],[51.5243,-0.20166,1,1,"Harrow Rd/Grt Western Rd"],[51.5238,-0.13724,1,1,"Tottenham Court Rd/Grafton Way"],[51.509,-0.07368,1,1,"Tower Bridge App./East Smithfield"],[51.3989,0.02036,0,1,"Kentish Way N of Masons Hill"],[51.5718,-0.22795,1,0,"Staples Corner - Rbt Southside"],[51.4793,-0.14235,1,1,"A3205 BATTERSEA PK RD - SAVONA ST"],[51.5008,-0.16227,1,1,"Brompton Rd"],[51.53,-0.16889,1,1,"Wellington Rd/St Johns Wd Rd"],[51.5115,-0.21993,1,1,"A3220 West Cross Route"],[51.4553,-0.1194,1,0,"Brixton Hill /Lambert Rd"],[51.4468,-0.14943,1,0,"Balham High Rd/Caistor Rd"],[51.4969,0.00193,1,1,"A102 Tunnel House N"],[51.4921,-0.19266,1,1,"Earls Crt Rd/Earls Crt Station"],[51.3708,-0.11724,0,1,"Purley Way/Waddon Road"],[51.5165,-0.13032,1,1,"St Giles Circus"],[51.5222,-0.15768,1,1,"Baker St/Marylebone Rd"],[51.502,-0.07681,1,1,"Tooley St/Boss St"],[51.5009,-0.11762,1,1,"Westminster Bridge/York Rd"],[51.5141,-0.16133,1,1,"Edgware Rd/Seymour St"],[51.4747,-0.0242,1,1,"Deptford Broadway/Deptford Ch St"],[51.4863,0.01695,1,1,"Woolwich Rd/A102 Flyover"],[51.4452,0.00467,1,1,"A205/Verdant Lane"],[51.3318,-0.12475,0,1,"A23/Old Lodge Lane"],[51.4982,-0.14693,1,1,"Hobart Place/Grosvenor Place"],[51.4573,-0.19502,1,1,"Wworth High St/Wworth Plain"],[51.5132,-0.14091,1,1,"Regent St/Conduit St"],[51.5398,-0.17557,1,1,"A41 Finchley Rd/Boundary Rd E"],[51.5236,-0.0873,1,1,"City Road / Epworth St"],[51.5033,-0.28891,1,1,"Gunnersbury Ave/Gunnersbury Drive"],[51.59991,-0.00026,0,1,"A406 Hale End Rd E"],[51.4488,-0.01722,1,0,"Rushy Green/Rosenthal Rd"],[51.4802,-0.19601,1,1,"Fulham BWay Wst of Harwood Rd"],[51.4733,-0.0701,1,1,"Peckham High St/Rye Lane"],[51.6005,-0.00395,0,1,"A406 Hale End Rd W"],[51.5528,-0.18881,1,1,"Finchley Road / West End Lane"],[51.3577,-0.21576,0,1,"High St/Station way/The Cheam"],[51.4712,-0.09306,1,1,"Denmark Hill/Love Walk"],[51.4842,-0.18431,1,1,"Fulham Rd/Redcliffe Gardens"],[51.57193,0.0199,1,1,"A12 GMT E Appr 3969L"],[51.4929,-0.41029,0,1,"A312 Parkway/M4 J3"],[51.5396,-0.3004,1,0,"Ealing Rd/Bridgewater Rd"],[51.469,-0.27702,1,1,"Chalkers Corner"],[51.4574,-0.01332,1,1,"Lewisham High St/Courthill Rd"],[51.4912,-0.2829,1,1,"A4 Chiswick Roundabout"],[51.5287,-0.28747,1,1,"A40 / Near Connell Crescent"],[51.56187,0.00185,1,1,"A12 Cathall Rd 3775A"],[51.57742,0.03599,1,1,"A12/Preston Drive"],[51.5198,-0.16961,1,0,"Edgware Rd/Harrow Rd"],[51.4868,-0.11677,1,1,"Kennington Ln/Vauxhall St"],[51.5656,-0.1345,1,1,"Archway Gyr/Holloway Rd/Jnc Rd"],[51.4941,-0.14655,1,1,"Buck Palace Rd/Eccleston Bridge"],[51.5051,-0.22477,1,1,"Shepherd Bush Gr/Wood Lane"],[51.4642,-0.27609,1,1,"Upper Rmond Rd/Clifford Ave"],[51.4276,-0.16862,1,0,"Tooting High St/Garratt Terrace"],[51.4562,-0.01459,1,1,"A21 South of Ladywell Rd"],[51.5427,-0.13742,1,1,"Camden Rd/St Pancras Way"],[51.5044,-0.1472,1,1,"Piccadilly/Down St"],[51.5121,-0.13158,1,1,"Shaftesbury Ave / Macclesfield St"],[51.5018,-0.10451,1,1,"Blackfriars Rd/Pocock St"],[51.5202,-0.17351,1,1,"A40 Westway/Paddington Grn"],[51.4884,-0.11116,1,1,"Kennington Lane/Kennington Rd"],[51.5325,0.05065,1,1,"Barking Rd / W of Bartle Ave"],[51.5522,-0.07486,1,1,"A10 Stoke Newington Rd/Barretts Grove"],[51.5302,-0.29492,1,1,"A40/Hanger Lane Tunnel"],[51.4486,-0.44746,0,1,"Clockhouse Lane/Staines Rd"],[51.5109,-0.31884,1,1,"Uxbridge Rd/Chapel Rd"],[51.4857,0.01914,1,1,"A102 Blackwall Tunnel Sth Appr"],[51.4677,-0.28769,1,1,"Lwr Mortlake Rd/Manor Circus"],[51.4854,-0.12036,1,1,"Harleyford Rd/Vauxhall Grove"],[51.4559,0.01302,1,1,"Eltham Rd/Leyland Rd"],[51.50791,-0.02752,1,1,"Limehouse Tnl HH Westferry Rd Exit"],[51.5743,-0.07221,1,0,"Stamford Hill/Egerton Rd"],[51.432,0.07636,0,1,"A20 Sidcup Rd/County Gate"],[51.54482,-0.27287,1,1,"A406 / Harrow Rd / Brentfield"],[51.514,-0.30067,1,1,"The Broadway/Windsor Rd"],[51.5282,-0.11917,1,1,"Grays Inn Rd / Acton St"],[51.5465,-0.08591,1,1,"Balls Pond Rd/Henshall St"],[51.51336,0.00141,1,1,"EIDT East Portal Pole"],[51.4528,-0.01641,1,1,"A21 North of Lewisham Pk"],[51.5101,-0.1572,1,1,"Park Lane / Upper Grosvenor St"],[51.44818,0.13535,0,1,"A2 Arbuthnot Lane"],[51.4722,-0.03114,1,1,"Lewisham Way/Florence Road"],[51.4293,-0.13099,1,1,"A23 Streatham H Rd/Mitcham Ln"],[51.4891,-0.28764,1,1,"Kew Bridge Northside"],[51.51281,-0.0388,1,1,"A13 Branch Road"],[51.5258,-0.16145,1,1,"Park Rd / Gloucester Pl"],[51.5386,-0.07685,1,1,"A10 North of Lee Street"],[51.5094,-0.19438,1,1,"Notting Hill Gate/Palace Grdns Ter"],[51.44816,0.15266,0,1,"A2 Black Prince"],[51.4935,0.06171,0,1,"John Wilson St/New Ferry Approach"],[51.5048,-0.09006,1,0,"Borough High St/Southwark St"],[51.5519,-0.299,1,1,"High Rd/Ealing Road"],[51.4862,0.00843,1,1,"Woolwich Rd/Hatcliffe st"],[51.5406,-0.13953,1,1,"Camden Rd/Camden St/Lyme St"],[51.5359,-0.34627,1,1,"A40/Greenford Flyover"],[51.52427,0.15119,0,1,"Goresbrook East"],[51.6496,-0.06039,0,1,"A10 Grt Cambridge Rd/A110 S bury Rd"],[51.5355,-0.10381,1,1,"Upper St by Essex Rd"],[51.52049,0.05882,1,1,"Woolwich Manor Way"],[51.6169,-0.24511,0,1,"A1 Watford Way/The Broadway"],[51.51022,0.19714,0,1,"Rainham Marshes"],[51.4173,-0.17788,0,1,"Christchurch Rd/Colliers Wood"],[51.4463,0.01508,1,1,"Westhorn Av E of Burnt Ash Hill"],[51.52578,0.07349,0,1,"A13/A406 Beckton Rb"],[51.4567,-0.2024,1,0,"A3 West Hill/Up Richmond Rd"],[51.5067,-0.24443,1,1,"Uxbridge Rd/Askew Rd"],[51.5179,-0.18026,1,0,"Eastbourne Te/Bishops Bridge Rd"],[51.5133,-0.04692,1,1,"Commercial Rd/Albert Gardens"],[51.5012,-0.11583,1,1,"Westminster Bridge / South"],[51.422,-0.12926,1,1,"A23 Streatham H Rd/Greyhound Ln"],[51.5492,-0.10762,1,1,"Holloway Rd Sth/Fieldway Cres"],[51.4732,-0.05147,1,1,"Queens Rd/Pomeroy St/Lausanne Rd"],[51.5313,-0.10463,1,1,"Goswell Rd Opp Owen St"],[51.4746,-0.26731,1,0,"Great Chertsey Rd/Hartington Rd"],[51.4583,-0.31698,1,1,"Twickenham Rd/Heathcote Rd"],[51.3773,-0.02857,0,1,"Wickham Rd/Monks Orchard Rd"],[51.4949,0.01184,1,1,"West Parkside/John Harrison Wy"],[51.59656,0.027,0,1,"C/Browns E/B Off-Slip"],[51.57103,0.01022,1,1,"A12 Kswood Rd 3893A"],[51.50047,0.22112,0,1,"Wennington Viaduct E"],[51.5265,-0.13356,1,1,"A501 East of Melton St"],[51.4645,-0.01522,1,1,"Loampit Vale/Thurston Rd"],[51.4983,-0.16584,1,1,"Brompton Rd/Beaufort Grns"],[51.4779,-0.14518,1,1,"Battersea Pk Rd/Prince of Wales Dr"],[51.57302,-0.22271,1,1,"A406 Holiday Inn"],[51.5115,-0.37766,0,1,"The Broadway/St.Georges Av"],[51.5285,-0.09239,1,0,"City Rd/Shepherdess Walk"],[51.55164,-0.01853,1,1,"A12 Lea Bridge 3582A"],[51.5127,-0.00048,1,1,"Leamouth Road"],[51.45645,0.06041,0,1,"A2 Westmount Road"],[51.5463,-0.07566,1,1,"Kingsland Rd/Balls Pond Rd"],[51.4889,-0.12294,1,0,"Albert Emb/Glasshouse Wk"],[51.4714,-0.11265,1,1,"A23 Brixton Rd/Ingleton St"],[51.5177,-0.12056,1,1,"Kingsway/High Holborn"],[51.46806,0.02913,1,1,"DURSLEY ROAD"],[51.4588,-0.17952,1,1,"Marcilly Rd/Elsynge Rd"],[51.5614,-0.11295,1,1,"Seven Sisters Rd/Barrow Way"],[51.5112,-0.01399,1,1,"East India Dock Rd/Chrisp St"],[51.3382,-0.11724,0,1,"A23/Purley Cross"],[51.5133,-0.16018,1,1,"Marble Arch"],[51.5369,-0.17613,1,1,"A41 Finchley Rd/Queen Grove"],[51.4462,-0.12421,1,1,"Brixton Hill/Morrish Rd"],[51.5584,-0.12005,1,1,"Holloway Rd/Tufnell Pk Rd"],[51.5562,-0.11693,1,1,"Holloway Rd Nth/Tollington Rd"],[51.3753,-0.09122,0,1,"Addiscombe Rd/Cherry Orchard Rd"],[51.3923,-0.26182,0,1,"A3 Kingston Bypass/South Lane"],[51.538,-0.10247,1,1,"Upper St/Theberton St"],[51.51803,0.03557,1,1,"Prince Regents Lane E"],[51.36,-0.19394,0,1,"A232 Grove Rd/Sutton Park Rd"],[51.4937,-0.1214,1,0,"Albert Emb/Lambeth Brdge"],[51.4875,0.06352,0,1,"Grand Depot Rd/John Wilson St"],[51.5072,-0.01003,1,1,"Aspen Way/Cotton Street"],[51.4613,0.02625,1,1,"Kidbrooke Park Rd"],[51.4948,-0.19948,1,1,"Pembroke Rd/Cromwell Crescent"],[51.4615,-0.22031,1,1,"Upper Richmond Rd/Ravenna Rd"],[51.61137,-0.04729,0,1,"A406 Angel Road East"],[51.5466,-0.055,1,1,"Mare St/Graham Rd"],[51.4432,-0.02857,1,1,"A205 / Catford Hill"],[51.5655,-0.2773,1,1,"A4088 Forty Av/Bridge Rd"],[51.5729,-0.07074,1,0,"Clapton Common/Lewstone Place"],[51.5196,-0.26273,1,1,"A40/Wales Farm Rd"],[51.5514,-0.1848,1,1,"Finchley Rd/Langland Grdns"],[51.4571,-0.19741,1,1,"A3 East Of West Hill"],[51.5262,-0.08563,1,1,"Old Street e of Vince St"],[51.4412,-0.09268,1,1,"Thurlow Park Road/Croxted Road"],[51.55789,-0.00433,1,1,"A12 Langthorne 3713A"],[51.57283,0.0132,1,1,"A12 GMT W Appr 3921J"],[51.5896,-0.19648,0,1,"A406/A1 Falloden Way"],[51.5544,-0.44771,0,1,"A40 Western Ave/Long Lane"],[51.5484,-0.18096,1,0,"Finchley Rd/Frognal Ct"],[51.5115,-0.00971,1,1,"A13 East India Dock/Cotton St"],[51.4958,-0.10358,1,1,"St Georges Rd/Hayles St"],[51.5241,-0.07984,1,1,"Gt Eastern St/Holywell Ln"],[51.5948,-0.21662,0,1,"A1/Holders Hill"],[51.51333,-0.00809,1,1,"A102 Brunswick Rd"],[51.4848,-0.12858,1,1,"Nine Elms Ln/Wandsworth Rd"],[51.5258,-0.17829,1,1,"Maida Vale/St Johns Wood Rd"],[51.5736,-0.14128,1,1,"Archway Rd / Causton Rd"],[51.5762,-0.14369,1,1,"A1 Archway Rd/Holmesdale Rd"],[51.4946,-0.18878,1,1,"Cromwell Rd/Collingham Rd"],[51.4925,-0.08363,1,1,"Old Kent Rd/Preston Cls"],[51.3769,-0.02043,0,1,"High St/Grosvenor Rd W Wickham"],[51.53949,-0.27802,1,1,"A406 Abbey Road Underpass"],[51.59612,0.03004,0,1,"C/Browns/M11 Split"],[51.513,-0.04164,1,0,"Commercial Rd/Belgrave St"],[51.53144,0.09954,0,1,"Movers Lane East"],[51.4612,-0.16006,1,1,"Clapham Common/Northside"],[51.4935,-0.24577,1,1,"Chiswick High Rd/Goldhawk Rd"],[51.4145,-0.12426,0,1,"A23 Streatham H Rd/Colmer Rd"],[51.4986,-0.10545,1,1,"Westminster Bridge Rd/Waterloo Rd"],[51.5464,0.0236,1,1,"Romford Rd / Sprowston Rd"],[51.5259,0.02915,1,1,"Barking Rd/Prince Regent Lane"],[51.52235,0.06462,0,1,"Beckton West"],[51.54183,-0.02692,1,1,"A12 Wansbeck Road"],[51.4743,0.03774,1,1,"Shooters Hill Rd/Charlton Pk Ln"],[51.4571,0.00908,1,1,"A20 Lee High Rd/Lampmead Rd"],[51.4998,-0.21009,1,0,"Holland Rd/Addison Crescent"],[51.4765,-0.19286,1,1,"New Kings Rd/Wanworth Brg Rd"],[51.5364,-0.10364,1,1,"Upper St/St Albans Place"],[51.49395,0.00646,1,1,"A102 Blackwall Lane"],[51.4961,-0.08297,1,1,"Tower Bridge Rd/Rothsay St"],[51.5435,-0.10316,1,1,"Upper St by Canonbury Lane"],[51.4066,0.01867,0,1,"Tweedy Rd N of Widmore Rd"],[51.4503,-0.17405,1,1,"Trinity Road - Dorlcote Road"],[51.49,-0.04228,1,1,"Evelyn Street / Bestwood St"],[51.4479,-0.13252,1,1,"A205 Poynders Rd/Kings Ave"],[51.53802,0.06771,0,1,"A406/A124 Barking"],[51.5049,-0.10466,1,1,"Blackfriars Rd/Dolben St"],[51.56674,0.00641,1,1,"A12 Church Ln 3839A"],[51.4843,-0.12288,1,0,"South Lambeth Rd/Parry St"],[51.3743,-0.11875,0,1,"A23/Commerce Way"],[51.4609,-0.16331,1,1,"Battersea Rise/Lavender Sweep"],[51.5458,-0.07567,1,1,"Kland Rd/Balls Pond Rd"],[51.5591,-0.46984,0,1,"Western Ave/Swakeleys RB"],[51.4838,-0.40773,0,1,"Parkway/Cranford High St"],[51.537,-0.38929,0,0,"A312 / White Hart Roundabout"],[51.465,-0.30139,1,1,"Twickenham Rd/St Johns Grove"],[51.6103,-0.03041,0,1,"Lea Valley/Cabinet Way"],[51.4678,-0.12808,1,1,"A3 Clapham Road/Mayflower Road"],[51.5814,0.05825,0,1,"Woodford Avenue - Beehive Lane"],[51.5147,-0.14721,1,1,"Oxford St/Vere St"],[51.60101,-0.01695,0,1,"A406 Billet Upass W"],[51.5064,-0.12224,1,1,"Northumberland Ave/Victoria Emb"],[51.4991,-0.05633,1,1,"Jamaica Rd W of Lower Rd"],[51.4445,-0.23427,1,1,"A3 Kingston Rd/Roehampton Ln"],[51.482,-0.34634,1,1,"Great West Rd / Thornbury Rd"],[51.5493,-0.18171,1,1,"Finchley Rd Sth of Rosemont Rd"],[51.472,-0.12219,1,1,"Stockwell Rd By Clapham Rd"],[51.375,-0.08142,0,1,"Chepstow Rd/Addiscombe Rd"],[51.4359,-0.25594,1,1,"A3 Roehampton Vale/A308 Robin Hood"],[51.5276,-0.11548,1,1,"Kings X Rd / Wharton St"],[51.4205,-0.17578,1,1,"High St/Colliers Wd/Marlborough Rd"],[51.5097,-0.05046,1,1,"The Highway/Glamis Road"],[51.4981,-0.06409,1,1,"Jamaica Rd / Major Rd"],[51.5155,-0.1546,1,1,"Portman Square/Orchard St"],[51.5143,-0.02834,1,1,"Burdett Rd/Pixley St"],[51.52782,0.14206,0,1,"Goresbrook West"],[51.4389,-0.15648,1,1,"Balham High Rd/Upper Tting Pk"],[51.47463,0.02484,1,1,"A102 Shooters Hill"],[51.3608,-0.18941,0,1,"A232 / Sutton Court Road"],[51.4858,-0.14971,1,1,"Chelsea Bridge/Chelsea Embankment"],[51.4436,-0.1526,1,0,"Balham High Rd/Chestnut Grove"],[51.4401,-0.10643,1,1,"A205 Christchurch Rd/Norwood Rd"],[51.53782,-0.28341,1,1,"A406 Iveagh Ave"],[51.439,-0.05379,1,1,"A205 London Rd/Dartmouth Rd"],[51.5512,-0.075,1,1,"A10 Stoke Newington Rd/Millers Terrace"],[51.4549,-0.20828,1,1,"West Hill/Portinscale Rd"],[51.5106,-0.04182,1,1,"Limehouse Tunnel/Butcher Row"],[51.4448,-0.15179,1,1,"Balham High Rd/Ramsden Rd"],[51.6013,-0.17396,0,1,"Finchley High Rd/A406"],[51.4765,-0.11232,1,1,"A23 Brixton Rd/Vassell Rd"],[51.473,-0.01659,1,1,"Blackheath Rd/Wickes Store"],[51.4613,-0.0059,1,1,"A20 Lee High Rd/Marischal Rd"],[51.53173,0.12444,0,1,"Castle Green"],[51.5466,-0.00091,1,1,"Leyton Rd/Montfichet Rd/Penny Brookes St"],[51.4808,-0.11356,1,1,"A3 Clapham Rd/Elias Place"],[51.5024,-0.11633,1,1,"York Road/Leake Street"],[51.4183,0.09822,0,0,"A20 Sidcup Bypass/Perry St"],[51.5411,-0.00528,1,1,"Montfichet Rd/Westfield Ave/Car Park B"],[51.4739,-0.09045,1,1,"Camberwell Ch St/Grove Ln"],[51.52026,0.04645,1,0,"Noel Road"],[51.548,-0.1301,1,1,"Camden Rd N Of Camden Pk Rd"],[51.4778,-0.05185,1,1,"A2 New Cross Rd/Avonley Rd"],[51.5021,-0.15238,1,1,"Hyde Park Corner"],[51.4914,-0.22206,1,1,"Talgarth Rd/Butterwick"],[51.61329,-0.03691,0,1,"A406 Cooks Ferry R/B"],[51.4532,0.02756,1,1,"Eltham Rd/Sidcup Rd"],[51.4824,-0.11208,1,1,"Kenington Pk Rd/Kennington Oval"],[51.5187,-0.0611,1,0,"Whitechapel Rd/Court St"],[51.533,0.10988,0,1,"Lodge Avenue"],[51.49612,0.00227,1,1,"A102 Pear Island"],[51.51985,0.16853,0,1,"Marsh Way West"],[51.4735,0.01544,1,1,"Shooters Hill Rd/P o wales Rd"],[51.50773,-0.02766,1,1,"Limehouse Tnl Westferry Rd Entr"],[51.5208,-0.03275,1,1,"Burdett Rd/Eric St"],[51.4188,-0.17743,0,1,"High St Colliers Wd/Cavendish Rd"],[51.5165,-0.16494,1,1,"A5 Edgware Rd/Nutford Pl"],[51.5005,-0.14971,1,1,"Grosvenor/Chapel St"],[51.4644,-0.13142,1,1,"A3 Clapham High St/Aristotle Rd"],[51.6148,-0.06419,0,0,"Sterling Way Slip/A1010 Fore St"],[51.4853,-0.28752,1,1,"A205 Kew Rd/Kew Green"],[51.49672,0.00205,1,1,"Tunnel House"],[51.5147,-0.06163,1,1,"Commercial Rd/Cannon St Rd"],[51.4491,-0.1479,1,1,"Balham Hill/Yukon Rd"],[51.4569,0.04229,1,1,"A2 Westhorne Avenue"],[51.5484,-0.07533,1,0,"A10 Kingsland High St/Winchester"],[51.4322,0.02139,1,1,"Baring Rd/Le May Avenue"],[51.475,-0.11953,1,1,"A3 Clapham Rd/Stockwell Rd/Landsdowne Way"],[51.5439,-0.17503,1,1,"Swiss Cottage/Finchley Rd"],[51.5564,0.06491,0,1,"A118 Romford Rd/A406 Ncr"],[51.5053,-0.11402,1,1,"Waterloo Bridge south"],[51.4903,-0.13315,1,1,"Vauxhall B Rd N Rampayne St"],[51.5074,-0.12765,1,1,"Trafalgar Square"],[51.6124,-0.10987,0,0,"A406/Bowes Rd/Green Lanes"],[51.4618,-0.01334,1,1,"Molesworth St/Riversdale shops"],[51.5297,-0.08708,1,1,"East Road/Vestry Street"],[51.4787,-0.28138,1,1,"A205 Mortlake Rd/Bessant Drive"],[51.5116,-0.17596,1,1,"Bayswater Rd/Lancaster Terrace"],[51.4899,-0.10798,1,1,"Kennington Ln/Chester Way"],[51.61324,-0.05247,0,1,"A406 Montagu Road"],[51.5547,-0.25591,1,1,"Grt Central Way/Drury Way"],[51.598,0.23161,0,1,"Colchester Rd/Gubbins Ln"],[51.478,-0.1697,1,0,"Battersea Brdg Rd/Westbridge Rd"],[51.4712,0.05519,1,1,"A205 Academy Rd/Shooters Hill"],[51.5425,-0.37711,0,0,"A40 / Target Roundabout"],[51.4742,-0.09223,1,1,"Camberwell Ch St/Camberwell Grn"],[51.4784,-0.10381,1,1,"Camberwell New Rd/Vassall Rd"],[51.5352,-0.13897,1,0,"Camden High St/Symes Mews"],[51.474,-0.06234,1,1,"Queens Road/Woods Road"],[51.4725,-0.40497,0,1,"A30 Great Sth/W Rd/The Parkway"],[51.5773,-0.1466,1,1,"A1 South of Muswell Hill"],[51.5548,-0.07466,1,1,"A10 South of Farleigh Rd"],[51.59565,0.01903,0,1,"Waterworks E/B On-Slip"],[51.4862,-0.1219,1,1,"Kennington Lane"],[51.3234,-0.13475,0,0,"Brighton Rd/Farthing Way"],[51.57596,0.04429,1,1,"A12/M11 Redbrdg 100A"],[51.5241,-0.14352,1,1,"Marylebone Rd/Osnaburgh St"],[51.49923,-0.05514,1,1,"Rotherhithe Tunnel Barrier S"],[51.4855,-0.11138,1,0,"Kennington Rd/Kennington Grn"],[51.4934,-0.1005,1,1,"Elephant & Castle/Walworth Road"],[51.5456,-0.1033,1,1,"Upper St/Highbury Corner"],[51.4789,-0.12365,1,1,"South Lambeth Rd/Tradescant Rd"],[51.5019,-0.16028,1,1,"Scotch Corner"],[51.5196,-0.12019,1,1,"Theobalds Rd/Boswell St"],[51.5339,-0.32962,1,1,"A40 /Argyle Rd"],[51.5137,-0.24892,1,1,"A40/Old Oak Road"],[51.50861,0.01418,1,1,"Tidal Basin Roundabout East"],[51.50816,0.01192,1,1,"Tidal Basin Roundabout West"],[51.51071,-0.04053,1,1,"Limehouse Tunnel/The Highway"],[51.5103,-0.00684,1,1,"Blackwall Nth Portal"],[51.49794,0.00199,1,1,"STT Southern Portal Bus Lane"],[51.51229,-0.03911,1,0,"Rotherhithe Tunnel Barrier N"],[51.45551,0.05352,1,1,"Eltham Tunnel E/B"],[51.57651,0.03117,1,1,"A12 GGT E Appr 4063A"]],"hits":[[217,224.2,1],[716,226.2,1],[581,229.1,1],[716,229.2,1],[30,229.6,3],[456,230.2,1],[803,230.4,1],[401,231.7,1],[65,231.9,1],[416,231.9,1],[435,232.4,1],[533,232.8,1],[5,233.4,1],[615,234.5,1],[571,234.6,1],[132,234.8,1],[531,235.7,1],[872,235.7,1],[182,236.7,1],[752,237.9,1],[552,239.6,1],[388,241.9,1],[552,244.5,1],[59,245.2,1],[230,245.2,1],[65,245.5,1],[43,247.2,1],[188,247.2,1],[401,247.6,1],[65,249.4,1],[474,249.7,1],[635,250.4,1],[391,250.8,1],[388,251.9,1],[280,252.5,1],[544,252.7,1],[344,253.1,1],[257,253.5,1],[26,253.8,2],[593,253.9,2],[216,254.3,1],[30,255.0,1],[818,256.5,1],[621,256.6,1],[477,257.1,1],[790,257.2,2],[535,257.3,1],[811,257.6,1],[378,258.1,1],[828,258.4,1],[619,259.2,1],[401,259.7,1],[118,259.8,1],[533,261.6,1],[389,261.7,1],[541,266.6,1],[65,269.3,1],[364,269.6,1],[531,269.6,1],[346,270.0,1],[480,270.7,1],[257,271.5,1],[313,272.2,1],[97,275.2,1],[853,275.9,1],[581,277.1,1],[411,278.4,2],[258,284.5,1],[544,295.1,1],[421,295.2,1],[556,296.4,1],[176,298.5,1],[756,306.9,1],[541,307.4,1],[30,325.3,1],[329,325.4,1],[753,327.2,1],[807,330.0,1],[378,330.1,1],[853,340.1,1],[188,341.7,1],[3,351.3,1],[553,354.9,1],[343,355.2,1],[378,355.8,1],[828,356.1,1],[689,357.2,1],[531,362.0,1],[262,365.2,1],[571,373.0,1],[416,373.7,1],[779,376.3,1],[132,380.1,1],[446,381.3,1],[330,388.6,1],[397,391.3,1],[615,392.1,1],[579,392.8,1],[480,393.9,1],[558,402.5,1],[335,405.2,1],[878,407.6,1],[242,413.7,2],[216,414.0,1],[79,414.4,1],[789,417.4,1],[176,418.1,1],[846,418.1,1],[778,418.4,1],[461,419.3,1],[280,421.9,1],[788,423.8,1],[30,425.7,1],[788,429.6,1],[192,439.9,1],[862,443.5,1],[302,443.8,1],[257,446.9,1],[32,450.2,1],[416,452.8,1],[242,456.0,1],[828,459.2,1],[405,463.1,2],[329,463.8,1],[765,464.4,1],[575,465.8,1],[375,467.6,1],[575,470.1,1],[571,472.0,1],[523,472.4,1],[574,472.8,1],[881,476.5,1],[833,489.3,1],[818,489.5,1],[216,491.0,1],[676,491.5,1],[846,492.1,1],[192,493.0,1],[535,494.0,1],[192,495.0,1],[73,495.3,1],[176,495.8,1],[881,496.1,1],[411,499.4,1],[616,499.5,1],[446,499.7,1],[339,500.2,1],[523,500.8,1],[65,501.2,1],[779,501.4,1],[796,502.1,1],[603,508.4,1],[736,509.7,1],[822,510.3,1],[426,511.5,1],[878,516.4,1],[541,517.8,1],[26,519.1,2],[807,521.5,1],[778,522.7,1],[289,526.7,1],[132,530.2,1],[552,530.7,1],[378,534.8,1],[401,535.9,1],[631,539.3,1],[640,541.1,1],[192,544.2,1],[603,544.6,1],[242,545.1,1],[176,545.8,1],[833,546.4,2],[217,547.9,2],[242,549.7,1],[375,550.7,1],[132,552.3,1],[760,557.8,1],[242,558.2,2],[878,559.5,1],[416,563.2,1],[553,563.9,1],[119,567.3,1],[778,567.7,1],[30,567.7,2],[344,568.2,1],[408,569.6,1],[344,570.2,1],[30,570.5,1],[97,570.6,1],[28,571.5,1],[788,571.8,1],[575,573.3,1],[26,573.7,1],[389,573.7,1],[575,574.5,1],[132,575.1,1],[134,579.3,4],[416,579.5,1],[100,580.5,1],[477,581.0,1],[389,581.5,1],[315,582.9,1],[73,585.1,1],[364,587.6,1],[23,587.6,1],[281,588.6,1],[192,590.1,1],[716,590.6,1],[411,591.3,1],[176,591.8,1],[242,594.3,1],[709,594.9,1],[30,595.1,1],[214,596.6,1],[779,598.2,1],[796,601.2,1],[819,601.4,1],[329,604.0,1],[556,604.7,1],[558,605.3,1],[553,607.2,1],[176,610.1,1],[861,610.3,1],[84,610.4,1],[878,610.6,1],[760,611.3,1],[752,612.1,1],[779,612.7,1],[779,613.7,1],[242,615.1,1],[853,615.1,1],[716,616.4,1],[311,616.7,3],[268,618.4,1],[30,619.2,1],[356,619.6,1],[339,622.3,1],[281,628.6,1],[192,630.0,1],[796,631.7,1],[716,634.1,1],[872,635.0,1],[593,638.7,1],[616,639.0,1],[796,639.1,1],[329,639.4,2],[838,639.6,1],[603,688.2,1],[389,688.4,1],[606,688.4,1],[410,689.3,1],[230,689.3,1],[317,689.4,1],[846,689.4,1],[75,689.5,1],[815,689.9,1],[329,691.8,1],[789,692.5,1],[3,693.1,1],[558,693.7,1],[97,693.8,1],[375,694.0,1],[803,694.1,1],[242,694.5,1],[534,696.5,1],[807,697.3,1],[423,697.8,1],[132,698.6,1],[815,700.0,1],[878,701.2,1],[869,701.6,3],[75,702.8,1],[796,703.3,1],[558,704.0,1],[389,704.4,1],[424,704.7,1],[242,705.3,1],[416,705.4,1],[281,705.7,1],[556,706.0,1],[833,708.1,1],[192,708.1,1],[544,708.1,1],[315,708.6,1],[75,708.7,1],[429,708.9,1],[339,709.1,1],[343,709.4,1],[411,709.9,1],[195,709.9,1],[490,710.6,1],[815,710.7,1],[434,712.0,1],[643,712.2,1],[530,712.3,2],[556,712.7,1],[788,713.1,1],[803,713.1,1],[73,713.2,1],[807,714.5,1],[833,715.5,1],[75,715.7,1],[30,715.7,1],[558,715.9,1],[87,716.1,2],[5,716.3,1],[552,716.5,1],[523,719.4,1],[819,720.9,1],[872,721.6,1],[3,722.1,1],[531,722.3,1],[778,723.3,1],[807,723.6,1],[788,723.6,1],[316,724.8,1],[192,726.2,1],[488,727.7,1],[346,729.2,1],[643,729.3,1],[558,729.3,1],[34,730.3,1],[818,730.4,1],[242,731.1,1],[192,731.1,2],[311,731.4,1],[558,731.8,1],[218,732.4,1],[818,732.4,1],[118,732.6,1],[822,732.8,1],[493,733.3,1],[869,733.4,1],[538,733.6,1],[579,735.0,1],[778,737.5,1],[570,737.9,1],[134,738.2,1],[411,738.2,2],[558,738.3,1],[579,738.6,1],[558,739.2,1],[192,739.4,1],[293,739.5,1],[430,739.8,1],[803,741.2,1],[169,741.9,1],[195,742.0,1],[343,742.0,1],[176,742.2,1],[188,742.2,1],[280,742.6,1],[56,743.1,1],[110,743.3,1],[796,743.4,1],[242,743.6,1],[375,743.8,1],[411,743.9,1],[593,744.5,1],[242,744.6,1],[75,744.7,1],[859,746.2,1],[541,746.7,1],[405,748.2,1],[879,748.6,1],[646,748.7,1],[760,748.7,1],[531,748.8,1],[478,749.9,1],[242,749.9,1],[375,750.5,1],[346,750.6,1],[490,750.7,1],[200,751.0,2],[576,751.1,1],[460,752.7,1],[828,752.7,1],[242,753.0,1],[497,753.1,1],[530,753.2,2],[736,753.6,2],[97,753.8,1],[416,754.3,2],[258,754.4,1],[59,754.5,1],[159,754.6,1],[789,754.8,3],[56,755.1,1],[100,757.2,1],[416,757.4,1],[574,758.5,1],[423,758.7,1],[216,760.3,1],[397,760.8,1],[790,761.2,1],[779,761.6,1],[30,762.5,1],[110,762.9,1],[558,763.0,1],[188,763.0,1],[195,763.4,1],[97,764.4,1],[151,764.5,2],[779,764.5,1],[788,764.6,2],[375,766.3,2],[176,766.8,1],[501,767.2,1],[280,767.5,1],[779,767.7,1],[192,767.9,1],[200,768.1,1],[286,768.1,1],[881,770.5,1],[3,770.6,1],[242,771.1,1],[61,771.4,1],[575,771.5,1],[73,771.5,1],[678,771.6,1],[151,772.5,1],[118,773.7,1],[553,774.6,1],[872,775.5,1],[572,776.6,2],[736,777.5,1],[230,777.6,1],[410,777.8,1],[311,777.9,1],[879,778.1,1],[878,778.7,1],[558,778.7,1],[778,779.6,1],[23,779.7,1],[554,779.8,1],[752,780.8,1],[676,781.1,1],[97,781.3,1],[584,781.4,1],[872,782.1,1],[807,782.4,1],[59,782.9,1],[416,783.1,2],[643,783.4,1],[316,783.4,1],[159,784.2,2],[626,784.2,1],[779,786.1,1],[195,786.6,1],[832,787.1,2],[313,787.8,1],[61,789.1,1],[676,789.6,1],[556,790.7,1],[776,792.5,1],[552,793.8,1],[788,794.1,1],[524,794.6,1],[411,794.7,1],[411,795.1,1],[118,795.7,1],[262,797.3,1],[335,799.0,1],[242,799.0,1],[3,799.9,1],[350,800.1,1],[27,800.2,1],[217,800.8,1],[788,801.1,1],[864,801.3,1],[192,801.6,1],[132,801.7,1],[530,801.7,2],[575,801.7,1],[258,801.9,1],[190,802.0,1],[736,802.8,1],[872,802.9,1],[30,803.6,1],[97,804.1,1],[760,804.1,1],[26,804.1,1],[600,804.7,1],[216,804.8,1],[342,804.9,1],[329,805.8,1],[807,807.0,1],[408,807.7,1],[87,807.8,1],[242,808.6,1],[75,808.7,1],[423,808.9,1],[151,809.1,1],[624,811.1,1],[789,811.7,1],[788,812.3,1],[535,812.5,1],[523,812.6,1],[192,813.2,1],[28,813.2,1],[389,813.3,1],[446,813.3,1],[242,813.7,1],[389,815.6,1],[378,815.9,1],[134,816.7,1],[329,820.6,1],[132,821.0,1],[556,821.2,1],[23,821.3,1],[664,821.3,1],[631,821.3,1],[176,822.8,1],[65,823.2,1],[822,823.3,1],[807,823.6,1],[861,823.9,1],[872,823.9,1],[28,824.0,1],[329,826.2,1],[693,826.5,1],[501,826.6,1],[283,826.8,1],[833,827.1,1],[230,827.2,1],[553,827.6,1],[480,827.9,1],[779,829.5,1],[297,830.1,1],[411,830.1,1],[260,830.4,1],[789,831.2,1],[317,831.6,1],[151,832.2,1],[313,833.9,1],[293,834.0,1],[192,834.7,1],[313,835.3,1],[242,835.5,2],[803,836.0,2],[192,836.1,1],[736,837.2,1],[579,838.3,1],[423,838.5,1],[556,840.7,1],[872,843.2,1],[411,843.3,2],[242,844.9,1],[534,845.9,1],[192,847.6,1],[833,848.1,1],[828,848.3,1],[600,848.3,1],[311,848.4,1],[65,849.1,1],[807,849.8,1],[493,849.8,1],[429,849.8,1],[119,850.2,1],[216,850.7,1],[411,851.8,1],[423,851.9,1],[65,852.3,1],[191,852.5,1],[879,853.4,1],[862,855.0,1],[348,855.4,1],[554,856.4,1],[59,856.9,1],[230,857.7,1],[343,857.9,1],[280,858.0,1],[132,858.3,1],[313,859.1,1],[73,859.1,1],[575,859.4,2],[281,860.5,1],[391,861.5,1],[789,861.7,1],[779,861.8,1],[391,862.0,1],[788,867.2,1],[558,867.2,1],[525,868.6,1],[760,869.4,1],[110,869.4,1],[3,871.6,1],[192,871.7,1],[216,871.8,1],[330,872.0,1],[30,872.6,1],[556,872.8,1],[313,873.9,2],[169,873.9,1],[616,877.3,1],[474,877.7,1],[262,877.9,1],[118,881.0,1],[745,884.1,1],[144,884.3,1],[30,884.7,1],[242,885.1,1],[212,885.2,1],[571,885.9,1],[411,886.0,1],[461,887.0,1],[3,887.4,1],[280,888.2,1],[676,888.7,1],[316,892.4,1],[316,892.6,1],[848,893.4,1],[343,894.3,1],[558,895.2,1],[488,895.4,1],[418,898.0,1],[615,899.2,1],[230,899.7,1],[444,900.4,1],[59,901.2,1],[568,901.6,1],[242,905.4,1],[571,907.1,1],[557,907.3,1],[571,907.7,1],[286,907.7,1],[796,908.2,1],[375,908.6,2],[646,910.0,1],[631,910.2,1],[556,910.3,1],[872,910.3,1],[779,910.4,2],[815,910.6,1],[316,911.5,1],[667,914.3,1],[192,915.1,1],[97,915.3,1],[230,915.6,2],[557,916.8,1],[760,917.3,1],[446,918.1,1],[818,920.2,1],[192,920.5,1],[493,920.9,1],[846,921.6,1],[242,921.8,1],[803,922.2,1],[561,922.9,2],[313,923.0,1],[397,923.2,1],[872,924.5,1],[389,924.7,1],[132,925.3,1],[375,925.7,1],[434,925.7,1],[190,925.8,1],[329,926.2,1],[779,929.2,1],[570,929.6,1],[257,930.5,2],[286,931.0,1],[242,931.3,1],[779,931.7,1],[551,932.2,1],[736,932.4,1],[118,933.4,1],[389,934.3,1],[796,935.5,1],[350,936.5,1],[740,936.5,1],[132,936.6,1],[97,936.8,1],[716,937.3,1],[391,937.9,1],[477,940.4,1],[350,940.7,1],[55,940.8,1],[389,941.4,1],[488,942.3,3],[554,943.7,2],[65,946.1,1],[73,946.1,2],[778,947.2,1],[8,950.1,1],[444,950.1,1],[188,950.3,1],[716,950.5,1],[100,950.5,2],[401,950.6,1],[79,951.2,1],[311,951.4,1],[807,951.6,2],[796,952.1,1],[389,952.5,1],[429,952.6,1],[280,952.7,1],[378,952.8,1],[497,952.9,1],[807,954.2,1],[535,955.3,1],[523,956.6,1],[878,956.7,1],[375,957.2,1],[280,957.6,1],[389,958.1,1],[828,958.8,1],[864,959.1,1],[97,959.3,1],[100,960.6,1],[192,962.7,1],[330,966.7,1],[828,968.3,1],[751,968.7,1],[435,969.7,1],[558,970.5,1],[159,970.5,1],[736,970.6,1],[242,970.9,1],[30,971.1,1],[853,971.4,1],[216,972.0,1],[604,972.8,1],[803,973.4,1],[100,975.2,1],[881,975.4,1],[192,976.1,1],[192,976.5,1],[531,976.6,1],[807,976.9,1],[760,977.1,1],[344,979.6,1],[218,979.7,1],[456,979.8,1],[242,979.9,1],[212,981.2,1],[87,983.2,1],[411,983.4,1],[3,983.5,1],[423,985.3,1],[100,985.4,1],[242,987.0,1],[872,987.7,1],[493,988.5,2],[230,988.8,2],[423,988.9,2],[803,988.9,1],[551,989.3,1],[280,989.8,1],[881,990.8,2],[676,991.1,1],[668,991.4,1],[151,991.5,1],[416,994.7,1],[309,996.1,1],[344,999.2,1],[214,999.7,1],[408,1001.0,1],[803,1001.0,1],[8,1001.6,1],[643,1001.8,1],[745,1003.9,1],[192,1003.9,1],[822,1003.9,1],[878,1003.9,1],[575,1004.7,1],[30,1005.1,1],[646,1005.6,1],[490,1006.4,1],[308,1008.0,1],[796,1008.1,2],[588,1008.1,1],[558,1008.4,1],[30,1013.5,1],[726,1014.3,1],[192,1014.6,1],[779,1015.6,1],[838,1015.7,1],[760,1015.8,1],[581,1016.2,1],[861,1016.6,1],[216,1016.9,1],[553,1017.2,1],[616,1017.7,1],[115,1017.7,1],[216,1017.7,1],[815,1018.3,1],[242,1018.5,1],[412,1019.2,1],[242,1019.2,1],[73,1019.3,1],[530,1020.7,1],[3,1021.6,1],[575,1021.6,1],[788,1021.9,1],[881,1022.3,1],[575,1023.4,1],[434,1023.7,1],[616,1026.1,1],[356,1026.5,1],[151,1028.0,1],[118,1028.1,1],[553,1028.1,1],[779,1028.2,1],[423,1029.5,1],[789,1030.0,1],[87,1030.7,1],[861,1033.0,1],[165,1033.2,1],[73,1034.0,1],[778,1035.8,1],[803,1037.0,2],[73,1037.0,2],[242,1037.2,2],[818,1038.1,1],[350,1038.1,1],[678,1038.2,1],[289,1038.3,2],[97,1038.8,1],[242,1039.4,1],[416,1039.6,1],[429,1039.8,1],[807,1039.9,1],[525,1040.8,1],[8,1041.1,1],[30,1041.3,1],[678,1041.4,2],[350,1041.5,1],[736,1041.8,2],[344,1042.1,1],[375,1042.2,1],[480,1042.3,1],[833,1042.4,1],[574,1042.6,1],[434,1042.8,1],[875,1043.1,1],[455,1043.4,1],[73,1044.8,1],[343,1045.0,1],[283,1045.9,1],[558,1046.4,1],[176,1047.0,1],[316,1051.6,1],[192,1052.1,1],[281,1052.4,1],[389,1052.7,1],[101,1053.2,1],[3,1055.5,1],[148,1056.0,1],[428,1056.3,1],[534,1056.4,1],[872,1056.6,1],[280,1057.7,1],[56,1060.0,1],[217,1060.8,1],[788,1061.1,1],[838,1061.2,1],[148,1061.6,1],[667,1061.8,1],[603,1062.1,1],[408,1062.6,1],[789,1063.4,1],[788,1063.4,1],[375,1063.5,1],[818,1064.1,1],[75,1064.4,1],[581,1064.5,1],[429,1065.4,1],[846,1065.5,1],[643,1065.7,1],[289,1066.0,1],[435,1066.3,1],[408,1066.5,1],[132,1066.6,1],[788,1066.9,1],[488,1067.1,1],[28,1067.2,1],[531,1067.3,1],[553,1067.4,2],[288,1067.5,1],[242,1068.1,1],[289,1068.6,1],[511,1069.2,1],[664,1069.5,1],[182,1069.7,1],[558,1070.0,1],[329,1070.8,1],[478,1072.0,1],[803,1072.2,1],[317,1072.5,2],[389,1072.7,1],[819,1074.0,1],[151,1074.1,1],[260,1074.4,1],[348,1084.8,1],[118,1085.1,1],[424,1085.3,1],[760,1085.4,1],[523,1086.1,1],[375,1087.5,1],[838,1087.8,1],[115,1089.3,1],[313,1089.3,1],[26,1089.6,1],[97,1090.2,1],[726,1090.3,1],[280,1091.7,1],[65,1091.7,1],[693,1092.3,1],[833,1092.5,1],[389,1093.1,1],[872,1094.0,2],[875,1094.4,1],[118,1094.9,1],[676,1095.8,1],[803,1096.5,1],[148,1096.9,1],[788,1098.3,1],[788,1098.6,1],[667,1098.8,1],[75,1100.1,1],[176,1102.7,1],[410,1103.1,1],[796,1105.0,1],[132,1106.5,1],[624,1106.6,1],[258,1108.4,1],[558,1109.2,1],[803,1110.2,1],[73,1110.7,3],[242,1111.0,3],[828,1111.2,1],[846,1111.5,1],[663,1112.0,1],[818,1112.4,1],[579,1112.5,1],[389,1112.6,2],[404,1112.6,1],[615,1114.2,1],[61,1114.2,1],[289,1115.0,1],[846,1115.3,1],[262,1115.7,1],[132,1116.0,1],[289,1116.1,1],[613,1116.2,2],[416,1116.7,1],[258,1117.9,1],[803,1118.1,1],[530,1119.2,1],[242,1119.4,1],[378,1119.7,1],[530,1119.8,1],[151,1119.8,1],[75,1120.1,1],[344,1122.8,1],[649,1123.4,1],[217,1124.0,1],[446,1126.3,1],[375,1126.5,1],[389,1131.2,1],[408,1131.7,1],[418,1132.9,1],[558,1133.2,1],[553,1133.3,1],[184,1133.6,1],[488,1133.7,1],[242,1133.8,1],[878,1135.6,1],[192,1135.6,2],[716,1135.7,1],[553,1135.9,1],[375,1135.9,1],[716,1136.5,1],[30,1137.0,1],[579,1137.1,1],[456,1137.3,1],[664,1138.1,1],[456,1138.3,1],[455,1139.1,1],[477,1139.1,1],[59,1139.7,1],[676,1140.3,2],[257,1140.6,1],[313,1141.1,1],[819,1141.5,1],[872,1141.5,1],[26,1141.6,2],[719,1141.7,1],[752,1141.8,1],[803,1142.0,2],[408,1142.9,1],[61,1142.9,1],[676,1143.1,1],[477,1143.3,1],[778,1143.4,1],[635,1143.6,1],[796,1144.2,1],[65,1144.4,1],[188,1145.0,1],[511,1145.1,2],[293,1145.7,1],[313,1145.9,1],[260,1145.9,1],[101,1146.1,1],[853,1147.4,1],[796,1147.8,1],[84,1148.9,1],[853,1149.3,1],[391,1149.4,1],[480,1149.7,1],[779,1150.3,1],[779,1151.9,1],[575,1152.1,1],[579,1152.5,1],[631,1155.9,1],[788,1159.8,1],[375,1160.5,1],[493,1160.8,1],[350,1161.2,1],[408,1161.4,2],[375,1161.4,1],[289,1161.7,1],[262,1161.9,1],[132,1162.0,1],[59,1162.1,1],[375,1163.0,1],[760,1163.4,1],[242,1163.8,1],[803,1164.0,1],[3,1164.3,1],[118,1164.3,1],[530,1164.5,1],[148,1165.0,1],[511,1165.5,1],[622,1165.7,1],[807,1165.9,1],[460,1166.0,1],[460,1169.8,1],[313,1170.2,1],[881,1171.2,1],[148,1173.0,1],[571,1173.2,1],[389,1173.9,1],[192,1175.1,1],[378,1175.3,1],[182,1178.4,1],[861,1179.3,1],[789,1179.4,1],[3,1180.0,1],[807,1180.3,1],[315,1182.6,2],[779,1185.6,1],[242,1186.2,1],[375,1186.6,1],[579,1186.9,1],[411,1187.3,1],[833,1187.8,1],[556,1188.3,1],[833,1188.4,1],[807,1188.8,1],[553,1189.0,1],[745,1190.5,1],[30,1190.8,1],[571,1192.1,1],[192,1194.9,1],[30,1195.0,1],[572,1195.3,1],[455,1196.1,2],[511,1196.7,1],[676,1197.2,1],[862,1197.5,1],[480,1199.1,1],[828,1199.9,1],[572,1200.4,1],[861,1200.6,1],[378,1201.1,1],[511,1201.2,1],[807,1201.5,1],[861,1201.6,1],[423,1203.6,1],[100,1203.9,1],[242,1204.3,1],[344,1205.0,2],[97,1205.1,1],[350,1205.1,1],[30,1206.7,1],[663,1207.0,1],[541,1207.6,1],[679,1208.3,1],[803,1208.6,1],[446,1210.2,1],[434,1210.4,1],[541,1211.5,1],[736,1211.7,1],[260,1212.1,1],[79,1213.2,1],[313,1214.1,1],[289,1215.6,1],[511,1217.0,1],[779,1217.1,1],[242,1218.1,1],[310,1218.7,1],[257,1219.4,1],[588,1219.6,1],[6,1219.6,1],[779,1221.6,1],[881,1223.3,1],[411,1223.4,1],[389,1223.5,1],[862,1225.3,1],[788,1227.1,1],[676,1227.1,1],[616,1227.3,1],[217,1229.0,1],[344,1229.4,1],[460,1229.4,1],[192,1231.2,1],[426,1231.4,1],[118,1232.9,1],[389,1233.5,1],[418,1234.1,1],[101,1234.4,1],[796,1234.8,1],[242,1235.6,1],[65,1235.7,2],[364,1236.8,1],[838,1237.5,1],[872,1237.7,1],[588,1238.5,1],[216,1239.5,1],[230,1240.2,2],[378,1240.2,1],[689,1240.9,1],[493,1241.4,1],[803,1241.4,2],[73,1241.6,1],[30,1241.7,1],[547,1242.2,1],[30,1242.3,1],[30,1243.2,1],[535,1243.4,1],[828,1269.7,2],[778,1316.6,1],[579,1316.7,1],[558,1316.8,1],[411,1316.9,1],[28,1317.6,1],[558,1318.0,1],[752,1617.7,1],[624,1620.2,1],[430,1621.2,1],[788,1621.7,1],[343,1621.7,1],[819,1621.7,1],[878,1622.1,2],[317,1622.8,1],[862,1623.0,1],[388,1623.7,1],[558,1624.7,2],[597,1625.4,1],[815,1627.3,1],[344,1627.5,1],[375,1627.7,1],[752,1627.8,1],[511,1628.0,1],[803,1628.0,1],[311,1628.9,1],[534,1629.1,1],[30,1629.5,1],[624,1629.6,1],[192,1630.0,1],[588,1633.4,1],[511,1633.5,1],[416,1633.9,1],[571,1637.2,1],[558,1638.2,1],[872,1638.3,2],[819,1638.5,1],[288,1639.3,1],[543,1639.3,1],[230,1640.0,1],[342,1641.8,1],[477,1641.9,1],[3,1642.6,1],[176,1643.0,1],[429,1643.5,1],[664,1643.6,1],[881,1643.6,3],[828,1644.2,1],[27,1644.3,1],[313,1644.7,1],[833,1645.0,1],[524,1645.2,1],[735,1646.0,1],[579,1646.7,1],[389,1646.7,1],[530,1646.8,1],[558,1647.1,2],[676,1647.6,1],[242,1648.6,1],[456,1648.7,1],[216,1648.7,1],[311,1649.2,1],[796,1649.4,1],[752,1650.8,1],[316,1651.3,1],[5,1651.6,1],[389,1652.9,1],[818,1653.4,1],[287,1655.5,1],[217,1655.8,1],[803,1657.8,1],[446,1657.9,1],[829,1659.2,1],[530,1661.4,1],[765,1662.0,1],[765,1662.3,1],[311,1662.9,1],[815,1665.7,1],[579,1666.2,1],[807,1666.7,2],[192,1667.5,2],[615,1668.0,1],[603,1668.8,1],[480,1668.8,1],[614,1669.2,1],[416,1669.7,1],[435,1670.9,1],[803,1671.0,1],[59,1671.9,1],[511,1672.2,1],[756,1672.6,1],[558,1673.2,1],[872,1676.1,1],[3,1676.7,1],[378,1676.7,1],[828,1679.8,1],[579,1680.2,1],[579,1681.6,1],[667,1681.9,1],[779,1682.2,1],[311,1682.9,1],[881,1683.2,2],[488,1684.8,1],[819,1685.8,2],[833,1687.4,1],[3,1688.6,1],[879,1688.8,2],[26,1689.8,1],[281,1689.9,1],[242,1691.1,1],[118,1691.2,1],[579,1691.4,1],[148,1691.7,1],[283,1692.4,1],[558,1692.7,1],[635,1693.9,1],[558,1695.1,1],[807,1695.5,1],[132,1695.5,1],[530,1696.7,1],[361,1697.0,1],[257,1697.1,1],[843,1697.1,1],[2,1697.3,1],[218,1697.4,1],[843,1697.5,1],[788,1698.1,1],[110,1698.6,1],[735,1700.2,1],[248,1700.5,1],[293,1701.4,1],[501,1701.8,1],[819,1702.1,1],[97,1702.2,1],[861,1702.3,1],[861,1703.8,1],[343,1706.2,2],[446,1708.3,2],[242,1713.2,1],[531,1713.9,1],[1,1714.2,1],[776,1714.5,1],[380,1717.2,2],[736,1717.4,1],[523,1717.7,1],[283,1717.9,1],[242,1718.1,1],[195,1718.4,1],[543,1718.8,1],[73,1719.1,2],[188,1721.1,1],[501,1723.5,1],[401,1723.5,1],[61,1724.1,1],[317,1724.4,1],[118,1725.4,1],[872,1725.5,1],[118,1725.7,1],[173,1725.9,1],[511,1725.9,1],[192,1726.0,1],[552,1726.3,1],[829,1726.5,2],[343,1727.5,1],[344,1727.6,1],[97,1730.0,1],[311,1732.5,1],[625,1732.7,1],[819,1732.8,1],[819,1733.2,1],[833,1733.9,1],[603,1734.1,1],[281,1735.1,1],[603,1735.3,1],[531,1736.8,1],[389,1737.2,1],[59,1737.4,1],[30,1737.6,1],[242,1739.3,2],[455,1739.4,2],[133,1739.7,1],[132,1740.9,1],[429,1741.1,1],[872,1741.2,1],[455,1741.6,1],[192,1741.6,1],[79,1741.9,1],[310,1742.3,1],[819,1744.9,1],[740,1746.0,1],[511,1747.4,1],[788,1747.5,1],[803,1747.5,1],[446,1747.6,1],[446,1748.1,1],[796,1748.3,1],[423,1749.8,1],[343,1750.2,1],[423,1750.2,1],[614,1750.2,1],[823,1750.3,1],[631,1751.3,1],[786,1751.3,1],[676,1752.6,1],[788,1756.5,1],[342,1757.1,1],[30,1761.2,1],[242,1762.0,1],[493,1762.0,1],[600,1762.2,1],[782,1763.1,1],[629,1763.1,1],[803,1763.3,1],[614,1763.6,3],[446,1766.4,1],[788,1767.3,1],[676,1768.5,1],[446,1770.4,1],[511,1771.1,1],[188,1771.2,1],[84,1771.5,1],[313,1771.6,1],[735,1774.2,1],[616,1774.6,1],[629,1774.7,1],[531,1774.8,1],[740,1775.0,1],[3,1775.8,1],[426,1776.6,1],[788,1776.7,1],[786,1777.0,1],[575,1778.9,1],[129,1779.1,1],[736,1780.8,2],[348,1781.3,1],[310,1784.0,1],[242,1784.5,1],[828,1784.6,1],[788,1785.2,1],[148,1788.5,1],[538,1790.5,1],[571,1790.7,1],[779,1792.7,1],[148,1793.8,1],[693,1794.0,1],[576,1794.2,1],[311,1794.9,1],[308,1802.1,1],[375,1803.7,1],[65,1805.1,1],[629,1805.8,1],[751,1806.2,1],[631,1808.6,1],[853,1808.7,1],[837,1809.4,1],[238,1809.6,1],[426,1810.6,1],[604,1811.2,1],[803,1811.4,2],[629,1811.6,1],[79,1813.0,1],[829,1814.5,1],[716,1814.7,1],[405,1815.1,1],[676,1815.1,1],[803,1815.2,1],[133,1815.5,1],[242,1815.6,1],[133,1816.0,1],[789,1816.4,1],[257,1818.1,2],[788,1818.9,1],[552,1819.4,1],[574,1820.4,1],[310,1820.8,1],[389,1821.1,1],[740,1821.1,1],[575,1822.9,1],[26,1830.0,2],[878,1832.6,1],[716,1833.2,1],[550,1834.0,1],[728,1834.4,1],[242,1835.0,1],[289,1835.3,1],[281,1835.4,1],[511,1836.0,1],[242,1836.1,1],[257,1836.6,1],[600,1836.7,1],[192,1837.1,1],[389,1837.1,1],[344,1837.2,1],[411,1837.3,1],[558,1838.2,2],[575,1839.5,1],[854,1839.6,1],[678,1839.7,1],[268,1840.1,1],[603,1840.4,1],[61,1840.5,1],[616,1840.9,1],[297,1841.1,1],[118,1841.4,1],[411,1841.8,1],[736,1842.1,1],[807,1842.2,1],[87,1845.9,1],[404,1846.7,1],[192,1850.4,1],[433,1852.2,1],[629,1852.7,1],[375,1852.8,1],[389,1853.1,1],[389,1853.4,1],[65,1854.7,1],[308,1855.0,1],[788,1855.1,1],[878,1855.1,1],[853,1855.4,2],[604,1855.8,1],[411,1857.7,1],[84,1857.9,1],[8,1859.7,1],[575,1859.8,1],[522,1860.1,1],[826,1860.3,1],[129,1860.3,1],[786,1860.4,1],[786,1861.0,1],[311,1861.2,1],[716,1861.4,2],[629,1861.5,2],[281,1861.7,1],[819,1862.3,1],[339,1863.0,1],[676,1864.3,1],[317,1864.4,1],[378,1866.1,1],[435,1866.5,1],[192,1866.7,1],[6,1866.9,1],[803,1867.7,1],[878,1868.2,1],[819,1868.2,1],[667,1870.4,1],[97,1870.6,1],[511,1871.6,2],[626,1872.2,1],[872,1876.5,1],[356,1877.7,1],[736,1877.7,1],[79,1878.0,1],[289,1878.2,1],[132,1878.5,1],[511,1879.7,1],[134,1880.3,1],[72,1880.3,1],[375,1880.7,1],[676,1880.8,1],[530,1881.4,1],[79,1881.7,1],[391,1882.7,1],[861,1883.3,1],[230,1883.3,2],[861,1883.9,1],[819,1884.0,1],[819,1884.4,1],[779,1885.6,1],[615,1885.6,1],[297,1885.6,2],[807,1885.9,2],[281,1886.1,1],[287,1886.1,1],[558,1887.1,1],[716,1887.1,1],[558,1887.4,1],[343,1887.6,1],[736,1887.8,1],[511,1888.0,1],[79,1888.2,1],[819,1888.3,1],[188,1888.9,2],[391,1889.5,1],[626,1889.6,1],[788,1889.9,1],[118,1890.2,1],[242,1890.7,1],[132,1891.4,1],[242,1891.7,1],[575,1893.4,1],[446,1894.9,1],[289,1896.0,1],[735,1896.3,1],[391,1901.3,2],[880,1901.4,1],[375,1901.5,1],[118,1902.3,1],[110,1902.3,1],[350,1902.4,3],[75,1903.1,1],[488,1903.3,1],[629,1903.7,1],[118,1904.8,1],[310,1905.0,1],[819,1905.5,1],[389,1905.5,1],[242,1905.7,1],[424,1905.9,1],[65,1906.2,1],[557,1906.5,1],[281,1906.7,1],[547,1907.0,1],[242,1907.3,1],[803,1907.8,1],[843,1908.1,1],[819,1908.7,2],[829,1909.2,1],[727,1909.6,1],[824,1909.8,2],[192,1910.6,1],[184,1910.6,1],[65,1910.7,1],[173,1911.1,1],[375,1911.2,1],[456,1911.2,1],[558,1911.2,1],[280,1911.5,1],[807,1912.1,1],[882,1912.4,1],[84,1912.7,1],[716,1913.4,1],[613,1914.2,1],[242,1916.9,1],[861,1917.0,1],[829,1917.2,1],[391,1917.7,1],[343,1918.6,1],[667,1919.1,1],[391,1919.4,1],[350,1919.8,1],[378,1920.3,1],[280,1920.3,1],[97,1922.3,1],[815,1923.0,1],[423,1923.1,1],[624,1923.4,1],[640,1925.0,1],[132,1925.2,2],[311,1925.4,1],[779,1925.6,1],[280,1926.8,1],[257,1927.1,1],[446,1927.4,1],[884,1927.8,1],[765,1928.0,1],[616,1928.3,2],[884,1928.9,1],[120,1929.4,1],[788,1929.6,1],[242,1930.1,3],[316,1930.8,1],[446,1930.9,1],[538,1930.9,1],[550,1931.2,1],[864,1931.4,1],[257,1931.7,1],[134,1932.6,1],[778,1933.1,1],[796,1933.3,1],[423,1933.5,1],[631,1933.8,3],[716,1935.4,1],[87,1935.7,1],[97,1936.2,1],[118,1937.1,1],[511,1937.2,1],[79,1937.2,1],[562,1937.3,1],[779,1937.5,1],[73,1937.6,1],[523,1938.2,1],[579,1938.5,1],[258,1938.7,1],[242,1939.7,1],[378,1939.7,1],[558,1941.6,1],[389,1941.8,1],[446,1942.4,1],[693,1942.8,1],[579,1943.1,1],[829,1944.0,1],[455,1945.9,1],[572,1947.4,1],[523,1947.8,1],[637,1948.7,1],[788,1949.0,1],[861,1949.1,1],[423,1949.1,1],[819,1949.3,1],[311,1951.5,1],[616,1951.6,1],[378,1951.9,1],[803,1952.9,2],[118,1953.1,1],[192,1954.1,1],[3,1954.4,1],[329,1954.6,1],[258,1954.7,1],[829,1955.2,1],[833,1956.4,2],[242,1956.7,1],[32,1957.5,1],[192,1958.9,2],[558,1959.2,1],[779,1959.5,1],[812,1959.9,1],[192,1960.0,1],[779,1960.0,2],[819,1960.3,1],[242,1960.5,1],[575,1960.7,1],[488,1961.0,1],[558,1961.4,1],[788,1961.6,2],[8,1961.7,1],[684,1961.9,1],[819,1962.8,1],[803,1963.0,1],[834,1963.1,1],[779,1963.2,1],[299,1963.2,1],[531,1963.3,2],[819,1964.4,1],[779,1964.7,2],[736,1964.8,1],[829,1966.4,1],[684,1966.6,1],[552,1967.1,1],[511,1967.3,1],[343,1968.1,1],[872,1968.3,1],[97,1969.8,3],[779,1971.8,1],[828,1972.4,1],[732,1973.7,1],[110,1973.9,1],[861,1974.4,2],[357,1975.8,1],[667,1977.1,1],[807,1977.3,1],[815,1978.2,1],[460,1979.8,1],[806,1979.9,1],[728,1980.0,1],[123,1980.2,1],[493,1980.2,1],[571,1980.9,1],[281,1981.8,1],[356,1982.2,1],[779,1982.7,1],[378,1982.8,3],[329,1983.1,2],[796,1983.2,3],[493,1983.4,1],[803,1983.7,1],[56,1984.7,3],[5,1986.1,2],[523,1986.9,1],[257,1987.1,1],[872,1988.0,1],[637,1989.1,2],[101,1989.3,1],[242,1989.6,1],[850,1989.7,1],[375,1989.8,1],[375,1990.5,1],[862,1990.6,1],[97,1990.8,1],[378,1991.0,1],[829,1991.6,1],[684,1992.6,2],[378,1994.6,1],[531,1998.9,1],[872,1999.1,1],[230,1999.3,2],[416,2001.8,2],[477,2002.3,1],[853,2003.6,1],[791,2003.9,1],[289,2004.7,1],[637,2006.6,1],[446,2006.9,2],[460,2006.9,1],[788,2007.5,1],[684,2007.5,1],[736,2007.8,1],[760,2008.3,1],[579,2009.2,1],[316,2010.8,1],[281,2011.3,1],[493,2011.9,1],[242,2012.0,1],[884,2012.7,1],[726,2012.8,1],[308,2013.1,1],[343,2013.2,1],[533,2013.7,2],[378,2013.9,1],[84,2013.9,1],[828,2015.6,1],[624,2017.6,1],[378,2019.3,1],[389,2019.6,1],[129,2019.8,1],[389,2020.0,1],[217,2021.0,1],[411,2021.5,1],[132,2021.5,1],[118,2021.7,1],[861,2022.5,1],[604,2023.7,1],[364,2023.7,1],[752,2023.7,1],[861,2024.1,1],[833,2024.2,1],[885,2025.2,1],[861,2025.5,1],[97,2025.6,1],[616,2025.6,1],[389,2025.7,1],[677,2025.8,1],[424,2026.0,2],[786,2026.1,1],[834,2026.5,1],[872,2026.6,1],[716,2027.3,1],[302,2027.4,1],[217,2027.5,1],[684,2027.7,1],[571,2027.8,1],[118,2027.9,1],[884,2028.2,1],[664,2028.6,1],[575,2028.7,1],[778,2028.8,1],[316,2029.2,1],[819,2029.3,1],[73,2029.5,1],[511,2029.6,2],[872,2030.0,2],[837,2031.9,1],[412,2032.2,1],[344,2032.3,1],[684,2032.4,1],[875,2032.9,1],[132,2034.4,2],[667,2034.6,1],[789,2034.9,1],[803,2035.0,1],[389,2035.9,1],[259,2037.4,1],[446,2037.5,1],[789,2037.7,1],[3,2038.1,1],[26,2038.1,1],[822,2038.2,1],[740,2038.5,1],[317,2038.5,1],[460,2041.7,1],[26,2043.4,2],[788,2044.9,1],[853,2048.7,1],[796,2050.7,2],[59,2051.1,1],[497,2051.8,1],[678,2053.3,2],[881,2053.4,1],[624,2054.4,1],[736,2054.8,1],[765,2055.1,1],[885,2055.2,1],[735,2055.2,1],[316,2055.2,1],[460,2055.6,1],[477,2056.0,1],[97,2056.4,1],[73,2058.2,1],[65,2059.0,1],[511,2059.7,1],[446,2060.4,1],[779,2061.0,1],[676,2062.0,1],[819,2062.2,1],[882,2062.2,1],[637,2062.4,1],[558,2062.5,1],[192,2062.6,1],[419,2064.1,1],[242,2066.3,1],[541,2071.7,2],[760,2071.7,1],[389,2071.8,1],[443,2072.1,1],[27,2072.2,1],[570,2072.3,1],[444,2074.5,1],[391,2076.3,2],[416,2076.3,1],[375,2077.1,1],[779,2077.2,1],[176,2077.2,1],[134,2077.3,1],[511,2077.8,1],[26,2078.0,1],[760,2078.1,1],[664,2078.2,1],[640,2078.3,1],[885,2078.3,1],[343,2078.7,1],[833,2078.9,1],[752,2079.0,2],[5,2079.1,1],[678,2079.2,1],[446,2079.2,1],[558,2079.8,1],[885,2079.9,1],[535,2080.6,1],[558,2080.8,1],[716,2080.9,1],[562,2080.9,1],[789,2081.1,1],[26,2081.6,1],[803,2082.1,1],[474,2082.3,1],[506,2082.8,1],[97,2083.1,1],[579,2083.3,1],[289,2084.5,1],[571,2084.7,1],[446,2085.5,1],[280,2086.1,1],[97,2086.3,1],[461,2086.5,1],[788,2087.3,1],[123,2095.0,1],[776,2095.1,1],[79,2095.4,1],[311,2096.0,1],[571,2097.0,1],[446,2097.3,1],[59,2097.3,1],[570,2097.6,1],[59,2097.8,2],[803,2097.9,1],[262,2098.2,1],[191,2098.4,2],[134,2099.0,1],[220,2099.0,1],[280,2099.1,1],[558,2099.7,1],[558,2100.6,1],[819,2101.8,1],[446,2102.0,1],[571,2103.1,1],[583,2103.2,1],[411,2104.3,1],[872,2104.8,1],[716,2104.8,1],[544,2104.9,1],[424,2105.2,1],[15,2105.3,1],[191,2105.4,1],[26,2106.0,2],[779,2106.2,1],[872,2106.2,1],[446,2106.9,1],[26,2107.6,1],[411,2108.6,1],[26,2110.3,1],[501,2110.7,1],[132,2111.7,1],[862,2113.8,1],[446,2114.6,1],[511,2117.0,1],[132,2117.3,1],[446,2117.8,1],[760,2118.8,1],[558,2119.2,1],[184,2120.1,1],[375,2120.2,1],[411,2120.2,1],[506,2121.1,1],[132,2121.5,1],[460,2121.6,1],[684,2122.6,1],[258,2123.4,1],[882,2124.9,2],[884,2125.0,2],[745,2126.6,1],[148,2127.1,1],[411,2127.2,1],[30,2128.1,1],[389,2129.0,1],[410,2129.1,1],[488,2129.6,1],[833,2129.8,1],[819,2130.6,1],[460,2130.9,1],[752,2131.8,1],[129,2132.9,1],[411,2133.4,1],[101,2135.2,1],[411,2135.6,1],[881,2136.2,1],[726,2136.3,1],[100,2138.1,1],[32,2139.4,1],[570,2139.6,1],[558,2141.0,1],[242,2141.0,1],[878,2141.1,1],[26,2141.2,2],[631,2141.3,1],[558,2141.8,1],[815,2142.5,1],[288,2143.6,1],[308,2143.6,2],[316,2144.1,1],[308,2144.3,1],[411,2144.9,1],[635,2145.1,1],[289,2145.2,1],[32,2146.1,1],[348,2146.1,1],[350,2146.7,1],[819,2147.4,1],[5,2149.5,1],[631,2149.5,1],[881,2149.5,1],[257,2150.2,1],[477,2150.7,1],[541,2151.0,1],[316,2151.4,1],[875,2151.6,2],[624,2151.7,1],[375,2153.4,1],[411,2153.4,1],[535,2153.8,1],[176,2154.2,1],[572,2154.2,1],[350,2154.8,2],[637,2155.3,1],[97,2155.7,2],[819,2156.0,1],[572,2157.5,1],[375,2158.1,1],[726,2159.5,1],[311,2160.1,1],[389,2160.8,1],[411,2161.8,1],[411,2162.7,1],[97,2162.7,1],[391,2162.9,1],[735,2164.3,1],[257,2165.9,1],[190,2167.8,1],[444,2168.0,1],[488,2168.6,1],[511,2169.2,1],[293,2170.2,1],[846,2170.6,1],[581,2171.0,1],[616,2171.1,1],[338,2171.3,1],[163,2172.1,1],[627,2172.2,1],[803,2172.6,1],[316,2172.6,1],[676,2173.1,1],[134,2173.4,1],[411,2173.5,2],[429,2173.7,1],[26,2174.7,1],[663,2175.5,1],[260,2176.4,1],[411,2177.6,1],[501,2178.2,2],[511,2178.4,1],[790,2178.7,1],[26,2178.8,2],[118,2181.2,1],[850,2182.6,1],[337,2183.3,1],[663,2183.4,1],[423,2187.3,1],[26,2189.1,1],[579,2189.8,1],[571,2190.0,1],[547,2190.5,1],[375,2190.5,1],[15,2191.2,1],[184,2191.2,1],[446,2191.9,1],[343,2192.9,2],[760,2193.9,1],[547,2194.5,1],[535,2194.6,1],[411,2194.7,1],[779,2194.9,1],[631,2195.2,2],[375,2195.3,1],[293,2195.3,2],[727,2195.4,1],[391,2195.5,1],[779,2195.6,1],[637,2195.9,2],[423,2196.1,1],[26,2196.4,1],[779,2196.7,1],[195,2197.3,1],[640,2197.4,1],[736,2198.2,1],[159,2198.9,1],[571,2199.0,1],[26,2199.3,2],[878,2200.3,1],[535,2200.8,1],[188,2201.1,1],[535,2201.5,1],[736,2202.2,1],[221,2202.4,1],[878,2202.5,1],[424,2203.0,2],[446,2203.3,1],[776,2203.4,1],[456,2203.5,1],[26,2203.6,1],[26,2203.9,1],[552,2205.0,1],[779,2205.5,1],[411,2206.0,1],[460,2206.9,1],[423,2209.2,1],[410,2211.2,1],[593,2212.4,1],[719,2212.4,1],[242,2212.9,1],[5,2213.2,1],[488,2213.5,2],[415,2214.0,1],[367,2214.4,1],[221,2215.5,1],[460,2216.2,1],[288,2216.7,1],[763,2217.3,1],[760,2219.0,1],[348,2219.5,1],[807,2220.8,1],[132,2221.1,1],[640,2221.3,2],[791,2221.5,1],[257,2222.3,1],[293,2222.7,1],[779,2222.9,1],[316,2223.1,1],[132,2223.1,1],[411,2223.6,1],[478,2224.2,1],[676,2224.2,1]]};
+
+const EPOCH_MS = Date.parse(DATA.epoch);
+const LATEST_MS = Date.parse(DATA.latest);
+const HOUR_MS = 3600e3;
+const LONDON = "Europe/London";
+
+/* metres per degree at London's latitude — good to ~0.1% across the
+   ~30 km we care about, and it keeps hull/area maths to plain arithmetic */
+const LAT0 = 51.5;
+const M_PER_DEG_LAT = 111132.0;
+const M_PER_DEG_LON = 111320.0 * Math.cos(LAT0 * Math.PI / 180);
+const toXY = (lat, lon) => [lon * M_PER_DEG_LON, lat * M_PER_DEG_LAT];
+
+const map = L.map("map", {
+  center: [51.512, -0.128],
+  zoom: 11,
+  minZoom: 10,
+  maxZoom: 16,
+  maxBounds: [[51.25, -0.60], [51.75, 0.45]],
+  maxBoundsViscosity: 1.0,
+  zoomControl: false,
+  attributionControl: false
+});
+L.control.zoom({ position: "topright" }).addTo(map);   /* topleft is the panel's */
+
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png?key=cb1_2qhj_1_5ac61231d7adf943d9eac87f", {
+  subdomains: "abcd",
+  maxZoom: 16,
+  keepBuffer: 4
+}).addTo(map);
+
+/* panes so the ordering is stable regardless of toggle order */
+map.createPane("cells");   map.getPane("cells").style.zIndex = 380;
+map.createPane("hullp");   map.getPane("hullp").style.zIndex = 390;
+map.createPane("cold");    map.getPane("cold").style.zIndex = 400;
+map.createPane("sights");  map.getPane("sights").style.zIndex = 410;
+
+const layers = {
+  sight: L.layerGroup([], { pane: "sights" }),
+  cold:  L.layerGroup([], { pane: "cold" }),
+  hull:  L.layerGroup([], { pane: "hullp" }),
+  grid:  L.layerGroup([], { pane: "cells" }),
+  zone:  L.layerGroup([], { pane: "hullp" })
+};
+
+/* --- the polling box: the hard edge of what we can see at all --- */
+const Z = DATA.zone;
+L.rectangle([[Z.lat0, Z.lon0], [Z.lat1, Z.lon1]], {
+  pane: "hullp", color: "#6E6E73", weight: 1.5, dashArray: "6 4",
+  fill: false, interactive: false
+}).addTo(layers.zone);
+
+/* ------------------------------- geometry ------------------------------- */
+
+/* Andrew's monotone chain. Returns the hull in input (lat,lon) space. */
+function convexHull(pts) {
+  if (pts.length < 3) return pts.slice();
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) =>
+    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const half = (src) => {
+    const h = [];
+    for (const q of src) {
+      while (h.length >= 2 && cross(h[h.length - 2], h[h.length - 1], q) <= 0) h.pop();
+      h.push(q);
+    }
+    h.pop();
+    return h;
+  };
+  return half(p).concat(half(p.slice().reverse()));
+}
+
+/* shoelace, in km² */
+function areaKm2(ringXY) {
+  let a = 0;
+  for (let i = 0, n = ringXY.length; i < n; i++) {
+    const [x1, y1] = ringXY[i], [x2, y2] = ringXY[(i + 1) % n];
+    a += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(a) / 2 / 1e6;
+}
+
+const CELL_M = 500;
+function occupiedCells(latlons) {
+  const cells = new Map();
+  for (const [lat, lon] of latlons) {
+    const [x, y] = toXY(lat, lon);
+    const key = Math.floor(x / CELL_M) + ":" + Math.floor(y / CELL_M);
+    cells.set(key, (cells.get(key) || 0) + 1);
+  }
+  return cells;
+}
+
+/* ------------------------------- rendering ------------------------------ */
+
+const fmtDate = ms => new Date(ms).toLocaleDateString("en-GB",
+  { timeZone: LONDON, day: "numeric", month: "short", year: "numeric" });
+
+let windowMode = "all";
+
+function hitsInWindow() {
+  if (windowMode === "all") return DATA.hits;
+  const cut = (LATEST_MS - 7 * 24 * HOUR_MS - EPOCH_MS) / HOUR_MS;
+  return DATA.hits.filter(h => h[1] >= cut);
+}
+
+function render() {
+  Object.values(layers).forEach(l => { if (l !== layers.zone) l.clearLayers(); });
+
+  const hits = hitsInWindow();
+
+  /* passes per camera, and the frame count behind them */
+  const perCam = new Map();
+  let frames = 0;
+  for (const [ci, , fr] of hits) {
+    perCam.set(ci, (perCam.get(ci) || 0) + 1);
+    frames += fr;
+  }
+
+  /* --- sighting dots, radius by pass count --- */
+  const pts = [];
+  for (const [ci, n] of perCam) {
+    const c = DATA.cams[ci];
+    pts.push([c[0], c[1]]);
+    const px = Math.min(26, 7 + Math.sqrt(n) * 3.1);
+    L.marker([c[0], c[1]], {
+      pane: "sights",
+      icon: L.divIcon({
+        className: "", iconSize: [px, px], iconAnchor: [px / 2, px / 2],
+        html: `<div class="sight-dot" style="width:${px}px;height:${px}px"></div>`
+      })
+    }).bindPopup(
+      `<div class="pop-name">${c[4]}</div>` +
+      `<div class="pop-line">${n} pass${n === 1 ? "" : "es"} · ${c[0].toFixed(4)}, ${c[1].toFixed(4)}</div>`
+    ).addTo(layers.sight);
+  }
+
+  /* --- cameras we poll that have never seen one --- */
+  let coldCount = 0;
+  DATA.cams.forEach((c, i) => {
+    if (!(c[2] && c[3]) || perCam.has(i)) return;   /* in-zone + available only */
+    coldCount++;
+    L.marker([c[0], c[1]], {
+      pane: "cold",
+      icon: L.divIcon({
+        className: "", iconSize: [7, 7], iconAnchor: [3.5, 3.5],
+        html: '<div class="cold-dot" style="width:7px;height:7px"></div>'
+      })
+    }).bindPopup(
+      `<div class="pop-name">${c[4]}</div><div class="pop-line">Polled, never a confirmed pass</div>`
+    ).addTo(layers.cold);
+  });
+
+  /* --- convex hull --- */
+  let hullArea = 0, hull = [];
+  if (pts.length >= 3) {
+    hull = convexHull(pts);
+    hullArea = areaKm2(hull.map(([la, lo]) => toXY(la, lo)));
+    L.polygon(hull, {
+      pane: "hullp", color: "#E32017", weight: 1.5,
+      fillColor: "#E32017", fillOpacity: 0.06, interactive: false
+    }).addTo(layers.hull);
+  }
+
+  /* --- occupied 500 m cells: the tighter, more honest footprint --- */
+  const cells = occupiedCells(pts);
+  for (const key of cells.keys()) {
+    const [cx, cy] = key.split(":").map(Number);
+    const lat0 = (cy * CELL_M) / M_PER_DEG_LAT, lat1 = ((cy + 1) * CELL_M) / M_PER_DEG_LAT;
+    const lon0 = (cx * CELL_M) / M_PER_DEG_LON, lon1 = ((cx + 1) * CELL_M) / M_PER_DEG_LON;
+    L.rectangle([[lat0, lon0], [lat1, lon1]], {
+      pane: "cells", stroke: false, fillColor: "#000F9F", fillOpacity: 0.16, interactive: false
+    }).addTo(layers.grid);
+  }
+
+  /* --- stats --- */
+  const lats = pts.map(p => p[0]), lons = pts.map(p => p[1]);
+  const spanNS = lats.length ? (Math.max(...lats) - Math.min(...lats)) * M_PER_DEG_LAT / 1000 : 0;
+  const spanEW = lons.length ? (Math.max(...lons) - Math.min(...lons)) * M_PER_DEG_LON / 1000 : 0;
+  const first = hits.length ? EPOCH_MS + hits[0][1] * HOUR_MS : null;
+
+  document.getElementById("stats").innerHTML = [
+    ["Passes", hits.length.toLocaleString("en-GB"), true],
+    ["Cameras hit", `${perCam.size} of ${DATA.polled}`, false],
+    ["Occupied cells", `${cells.size} × 500 m`, false],
+    ["Hull area", `${hullArea.toFixed(1)} km²`, false],
+    ["Extent (E–W × N–S)", `${spanEW.toFixed(1)} × ${spanNS.toFixed(1)} km`, false],
+    ["From", first ? fmtDate(first) : "—", false]
+  ].map(([k, v, big]) =>
+    `<div class="stat${big ? " big" : ""}"><dt>${k}</dt><dd>${v}</dd></div>`
+  ).join("");
+
+  /* --- the caveat, recomputed because it depends on the hull --- */
+  const edge = hullTouchesZone(hull);
+  document.getElementById("caveat").innerHTML =
+    `<strong>Read this before trusting the shape.</strong> We only poll ${DATA.polled} cameras ` +
+    `inside a fixed box, so the footprint can never be larger than the box. ` +
+    (edge.length
+      ? `The hull currently runs up against the <strong>${edge.join(" and ")}</strong> edge of it — ` +
+        `that side is our limit, not necessarily Waymo's.`
+      : `The hull sits clear of every edge, so the boundary is evidenced rather than clipped.`) +
+    ` The ${coldCount} hollow dots are cameras we watch that have never seen one; where they ` +
+    `crowd the hull, the edge is real.`;
+
+  applyLayerVisibility();
+
+  /* frame the footprint once, on first paint — afterwards the view is the user's */
+  if (!framed && pts.length) {
+    framed = true;
+    map.fitBounds(L.latLngBounds(pts).pad(0.12), { animate: false });
+  }
+}
+let framed = false;
+
+/* which sides of the polling box the hull is pressed against (within 1 km) */
+function hullTouchesZone(hull) {
+  if (!hull.length) return [];
+  const TOL_LAT = 1000 / M_PER_DEG_LAT, TOL_LON = 1000 / M_PER_DEG_LON;
+  const lats = hull.map(p => p[0]), lons = hull.map(p => p[1]);
+  const out = [];
+  if (Math.max(...lats) >= Z.lat1 - TOL_LAT) out.push("north");
+  if (Math.min(...lats) <= Z.lat0 + TOL_LAT) out.push("south");
+  if (Math.max(...lons) >= Z.lon1 - TOL_LON) out.push("east");
+  if (Math.min(...lons) <= Z.lon0 + TOL_LON) out.push("west");
+  return out;
+}
+
+/* ------------------------------- controls ------------------------------- */
+
+const boxes = {
+  sight: document.getElementById("l-sight"),
+  grid:  document.getElementById("l-grid"),
+  hull:  document.getElementById("l-hull"),
+  cold:  document.getElementById("l-cold"),
+  zone:  document.getElementById("l-zone")
+};
+
+function applyLayerVisibility() {
+  for (const k in boxes) {
+    if (boxes[k].checked) layers[k].addTo(map);
+    else map.removeLayer(layers[k]);
+  }
+}
+for (const k in boxes) boxes[k].addEventListener("change", applyLayerVisibility);
+
+const btnWeek = document.getElementById("btn-week");
+const btnAll  = document.getElementById("btn-all");
+function setWindow(mode) {
+  windowMode = mode;
+  btnWeek.setAttribute("aria-pressed", String(mode === "week"));
+  btnAll.setAttribute("aria-pressed", String(mode === "all"));
+  render();
+}
+btnWeek.addEventListener("click", () => setWindow("week"));
+btnAll.addEventListener("click", () => setWindow("all"));
+
+/* panel can be folded away on small screens */
+const panel = document.getElementById("panel");
+const restore = document.getElementById("panel-restore");
+panel.addEventListener("dblclick", e => {
+  if (e.target === panel) { panel.hidden = true; restore.hidden = false; }
+});
+restore.addEventListener("click", () => { restore.hidden = true; panel.hidden = false; });
+
+render();
+</script>
+</body>
+</html>

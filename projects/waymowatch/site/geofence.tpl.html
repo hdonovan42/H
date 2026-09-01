@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WaymoNet · Geofence estimate</title>
+<meta name="description" content="Every confirmed Waymo sighting in London since June 2026, with the observed testing footprint — a demo view for estimating Waymo's London geofence." />
+<meta name="robots" content="noindex,nofollow" />
+<link rel="icon" type="image/png" href="assets/favicon.png" />
+<link rel="preconnect" href="https://a.basemaps.cartocdn.com" />
+<link rel="preconnect" href="https://b.basemaps.cartocdn.com" />
+<link rel="preload" href="assets/hammersmith-one-latin.woff2" as="font" type="font/woff2" crossorigin />
+<style>
+/*__LEAFLET_CSS__*/
+</style>
+<style>
+  /* Hammersmith One (latin) — self-hosted, SIL OFL 1.1 (assets/OFL-HammersmithOne.txt) */
+  @font-face {
+    font-family: "Hammersmith One";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url(assets/hammersmith-one-latin.woff2) format("woff2");
+  }
+
+  :root {
+    --paper: #FBFAF7;
+    --ink: #16161F;
+    --blue: #000F9F;
+    --red: #E32017;
+    --grey: #6E6E73;
+    --hairline: #D9D7D0;
+    --display: "Hammersmith One", "Gill Sans", sans-serif;
+    --body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: var(--body);
+    color: var(--ink);
+    background: var(--paper);
+    -webkit-font-smoothing: antialiased;
+  }
+  #map { position: absolute; inset: 0; background: var(--paper); }
+
+  /* --- control panel --- */
+  .panel {
+    position: absolute; z-index: 500;
+    top: 14px; left: 14px; width: 268px;
+    max-height: calc(100% - 28px); overflow-y: auto;
+    background: rgba(251, 250, 247, 0.96);
+    border: 1px solid var(--hairline);
+    padding: 14px 15px 12px;
+    font-size: 12.5px; line-height: 1.45;
+  }
+  .panel h1 {
+    font-family: var(--display); font-weight: 400;
+    font-size: 17px; margin: 0 0 2px; letter-spacing: 0.01em;
+  }
+  .panel .sub { color: var(--grey); font-size: 11.5px; margin: 0 0 11px; }
+  .panel h2 {
+    font-size: 10.5px; letter-spacing: 0.09em; text-transform: uppercase;
+    color: var(--grey); font-weight: 600;
+    margin: 13px 0 6px; padding-top: 10px; border-top: 1px solid var(--hairline);
+  }
+  .panel h2:first-of-type { border-top: 0; padding-top: 0; }
+
+  /* segmented toggle — the headline control */
+  .seg { display: flex; border: 1px solid var(--ink); }
+  .seg button {
+    flex: 1; appearance: none; cursor: pointer;
+    font-family: var(--body); font-size: 12px; font-weight: 600;
+    padding: 7px 4px; border: 0; background: transparent; color: var(--ink);
+    transition: background 120ms ease, color 120ms ease;
+  }
+  .seg button + button { border-left: 1px solid var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+  .seg button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+  /* stats */
+  .stats { margin-top: 11px; }
+  .stat { display: flex; justify-content: space-between; gap: 10px; padding: 2.5px 0; }
+  .stat dt { color: var(--grey); }
+  .stat dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .stat.big dd { font-size: 15px; }
+
+  /* layer checkboxes */
+  .layers label {
+    display: flex; align-items: center; gap: 8px;
+    padding: 3px 0; cursor: pointer;
+  }
+  .layers input { margin: 0; accent-color: var(--blue); flex: none; }
+  .swatch { width: 13px; height: 13px; flex: none; border-radius: 50%; }
+  .sw-sight { background: var(--blue); opacity: 0.75; }
+  .sw-cold  { background: transparent; border: 1.5px solid #C4C2BB; }
+  .sw-hull  { border-radius: 0; background: rgba(227, 32, 23, 0.10); border: 1.5px solid var(--red); }
+  .sw-grid  { border-radius: 0; background: rgba(0, 15, 159, 0.16); border: 1px solid rgba(0,15,159,.45); }
+  .sw-zone  { border-radius: 0; background: transparent; border: 1.5px dashed var(--grey); }
+
+  .note {
+    margin: 11px 0 0; padding-top: 10px; border-top: 1px solid var(--hairline);
+    color: var(--grey); font-size: 11px; line-height: 1.5;
+  }
+  .note strong { color: var(--ink); font-weight: 600; }
+  .note a { color: var(--blue); }
+
+  .panel-toggle {
+    position: absolute; z-index: 500; top: 14px; left: 14px;
+    appearance: none; cursor: pointer;
+    background: rgba(251, 250, 247, 0.96); border: 1px solid var(--hairline);
+    font-family: var(--display); font-size: 13px; color: var(--ink);
+    padding: 7px 11px;
+  }
+
+  /* map marks */
+  .sight-dot {
+    border-radius: 50%;
+    background: rgba(0, 15, 159, 0.34);
+    border: 1.5px solid var(--blue);
+  }
+  .cold-dot { border-radius: 50%; background: transparent; border: 1.5px solid #C4C2BB; }
+
+  .leaflet-container { background: var(--paper); font-family: var(--body); }
+  .leaflet-popup-content-wrapper { border-radius: 2px; }
+  .leaflet-popup-content { margin: 9px 12px; font-size: 12.5px; line-height: 1.45; }
+  .pop-name { font-family: var(--display); font-size: 13.5px; margin-bottom: 2px; }
+  .pop-line { color: var(--grey); font-size: 11.5px; }
+
+  .attrib {
+    position: absolute; z-index: 500; right: 0; bottom: 0;
+    background: rgba(251, 250, 247, 0.9); border-top: 1px solid var(--hairline);
+    border-left: 1px solid var(--hairline);
+    font-size: 10.5px; color: var(--grey); padding: 4px 8px;
+  }
+  .attrib a { color: var(--grey); }
+
+  @media (max-width: 620px) {
+    .panel { width: calc(100% - 28px); max-height: 54%; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<button class="panel-toggle" id="panel-restore" hidden>Controls</button>
+
+<section class="panel" id="panel" aria-label="Geofence controls">
+  <h1>Geofence estimate</h1>
+  <p class="sub">Confirmed Waymo passes · demo</p>
+
+  <h2>Time window</h2>
+  <div class="seg" role="group" aria-label="Time window">
+    <button id="btn-week" aria-pressed="false">Past week</button>
+    <button id="btn-all"  aria-pressed="true">All time</button>
+  </div>
+
+  <dl class="stats" id="stats"></dl>
+
+  <h2>Layers</h2>
+  <div class="layers">
+    <label><input type="checkbox" id="l-sight" checked><span class="swatch sw-sight"></span> Sightings</label>
+    <label><input type="checkbox" id="l-grid"><span class="swatch sw-grid"></span> Occupied cells (500 m)</label>
+    <label><input type="checkbox" id="l-hull" checked><span class="swatch sw-hull"></span> Convex hull</label>
+    <label><input type="checkbox" id="l-cold"><span class="swatch sw-cold"></span> Watched, never hit</label>
+    <label><input type="checkbox" id="l-zone"><span class="swatch sw-zone"></span> Our polling box</label>
+  </div>
+
+  <p class="note" id="caveat"></p>
+</section>
+
+<div class="attrib">
+  Powered by TfL Open Data · &copy; <a href="https://carto.com/attributions">CARTO</a>,
+  &copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>
+</div>
+
+<script src="assets/leaflet.js"></script>
+<script>
+/* ------------------------------------------------------------------ *
+ * WaymoNet geofence demo.
+ *
+ * Every confirmed pass is baked into DATA below at build time (see
+ * site/build_geofence.py) — this page makes no API call, so it is a
+ * frozen snapshot, not the live feed.
+ *
+ * The point of the page: the public map already plots every sighting
+ * ever, but it says nothing about where Waymo *doesn't* go. A footprint
+ * drawn from hits alone is unfalsifiable. So we also plot the cameras we
+ * poll that have never once seen a Waymo — the negative space is what
+ * turns a scatter of dots into a boundary you can argue for.
+ * ------------------------------------------------------------------ */
+const DATA = /*__PAYLOAD__*/;
+
+const EPOCH_MS = Date.parse(DATA.epoch);
+const LATEST_MS = Date.parse(DATA.latest);
+const HOUR_MS = 3600e3;
+const LONDON = "Europe/London";
+
+/* metres per degree at London's latitude — good to ~0.1% across the
+   ~30 km we care about, and it keeps hull/area maths to plain arithmetic */
+const LAT0 = 51.5;
+const M_PER_DEG_LAT = 111132.0;
+const M_PER_DEG_LON = 111320.0 * Math.cos(LAT0 * Math.PI / 180);
+const toXY = (lat, lon) => [lon * M_PER_DEG_LON, lat * M_PER_DEG_LAT];
+
+const map = L.map("map", {
+  center: [51.512, -0.128],
+  zoom: 11,
+  minZoom: 10,
+  maxZoom: 16,
+  maxBounds: [[51.25, -0.60], [51.75, 0.45]],
+  maxBoundsViscosity: 1.0,
+  zoomControl: false,
+  attributionControl: false
+});
+L.control.zoom({ position: "topright" }).addTo(map);   /* topleft is the panel's */
+
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png?key=__CARTO_KEY__", {
+  subdomains: "abcd",
+  maxZoom: 16,
+  keepBuffer: 4
+}).addTo(map);
+
+/* panes so the ordering is stable regardless of toggle order */
+map.createPane("cells");   map.getPane("cells").style.zIndex = 380;
+map.createPane("hullp");   map.getPane("hullp").style.zIndex = 390;
+map.createPane("cold");    map.getPane("cold").style.zIndex = 400;
+map.createPane("sights");  map.getPane("sights").style.zIndex = 410;
+
+const layers = {
+  sight: L.layerGroup([], { pane: "sights" }),
+  cold:  L.layerGroup([], { pane: "cold" }),
+  hull:  L.layerGroup([], { pane: "hullp" }),
+  grid:  L.layerGroup([], { pane: "cells" }),
+  zone:  L.layerGroup([], { pane: "hullp" })
+};
+
+/* --- the polling box: the hard edge of what we can see at all --- */
+const Z = DATA.zone;
+L.rectangle([[Z.lat0, Z.lon0], [Z.lat1, Z.lon1]], {
+  pane: "hullp", color: "#6E6E73", weight: 1.5, dashArray: "6 4",
+  fill: false, interactive: false
+}).addTo(layers.zone);
+
+/* ------------------------------- geometry ------------------------------- */
+
+/* Andrew's monotone chain. Returns the hull in input (lat,lon) space. */
+function convexHull(pts) {
+  if (pts.length < 3) return pts.slice();
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) =>
+    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const half = (src) => {
+    const h = [];
+    for (const q of src) {
+      while (h.length >= 2 && cross(h[h.length - 2], h[h.length - 1], q) <= 0) h.pop();
+      h.push(q);
+    }
+    h.pop();
+    return h;
+  };
+  return half(p).concat(half(p.slice().reverse()));
+}
+
+/* shoelace, in km² */
+function areaKm2(ringXY) {
+  let a = 0;
+  for (let i = 0, n = ringXY.length; i < n; i++) {
+    const [x1, y1] = ringXY[i], [x2, y2] = ringXY[(i + 1) % n];
+    a += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(a) / 2 / 1e6;
+}
+
+const CELL_M = 500;
+function occupiedCells(latlons) {
+  const cells = new Map();
+  for (const [lat, lon] of latlons) {
+    const [x, y] = toXY(lat, lon);
+    const key = Math.floor(x / CELL_M) + ":" + Math.floor(y / CELL_M);
+    cells.set(key, (cells.get(key) || 0) + 1);
+  }
+  return cells;
+}
+
+/* ------------------------------- rendering ------------------------------ */
+
+const fmtDate = ms => new Date(ms).toLocaleDateString("en-GB",
+  { timeZone: LONDON, day: "numeric", month: "short", year: "numeric" });
+
+let windowMode = "all";
+
+function hitsInWindow() {
+  if (windowMode === "all") return DATA.hits;
+  const cut = (LATEST_MS - 7 * 24 * HOUR_MS - EPOCH_MS) / HOUR_MS;
+  return DATA.hits.filter(h => h[1] >= cut);
+}
+
+function render() {
+  Object.values(layers).forEach(l => { if (l !== layers.zone) l.clearLayers(); });
+
+  const hits = hitsInWindow();
+
+  /* passes per camera, and the frame count behind them */
+  const perCam = new Map();
+  let frames = 0;
+  for (const [ci, , fr] of hits) {
+    perCam.set(ci, (perCam.get(ci) || 0) + 1);
+    frames += fr;
+  }
+
+  /* --- sighting dots, radius by pass count --- */
+  const pts = [];
+  for (const [ci, n] of perCam) {
+    const c = DATA.cams[ci];
+    pts.push([c[0], c[1]]);
+    const px = Math.min(26, 7 + Math.sqrt(n) * 3.1);
+    L.marker([c[0], c[1]], {
+      pane: "sights",
+      icon: L.divIcon({
+        className: "", iconSize: [px, px], iconAnchor: [px / 2, px / 2],
+        html: `<div class="sight-dot" style="width:${px}px;height:${px}px"></div>`
+      })
+    }).bindPopup(
+      `<div class="pop-name">${c[4]}</div>` +
+      `<div class="pop-line">${n} pass${n === 1 ? "" : "es"} · ${c[0].toFixed(4)}, ${c[1].toFixed(4)}</div>`
+    ).addTo(layers.sight);
+  }
+
+  /* --- cameras we poll that have never seen one --- */
+  let coldCount = 0;
+  DATA.cams.forEach((c, i) => {
+    if (!(c[2] && c[3]) || perCam.has(i)) return;   /* in-zone + available only */
+    coldCount++;
+    L.marker([c[0], c[1]], {
+      pane: "cold",
+      icon: L.divIcon({
+        className: "", iconSize: [7, 7], iconAnchor: [3.5, 3.5],
+        html: '<div class="cold-dot" style="width:7px;height:7px"></div>'
+      })
+    }).bindPopup(
+      `<div class="pop-name">${c[4]}</div><div class="pop-line">Polled, never a confirmed pass</div>`
+    ).addTo(layers.cold);
+  });
+
+  /* --- convex hull --- */
+  let hullArea = 0, hull = [];
+  if (pts.length >= 3) {
+    hull = convexHull(pts);
+    hullArea = areaKm2(hull.map(([la, lo]) => toXY(la, lo)));
+    L.polygon(hull, {
+      pane: "hullp", color: "#E32017", weight: 1.5,
+      fillColor: "#E32017", fillOpacity: 0.06, interactive: false
+    }).addTo(layers.hull);
+  }
+
+  /* --- occupied 500 m cells: the tighter, more honest footprint --- */
+  const cells = occupiedCells(pts);
+  for (const key of cells.keys()) {
+    const [cx, cy] = key.split(":").map(Number);
+    const lat0 = (cy * CELL_M) / M_PER_DEG_LAT, lat1 = ((cy + 1) * CELL_M) / M_PER_DEG_LAT;
+    const lon0 = (cx * CELL_M) / M_PER_DEG_LON, lon1 = ((cx + 1) * CELL_M) / M_PER_DEG_LON;
+    L.rectangle([[lat0, lon0], [lat1, lon1]], {
+      pane: "cells", stroke: false, fillColor: "#000F9F", fillOpacity: 0.16, interactive: false
+    }).addTo(layers.grid);
+  }
+
+  /* --- stats --- */
+  const lats = pts.map(p => p[0]), lons = pts.map(p => p[1]);
+  const spanNS = lats.length ? (Math.max(...lats) - Math.min(...lats)) * M_PER_DEG_LAT / 1000 : 0;
+  const spanEW = lons.length ? (Math.max(...lons) - Math.min(...lons)) * M_PER_DEG_LON / 1000 : 0;
+  const first = hits.length ? EPOCH_MS + hits[0][1] * HOUR_MS : null;
+
+  document.getElementById("stats").innerHTML = [
+    ["Passes", hits.length.toLocaleString("en-GB"), true],
+    ["Cameras hit", `${perCam.size} of ${DATA.polled}`, false],
+    ["Occupied cells", `${cells.size} × 500 m`, false],
+    ["Hull area", `${hullArea.toFixed(1)} km²`, false],
+    ["Extent (E–W × N–S)", `${spanEW.toFixed(1)} × ${spanNS.toFixed(1)} km`, false],
+    ["From", first ? fmtDate(first) : "—", false]
+  ].map(([k, v, big]) =>
+    `<div class="stat${big ? " big" : ""}"><dt>${k}</dt><dd>${v}</dd></div>`
+  ).join("");
+
+  /* --- the caveat, recomputed because it depends on the hull --- */
+  const edge = hullTouchesZone(hull);
+  document.getElementById("caveat").innerHTML =
+    `<strong>Read this before trusting the shape.</strong> We only poll ${DATA.polled} cameras ` +
+    `inside a fixed box, so the footprint can never be larger than the box. ` +
+    (edge.length
+      ? `The hull currently runs up against the <strong>${edge.join(" and ")}</strong> edge of it — ` +
+        `that side is our limit, not necessarily Waymo's.`
+      : `The hull sits clear of every edge, so the boundary is evidenced rather than clipped.`) +
+    ` The ${coldCount} hollow dots are cameras we watch that have never seen one; where they ` +
+    `crowd the hull, the edge is real.`;
+
+  applyLayerVisibility();
+
+  /* frame the footprint once, on first paint — afterwards the view is the user's */
+  if (!framed && pts.length) {
+    framed = true;
+    map.fitBounds(L.latLngBounds(pts).pad(0.12), { animate: false });
+  }
+}
+let framed = false;
+
+/* which sides of the polling box the hull is pressed against (within 1 km) */
+function hullTouchesZone(hull) {
+  if (!hull.length) return [];
+  const TOL_LAT = 1000 / M_PER_DEG_LAT, TOL_LON = 1000 / M_PER_DEG_LON;
+  const lats = hull.map(p => p[0]), lons = hull.map(p => p[1]);
+  const out = [];
+  if (Math.max(...lats) >= Z.lat1 - TOL_LAT) out.push("north");
+  if (Math.min(...lats) <= Z.lat0 + TOL_LAT) out.push("south");
+  if (Math.max(...lons) >= Z.lon1 - TOL_LON) out.push("east");
+  if (Math.min(...lons) <= Z.lon0 + TOL_LON) out.push("west");
+  return out;
+}
+
+/* ------------------------------- controls ------------------------------- */
+
+const boxes = {
+  sight: document.getElementById("l-sight"),
+  grid:  document.getElementById("l-grid"),
+  hull:  document.getElementById("l-hull"),
+  cold:  document.getElementById("l-cold"),
+  zone:  document.getElementById("l-zone")
+};
+
+function applyLayerVisibility() {
+  for (const k in boxes) {
+    if (boxes[k].checked) layers[k].addTo(map);
+    else map.removeLayer(layers[k]);
+  }
+}
+for (const k in boxes) boxes[k].addEventListener("change", applyLayerVisibility);
+
+const btnWeek = document.getElementById("btn-week");
+const btnAll  = document.getElementById("btn-all");
+function setWindow(mode) {
+  windowMode = mode;
+  btnWeek.setAttribute("aria-pressed", String(mode === "week"));
+  btnAll.setAttribute("aria-pressed", String(mode === "all"));
+  render();
+}
+btnWeek.addEventListener("click", () => setWindow("week"));
+btnAll.addEventListener("click", () => setWindow("all"));
+
+/* panel can be folded away on small screens */
+const panel = document.getElementById("panel");
+const restore = document.getElementById("panel-restore");
+panel.addEventListener("dblclick", e => {
+  if (e.target === panel) { panel.hidden = true; restore.hidden = false; }
+});
+restore.addEventListener("click", () => { restore.hidden = true; panel.hidden = false; });
+
+render();
+</script>
+</body>
+</html>

@@ -1001,7 +1001,11 @@ const AttribControl = L.Control.extend({
 });
 map.addControl(new AttribControl());
 
-L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+/* CARTO Positron raster. The `key` has been required since Aug 2026 — without it CARTO
+   still serves the tile but stamps "API KEY REQUIRED" across it. Public by design (CARTO
+   issue these for static sites); free tier is 5M tiles/month and we run well under 1M.
+   CARTO are retiring raster PNG, so the exit is the London PMTiles extract (see CHANGELOG). */
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png?key=cb1_2qhj_1_5ac61231d7adf943d9eac87f", {
   subdomains: "abcd",
   maxZoom: 16,
   keepBuffer: 4,
