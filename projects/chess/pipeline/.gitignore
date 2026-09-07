@@ -1,0 +1,6 @@
+# The store and its polling state live on vps-hel1, not in the repo.
+# Only derived exports get committed (see the export stage).
+chess.db
+chess.db-wal
+chess.db-shm
+state.json
