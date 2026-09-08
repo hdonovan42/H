@@ -385,6 +385,62 @@ def report(con: sqlite3.Connection) -> None:
         print(f"      {r[7]}  ·  {r[8]} plies  ·  {r[9]}")
 
 
+def _recent(con: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:
+    con.row_factory = sqlite3.Row
+    return list(con.execute(
+        "SELECT * FROM games ORDER BY end_time DESC LIMIT ?", (limit,)))
+
+
+def cmd_list(args) -> int:
+    """Numbered recent games — the numbers are what `show` takes."""
+    rows = _recent(connect(DB_PATH), args.number)
+    if not rows:
+        print("  (store is empty)")
+        return 0
+    for i, r in enumerate(rows, 1):
+        when = datetime.fromtimestamp(r["end_time"], timezone.utc).strftime("%m-%d %H:%M")
+        mark = {"win": "+", "loss": "-", "draw": "="}.get(r["outcome"], "?")
+        print(f"  {i:>3}. {mark} {when}  {r['time_class']:<7} as {r['my_colour']:<5} "
+              f"{r['my_rating']:>4} vs {r['opponent'][:20]:<20} ({r['opp_rating']})")
+        print(f"       {r['opening']}")
+    print(f"\n  `ingest.py show <n>` for the PGN.")
+    return 0
+
+
+def cmd_show(args) -> int:
+    """Print one game: summary, then bare PGN to paste into analysis.html."""
+    con = connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    if args.game.isdigit():
+        rows = _recent(con, int(args.game))
+        if len(rows) < int(args.game):
+            print(f"  ✗ Only {len(rows)} game(s) in the store.", file=sys.stderr)
+            return 1
+        r = rows[int(args.game) - 1]
+    else:
+        r = con.execute("SELECT * FROM games WHERE uuid = ?", (args.game,)).fetchone()
+        if r is None:
+            print(f"  ✗ No game with uuid {args.game}", file=sys.stderr)
+            return 1
+
+    if not args.pgn_only:
+        when = datetime.fromtimestamp(r["end_time"], timezone.utc)
+        print(f"  {when:%Y-%m-%d %H:%M:%S} UTC · {r['time_class']} {r['time_control']}")
+        print(f"  {r['outcome'].upper()} as {r['my_colour']} — {r['termination']}")
+        print(f"  {r['my_rating']} vs {r['opponent']} ({r['opp_rating']})")
+        print(f"  {r['opening']} [{r['eco']}] · {r['ply_count']} plies")
+        print(f"  {r['url']}")
+        spent = con.execute(
+            "SELECT ROUND(AVG(spent_cs)/100.0,2), ROUND(MAX(spent_cs)/100.0,1) "
+            "FROM plies WHERE uuid = ? AND spent_cs IS NOT NULL AND ply % 2 = ?",
+            (r["uuid"], 1 if r["my_colour"] == "white" else 0)).fetchone()
+        if spent and spent[0] is not None:
+            print(f"  your clock: {spent[0]}s/move average, {spent[1]}s longest think")
+        print()
+    print(r["pgn"])
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -400,6 +456,15 @@ def main() -> int:
 
     s = sub.add_parser("status", help="show what the store holds")
     s.set_defaults(func=lambda a: (report(connect(DB_PATH)), 0)[1])
+
+    l = sub.add_parser("list", help="numbered recent games")
+    l.add_argument("-n", "--number", type=int, default=15)
+    l.set_defaults(func=cmd_list)
+
+    w = sub.add_parser("show", help="print one game's PGN (by list number or uuid)")
+    w.add_argument("game", help="list number (1 = most recent) or a game uuid")
+    w.add_argument("--pgn-only", action="store_true", help="omit the summary header")
+    w.set_defaults(func=cmd_show)
 
     args = p.parse_args()
     return args.func(args)
