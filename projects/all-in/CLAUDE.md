@@ -9,6 +9,7 @@ npm install          # Install dependencies
 npm run dev          # Dev server (localhost:5173)
 npm run build        # Production build to dist/
 npm run preview      # Preview production build
+npm run test:transitions  # Simulated week: a page left open must equal a cold load at every transition
 ```
 
 ## Architecture
@@ -36,6 +37,7 @@ npm run preview      # Preview production build
 | `src/utils/marketState.js` | Market hours detection using Alpaca clock |
 | `src/utils/cache.js` | LocalStorage caching (1-hour TTL) |
 | `worker/` | Cloudflare Worker proxy for API calls |
+| `tests/transitions.mjs` | Transition test: mocked worker + fake clock, one page lives through a week |
 
 ## Market State Logic
 
@@ -47,25 +49,38 @@ The `MarketState` enum defines four states:
 
 **Alpaca clock is the authoritative source** for market status. Local time calculation is fallback only.
 
-### Spreadsheet Row Logic
+### Session model — why nothing needs "updating" on a transition
 
-A "today" row in the spreadsheet should only appear when regular trading has occurred:
+Every session-shaped number derives from ONE date, the session the page is showing, never
+from a quote snapshot. Yahoo's quote meta describes whichever session *Yahoo* considers
+current — all pre-market that is yesterday's, so its `previousClose` is two sessions back —
+which is what used to make values stick across the open.
 
-```javascript
-// StockTracker.jsx ~line 559
-const regularHoursToday = currentMarketState.isRegularHours ||
-  currentMarketState.state === MarketState.POST_MARKET;
-const shouldProcessTodayRow = regularHoursToday;
-```
+- `hasTradedToday` / `getSessionDate` (`src/utils/marketState.js`): today once it has traded
+  (clock open, witnessed open, or a daily bar dated today after 09:30), else the latest
+  earlier daily bar. A bar Yahoo dates today before the open is ignored.
+- Spreadsheet rows = daily bars up to the session; today's row is rebuilt from its own 1-min
+  bars + the resolved live price. **Previous close = the row before the session row**, so the
+  1D dotted line, the change figure and the spreadsheet cannot disagree.
+- Day range = the session row. 1D chart = the session's bars only. 6M–5Y end on the session row.
+- ONE loading effect keyed on `(ticker, sessionKey)`, sessionKey = `EST date | market state`:
+  every transition — including midnight and a laptop waking hours later — reloads every dataset.
 
-| Market State | Today Row Shown | Why |
-|--------------|-----------------|-----|
-| PRE_MARKET | No | Regular trading hasn't started |
-| OPEN | Yes | Live trading happening |
-| POST_MARKET | Yes | Regular trading completed |
-| CLOSED | No | Weekend/holiday/overnight |
+| Time | Session shown | Today row |
+|------|---------------|-----------|
+| Pre-market / overnight before 09:30 | previous session | No |
+| Open, post-market, evening after a session | today | Yes |
+| Weekend / holiday | last session | No |
 
-Do NOT rely on Yahoo's `tradingDay` field - it returns today's date during pre-market due to intraday timestamps.
+After the bell Alpaca's clock cannot tell a holiday from a normal close (next_open is tomorrow
+either way), so `getMarketState(clock, { tradedToday })` takes `tradedToday`; without it a
+weekday evening is assumed to be post-market.
+
+Close settle: lock only once Yahoo's `regularMarketTime` reaches the session close (the official
+print) and holds for K reads — never on stability alone. A lock expires when post-market ends.
+
+Do NOT take `tradingDay`, `open`, `previousClose` or day high/low from Yahoo's quote meta — derive
+them from bars. **`npm run test:transitions` must pass after any change to this logic.**
 
 ## Real-Time Price Updates
 
@@ -90,7 +105,6 @@ The `wsAvailable` state tracks WebSocket status. Health check runs every 15s to 
 **Clean up failed attempts immediately.** If an approach doesn't work (e.g., an API field doesn't exist, a method fails), revert ALL changes from that attempt before trying an alternative. Never leave dead code, unused imports, or superfluous additions from failed attempts in the codebase. The user should not need to prompt for cleanup.
 
 ## Known Issues
-- 1D graph sometimes draws incorrectly on market open
 - Could localStorage fill up with many stock searches? (needs try/catch)
 
 ## Current Priorities

@@ -154,7 +154,15 @@ export const fetchYahooQuote = async (symbol, { noCache = false } = {}) => {
 
     const dayHigh = meta.regularMarketDayHigh || quote.high?.[0] || meta.regularMarketPrice;
     const dayLow = meta.regularMarketDayLow || quote.low?.[0] || meta.regularMarketPrice;
-    const dayOpen = meta.regularMarketOpen || quote.open?.[0] || meta.previousClose;
+    // Yahoo omits regularMarketOpen and this series includes pre-market, so bar 0 is the
+    // 04:00 print — the open is the first bar inside the regular session instead.
+    const sessionDay = meta.regularMarketTime ? dayjs.unix(meta.regularMarketTime).tz(EST).format('YYYY-MM-DD') : null;
+    const firstRegular = timestamps.findIndex(t => {
+      const et = dayjs.unix(t).tz(EST);
+      const mins = et.hour() * 60 + et.minute();
+      return et.format('YYYY-MM-DD') === sessionDay && mins >= 9 * 60 + 30 && mins < 16 * 60;
+    });
+    const dayOpen = meta.regularMarketOpen || quote.open?.[firstRegular] || meta.previousClose;
 
     let preMarketPrice = null;
     let postMarketPrice = null;
@@ -182,6 +190,7 @@ export const fetchYahooQuote = async (symbol, { noCache = false } = {}) => {
 
     return {
       regularMarketPrice: meta.regularMarketPrice,
+      regularMarketTime: meta.regularMarketTime,
       previousClose: meta.previousClose,
       open: dayOpen,
       high: dayHigh,
@@ -211,6 +220,7 @@ export const fetchMarketOpenData = async (symbol, opts = {}) => {
 
   return {
     currentPrice: yahooData.regularMarketPrice,
+    regularMarketTime: yahooData.regularMarketTime, // unix s of the last regular print; reaches the close once it is official
     open: yahooData.open,
     high: yahooData.high,
     low: yahooData.low,
@@ -249,6 +259,7 @@ export const fetchMarketClosedData = async (symbol, marketState, opts = {}) => {
 
   return {
     currentPrice: yahooData.regularMarketPrice,
+    regularMarketTime: yahooData.regularMarketTime, // unix s of the last regular print; reaches the close once it is official
     open: yahooData.open,
     high: yahooData.high,
     low: yahooData.low,

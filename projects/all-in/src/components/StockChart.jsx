@@ -20,7 +20,7 @@ const TIMEFRAME_DAYS = {
   'ALL': Infinity
 };
 
-export default function StockChart({ chartData, maxRangeData, intradayData, weeklyData, monthlyData, timeframe, onTimeframeChange, previousClose, livePrice, marketOpen }) {
+export default function StockChart({ chartData, maxRangeData, intradayData, weeklyData, monthlyData, timeframe, onTimeframeChange, previousClose, sessionDate, livePrice, marketOpen }) {
   const svgRef = useRef(null);
   const containerRef = useRef(null);
   const [hoverData, setHoverData] = useState(null);
@@ -100,14 +100,16 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
 
   // Determine which data source to use and slice appropriately
   const visibleData = useMemo(() => {
-    // 1D: 1-min intraday bars, extended in real time with the live price.
-    // During regular hours we append the live tick as a trailing point so the line
-    // keeps moving between Yahoo's minute bars; before the day's first bar arrives we
-    // seed an open-anchored point so a line can still render in the first ~minute.
+    // 1D: the session being shown (`sessionDate`), in 1-min bars, extended in real time
+    // with the live price. Only that session's bars are used — 1D x is time-of-day, so
+    // another day's bars (yesterday's, while today's first minute bar is still on its
+    // way) would overlay it. During regular hours we append the live tick as a trailing
+    // point so the line keeps moving between Yahoo's minute bars; before the day's first
+    // bar arrives we seed an open-anchored point so a line can still render.
     if (visibleDays <= 1) {
-      let base = intradayData?.length
-        ? intradayData
-        : (weeklyData?.length ? sliceByTradingDays(weeklyData, 1) : []);
+      const onSession = d => d.day === sessionDate;
+      let base = intradayData?.filter(onSession) ?? [];
+      if (!base.length) base = weeklyData?.filter(onSession) ?? [];
 
       if (marketOpen && livePrice > 0) {
         const now = dayjs().tz(EST);
@@ -147,7 +149,7 @@ export default function StockChart({ chartData, maxRangeData, intradayData, week
     }
 
     return [];
-  }, [chartData, maxRangeData, intradayData, weeklyData, monthlyData, visibleDays, sliceByTradingDays, livePrice, marketOpen, previousClose]);
+  }, [chartData, maxRangeData, intradayData, weeklyData, monthlyData, visibleDays, sliceByTradingDays, livePrice, marketOpen, previousClose, sessionDate]);
 
   // Intraday x-axis window: normally the full session (9:30-16:00). When data spans
   // < 2 hours, zoom to a 2-hour window anchored at the half-hour at or below the first

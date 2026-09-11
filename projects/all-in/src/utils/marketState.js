@@ -42,8 +42,39 @@ const getLocalMarketState = (now) => {
   return { state, isWeekend, timeInMinutes };
 };
 
+// Did a regular session actually trade today? Alpaca's clock cannot answer this after
+// the bell (on a holiday and after a normal close, next_open is tomorrow either way),
+// so fall back to the data: once the session has started, Yahoo carries a daily bar
+// dated today. `openSeenDate` is the last date the clock reported the market open, so
+// a page that witnessed the session never has to ask. Returns true / false / null.
+export const hasTradedToday = ({ clockData = null, bars = [], openSeenDate = null } = {}) => {
+  const now = dayjs().tz(EST);
+  const today = now.format('YYYY-MM-DD');
+
+  if (clockData?.isOpen || openSeenDate === today) return true;
+  if (now.hour() * 60 + now.minute() < MARKET_OPEN) return false;
+  if (!bars.length) return null; // unknown until the daily bars arrive
+
+  return String(bars[bars.length - 1].date).slice(0, 10) === today;
+};
+
+// The regular session the page is showing: today once it has traded, otherwise the
+// latest completed session in the daily bars. Every session-dependent number hangs off
+// this one date — previous close, day range, today's row, the 1D chart — so none of
+// them can outlive the session it was fetched for. A bar Yahoo dates today before the
+// session has started is premature and ignored.
+export const getSessionDate = ({ bars = [], tradedToday = false } = {}) => {
+  const today = dayjs().tz(EST).format('YYYY-MM-DD');
+  if (tradedToday) return today;
+
+  const earlier = bars.map(b => String(b.date).slice(0, 10)).filter(d => d < today);
+  return earlier.length ? earlier[earlier.length - 1] : null;
+};
+
 // Get market state - uses clock data if provided, otherwise falls back to local calculation
-export const getMarketState = (clockData = null) => {
+// `tradedToday` (see hasTradedToday) resolves post-bell holidays; omit it and a weekday
+// evening is assumed to be a normal post-market, which is right far more often than not.
+export const getMarketState = (clockData = null, { tradedToday = null } = {}) => {
   const now = dayjs().tz(EST);
   const local = getLocalMarketState(now);
 
@@ -65,11 +96,15 @@ export const getMarketState = (clockData = null) => {
   // Use Alpaca clock data for accurate market status
   const { isOpen, nextOpen, nextClose } = clockData;
 
-  // Determine if today is a holiday:
-  // It's a weekday, market not open, and next open is not today
+  // Holiday = a weekday with no session. Before the bell next_open answers exactly.
+  // After it, next_open is tomorrow on a holiday AND after a normal close, so only
+  // `tradedToday` can tell them apart (the old `next_open !== today` test made every
+  // weekday evening a holiday, so POST_MARKET never happened).
   const todayStr = now.format('YYYY-MM-DD');
   const nextOpenStr = nextOpen ? dayjs(nextOpen).tz(EST).format('YYYY-MM-DD') : null;
-  const isHoliday = !local.isWeekend && !isOpen && nextOpenStr !== todayStr;
+  const isHoliday = !local.isWeekend && !isOpen && (local.timeInMinutes < MARKET_OPEN
+    ? nextOpenStr !== todayStr
+    : tradedToday === false);
 
   let state;
 

@@ -301,3 +301,23 @@ positives + candidates?") is what prompted the check.
   arguing from the design. Here their proposal bought ~50 days vs ~25 — but the same query
   proved negatives had already frozen naturally (7,976 in June → 79 in July), so the real win
   was elsewhere. Quantify first; the runway table settled it in one table.
+
+## 2026-09-11 — Fix the class, not the instance: "a page left open must equal a cold load" (All-In)
+Reported: 1D dotted line (previous close) stuck on the wrong price after the open. The user had
+already hand-patched many variants of "something is stale after a state change without a
+refresh" and said so. Root cause of the whole class: session-shaped numbers (previous close,
+open, day range, volume) were **snapshots** of Yahoo's quote meta — which describes whichever
+session *Yahoo* considers current (pre-market: yesterday's, so `previousClose` is two sessions
+back) — and each transition edge refetched a different subset. Fix: derive every such number
+from one session date + bars, and reload everything on every (date | market state) change.
+- Rule: when a user reports one variant of a transition bug, write the invariant test FIRST —
+  fake clock + mocked backend, one page lives through the transitions and is diffed against a
+  cold load at each checkpoint — and run it against `main`. It enumerated 83 failures, the
+  reported one among them, so nothing was left for the user to spot.
+- Rule: never store a derived value that has a natural source in the data. "Previous close" is
+  the row before the session's row; storing it separately is what let it go stale.
+- Rule: "N equal reads = settled" cannot tell a quiet preliminary print from the final one.
+  Look for a field that marks finality (Yahoo `regularMarketTime` reaching the close) and keep
+  the stability test only as a companion. Any lock must expire at the next transition.
+- Rule: model the upstream's quirks adversarially in the mock (lagging open, premature bar,
+  preliminary close) — the fix must not depend on the upstream behaving.

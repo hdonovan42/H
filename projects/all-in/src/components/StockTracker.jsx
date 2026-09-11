@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import StockChart from './StockChart';
 import { WORKER_URL, EST, SETTLE_POLL_INTERVAL_MS, SETTLE_STABLE_K, SETTLE_TIMEOUT_MS, SETTLE_COLD_WINDOW_MIN } from '../utils/config';
-import { dayjs, getMarketState, getTodayEST, MarketState } from '../utils/marketState';
+import { dayjs, getMarketState, getTodayEST, hasTradedToday, getSessionDate, MarketState } from '../utils/marketState';
 import { getCachedData, setCachedData, clearCaches } from '../utils/cache';
-import { fetchPriceData, fetchMarketClock, fetchEarningsDate, backfillLatestClose, parseYahooBars } from '../utils/api';
+import { fetchPriceData, fetchMarketClock, fetchEarningsDate, parseYahooBars } from '../utils/api';
 import { PHASE, determineInitialPhase, isStable, resolvePrice } from '../utils/pricePhase';
 import '../styles/stock-tracker.css';
 
@@ -31,10 +31,10 @@ export default function StockTracker() {
   const [sharesCount, setSharesCount] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [earnings, setEarnings] = useState(null);
-  const [chartCache, setChartCache] = useState({});
   const [currentMarketState, setCurrentMarketState] = useState(getMarketState());
+  // EST date | market state — changes on every session transition (see the monitor below)
+  const [sessionKey, setSessionKey] = useState(() => `${getTodayEST()}|${getMarketState().state}`);
   const [clockData, setClockData] = useState(null);
-  const [clockLoaded, setClockLoaded] = useState(false);
 
   // Close-settle state machine: live → settling → settled (see utils/pricePhase.js).
   // The single source of truth all views read from, so box/spreadsheet/light agree.
@@ -50,7 +50,8 @@ export default function StockTracker() {
   const settleIntervalRef = useRef(null);   // close-settle poll interval id
   const settleStartRef = useRef(0);          // ms timestamp settling began (timeout backstop)
   const settleReadingsRef = useRef([]);      // recent cent-rounded reads for stability test
-  const clockFirstLoadRef = useRef(false);   // gate: fetchStockData only on first clock load
+  const openSeenRef = useRef(null);          // EST date on which Alpaca last reported the market open
+  const sessionCloseRef = useRef(null);      // unix s of that session's close (half-days included)
   const prevIsOpenRef = useRef(null);        // previous Alpaca isOpen, for close-edge detection
   const tickerRef = useRef(ticker);          // current ticker, so in-flight settle polls can bail
   const [wsAvailable, setWsAvailable] = useState(true);
@@ -97,8 +98,11 @@ export default function StockTracker() {
       const clock = await fetchMarketClock();
       if (clock) {
         clockDataRef.current = clock;
+        if (clock.isOpen) {
+          openSeenRef.current = getTodayEST();
+          sessionCloseRef.current = clock.nextClose?.unix() ?? null;
+        }
         setClockData(clock);
-        setClockLoaded(true);
         scheduleTransitionFetch(clock);
       }
     };
@@ -113,25 +117,28 @@ export default function StockTracker() {
     };
   }, []);
 
-  // Market state monitoring - uses clock data for accuracy
+  // Market state + session key, re-derived every second. The key (EST date | state)
+  // changes on every transition — pre→open, open→post, post→closed, midnight, or a
+  // laptop waking hours later — and drives the single data-loading effect below.
   useEffect(() => {
-    const interval = setInterval(() => {
-      const newState = getMarketState(clockData);
-      setCurrentMarketState(prev => {
-        if (prev.state !== newState.state) {
-          return newState;
-        }
-        return prev;
-      });
-    }, 1000); // Check every second for instant state changes
-
+    const tick = () => {
+      const tradedToday = hasTradedToday({ clockData, bars: data, openSeenDate: openSeenRef.current });
+      const newState = getMarketState(clockData, { tradedToday });
+      setCurrentMarketState(prev => (prev.state !== newState.state ? newState : prev));
+      setSessionKey(`${getTodayEST()}|${newState.state}`);
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
-  }, [clockData]);
+  }, [clockData, data]);
 
-  // Main data fetcher
-  const fetchStockData = async (symbol, showLoading = false) => {
+  // Quote + daily bars. The quote supplies only what is not session-shaped: the live
+  // price, extended-hours price, 52-week range and fundamentals. Yahoo's meta describes
+  // whichever session *Yahoo* considers current — all pre-market, that is yesterday's —
+  // so previous close, open, day range and volume are derived from bars instead (see
+  // the session model below) and never snapshotted here.
+  const fetchStockData = async (symbol) => {
     const signal = fetchAbortRef.current?.signal;
-    if (showLoading) setLoading(true);
     const marketState = getMarketState(clockDataRef.current);
 
     try {
@@ -140,47 +147,8 @@ export default function StockTracker() {
 
       if (priceData) {
         setCompanyName(priceData.shortName || symbol);
-      }
-
-      let historicalData = getCachedData(symbol);
-      if (!historicalData) {
-        const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=6mo&interval=1d`, { signal });
-        const barsData = await barsRes.json();
-        if (barsData?.chart?.result?.[0]) {
-          const result = barsData.chart.result[0];
-          const timestamps = result.timestamp;
-          const quote = result.indicators.quote[0];
-          if (timestamps && quote) {
-            const rows = timestamps.map((t, i) => ({
-              date: dayjs.unix(t).tz(EST).format('YYYY-MM-DD'),
-              open: quote.open[i],
-              high: quote.high[i],
-              low: quote.low[i],
-              close: quote.close[i],
-              volume: quote.volume[i] || 0
-            }));
-            historicalData = backfillLatestClose(rows, result.meta)
-              .filter(day => day.close !== null)
-              .sort((a, b) => dayjs(a.date).unix() - dayjs(b.date).unix());
-            setCachedData(symbol, historicalData);
-          }
-        }
-      }
-
-      if (historicalData?.length >= 2 && priceData) {
-        const previousClose = priceData.previousClose || historicalData[historicalData.length - 2].close;
-        const change = priceData.currentPrice - previousClose;
-
         setQuote({
           c: priceData.currentPrice,
-          o: priceData.open,
-          h: priceData.high,
-          l: priceData.low,
-          pc: previousClose,
-          d: change,
-          dp: (change / previousClose) * 100,
-          volume: priceData.volume,
-          tradingDay: priceData.tradingDay,
           extendedHoursPrice: priceData.extendedHoursPrice,
           extendedHoursType: priceData.extendedHoursType,
           fiftyTwoWeekHigh: priceData.fiftyTwoWeekHigh,
@@ -191,6 +159,16 @@ export default function StockTracker() {
 
         if (marketState.usingApi) {
           console.log(`Market: ${marketState.state.toUpperCase()} | ${symbol}: $${priceData.currentPrice.toFixed(2)}${priceData.extendedHoursPrice ? ` | Extended: $${priceData.extendedHoursPrice.toFixed(2)}` : ''}`);
+        }
+      }
+
+      let historicalData = getCachedData(symbol);
+      if (!historicalData) {
+        const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=6mo&interval=1d`, { signal });
+        const result = (await barsRes.json())?.chart?.result?.[0];
+        if (result) {
+          historicalData = parseYahooBars(result).sort((a, b) => (a.date < b.date ? -1 : 1));
+          if (historicalData.length) setCachedData(symbol, historicalData);
         }
       }
 
@@ -250,177 +228,34 @@ export default function StockTracker() {
     }
   }, [isFetchingMore, hasMoreHistory, data, ticker]);
 
-  // Chart data fetcher - fetches 5Y daily data for 1D–5Y zoom
-  const fetchChartData = useCallback(async (symbol) => {
-    const signal = fetchAbortRef.current?.signal;
-    const cacheKey = `${symbol}-5Y`;
+  // Yahoo bars → [{ date: ISO, day: EST 'YYYY-MM-DD', open, high, low, close, volume }].
+  // `day` lets views pick out one session without re-parsing dates on every render.
+  const fetchBars = async (symbol, query) => {
+    const res = await fetch(`${WORKER_URL}/yahoo/${symbol}?${query}`, { signal: fetchAbortRef.current?.signal });
+    const result = (await res.json())?.chart?.result?.[0];
+    const q = result?.indicators?.quote?.[0];
+    if (!result?.timestamp || !q) return null;
+    return result.timestamp.map((t, i) => {
+      const et = dayjs.unix(t).tz(EST);
+      return { date: et.toISOString(), day: et.format('YYYY-MM-DD'), open: q.open[i], high: q.high[i], low: q.low[i], close: q.close[i], volume: q.volume[i] || 0 };
+    }).filter(b => b.close !== null);
+  };
 
-    if (chartCache[cacheKey]) {
-      setChartData(chartCache[cacheKey]);
-      return;
-    }
-
+  const barLoader = (query, setBars) => async (symbol) => {
     try {
-      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=5y&interval=1d`, { signal });
-      const barsData = await barsRes.json();
-
-      if (barsData?.chart?.result?.[0]) {
-        const result = barsData.chart.result[0];
-        const timestamps = result.timestamp;
-        const quote = result.indicators.quote[0];
-        if (timestamps && quote) {
-          const chartBars = timestamps.map((t, i) => ({
-            date: dayjs.unix(t).tz(EST).toISOString(),
-            open: quote.open[i],
-            high: quote.high[i],
-            low: quote.low[i],
-            close: quote.close[i],
-            volume: quote.volume[i] || 0
-          })).filter(b => b.close !== null);
-
-          setChartData(chartBars);
-          setChartCache(prev => ({ ...prev, [cacheKey]: chartBars }));
-        }
-      }
+      const bars = await fetchBars(symbol, query);
+      if (bars) setBars(bars);
     } catch (error) {
-      if (error.name === 'AbortError') return;
-      console.error('Error fetching chart data:', error);
+      if (error.name !== 'AbortError') console.error(`Error fetching bars (${query}):`, error);
     }
-  }, [chartCache]);
+  };
 
-  // Max-range fetcher for ALL view (Yahoo forces monthly intervals)
-  const fetchMaxRangeData = useCallback(async (symbol) => {
-    const signal = fetchAbortRef.current?.signal;
-    const cacheKey = `${symbol}-MAX`;
-
-    if (chartCache[cacheKey]) {
-      setMaxRangeData(chartCache[cacheKey]);
-      return;
-    }
-
-    try {
-      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=max&interval=1mo`, { signal });
-      const barsData = await barsRes.json();
-
-      if (barsData?.chart?.result?.[0]) {
-        const result = barsData.chart.result[0];
-        const timestamps = result.timestamp;
-        const quote = result.indicators.quote[0];
-        if (timestamps && quote) {
-          const bars = timestamps.map((t, i) => ({
-            date: dayjs.unix(t).tz(EST).toISOString(),
-            open: quote.open[i],
-            high: quote.high[i],
-            low: quote.low[i],
-            close: quote.close[i],
-            volume: quote.volume[i] || 0
-          })).filter(b => b.close !== null);
-
-          setMaxRangeData(bars);
-          setChartCache(prev => ({ ...prev, [cacheKey]: bars }));
-        }
-      }
-    } catch (error) {
-      if (error.name === 'AbortError') return;
-      console.error('Error fetching max range data:', error);
-    }
-  }, [chartCache]);
-
-  // Intraday data fetcher for 1D view (1-min intervals)
-  const fetchIntradayData = useCallback(async (symbol) => {
-    const signal = fetchAbortRef.current?.signal;
-    try {
-      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=1d&interval=1m`, { signal });
-      const barsData = await barsRes.json();
-
-      if (barsData?.chart?.result?.[0]) {
-        const result = barsData.chart.result[0];
-        const timestamps = result.timestamp;
-        const quote = result.indicators.quote[0];
-        if (timestamps && quote) {
-          const intradayBars = timestamps.map((t, i) => ({
-            date: dayjs.unix(t).tz(EST).toISOString(),
-            open: quote.open[i],
-            high: quote.high[i],
-            low: quote.low[i],
-            close: quote.close[i],
-            volume: quote.volume[i] || 0
-          })).filter(b => b.close !== null);
-
-          // Collapse to a single trading day — 1D calcX is time-of-day only, so a mixed
-          // yesterday/today payload from Yahoo would overlay both sessions on one axis.
-          const state = getMarketState(clockDataRef.current).state;
-          const sessionToday = state === MarketState.OPEN || state === MarketState.POST_MARKET;
-          const toDate = b => dayjs(b.date).tz(EST).format('YYYY-MM-DD');
-          const cutoff = sessionToday ? getTodayEST() : [...new Set(intradayBars.map(toDate))].sort().pop();
-          setIntradayData(intradayBars.filter(b => toDate(b) === cutoff));
-        }
-      }
-    } catch (error) {
-      if (error.name === 'AbortError') return;
-      console.error('Error fetching intraday data:', error);
-    }
-  }, []);
-
-  // Weekly data fetcher for 1W view (15-min intervals)
-  const fetchWeeklyData = useCallback(async (symbol) => {
-    const signal = fetchAbortRef.current?.signal;
-    try {
-      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=5d&interval=15m`, { signal });
-      const barsData = await barsRes.json();
-
-      if (barsData?.chart?.result?.[0]) {
-        const result = barsData.chart.result[0];
-        const timestamps = result.timestamp;
-        const quote = result.indicators.quote[0];
-        if (timestamps && quote) {
-          const weeklyBars = timestamps.map((t, i) => ({
-            date: dayjs.unix(t).tz(EST).toISOString(),
-            open: quote.open[i],
-            high: quote.high[i],
-            low: quote.low[i],
-            close: quote.close[i],
-            volume: quote.volume[i] || 0
-          })).filter(b => b.close !== null);
-
-          setWeeklyData(weeklyBars);
-        }
-      }
-    } catch (error) {
-      if (error.name === 'AbortError') return;
-      console.error('Error fetching weekly data:', error);
-    }
-  }, []);
-
-  // Monthly data fetcher for 6D-60D view (1-hour intervals)
-  const fetchMonthlyData = useCallback(async (symbol) => {
-    const signal = fetchAbortRef.current?.signal;
-    try {
-      const barsRes = await fetch(`${WORKER_URL}/yahoo/${symbol}?range=60d&interval=1h`, { signal });
-      const barsData = await barsRes.json();
-
-      if (barsData?.chart?.result?.[0]) {
-        const result = barsData.chart.result[0];
-        const timestamps = result.timestamp;
-        const quote = result.indicators.quote[0];
-        if (timestamps && quote) {
-          const monthlyBars = timestamps.map((t, i) => ({
-            date: dayjs.unix(t).tz(EST).toISOString(),
-            open: quote.open[i],
-            high: quote.high[i],
-            low: quote.low[i],
-            close: quote.close[i],
-            volume: quote.volume[i] || 0
-          })).filter(b => b.close !== null);
-
-          setMonthlyData(monthlyBars);
-        }
-      }
-    } catch (error) {
-      if (error.name === 'AbortError') return;
-      console.error('Error fetching monthly data:', error);
-    }
-  }, []);
+  // Chart datasets: 1D (1-min, regular hours only), 1W (15-min), 1M (hourly), 6M–5Y (daily), ALL (monthly)
+  const fetchIntradayData = barLoader('range=1d&interval=1m', setIntradayData);
+  const fetchWeeklyData = barLoader('range=5d&interval=15m', setWeeklyData);
+  const fetchMonthlyData = barLoader('range=60d&interval=1h', setMonthlyData);
+  const fetchChartData = barLoader('range=5y&interval=1d', setChartData);
+  const fetchMaxRangeData = barLoader('range=max&interval=1mo', setMaxRangeData);
 
   // ── Close-settle machine ───────────────────────────────────────────────
   // Stop any running settle poll and clear its reading buffer.
@@ -432,10 +267,16 @@ export default function StockTracker() {
     settleReadingsRef.current = [];
   }, []);
 
-  // Poll the official close (cache-bypassed) until it stabilises, then lock every
+  // Poll the official close (cache-bypassed) until Yahoo reports it, then lock every
   // view to it. Bails if the ticker changes mid-flight; backstop-locks on timeout.
   const startSettlePoll = useCallback((activeTicker) => {
     stopSettlePoll();
+    // Today's close as Alpaca reported it while open; a cold load inside the settle
+    // window never saw the session, so assume the regular 16:00.
+    const witnessed = sessionCloseRef.current;
+    const closeAt = witnessed && openSeenRef.current === getTodayEST()
+      ? witnessed
+      : dayjs.tz(`${getTodayEST()} 16:00`, EST).unix();
     settleStartRef.current = Date.now();
     settleReadingsRef.current = [];
     setSettlingValue(null);
@@ -454,7 +295,11 @@ export default function StockTracker() {
         const reads = [...settleReadingsRef.current, v];
         settleReadingsRef.current = reads;
 
-        if (isStable(reads, SETTLE_STABLE_K)) {
+        // Official = Yahoo's last regular print is stamped at/after the close. A quiet run
+        // of the last continuous-trading print is NOT the close: locking on stability
+        // alone froze a preliminary price all evening while a fresh load showed the real one.
+        const official = pd.regularMarketTime >= closeAt;
+        if (official && isStable(reads, SETTLE_STABLE_K)) {
           console.log(`[settle] ${activeTicker} official close locked at $${v.toFixed(2)} (${reads.length} reads)`);
           setSettledValue(v);
           setPhase(PHASE.SETTLED);
@@ -480,10 +325,7 @@ export default function StockTracker() {
     tickerRef.current = ticker;
     if (fetchAbortRef.current) fetchAbortRef.current.abort();
     fetchAbortRef.current = new AbortController();
-    clearCaches(ticker);
-    setChartCache({});
     lastPriceRef.current = null;
-    clockFirstLoadRef.current = false;
     setHasMoreHistory(true);
     setIsFetchingMore(false);
     setFullHistoryLoaded(false);
@@ -506,34 +348,49 @@ export default function StockTracker() {
     });
     setPhase(initialPhase);
 
-    fetchStockData(ticker, true);
+    setLoading(true);
 
     // Cold load within the post-close window: start settling straight away.
     if (initialPhase === PHASE.SETTLING) startSettlePoll(ticker);
   }, [ticker]);
 
-  // Re-fetch once when clock data first loads (fixes race condition). Gated to the
-  // first load only — the 30s clock refreshes must NOT keep re-pulling and
-  // overwriting quote.c after close (that was the migrating-number bug).
+  // The ONE data-loading path: on ticker change and on every session transition
+  // (sessionKey = EST date | market state, so pre→open, open→post, post→closed,
+  // midnight, and a laptop waking hours later all count). It reloads every dataset;
+  // what the page shows is derived from the data, so nothing transition-specific is
+  // left to keep in sync.
   useEffect(() => {
-    if (clockData && ticker && !clockFirstLoadRef.current) {
-      clockFirstLoadRef.current = true;
-      fetchStockData(ticker);
-    }
-  }, [clockData]);
+    clearCaches(ticker);
+    fetchStockData(ticker);
+    fetchIntradayData(ticker);
+    fetchWeeklyData(ticker);
+    fetchMonthlyData(ticker);
+    fetchChartData(ticker);
+    fetchMaxRangeData(ticker);
 
-  // Detect the genuine market close via Alpaca's isOpen edge (works for regular and
-  // half-days; never false-fires on holidays, where isOpen is never true today). On
-  // close: reconcile the stale cache and settle to the official close.
+    // A settle lock belongs to its own evening: past post-market, show the freshly
+    // loaded quote exactly as a cold load would.
+    if (phase === PHASE.SETTLED && currentMarketState.state !== MarketState.POST_MARKET) {
+      setSettledValue(null);
+      setPhase(PHASE.INERT);
+    }
+  }, [ticker, sessionKey]);
+
+  // The genuine close, via Alpaca's isOpen edge (works for regular and half-days; never
+  // false-fires on holidays, where isOpen is never true): settle to the official close.
+  // The edge only means "the close just happened" if the session was today and we are
+  // inside the settle window — a laptop waking after the bell lands where a cold load
+  // would. The data reload itself comes from the session transition above.
   useEffect(() => {
     if (!clockData) return;
     const prevIsOpen = prevIsOpenRef.current;
     prevIsOpenRef.current = clockData.isOpen;
-    if (prevIsOpen === true && clockData.isOpen === false) {
-      clearCaches(ticker);
-      fetchStockData(ticker);
-      startSettlePoll(ticker);
-    }
+    if (prevIsOpen !== true || clockData.isOpen !== false) return;
+
+    const closedToday = openSeenRef.current === getTodayEST();
+    const minsSinceClose = (dayjs().unix() - (sessionCloseRef.current ?? 0)) / 60;
+    if (closedToday && minsSinceClose <= SETTLE_COLD_WINDOW_MIN) startSettlePoll(ticker);
+    else setPhase(closedToday ? PHASE.SETTLED : PHASE.INERT);
   }, [clockData, ticker]);
 
   // Back to a live regular session — release any settle lock immediately.
@@ -548,13 +405,6 @@ export default function StockTracker() {
 
   // Stop the settle poll on unmount.
   useEffect(() => () => stopSettlePoll(), [stopSettlePoll]);
-
-  useEffect(() => {
-    if (ticker) {
-      fetchChartData(ticker);
-      fetchMaxRangeData(ticker);
-    }
-  }, [ticker, fetchChartData, fetchMaxRangeData]);
 
   // Next earnings date is per-symbol; clear before fetching so a slow
   // response never shows the previous ticker's date.
@@ -674,18 +524,7 @@ export default function StockTracker() {
               const direction = oldPrice === null || newPrice >= oldPrice ? 'up' : 'down';
               lastPriceRef.current = newPrice;
 
-              setQuote(prev => {
-                if (!prev) return prev;
-                const change = newPrice - prev.pc;
-                return {
-                  ...prev,
-                  c: newPrice,
-                  d: change,
-                  dp: (change / prev.pc) * 100,
-                  h: Math.max(prev.h || newPrice, newPrice),
-                  l: Math.min(prev.l || newPrice, newPrice)
-                };
-              });
+              setQuote(prev => (prev ? { ...prev, c: newPrice } : prev));
               setPriceFlash(null);
               requestAnimationFrame(() => setPriceFlash(direction));
             }
@@ -792,26 +631,18 @@ export default function StockTracker() {
     };
   }, [ticker]);
 
-  // Fetch intraday, weekly, and monthly data on load and refresh during market hours
+  // Keep the session's bars fresh while it trades (and while the close settles, so the
+  // final minute lands). Transitions themselves are covered by the session reload.
+  const sessionLive = currentMarketState.isRegularHours || phase === PHASE.SETTLING;
   useEffect(() => {
-    if (!ticker) return;
-
-    // Always fetch on load
-    fetchIntradayData(ticker);
-    fetchWeeklyData(ticker);
-    fetchMonthlyData(ticker);
-
-    // Poll during market hours
-    if (!currentMarketState.isRegularHours) return;
-
+    if (!ticker || !sessionLive) return;
     const interval = setInterval(() => {
       fetchIntradayData(ticker);
       fetchWeeklyData(ticker);
       fetchMonthlyData(ticker);
     }, 60000);
-
     return () => clearInterval(interval);
-  }, [ticker, currentMarketState.state, fetchIntradayData, fetchWeeklyData, fetchMonthlyData]);
+  }, [ticker, sessionLive]);
 
   // Extended hours polling
   useEffect(() => {
@@ -866,19 +697,7 @@ export default function StockTracker() {
         const { data: priceData } = await fetchPriceData(ticker, clockDataRef.current);
 
         if (priceData && priceData.currentPrice) {
-          setQuote(prev => {
-            if (!prev) return prev;
-            const newPrice = priceData.currentPrice;
-            return {
-              ...prev,
-              c: newPrice,
-              d: newPrice - prev.pc,
-              dp: ((newPrice - prev.pc) / prev.pc) * 100,
-              h: Math.max(prev.h || newPrice, newPrice),
-              l: Math.min(prev.l || newPrice, newPrice),
-              volume: priceData.volume || prev.volume
-            };
-          });
+          setQuote(prev => (prev ? { ...prev, c: priceData.currentPrice } : prev));
         }
       } catch (error) {
         console.error('Fallback poll error:', error);
@@ -939,55 +758,48 @@ export default function StockTracker() {
     dataLastClose: data[data.length - 1]?.close
   });
 
-  // Spreadsheet data processing
+  // ── Session model ──────────────────────────────────────────────────────
+  // Everything session-shaped derives from ONE date — the session being shown — plus
+  // the bars, recomputed every render. Nothing is captured at load and then has to be
+  // "updated" on a transition: the previous close is simply the close of the row before
+  // the session's row, so the 1D dotted line, the change figure and the spreadsheet
+  // cannot disagree or go stale.
+  const tradedToday = hasTradedToday({ clockData, bars: data, openSeenDate: openSeenRef.current });
+  const sessionDate = getSessionDate({ bars: data, tradedToday });
+  const isSessionToday = sessionDate === getTodayEST();
+
+  // The session's own regular-hours minute bars (the intraday feed excludes pre/post).
+  const sessionBars = useMemo(
+    () => intradayData.filter(b => b.day === sessionDate),
+    [intradayData, sessionDate]
+  );
+
+  // Spreadsheet rows: daily bars up to the session (a bar Yahoo dates beyond it is
+  // premature), with today's row rebuilt from its minute bars + the resolved live price.
   const processSpreadsheetData = useMemo(() => {
-    const dataWithToday = [...data];
-    const todayEST = getTodayEST();
-    // Show today's row only when regular trading has occurred/is occurring today
-    const regularHoursToday = currentMarketState.isRegularHours ||
-      currentMarketState.state === MarketState.POST_MARKET;
-    const shouldProcessTodayRow = clockLoaded && regularHoursToday;
-
-    const toDateStr = (d) => d ? dayjs(d).format('YYYY-MM-DD') : null;
-    const historicalDataHasToday = toDateStr(data[data.length - 1]?.date) === todayEST;
-
-    if (shouldProcessTodayRow && currentPrice) {
-      if (historicalDataHasToday) {
-        const todayIndex = dataWithToday.findIndex(d => toDateStr(d.date) === todayEST);
-        if (todayIndex !== -1) {
-          dataWithToday[todayIndex] = {
-            ...dataWithToday[todayIndex],
-            open: quote?.o ?? dataWithToday[todayIndex].open,
-            high: quote?.h ?? dataWithToday[todayIndex].high,
-            low: quote?.l ?? dataWithToday[todayIndex].low,
-            close: currentPrice,
-            volume: quote?.volume || dataWithToday[todayIndex].volume,
-          };
-        }
-      } else {
-        dataWithToday.push({
-          date: todayEST,
-          open: quote?.o ?? currentPrice,
-          high: quote?.h ?? currentPrice,
-          low: quote?.l ?? currentPrice,
-          close: currentPrice,
-          volume: quote?.volume || 0,
-        });
-      }
+    const byDate = new Map();
+    for (const row of data) {
+      const date = String(row.date).slice(0, 10);
+      if (!sessionDate || date <= sessionDate) byDate.set(date, { ...row, date });
     }
 
-    // Deduplicate by date — last occurrence wins (resolved-price row overrides stale historical)
-    const seen = new Map();
-    for (const row of dataWithToday) seen.set(toDateStr(row.date), row);
-    const deduped = [...seen.values()].sort((a, b) => dayjs(a.date).unix() - dayjs(b.date).unix());
+    if (isSessionToday && currentPrice) {
+      const bar = byDate.get(sessionDate);
+      const bars = sessionBars.length ? sessionBars : (bar ? [bar] : []);
+      byDate.set(sessionDate, {
+        date: sessionDate,
+        open: bars[0]?.open ?? currentPrice,
+        high: Math.max(currentPrice, ...bars.map(b => b.high ?? currentPrice)),
+        low: Math.min(currentPrice, ...bars.map(b => b.low ?? currentPrice)),
+        close: currentPrice,
+        // Minute bars miss the auction prints the daily bar carries: take whichever is further along
+        volume: Math.max(bar?.volume || 0, sessionBars.reduce((sum, b) => sum + (b.volume || 0), 0)),
+      });
+    }
 
-    const dataWithChange = deduped.map((row, index) => ({
-      ...row,
-      chg: index === 0 ? null : row.close - deduped[index - 1].close
-    }));
-
-    return dataWithChange;
-  }, [data, quote, currentMarketState, clockLoaded, currentPrice]);
+    const rows = [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
+    return rows.map((row, i) => ({ ...row, chg: i === 0 ? null : row.close - rows[i - 1].close }));
+  }, [data, sessionDate, isSessionToday, sessionBars, currentPrice]);
 
   const sortedData = useMemo(() => {
     return [...processSpreadsheetData].sort((a, b) => {
@@ -1001,14 +813,23 @@ export default function StockTracker() {
   const lastTwo = processSpreadsheetData.slice(-2);
   const todayChange = lastTwo.length === 2 ? lastTwo[1].close - lastTwo[0].close : 0;
   const todayChangePercent = lastTwo.length === 2 ? (todayChange / lastTwo[0].close) * 100 : 0;
-  const dayHigh = quote?.h || data[data.length - 1]?.high || 0;
-  const dayLow = quote?.l || data[data.length - 1]?.low || 0;
+  const previousClose = lastTwo.length === 2 ? lastTwo[0].close : null; // the 1D dotted line
+  const sessionRow = lastTwo[lastTwo.length - 1];
+  const dayHigh = sessionRow?.high || 0;
+  const dayLow = sessionRow?.low || 0;
   const recentData = data.slice(-65);
   const avgVolume = recentData.length > 0 ? recentData.reduce((sum, d) => sum + d.volume, 0) / recentData.length : 0;
   const week52High = quote?.fiftyTwoWeekHigh || (data.length > 0 ? Math.max(...data.map(d => d.high)) : 0);
   const week52Low = quote?.fiftyTwoWeekLow || (data.length > 0 ? Math.min(...data.map(d => d.low)) : 0);
   const marketCap = quote?.sharesOutstanding ? (quote.sharesOutstanding * currentPrice) / 1e6 : 0;
   const forwardPE = quote?.forwardPE || 0;
+
+  // 6M–5Y charts end on the session's spreadsheet row, so they move with the live price too.
+  const chartDataLive = useMemo(() => {
+    if (!chartData.length || !sessionDate || sessionRow?.date !== sessionDate) return chartData;
+    const bar = { ...sessionRow, date: dayjs.tz(`${sessionDate} 09:30`, EST).toISOString(), day: sessionDate };
+    return [...chartData.filter(b => b.day < sessionDate), bar];
+  }, [chartData, sessionDate, sessionRow]);
 
   // Handlers
   const handleTickerSubmit = (e) => {
@@ -1126,14 +947,15 @@ export default function StockTracker() {
 
           <div className="chart-wrapper">
             <StockChart
-              chartData={chartData}
+              chartData={chartDataLive}
               maxRangeData={maxRangeData}
               intradayData={intradayData}
               weeklyData={weeklyData}
               monthlyData={monthlyData}
               timeframe={timeframe}
               onTimeframeChange={setTimeframe}
-              previousClose={quote?.pc}
+              previousClose={previousClose}
+              sessionDate={sessionDate}
               livePrice={currentPrice}
               marketOpen={currentMarketState.isRegularHours}
             />

@@ -1,5 +1,56 @@
 # All-In — Changelog
 
+## 2026-09-11 — Session model: market transitions no longer need a refresh
+
+Opening the tracker pre-market left the 1D dotted line (previous close) on the close from two
+sessions back after 09:30. It was one of a family of values that went stale whenever the market
+changed state without a reload; all of them are fixed, and a test now guards the whole class.
+
+### Found and fixed (one root cause)
+- 1D dotted line stuck on the wrong close after the open (reported)
+- Today's row **open** was the 04:00 pre-market print on every load (Yahoo omits `regularMarketOpen`,
+  and the quote series includes pre-market); high/low were yesterday's range unioned with today's
+  ticks after a pre-market load; volume froze at load. Day Range stat stale the same way
+- 1D chart overlaid yesterday's session with today's first tick at the open
+- 6M–5Y charts froze at page load and never showed today's move
+- POST_MARKET was never entered with the Alpaca clock (every weekday evening was classed a
+  holiday), so the post-market price never updated
+- Close settle locked a preliminary print for the whole evening if it held for ~45 s
+- A laptop waking after the close showed "settling…" for up to 15 minutes
+
+### How
+- **One session date** (`getSessionDate` / `hasTradedToday`, `src/utils/marketState.js`). Previous
+  close = the row before the session's row; today's row is rebuilt from its own 1-min bars + the
+  resolved live price; Day Range reads that row; the 1D chart shows only the session's bars; 6M–5Y
+  end on the same row. The quote now supplies only live price, extended-hours price, 52-week range
+  and fundamentals — Yahoo's meta describes *its* current session, which pre-market is yesterday's.
+- **One loading effect** keyed on (ticker, EST date | market state) reloads every dataset on every
+  transition, midnight and wake-from-sleep included. Replaces the first-clock-load refetch, the
+  close-edge refetch and the per-state intraday effect; five copy-pasted bar fetchers became one
+  `fetchBars`; `chartCache` removed.
+- Holiday vs normal close after the bell (indistinguishable from Alpaca's clock) resolved from
+  whether today traded.
+- Settle locks only once Yahoo's `regularMarketTime` reaches the session close (plus 3 equal reads);
+  a lock expires when post-market ends; the close edge settles only for today's close inside the
+  window, otherwise lands where a cold load would.
+
+### Files
+`src/components/StockTracker.jsx`, `src/components/StockChart.jsx`, `src/utils/marketState.js`,
+`src/utils/api.js`, `tests/transitions.mjs` (new), `package.json` (`playwright-core` dev dep,
+`npm run test:transitions`), `CLAUDE.md` (session model section).
+
+### Verified
+- `npm run test:transitions` — mocked worker with Yahoo's quirks (two-back pre-market
+  `previousClose`, 90 s lagging open, premature pre-market bar, preliminary close print), fake
+  clock, UK timezone. One page lives Thu 03:30 → Wed 13:00: pre-market, open, settle, post,
+  overnight, weekend, Labor Day, a ~20 h sleep. **18/18 checkpoints equal a cold load and the
+  model**, two consecutive runs. The same test against the previous code: **83 failures**,
+  including the reported one.
+- Live smoke, production build against the real worker (11 Sep, 13:51 ET): dotted line $363.56 =
+  10 Sep close; today's open $364.14 (was $364.50); 1D line one session; no page errors.
+- Not yet observed: `regularMarketTime` at a real 16:00 close. If Yahoo never stamps 16:00:00, the
+  15-minute backstop still locks the correct value — the amber light just lasts longer.
+
 ## 2026-07-22 — Compare page polish
 
 - Portfolio table gains a **Chg** column next to price: most recent day change, absolute then percent, green/red like the main-page spreadsheet (computed from the live quote, unaffected by manual price overrides)
