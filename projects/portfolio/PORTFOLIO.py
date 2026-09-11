@@ -425,7 +425,14 @@ def execute(action: str, ticker: str, quantity: int, price: Optional[float]) -> 
 
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 
-@click.group(invoke_without_command=True)
+class OrderedGroup(click.Group):
+    """List subcommands in declaration order rather than alphabetically."""
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        return list(self.commands)
+
+
+@click.group(cls=OrderedGroup, invoke_without_command=True)
 @click.pass_context
 def cli(ctx: click.Context) -> None:
     """PORTFOLIO — command-line stock portfolio tracker.
@@ -436,8 +443,7 @@ def cli(ctx: click.Context) -> None:
         portfolio sell AAPL 4 @ 415.50
 
     \b
-    Omit the price and you'll be asked to either use the current market
-    price (shown as a preview) or type your own:
+    If price is left empty, enter interactively (current market price or manual):
         portfolio buy AAPL 10
         -> No price given. [1] at current price ($401.23)  [2] enter price
 
