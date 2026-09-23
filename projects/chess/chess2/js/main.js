@@ -317,6 +317,13 @@ function render() {
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
 const fmt = e => !e ? '' : e.mate !== undefined ? `#${e.mate}`
   : `${e.cp > 0 ? '+' : e.cp < 0 ? '−' : ''}${(Math.abs(e.cp) / 100).toFixed(1)}`;
+// The eval bar's fill: Lichess's winning-chances curve, except that a decided
+// position (a forced mate, or ±10.00 and beyond) fills it completely
+function barWin(e) {
+  const decided = e.mate !== undefined ? Math.sign(e.mate) : Math.abs(e.cp) >= 1000 ? Math.sign(e.cp) : 0;
+  return decided ? 50 + 50 * decided : winPercent(e);
+}
+
 // The eval bar's label: "0.3", "−1.2", "M3"
 const short = e => !e ? '' : e.mate !== undefined ? `M${Math.abs(e.mate)}`
   : `${e.cp < 0 ? '−' : ''}${(Math.abs(e.cp) / 100).toFixed(1)}`;
@@ -330,7 +337,7 @@ function html(el, markup) {
 
 function renderEngine(n, a) {
   const over = facts(n).over, e = a?.lines[0]?.eval ?? n.eval;
-  const win = over === 'checkmate' ? (whiteMoved(n) ? 100 : 0) : e ? winPercent(e) : 50;
+  const win = over === 'checkmate' ? (whiteMoved(n) ? 100 : 0) : e ? barWin(e) : 50;
   const bar = $('.evalbar'), flipped = state.orientation === 'black';
   bar.style.setProperty('--white', `${win}%`);
   bar.classList.toggle('flipped', flipped);

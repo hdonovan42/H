@@ -25,13 +25,16 @@ body {
 
 main {
   display: flex;
-  justify-content: center;
+  justify-content: safe center;  /* start-aligned, not cut off, if it ever overflows */
   align-items: flex-start;
   gap: 20px;
   padding: 16px;
 }
 
 /* ---- Board column ---- */
+
+/* Both columns keep their size: the board never shifts with the engine's text */
+.play, .side { flex: none; }
 
 .play {
   display: grid;
@@ -212,7 +215,8 @@ main {
   border-bottom: 1px solid var(--line);
 }
 .engine .score { min-width: 3.2em; font-size: 20px; font-variant-numeric: tabular-nums; }
-.engine .info { flex: 1; color: var(--muted); font-size: 12px; }
+.engine .score:empty { display: none; }  /* engine off or loading: the message starts at the edge */
+.engine .info { flex: 1; color: var(--muted); font-size: 12px; line-height: 28px; }  /* the score's height: no jump on toggle */
 
 .toggle {
   position: relative;

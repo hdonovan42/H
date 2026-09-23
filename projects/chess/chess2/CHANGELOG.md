@@ -1,5 +1,27 @@
 # chess2 — Changelog
 
+## v1.0.1 — Eval bar, engine-off header, a board that never shifts (2026-09-23)
+
+- **Eval bar fills completely once a game is decided.** A forced mate, or
+  ±10.00 and beyond, now shows as 100% / 0% instead of Lichess's capped 97.5%,
+  which left a sliver of the losing colour on a mate. The curve below that is
+  unchanged, and accuracy and badges keep the capped formula (they must, to
+  match lichess.org). `js/main.js`: `barWin()`.
+- **"Engine off" sits at the start of the header**, not a third of the way in:
+  the empty score no longer reserves its width. The header keeps its height,
+  so toggling doesn't nudge the move list (41 px on and off, measured).
+- **The board can never move with the engine's text.** A flaky drop test (2 of
+  6 runs, CSS zoom only) turned out to be the board shifting sideways between
+  engine updates: when the page overflowed, flexbox shrank the side panel to
+  its content. Both columns are now fixed (`flex: none`) and centring is
+  `safe`; the board holds still (measured) and the drop test passes every run.
+  Normal window sizes never overflowed, so users weren't hit.
+- Tests: a timeout now reports what the page showed (engine line, review
+  progress, errors); the single-threaded fallback test gets a generous ceiling,
+  since one thread is slow when other engines hold every core.
+
+Files: `js/main.js`, `style.css`, `tests/browser.test.js`.
+
 ## v1.0 — A clean rewrite of the analysis board (2026-09-23)
 
 chess2 takes over the board's original address,

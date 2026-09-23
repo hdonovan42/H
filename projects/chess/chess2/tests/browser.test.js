@@ -49,7 +49,13 @@ async function until(page, fn, timeout = 30000, arg) {
   const end = Date.now() + timeout;
   for (;;) {
     try { if (await page.evaluate(fn, arg)) return; } catch { /* navigating */ }
-    if (Date.now() > end) throw new Error(`timed out waiting for ${fn}`);
+    if (Date.now() > end) {
+      const seen = await page.evaluate(() => ({ isolated: self.crossOriginIsolated,
+        engine: document.querySelector('.engine .info')?.textContent, status: document.querySelector('.foot .status')?.textContent,
+        review: document.querySelector('.graph')?.dataset.status, moves: document.querySelectorAll('.moves .move[data-id]').length,
+      })).catch(e => e.message);
+      throw new Error(`timed out waiting for ${fn}; page shows ${JSON.stringify(seen)}; errors ${JSON.stringify(page.errors)}`);
+    }
     await new Promise(r => setTimeout(r, 100));
   }
 }
@@ -219,15 +225,17 @@ test('without cross-origin isolation the single-threaded engine still analyses a
   const page = await context.newPage();
   page.errors = [];
   page.on('pageerror', e => page.errors.push(e.message));
+  page.on('console', m => m.type() === 'error' && page.errors.push(m.text()));
   await page.setRequestInterception(true);
   page.on('request', r => r.url().endsWith('coi-serviceworker.min.js')
     ? r.respond({ status: 200, contentType: 'text/javascript', body: '' }) : r.continue());
   await page.goto(url);
-  await until(page, () => /^Stockfish 19 Lite · depth/.test(document.querySelector('.engine .info').textContent), 30000);
+  // Generous ceilings: one thread is slow when other engines hold every core
+  await until(page, () => /^Stockfish 19 Lite · depth/.test(document.querySelector('.engine .info').textContent), 60000);
   assert.equal(await page.evaluate(() => self.crossOriginIsolated), false);
   await paste(page, '1. e4 e5 2. Nf3 Nc6 3. Bc4 Nd4 4. Nxe5 Qg5 5. Nxf7 Qxg2 6. Rf1 Qxe4+ 7. Be2 Nf3#');
   await until(page, () => document.querySelector('.graph').dataset.status === '' &&
-    document.querySelectorAll('.player .acc').length === 2, 120000);
+    document.querySelectorAll('.player .acc').length === 2, 300000);
   await page.keyboard.press('End');
   await frame(page);
   assert.equal(await page.$eval('.engine .score', el => el.textContent), '0-1');
