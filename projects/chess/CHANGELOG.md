@@ -1,5 +1,12 @@
 # Chess Analysis — Changelog
 
+## Retired to analysisRetro.html (2026-09-23)
+
+This version now lives at https://hjd.ai/projects/chess/analysisRetro.html,
+unchanged. `analysis.html` serves its rewrite, chess2 (`chess2/` in this folder), so the
+Lichess extension and every existing link open the new board.
+`tests/graph-smoke.js` now loads `analysisRetro.html`.
+
 ## v2.9.1 — Fix graph crash introduced by v2.9 (2026-07-13)
 
 User-reported: every graph run died with the "Graph analysis failed. Please

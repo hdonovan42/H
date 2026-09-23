@@ -41,7 +41,7 @@ const MIME = {
 
 const server = http.createServer((req, res) => {
   const urlPath = decodeURIComponent(req.url.split('?')[0]);
-  const file = path.join(ROOT, urlPath === '/' ? 'analysis.html' : urlPath);
+  const file = path.join(ROOT, urlPath === '/' ? 'analysisRetro.html' : urlPath);
   if (!file.startsWith(ROOT)) { res.writeHead(403); return res.end(); }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); return res.end(); }
@@ -68,7 +68,7 @@ const PGN = '1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. b4 Bxb4 5. c3 Ba5 6. d4 exd4 ' +
   page.on('dialog', async d => { dialogs.push(d.message()); await d.dismiss(); });
   page.on('pageerror', e => pageErrors.push(String(e.message || e)));
 
-  await page.goto(`http://localhost:${PORT}/analysis.html`, { waitUntil: 'networkidle2', timeout: 60000 });
+  await page.goto(`http://localhost:${PORT}/analysisRetro.html`, { waitUntil: 'networkidle2', timeout: 60000 });
 
   // coi-serviceworker reloads once on first visit (evaluate throws mid-reload —
   // swallow and retry); AppState is a top-level const, not a window property
