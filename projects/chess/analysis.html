@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chess analysis</title>
+  <!-- chess2 at the analysis board's original address; the first version
+       lives on at analysisRetro.html.
+       GitHub Pages can't send COOP/COEP headers; this service worker adds them
+       (one reload on the first visit) so Stockfish can use threads. It must be
+       the first script, and it only covers this folder, so chess2 and its
+       engine workers live inside it (./chess2/). -->
+  <script src="coi-serviceworker.min.js"></script>
+  <link rel="icon" type="image/png" href="/images/H-favicon.png">
+  <link rel="stylesheet" href="chess2/style.css">
+  <script type="module" src="chess2/js/main.js"></script>
+</head>
+<body>
+  <main>
+    <section class="play">
+      <div class="player top"></div>
+      <div class="evalbar"></div>
+      <div class="board"></div>
+      <div class="player bottom"></div>
+    </section>
+    <section class="side">
+      <div class="engine">
+        <header><b class="score"></b><span class="info"></span><button class="toggle" title="Engine on or off (t)"></button></header>
+        <ol class="lines"></ol>
+        <p class="tb"></p>
+      </div>
+      <div class="moves"><p class="opening"></p><div class="list"></div></div>
+      <div class="graph" hidden></div>
+      <form class="load">
+        <textarea rows="1" placeholder="Paste a PGN, FEN or Lichess link" aria-label="Game to load" spellcheck="false"></textarea>
+      </form>
+      <p class="foot"><span class="status" role="status"></span><span class="keys">← → moves · ↑ ↓ start, end · f flip · t engine · space best move · r reset</span></p>
+    </section>
+  </main>
+</body>
+</html>

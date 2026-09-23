@@ -321,3 +321,15 @@ from one session date + bars, and reload everything on every (date | market stat
   the stability test only as a companion. Any lock must expire at the next transition.
 - Rule: model the upstream's quirks adversarially in the mock (lagging open, premature bar,
   preliminary close) — the fix must not depend on the upstream behaving.
+
+## 2026-09-23 — Service-worker scope covers the WORKER's URL, not just the page's (chess2)
+Moved chess2's page to `projects/chess/analysis.html` while its Stockfish files stayed in
+`projects/chess2/`. The page was cross-origin isolated (coi-serviceworker at `chess/`), yet
+every engine worker was refused and the board sat on "Loading Stockfish…" with no error.
+- Rule: coi-serviceworker (any SW) controls only URLs under its own folder, and Chrome
+  matches a dedicated worker to a service worker by the worker script's URL. An isolated
+  page can only start workers whose scripts live under its SW's scope. Keep the page, its
+  code and its workers under one folder; never widen the SW to a parent (it would force
+  COEP on every sibling project).
+- Rule: after moving any page, rerun the end-to-end suite AT THE NEW ADDRESS before
+  claiming it works. Unit tests and "the files are all there" prove nothing here.

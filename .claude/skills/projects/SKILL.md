@@ -28,6 +28,7 @@ Map common aliases to canonical directory names (case-insensitive):
 | `command-centre`, `cc` | `command-centre` | No |
 | `costco`, `costco-tyres`, `tyres` | `costco-tyres` | No |
 | `chess` | `chess` | No |
+| `chess2` | `chess/chess2` | No |
 | `globe` | `globe` | No |
 | `roadtrip` | `roadtrip` | No |
 | `carcompare`, `car-compare` | `carCompare` | No |
@@ -63,7 +64,8 @@ Available projects:
   axiom1       — AXIOM v1 actuator research dashboard (archived)
   cc           — Command Centre agent orchestration dashboard
   costco       — Costco UK Michelin tyre stock checker
-  chess        — Chess project
+  chess        — Chess analysis board (legacy)
+  chess2       — Chess analysis board, rewritten (Stockfish 19, Lichess-exact review)
   globe        — Globe project
   roadtrip     — Road trip project
   carcompare   — Car comparison project

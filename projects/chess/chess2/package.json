@@ -1,0 +1,12 @@
+{
+  "name": "chess2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/lichess.test.js",
+    "test:browser": "node --test tests/browser.test.js"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^24"
+  }
+}
