@@ -9,6 +9,8 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+import chess
+
 import games
 import insights
 import lessons
@@ -30,9 +32,9 @@ def build(data: Path, site: Path) -> str:
         lesson = lessons.LESSONS[c["cause"]]
         causes.append({
             **{k: c[k] for k in ("cause", "moves", "games", "per_game", "trend", "detail",
-                                 "in_time_trouble", "fast", "after_opponent_error")},
+                                 "fast", "after_opponent_error")},
             "share": round(100 * c["cost"] * 100 / total, 1),  # % of the win chances costly moves gave away
-            "lesson": {**lesson, "drill": [{"name": n, "url": lessons.training_url(s)} for n, s in lesson["drill"]]},
+            "lesson": _lesson(lesson),
             "examples": [_example(m, by_uuid[m["game"]]) for m in c["examples"]],
         })
         if c["cause"] == "positional":  # not one habit: the kinds, each with its advice
@@ -61,11 +63,14 @@ def build(data: Path, site: Path) -> str:
         "costly": summary["costly"],
         "causes": causes,
         "punish": summary["punish_rate"],
-        "time": {**summary["time"], "lesson": _game_lesson("time")},
+        "time": summary["time"],
+        "scramble": {**summary["scramble"], "share": round(100 * summary["scramble"]["cost"] * 100 / total, 1),
+                     "lesson": _game_lesson("time"),
+                     "examples": [_example(m, by_uuid[m["game"]]) for m in summary["scramble"]["examples"]]},
         "phases": summary["phases"],
         "conversion": {"games": [_conversion(g) for g in summary["conversion"]], "lesson": _game_lesson("conversion")},
         "openings": _openings(played, built["moves"]),
-        "puzzles": _puzzles(built["moves"], by_uuid),
+        "positions": _positions(built["moves"], by_uuid),
         "repeats": [{**r, "colour": by_uuid[r["games"][0]]["me"], "pgn": by_uuid[r["games"][0]]["pgn"],
                      "opponents": [by_uuid[u]["opponent"]["name"] for u in r["games"]]} for r in summary["repeats"]],
         "list": [{"t": g["end_time"], "colour": g["me"], "opponent": g["opponent"], "result": g["result"],
@@ -78,8 +83,14 @@ def build(data: Path, site: Path) -> str:
 
 
 def _game_lesson(key: str) -> dict:
-    lesson = lessons.GAME_LESSONS[key]
-    return {**lesson, "drill": [{"name": n, "url": lessons.training_url(s)} for n, s in lesson["drill"]]}
+    return _lesson(lessons.GAME_LESSONS[key])
+
+
+def _lesson(lesson: dict) -> dict:
+    """A lesson as the page wants it: drill links, and the Lichess puzzle themes
+    ("angles") its in-page puzzles are drawn from."""
+    return {**lesson, "drill": [{"name": n, "url": lessons.training_url(s)} for n, s in lesson["drill"]],
+            "angles": [s for _, s in lesson["drill"] if not s.startswith("https://")] or ["mix"]}
 
 
 def _example(m: dict, game: dict) -> dict:
@@ -87,24 +98,36 @@ def _example(m: dict, game: dict) -> dict:
     return {
         "fen": m["fen"], "san": m["san"], "uci": m["uci"], "best": m["best"], "best_line": m["best_san"],
         "reply_line": m["reply_san"], "drop": m["drop"], "win_before": m["win_before"], "ply": m["ply"],
-        "move_no": (m["ply"] + 1) // 2, "colour": colour, "left": m["left"], "spent": m["spent"],
+        "move_no": (m["ply"] + 1) // 2, "colour": colour, "left": m["left"], "spent": m["spent"], "clock": m["clock"],
         "detail": insights._detail(m), "punish": m["punish"], "w": m["w"],
         "game": {"url": game["url"], "date": game["end_time"], "opponent": game["opponent"],
-                 "time_class": game["time_class"], "result": game["result"], "pgn": game["pgn"]},
+                 "time_class": game["time_class"], "result": game["result"]},  # the pgn is in "list"
     }
 
 
-def _puzzles(moves: list[dict], by_uuid: dict) -> list[dict]:
-    """Moments the player went wrong while one move clearly stood out: their own
-    positions, drilled until the right move is automatic. Newest first."""
+def _positions(moves: list[dict], by_uuid: dict) -> list[dict]:
+    """The player's own positions as puzzles, newest first, each with one clear
+    answer. "find": before a costly move, find the best one. "refute": after it,
+    take the opponent's side and find how to punish it."""
     out = []
     for m in moves:
-        if m.get("cause") and m["only"] and m["uci"] != m["best"]:
-            g = by_uuid[m["game"]]
-            out.append({"id": f"{m['game']}:{m['ply']}", "fen": m["fen"], "best": m["best"], "line": m["best_san"],
-                        "played": m["san"], "cause": m["cause"], "colour": g["me"], "move_no": (m["ply"] + 1) // 2,
-                        "opponent": g["opponent"]["name"], "date": g["end_time"], "url": g["url"]})
-    return sorted(out, key=lambda p: -p["date"])
+        if not m.get("cause"):
+            continue
+        g = by_uuid[m["game"]]
+        other = "black" if g["me"] == "white" else "white"
+        common = {"cause": m["cause"], "scramble": m["scramble"], "played": m["san"], "played_uci": m["uci"],
+                  "drop": m["drop"], "clock": m["clock"], "punish": m["punish"], "ply": m["ply"],
+                  "move_no": (m["ply"] + 1) // 2, "me": g["me"], "opponent": g["opponent"]["name"],
+                  "date": g["end_time"], "url": g["url"]}
+        if m["clear"] or m["only"]:  # a forced mate stands out even when the win% gap is small
+            out.append({**common, "id": f"{m['game']}:{m['ply']}", "kind": "find", "fen": m["fen"], "colour": g["me"],
+                        "best": m["best"], "line": m["best_san"], "last": m["last"], "only": m["only"]})
+        if m["refute"]:
+            b = chess.Board(m["fen"])
+            b.push_uci(m["uci"])
+            out.append({**common, "id": f"{m['game']}:{m['ply']}:refute", "kind": "refute", "fen": b.fen(),
+                        "colour": other, "best": m["refute"], "line": m["reply_san"], "last": m["uci"], "only": False})
+    return sorted(out, key=lambda p: (-p["date"], p["ply"]))
 
 
 def _conversion(g: dict) -> dict:

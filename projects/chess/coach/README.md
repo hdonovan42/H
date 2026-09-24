@@ -11,6 +11,21 @@ The report is a static page, `site/index.html`, reading `site/insights.json`.
 Examples open in the analysis board (`../analysis.html`) at the moment in
 question, and your own positions become spaced-repetition drills on the page.
 
+Each place the winning chances go opens as a topic of its own
+(`#topic=<cause>`). A topic has the idea behind it, what it looked like in
+your games, the habit, puzzles and examples. The puzzles come from two
+sources:
+
+- **Your own positions**, only where one move beat every other by 10% of win
+  chance, so there's one fair answer. Some ask for your best move; others show
+  the move you played and ask you to take your opponent's side and find the
+  punishment.
+- **Lichess puzzles** on the same theme, from real games, fetched live from
+  its public API.
+
+`site/`: `app.js` is the report, `topic.js` a topic, `puzzle.js` the puzzle
+board, and `ui.js` what they share.
+
 ## Dataset
 
 Games since the ingest pipeline's first game, 2026-09-07 17:13 UTC (`SINCE` in
@@ -73,6 +88,11 @@ the opponent's last move. The rules, in order:
    by kind: king safety, a king walk, endgame technique, opening play or a
    middlegame plan.
 
+Costly moves made with 20 seconds or less on the clock (`SCRAMBLE`) are
+counted apart, as time trouble: at that speed any habit breaks down. The
+habits are ranked on the moves made with time to think, and the clock gets its
+own section, with blunder rates by seconds left, in positions still open.
+
 The board is only used for naming. An independent audit, where an agent
 re-judged random samples with the engine, drove four rounds of these rules;
 the latest accuracy is in `tasks/todo.md`.
@@ -96,6 +116,8 @@ games from then on:
 3. Add the printed crontab line. Every 30 minutes it syncs, analyses new games
    with 2 workers at low priority, rebuilds the report and, with `--publish`,
    commits and pushes `site/insights.json` (it needs push access to the repo).
+   The report is gitignored until it's decided to publish it; until then
+   `--publish` stops with git's "paths are ignored" error, so leave it off.
 
 A game takes about 3 minutes of one core, so a dozen games a day is about 40
 minutes of CPU. The games and their analysis stay on the box; only the derived

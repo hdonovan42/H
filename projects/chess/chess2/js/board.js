@@ -5,7 +5,8 @@
 //
 // Moves by drag or by click-click, with mouse, touch or pen, and pieces jump
 // straight to their squares: no animation. The board knows no chess:
-// `dests(square)` supplies legal targets, `onMove(from, to)` hears moves.
+// `dests(square)` supplies legal targets, `onMove(from, to)` hears moves, and
+// `onDropOff(square)`, if given, hears a piece dragged off the board.
 
 const FILES = 'abcdefgh';
 
@@ -21,10 +22,11 @@ export class Board {
   #hover = null;
   #promoting = false;
 
-  constructor(el, { dests, onMove }) {
+  constructor(el, { dests, onMove, onDropOff = null }) {
     this.el = el;
     this.dests = dests;
     this.onMove = onMove;
+    this.onDropOff = onDropOff;
     el.innerHTML = '<div class="marks"></div><div class="pieces"></div>' +
       '<svg class="arrows" viewBox="0 0 8 8"></svg><div class="coords"></div>';
     [this.marksEl, this.piecesEl, this.arrowsEl, this.coordsEl] = el.children;
@@ -79,6 +81,9 @@ export class Board {
       box.firstChild.focus();
     });
   }
+
+  // The square under a screen point, or null off the board
+  squareAt(x, y) { return this.#square({ clientX: x, clientY: y }); }
 
   get #white() { return this.orientation === 'white'; }
 
@@ -156,6 +161,11 @@ export class Board {
     const to = cancelled ? null : this.#square(e);
     if (d.moved && to && to !== d.sq && this.#dests.includes(to)) return this.#play(d.sq, to);
     this.#place(d.el, d.sq);  // back home: a click, or a drop somewhere illegal
+    if (d.moved && !to && !cancelled && this.onDropOff) {
+      this.#fen = null;  // the next set() redraws, whatever it is given
+      this.#select(null);
+      return this.onDropOff(d.sq);
+    }
     if (d.moved ? to !== d.sq : d.again) this.#select(null);
     else this.#drawMarks();
   }

@@ -22,6 +22,9 @@ import phases
 CAUSES = ["allowed_mate", "ignored_threat", "moved_into_attack", "left_undefended", "traded_down",
           "allowed_tactic", "missed_mate", "missed_win", "missed_defence", "positional"]
 COSTLY = 10  # win% lost that makes a move worth explaining (lila's "mistake")
+# Seconds on the clock at or under which a move is a scramble: at that speed any
+# habit breaks down, so these moves are counted apart from the habits
+SCRAMBLE = 20
 
 
 def base_seconds(time_control: str) -> tuple[int, int]:
@@ -69,6 +72,8 @@ def moves_of(game: dict) -> list[dict]:
                 "left": left,
                 "spent": None if left is None or prev_left is None else round(prev_left - left + inc, 1),
                 "left_share": None if left is None else round(left / base, 3),
+                "clock": prev_left,  # on the clock when the move began
+                "scramble": prev_left is not None and prev_left <= SCRAMBLE,
                 "opponent_erred": _opponent_erred(game, i),
                 "only": only_move(evals[i], second[i], me_white),
             }
@@ -83,6 +88,12 @@ def moves_of(game: dict) -> list[dict]:
                 rec["cause"], rec["detail"], rec["punish"] = classify(
                     w, board, move, evals[i], after, best_line, reply_line, threat, last, rec["phase"])
                 rec["w"] = {k: None if v is None else round(v, 1) for k, v in w.items()}
+                # Puzzles need one clear answer: the best move beats every other by 10% or more.
+                # "clear": the player's best move here; "refute": the opponent's punishment after it
+                rec["clear"] = w["second"] is not None and w["best"] - w["second"] >= 10
+                s1 = second[i + 1] if i + 1 < len(second) else None
+                rec["refute"] = best[i + 1] if s1 and after is not None and win(s1[1]) - w1 >= 10 else None
+                rec["last"] = game["moves"][i - 1] if i else None
                 rec["best_san"] = _san_line(board, best_line, 8)
                 rec["reply_san"] = _san_line(_after(board, move), reply_line, 8)
             out.append(rec)
@@ -238,7 +249,7 @@ def build(games: list[dict]) -> dict:
         per_game.append({"uuid": g["uuid"], "url": g["url"], "end_time": g["end_time"], "time_class": g["time_class"],
                          "me": g["me"], "result": g["result"], "how": g["how"], "opening": g["opening"], "eco": g["eco"],
                          "accuracy": round(acc[g["me"]], 1) if acc and acc[g["me"]] is not None else None,
-                         "rating": g["players"][g["me"]]["rating"],
+                         "rating": g["players"][g["me"]]["rating"], "time_control": g["time_control"],
                          "opponent": g["players"]["black" if g["me"] == "white" else "white"],
                          "conversion": conversion(g), "pgn": g["pgn"]})
     return {"games": per_game, "moves": all_moves}
@@ -254,7 +265,7 @@ def summarise(data: dict) -> dict:
     total_cost = sum(m["drop"] for m in moves) / 100
     by = defaultdict(list)
     for m in moves:
-        if m.get("cause"):
+        if m.get("cause") and not m["scramble"]:  # habits, from moves made with time to think
             by[m["cause"]].append(m)
     causes = []
     for c in CAUSES:
@@ -271,7 +282,6 @@ def summarise(data: dict) -> dict:
             "per_game": round(len(ms) / n, 2),
             "trend": [round(t, 3) for t in trend],  # points lost per game, first half vs second half
             "detail": Counter(_detail(m) for m in ms).most_common(6),
-            "in_time_trouble": round(sum(1 for m in ms if (m["left_share"] or 1) < 0.1) / len(ms), 2),
             "fast": round(sum(1 for m in ms if m["spent"] is not None and m["spent"] < 2) / len(ms), 2),
             "after_opponent_error": round(sum(m["opponent_erred"] for m in ms) / len(ms), 2),
             "examples": _examples(ms, games),
@@ -286,6 +296,7 @@ def summarise(data: dict) -> dict:
         "causes": causes,
         "punish_rate": _punish_rate(moves),
         "time": _time_picture(moves, games),
+        "scramble": _scramble(moves, games),
         "phases": _phase_picture(moves, n),
         "conversion": [g for g in games if g["conversion"]],
         "repeats": _repeats(moves),
@@ -314,7 +325,7 @@ def _detail(m: dict) -> str:
     return m["detail"] or m["phase"]
 
 
-def _examples(ms: list[dict], games: list[dict], k: int = 6) -> list[dict]:
+def _examples(ms: list[dict], games: list[dict], k: int = 9) -> list[dict]:
     """The costliest instances, one per game, most recent first among equals."""
     seen, out = set(), []
     end = {g["uuid"]: g["end_time"] for g in games}
@@ -337,18 +348,47 @@ def _punish_rate(moves: list[dict]) -> dict:
 
 
 def _time_picture(moves: list[dict], games: list[dict]) -> dict:
-    """Error rate by clock: does the player fall apart when time runs short?"""
-    buckets = {"plenty (over 30%)": (0.3, 9), "getting short (10–30%)": (0.1, 0.3), "time trouble (under 10%)": (0, 0.1)}
-    out = {}
-    for name, (lo, hi) in buckets.items():
-        ms = [m for m in moves if m["left_share"] is not None and lo <= m["left_share"] < hi]
-        costly = [m for m in ms if m.get("cause")]
-        out[name] = {"moves": len(ms), "costly_rate": round(len(costly) / len(ms), 3) if ms else None}
-    spent = [m["spent"] for m in moves if m["spent"] is not None]
-    fast_costly = [m for m in moves if m.get("cause") and m["spent"] is not None and m["spent"] < 2]
+    """What the clock does to the player: blunders and accuracy by seconds left,
+    in positions still open (20–80%: in a decided one there's little to lose),
+    and where the time goes in the commonest time control."""
+    open_ = [m for m in moves if m["clock"] is not None and 20 <= m["win_before"] <= 80]
+    by_clock = {}
+    for name, lo, hi in (("over 2 min", 120, math.inf), ("1–2 min", 60, 120), ("20–60 s", SCRAMBLE, 60),
+                         (f"{SCRAMBLE} s or less", -1, SCRAMBLE)):
+        ms = [m for m in open_ if lo < m["clock"] <= hi]
+        by_clock[name] = {"moves": len(ms),
+                          "blunder_rate": round(sum(m["judgement"] == "blunder" for m in ms) / len(ms), 3) if ms else None,
+                          "costly_rate": round(sum(1 for m in ms if m.get("cause")) / len(ms), 3) if ms else None,
+                          "accuracy": round(statistics.mean(lichess._move_accuracy(100, 100 - m["drop"]) for m in ms), 1)
+                          if ms else None}
+    tc = Counter(g["time_control"] for g in games).most_common(1)[0][0]
+    control = {g["uuid"] for g in games if g["time_control"] == tc}
+    mine = [m for m in moves if m["game"] in control and m["clock"] is not None]
+    at = []
+    for n in range(10, 60, 10):
+        cs = [m["clock"] for m in mine if (m["ply"] + 1) // 2 == n]
+        if len(cs) >= 20:
+            at.append([n, round(statistics.median(cs))])
+    spent = {p: statistics.median(xs) for p in ("opening", "middlegame", "endgame")
+             if (xs := [m["spent"] for m in mine if m["phase"] == p and m["spent"] is not None])}
     timeouts = [g for g in games if g["result"] == "loss" and g["how"] == "timeout"]
-    return {"by_clock": out, "median_spent": statistics.median(spent) if spent else None,
-            "costly_under_2s": len(fast_costly), "lost_on_time": len(timeouts)}
+    return {"by_clock": by_clock, "control": tc, "clock_at_move": at, "median_spent": spent,
+            "lost_on_time": len(timeouts)}
+
+
+def _scramble(moves: list[dict], games: list[dict]) -> dict:
+    """Costly moves made with SCRAMBLE seconds or less, kept apart from the
+    habits, and how games went once the clock got that low."""
+    ms = [m for m in moves if m.get("cause") and m["scramble"]]
+    reached = {m["game"] for m in moves if m["scramble"]}
+    def score(gs):
+        return round(100 * sum(1 if g["result"] == "win" else 0.5 if g["result"] == "draw" else 0 for g in gs) / len(gs)) if gs else None
+    return {"seconds": SCRAMBLE, "moves": len(ms), "games": len({m["game"] for m in ms}),
+            "cost": round(sum(m["drop"] for m in ms) / 100, 2),
+            "reached": len(reached), "score_reached": score([g for g in games if g["uuid"] in reached]),
+            "score_rest": score([g for g in games if g["uuid"] not in reached]),
+            "detail": Counter(m["cause"] for m in ms).most_common(4),
+            "examples": _examples(ms, games)}
 
 
 def _phase_picture(moves: list[dict], n: int) -> dict:

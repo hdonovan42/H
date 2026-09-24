@@ -11,6 +11,7 @@
 </head>
 <body>
   <main>
+    <div id="report">
     <header>
       <h1>Chess coach</h1>
       <p class="sub" id="sub"></p>
@@ -18,8 +19,12 @@
     <section class="kpis" id="kpis"></section>
 
     <h2>Fix these first</h2>
-    <p class="lede">Ranked by how much of the winning chances your mistakes gave away. Every example is from your own games.</p>
+    <p class="lede" id="top-lede">Ranked by how much of the winning chances your mistakes gave away. Every example is from your own games.</p>
     <div id="top"></div>
+
+    <h2>Short of time</h2>
+    <p class="lede" id="scramble-lede"></p>
+    <div id="scramble"></div>
 
     <h2>Beyond tactics</h2>
     <p class="lede" id="positional-lede"></p>
@@ -31,20 +36,12 @@
 
     <h2>Practise your own positions</h2>
     <p class="lede">Moments from your games where one move clearly stood out and you played something else. Find it. Missed ones come back sooner; solved ones space out.</p>
-    <section class="card practise" id="practise">
-      <div class="board" id="drill"></div>
-      <div class="panel">
-        <p class="count" id="drill-count"></p>
-        <p id="drill-prompt"></p>
-        <p id="drill-result" aria-live="polite"></p>
-        <p class="buttons"><button id="drill-show" type="button">Show answer</button> <button id="drill-next" type="button">Next</button></p>
-      </div>
-    </section>
+    <div id="practise"></div>
 
     <h2>Where the winning chances go</h2>
     <div class="pair">
-      <figure class="card"><figcaption>Share of what your mistakes gave away, by cause</figcaption><div id="causes"></div></figure>
-      <figure class="card"><figcaption>By phase and by clock</figcaption><div id="phases"></div><div id="clock"></div></figure>
+      <figure class="card"><figcaption>Share of what your mistakes gave away, by cause. Each opens with the idea, examples and puzzles.</figcaption><div id="causes"></div></figure>
+      <figure class="card"><figcaption>By phase</figcaption><div id="phases"></div></figure>
     </div>
 
     <h2>Accuracy over time</h2>
@@ -60,6 +57,8 @@
     <details class="card"><summary id="games-sum"></summary><div id="games"></div></details>
 
     <footer id="method"></footer>
+    </div>
+    <div id="topic" hidden></div>
   </main>
   <div id="tip" role="tooltip" hidden></div>
 </body>

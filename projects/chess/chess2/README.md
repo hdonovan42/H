@@ -22,9 +22,29 @@ Paste a PGN, a FEN or a Lichess game link into the box. `?game=<lichess id>`
 
 Drag pieces or click, click; pieces move instantly, with no animation. Keys:
 ← → through the moves, ↑ ↓ to the start or end, `f` flip, `t` engine on/off,
-space plays the engine's move, Esc returns to the game from a side line, `r`
-resets. Press or drag on the graph to seek. Flip the board to your side once
-and your games open that way up from then on.
+space plays the engine's move, Esc returns to the game from a side line, `e`
+sets up a position, `r` resets. Press or drag on the graph to seek. Flip the
+board to your side once and your games open that way up from then on.
+
+**Setting up a position.** `e` (or Set up) opens an editor on the position on
+the board, and the side panel becomes a palette, each colour on its own side
+of the board:
+- **Placing pieces.** Drag a piece in, or pick one (click it, or type its FEN
+  letter: `K Q R B N P` for White, `k q r b n p` for Black) and click or sweep
+  across squares; clicking a square that holds the picked piece takes it off.
+- **Moving and removing.** Pieces on the board drag anywhere; dragged off, or
+  right-clicked, they go.
+- **Keys and controls.** `s` sets the start position, `c` empties the board
+  (all but the kings) and `x` picks the eraser. Side to move and castling are
+  one click. The FEN underneath works both ways, with a Copy button at its
+  right-hand end.
+- **Rules it keeps.** The kings are always on the board, one each: placing a
+  king moves it, and nothing removes or covers one. Pawns never stand on the
+  first or last rank. Analyse (Enter) only goes ahead in a legal position, and
+  says why not otherwise.
+
+Analyse starts from the position, and `#fen=<fen>` opens it again; Esc cancels
+and leaves the game as it was.
 
 ## How it works
 
@@ -32,6 +52,7 @@ and your games open that way up from then on.
 |---|---|
 | `js/main.js` | The move tree, live analysis, game review, drawing |
 | `js/board.js` | The board: pointer input resolved against its on-screen rectangle, so zoom, scroll and transforms can't misplace a drop |
+| `js/editor.js` | Setting up a position: the palette, picking and sweeping, legality, the FEN |
 | `js/engine.js` | One Stockfish worker over UCI: one search at a time, no timeouts |
 | `js/lichess.js` | lila's accuracy and move-judgement maths, ported line for line |
 | `js/graph.js` | The evaluation graph, in winning chances as Lichess draws it |

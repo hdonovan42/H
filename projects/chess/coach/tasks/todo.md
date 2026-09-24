@@ -33,8 +33,11 @@ Constraints from the owner:
       for keeps); threat test over 6 plies and material; in-check threats;
       left_undefended at the square that falls; perpetual needs a repetition;
       promotion-led mates; net-gain naming. Then audit 5.
-- [ ] Clock: judge time pressure in seconds left, not share of the base; keep
+- [x] Clock: judge time pressure in seconds left, not share of the base; keep
       time-scramble moves apart from the habits (owner, 2026-09-24: "≤20 seconds")
+- [x] Topics (owner, 2026-09-24): each cause clickable, with the idea, examples,
+      and puzzles (own positions: find / refute; Lichess by theme); browser-tested
+      (wrong move refused, right move solved, a 5-move Lichess line, the timer, back)
 - [ ] Owner: publish the report data on hjd.ai, or keep it local?
 
 ## Found along the way

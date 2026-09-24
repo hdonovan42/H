@@ -1,50 +1,9 @@
-// The coach report: draws insights.json. Text from games (names, openings)
-// only ever goes in as text; the example boards are chess2's own board.
+// The coach report: draws insights.json. Each place the winning chances go
+// opens as a topic of its own (#topic=<cause>): the idea, examples, puzzles.
 import { Board } from '../../chess2/js/board.js';
-import { Chess } from '../../chess2/vendor/chess.js';
-
-const $ = sel => document.querySelector(sel);
-
-// Element builder: strings become text nodes, never markup
-function h(tag, attrs = {}, ...kids) {
-  const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (v == null || v === false) continue;
-    if (k === 'class') el.className = v;
-    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
-    else el.setAttribute(k, v);
-  }
-  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid instanceof Node ? kid : String(kid));
-  return el;
-}
-const svg = (tag, attrs = {}) => {
-  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
-  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
-  return el;
-};
-
-const day = t => new Date(t * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-const pct = x => `${Math.round(x * 100)}%`;
-const RESULT = { win: 'Won', draw: 'Drew', loss: 'Lost' };
-const SYMBOL = { inaccuracy: '?!', mistake: '?', blunder: '??' };
-const analysisLink = (pgn, ply, colour) =>
-  `../../analysis.html#${new URLSearchParams({ pgn, ply: String(ply), color: colour })}`;
-
-// One shared tooltip; the hovered or focused element supplies [value, label]
-const tipEl = $('#tip');
-function tip(el, content) {
-  const show = e => {
-    const [value, label] = content();
-    tipEl.replaceChildren(h('b', {}, value), label);
-    tipEl.hidden = false;
-    const r = e.clientX != null ? { x: e.clientX, y: e.clientY } : el.getBoundingClientRect();
-    tipEl.style.left = `${Math.min(innerWidth - 290, (r.x ?? r.left) + 12)}px`;
-    tipEl.style.top = `${(r.y ?? r.top) + 14}px`;
-  };
-  el.addEventListener('pointermove', show);
-  el.addEventListener('focus', show);
-  for (const ev of ['pointerleave', 'blur']) el.addEventListener(ev, () => { tipEl.hidden = true; });
-}
+import { $, h, svg, day, pct, cap, RESULT, analysisLink, setGames, bars, example, lessonCols } from './ui.js';
+import { trainer, due, learnt } from './puzzle.js';
+import { topic, clockPicture, ownPuzzle } from './topic.js';
 
 const res = await fetch('insights.json', { cache: 'no-cache' }).catch(() => null);
 if (!res?.ok) {
@@ -54,6 +13,8 @@ if (!res?.ok) {
 }
 const data = await res.json();
 const games = data.accuracy;
+setGames(data.list);
+const more = key => h('p', { class: 'more' }, h('a', { href: `#topic=${key}` }, 'The idea, more examples, and puzzles →'));
 
 // ---- Header and stat tiles ----
 $('#sub').textContent = `${data.player} · ${data.games} games, ${day(data.period[0])} – ${day(data.period[1])} · ` +
@@ -79,17 +40,33 @@ function kpi(label, value, delta) {
 // ---- The top three causes: the concrete ones (positional mistakes get their own section) ----
 for (const c of data.causes.filter(c => c.cause !== 'positional').slice(0, 3)) $('#top').append(causeCard(c));
 
+// ---- Short of time: scramble moves, kept apart from the habits above ----
+(function scramble() {
+  const s = data.scramble, t = data.time, L = s.lesson;
+  $('#top-lede').textContent = `Ranked by how much of the winning chances your mistakes gave away, counting moves made with ` +
+    `more than ${s.seconds} seconds on the clock. Every example is from your own games.`;
+  $('#scramble-lede').textContent = `Moves made with ${s.seconds} seconds or less are counted here, not above.`;
+  $('#scramble').append(h('article', { class: 'card cause' },
+    h('header', {}, h('div', { class: 'share' }, `${Math.round(s.share)}%`),
+      h('div', {}, h('h3', {}, L.title), h('div', { class: 'facts' }, `${s.moves} costly moves in ${s.games} games` +
+        (t.lost_on_time ? ` · ${t.lost_on_time} games lost on time` : '')))),
+    h('p', { class: 'why' }, L.what),
+    clockPicture(data),
+    h('div', { class: 'examples' }, s.examples.slice(0, 3).map(example)),
+    lessonCols(L), more('scramble')));
+})();
+
 (function positional() {
   const p = data.causes.find(c => c.cause === 'positional');
   if (!p) return;
   $('#positional-lede').textContent = `${Math.round(p.share)}% of what your mistakes gave away had no tactic behind it: ` +
     `the position got worse without anything being lost at once. It isn't one habit, so here it is by kind.`;
   $('#positional').append(h('div', { class: 'card' },
-    bars(p.features.map(f => ({ label: f.feature[0].toUpperCase() + f.feature.slice(1), value: f.share,
+    bars(p.features.map(f => ({ label: cap(f.feature), value: f.share,
       tip: `${f.moves} moves` })), v => `${Math.round(v)}%`),
     h('div', { class: 'examples', style: 'margin-top:16px' }, p.features.slice(0, 3).map(f =>
-      h('div', {}, h('h4', { class: 'feature' }, f.feature[0].toUpperCase() + f.feature.slice(1)),
-        h('p', { class: 'why' }, f.advice), example(f.example))))));
+      h('div', {}, h('h4', { class: 'feature' }, cap(f.feature)),
+        h('p', { class: 'why' }, f.advice), example(f.example)))), more('positional')));
 })();
 
 function causeCard(c) {
@@ -101,7 +78,6 @@ function causeCard(c) {
     trend && `${trend} over the period`,
     c.after_opponent_error >= 0.3 && `${pct(c.after_opponent_error)} came straight after your opponent's mistake`,
     c.fast >= 0.2 && `${pct(c.fast)} played in under 2 seconds`,
-    c.in_time_trouble >= 0.2 && `${pct(c.in_time_trouble)} in time trouble`,
   ].filter(Boolean).join(' · ');
   const detail = c.detail.slice(0, 4).map(([k, n]) => `${k} (${n})`).join(', ');
   return h('article', { class: 'card cause' },
@@ -110,34 +86,7 @@ function causeCard(c) {
     h('p', { class: 'what' }, L.what),
     h('p', { class: 'why' }, L.why, detail ? ` Most often: ${detail}.` : ''),
     h('div', { class: 'examples' }, c.examples.slice(0, 3).map(example)),
-    h('div', { class: 'cols' },
-      h('div', {}, h('h4', {}, 'The habit'), h('ol', {}, L.fix.map(f => h('li', {}, f)))),
-      h('div', {}, h('h4', {}, 'Drill it'), h('ul', {},
-        L.drill.map(d => h('li', {}, h('a', { href: d.url, target: '_blank', rel: 'noopener' }, `Lichess puzzles: ${d.name}`))),
-        h('li', {}, 'Open each example below its board and find the better move before looking.')),
-        h('p', { class: 'target' }, h('strong', {}, 'Target: '), L.target))));
-}
-
-function example(x) {
-  const el = h('div', { class: 'board' });
-  const card = h('div', { class: 'example' }, el,
-    h('p', {}, `Move ${x.move_no} vs ${x.game.opponent.name}: you played `,
-      h('strong', {}, x.san), badge(x), ` (−${Math.round(x.drop)}% win chance)`),
-    h('p', {}, h('span', { class: 'key best' }), 'Better: ', h('strong', {}, x.best_line.slice(0, 3).join(' '))),
-    x.reply_line.length ? h('p', { class: 'line' }, h('span', { class: 'key played' }),
-      'After yours: ', x.reply_line.slice(0, 4).join(' ')) : null,
-    h('p', {}, h('a', { href: analysisLink(x.game.pgn, x.ply - 1, x.colour), target: '_blank' }, 'Open in analysis'),
-      ' · ', h('a', { href: x.game.url, target: '_blank', rel: 'noopener' }, 'chess.com'),
-      ` · ${day(x.game.date)}`));
-  const board = new Board(el, { dests: () => [], onMove() {} });
-  board.set({ fen: x.fen, orientation: x.colour,
-    arrows: [[x.best.slice(0, 2), x.best.slice(2, 4), 'best'], [x.uci.slice(0, 2), x.uci.slice(2, 4), 'played']] });
-  return card;
-}
-
-function badge(x) {
-  const j = x.drop >= 15 ? 'blunder' : x.drop >= 10 ? 'mistake' : 'inaccuracy';
-  return h('span', { class: `badge ${j}` }, SYMBOL[j]);
+    lessonCols(L), more(c.cause));
 }
 
 // ---- Repeated mistakes ----
@@ -150,112 +99,42 @@ function badge(x) {
       h('p', {}, `Move ${(r.ply + 1) >> 1}: you played `, h('strong', {}, r.san), ` in ${r.times} games (−${Math.round(r.drop)}% each time)`),
       h('p', {}, h('span', { class: 'key best' }), 'Better: ', h('strong', {}, r.best_line.slice(0, 3).join(' '))),
       h('p', { class: 'line' }, `Against ${r.opponents.join(', ')}`),
-      h('p', {}, h('a', { href: analysisLink(r.pgn, r.ply - 1, r.colour), target: '_blank' }, 'Open in analysis')));
+      h('p', {}, h('a', { href: analysisLink(r.url, r.ply - 1, r.colour), target: '_blank' }, 'Open in analysis')));
     new Board(el, { dests: () => [], onMove() {} }).set({ fen: r.fen, orientation: r.colour,
       arrows: [[r.best.slice(0, 2), r.best.slice(2, 4), 'best'], [r.uci.slice(0, 2), r.uci.slice(2, 4), 'played']] });
     return card;
   })));
 })();
 
-// ---- Practice: the player's own positions, spaced repetition in this browser ----
+// ---- Practice: the positions where one move stood out, spaced repetition in this browser ----
 (function practise() {
-  const DAYS = [0, 1, 3, 7, 21], KEY = 'coach.drills', DAY = 864e5;
-  let srs = {};
-  try { srs = JSON.parse(localStorage.getItem(KEY)) || {}; } catch {}
-  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(srs)); } catch {} };
-  const due = () => data.puzzles.filter(p => !srs[p.id] || srs[p.id].due <= Date.now())
-    .sort((a, b) => (srs[a.id]?.due ?? Infinity) - (srs[b.id]?.due ?? Infinity) || b.date - a.date);
-  let current = null, missed = false;
-  const board = new Board($('#drill'), {
-    dests: sq => current && !current.done ? new Chess(current.fen).moves({ square: sq, verbose: true }).map(m => m.to) : [],
-    async onMove(from, to) {
-      const c = new Chess(current.fen);
-      const promotes = c.get(from)?.type === 'p' && /[18]$/.test(to);
-      const piece = promotes ? await board.promote(to, c.turn()) : '';
-      if (piece === null) return show();
-      const move = c.move({ from, to, promotion: piece || undefined });
-      if (from + to + (piece || '') === current.best) {
-        board.set({ fen: c.fen(), orientation: current.colour, lastMove: [from, to] });
-        finish(true, `Yes: ${move.san}. ${lineText()}`);
-      } else {
-        missed = true;
-        show();
-        result('no', `Not ${move.san}. Try again, or show the answer.`);
-      }
-    },
+  const drills = data.positions.filter(p => p.only && p.kind === 'find');
+  const t = trainer({
+    next: () => { const p = due(drills)[0]; return p ? ownPuzzle(p, 'Find the move that stood out.') : null; },
+    status: () => `${due(drills).length} due · ${learnt(drills)} learnt · ${drills.length} in all`,
   });
-  const lineText = () => current.line.length > 1 ? `The line: ${current.line.join(' ')}.` : '';
-  const result = (cls, text) => $('#drill-result').replaceChildren(h('span', { class: cls }, text));
-  function show() {
-    board.set({ fen: current.fen, orientation: current.colour,
-      arrows: current.done ? [[current.best.slice(0, 2), current.best.slice(2, 4), 'best']] : [] });
-  }
-  function finish(solved, text) {
-    current.done = true;
-    const box = solved && !missed ? Math.min((srs[current.id]?.box ?? 0) + 1, DAYS.length - 1) : 0;
-    srs[current.id] = { box, due: Date.now() + (box ? DAYS[box] : 1) * DAY };
-    save();
-    result(solved && !missed ? 'ok' : 'no', text);
-    count();
-  }
-  function count() {
-    const learnt = data.puzzles.filter(p => (srs[p.id]?.box ?? 0) >= 3).length;
-    $('#drill-count').textContent = `${due().length} due · ${learnt} learnt · ${data.puzzles.length} in all`;
-  }
-  function next() {
-    current = due()[0] ? { ...due()[0] } : null;
-    missed = false;
-    $('#drill-result').replaceChildren();
-    if (!current) {
-      $('#drill-prompt').textContent = 'Nothing due. New positions arrive as new games are analysed.';
-      return count();
-    }
-    $('#drill-prompt').replaceChildren(`${day(current.date)}, vs ${current.opponent}, move ${current.move_no}. You're `,
-      h('strong', {}, current.colour), `. In the game you played ${current.played}. Find the move that stood out.`);
-    show();
-    count();
-  }
-  $('#drill-show').addEventListener('click', () => {
-    if (!current || current.done) return;
-    missed = true;
-    finish(false, `The move: ${current.line[0]}. ${lineText()}`);
-    show();
-  });
-  $('#drill-next').addEventListener('click', next);
-  next();
+  $('#practise').append(t.el);
+  t.load();
 })();
 
-// ---- Bars: causes, phases, clock ----
-function bars(rows, fmt) {
-  const max = Math.max(...rows.map(r => r.value), 1e-9);
-  return h('div', { class: 'bars' }, rows.flatMap(r => {
-    const bar = h('div', { class: 'bar', tabindex: 0, style: `width:${(90 * r.value) / max}%` });
-    tip(bar, () => [fmt(r.value), r.tip]);
-    const track = h('div', { class: 'track' }, bar,
-      h('span', { class: 'val', style: `left:calc(${(90 * r.value) / max}% + 6px)` }, fmt(r.value)));
-    return [h('div', {}, r.label), track];
-  }));
-}
-
-$('#causes').append(bars(data.causes.map(c => ({
-  label: c.lesson.title, value: c.share,
+// ---- Where the winning chances go: by cause (each opens its topic) and by phase ----
+$('#causes').append(bars([...data.causes.map(c => ({
+  label: c.lesson.title, value: c.share, href: `#topic=${c.cause}`,
   tip: `${c.moves} moves in ${c.games} games · ${c.per_game} a game`,
-})), v => `${v.toFixed(1)}%`));
+})), { label: data.scramble.lesson.title, value: data.scramble.share, href: '#topic=scramble',
+  tip: `${data.scramble.moves} moves with ${data.scramble.seconds} s or less on the clock` }].sort((a, b) => b.value - a.value),
+v => `${v.toFixed(1)}%`));
 
 const phaseTotal = Object.values(data.phases).reduce((s, p) => s + p.cost, 0) || 1;
 $('#phases').append(h('p', { class: 'muted' }, 'Share of all win chance given away, by phase'), bars(
   Object.entries(data.phases).map(([p, v]) => ({
-    label: p[0].toUpperCase() + p.slice(1), value: 100 * v.cost / phaseTotal,
+    label: cap(p), value: 100 * v.cost / phaseTotal,
     tip: `${v.costly} costly moves out of ${v.moves}`,
   })), v => `${Math.round(v)}%`));
 
-$('#clock').append(h('p', { class: 'muted', style: 'margin-top:16px' }, 'How often a move was costly, by time left'), bars(
-  Object.entries(data.time.by_clock).filter(([, v]) => v.moves).map(([name, v]) => ({
-    label: name[0].toUpperCase() + name.slice(1), value: 100 * v.costly_rate, tip: `${v.moves} moves`,
-  })), v => `${v.toFixed(0)}%`));
-
 // ---- Accuracy over time: each game in grey, a 15-game average in the accent ----
 (function accuracyChart() {
+  const tipEl = $('#tip');
   const W = 960, H = 240, L = 34, R = 8, T = 8, B = 22;
   const n = accs.length, x = i => L + (W - L - R) * (n > 1 ? i / (n - 1) : 0.5), y = a => T + (H - T - B) * (1 - a / 100);
   const root = svg('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Accuracy per game, with a 15-game average' });
@@ -302,11 +181,8 @@ $('#clock').append(h('p', { class: 'muted', style: 'margin-top:16px' }, 'How oft
       h('th', { class: 'num' }, 'Best'), h('th', {}, 'Result'), h('th', {})),
       list.map(g => h('tr', {}, h('td', {}, day(g.date)), h('td', {}, g.opponent.name), h('td', {}, g.time_class),
         h('td', { class: 'num' }, `${Math.round(g.peak)}%`), h('td', {}, `${RESULT[g.result]} (${g.how})`),
-        h('td', {}, h('a', { href: analysisLink(g.pgn, g.peak_ply, g.colour), target: '_blank' }, 'Open'))))) : null,
-    h('div', { class: 'cols' },
-      h('div', {}, h('h4', {}, 'The habit'), h('ol', {}, L.fix.map(f => h('li', {}, f)))),
-      h('div', {}, h('h4', {}, 'Drill it'), h('ul', {}, L.drill.map(d =>
-        h('li', {}, h('a', { href: d.url, target: '_blank', rel: 'noopener' }, `Lichess puzzles: ${d.name}`))))))));
+        h('td', {}, h('a', { href: analysisLink(g.url, g.peak_ply, g.colour), target: '_blank' }, 'Open'))))) : null,
+    lessonCols(L)));
 })();
 
 // ---- Openings ----
@@ -327,7 +203,21 @@ $('#games').append(h('table', {}, h('tr', {}, h('th', {}, 'Date'), h('th', {}, '
   h('th', {}, 'Game'), h('th', {}, 'Result'), h('th', { class: 'num' }, 'Accuracy'), h('th', {})),
   data.list.map(g => h('tr', {}, h('td', {}, day(g.t)), h('td', {}, g.colour), h('td', {}, `${g.opponent.name} (${g.opponent.rating})`),
     h('td', {}, g.tc), h('td', {}, `${RESULT[g.result]} (${g.how})`), h('td', { class: 'num' }, g.accuracy == null ? '–' : `${g.accuracy}%`),
-    h('td', {}, h('a', { href: analysisLink(g.pgn, 0, g.colour), target: '_blank' }, 'Analyse'), ' · ',
+    h('td', {}, h('a', { href: analysisLink(g.url, 0, g.colour), target: '_blank' }, 'Analyse'), ' · ',
       h('a', { href: g.url, target: '_blank', rel: 'noopener' }, 'chess.com'))))));
 $('#method').textContent = `Computer analysis: Stockfish 19, one million nodes per position, the same on any machine. ` +
   `Accuracy and move judgements follow Lichess's published formulas exactly. Built ${data.generated.replace('T', ' ')} UTC.`;
+
+// ---- Topics: #topic=<cause> swaps the report for that topic, and back ----
+let reportScroll = 0;
+function route() {
+  const key = new URLSearchParams(location.hash.slice(1)).get('topic');
+  const view = key && topic(data, key);
+  if (view && !$('#report').hidden) reportScroll = scrollY;
+  $('#topic').replaceChildren(...(view ? [view] : []));
+  $('#topic').hidden = !view;
+  $('#report').hidden = !!view;
+  scrollTo(0, view ? 0 : reportScroll);
+}
+addEventListener('hashchange', route);
+route();

@@ -4,6 +4,7 @@
 import { Chess, validateFen } from '../vendor/chess.js';
 import { Engine } from './engine.js';
 import { Board } from './board.js';
+import { Editor } from './editor.js';
 import { Graph } from './graph.js';
 import { accuracy, judge, winPercent, INITIAL } from './lichess.js';
 
@@ -94,8 +95,10 @@ function play(uci) {
 }
 
 const board = new Board($('.board'), {
-  dests: sq => new Chess(state.node.fen).moves({ square: sq, verbose: true }).map(m => m.to),
+  dests: sq => editor.active ? editor.dests(sq) : new Chess(state.node.fen).moves({ square: sq, verbose: true }).map(m => m.to),
+  onDropOff: sq => editor.active && editor.remove(sq),
   async onMove(from, to) {
+    if (editor.active) return editor.move(from, to);
     const n = state.node, c = new Chess(n.fen);
     const promotes = c.get(from)?.type === 'p' && /[18]$/.test(to);
     const piece = promotes ? await board.promote(to, c.turn()) : '';
@@ -105,6 +108,26 @@ const board = new Board($('.board'), {
 });
 
 const graph = new Graph($('.graph'), ply => go(state.game[ply]));
+
+// ---- Setting up a position -------------------------------------------------------
+// From the position on the board; the side panel becomes the palette. Analyse
+// starts from the new position (#fen= keeps it); unchanged, the game stays.
+const editor = new Editor({
+  board, el: $('.editor'), legal, changed: () => requestRender(),
+  done(fen) {
+    document.body.classList.remove('editing');
+    if (!fen || fen === state.node.fen) return requestRender(), analyse();
+    start(fen);
+    history.replaceState(null, '', `#${new URLSearchParams({ fen })}`);
+    notice('');
+  },
+});
+
+function setUp() {
+  live.stop();
+  editor.open(state.node.fen);
+  document.body.classList.add('editing');
+}
 
 // ---- Board analysis ------------------------------------------------------------
 // Lite first so arrows arrive at once, then the full engine takes over.
@@ -300,6 +323,7 @@ const requestRender = () => { frame ||= requestAnimationFrame(render); };
 
 function render() {
   frame = 0;
+  if (editor.active) return editor.render(state.orientation);
   const n = state.node, a = state.engineOn ? analysisOf(n) : null;
   board.set({
     fen: n.fen,
@@ -532,6 +556,7 @@ function tap(el, pick, act) {
 tap($('.moves'), e => e.target.closest('.move[data-id]')?.dataset.id, id => go(nodes.get(+id)));
 tap($('.engine .lines'), e => e.target.closest('[data-uci]')?.dataset.uci, play);
 $('.engine .toggle').addEventListener('click', toggleEngine);
+$('.load .setup').addEventListener('click', setUp);
 
 const keys = {
   ArrowLeft: () => go(state.node.parent),
@@ -544,20 +569,24 @@ const keys = {
   ' ': () => { const best = analysisOf(state.node)?.lines[0]?.pv[0]; if (best) play(best); },
   f: flip,
   t: toggleEngine,
+  e: setUp,
   r: () => { history.replaceState(null, '', location.pathname); start(START); },
 };
 document.addEventListener('keydown', e => {
-  if (e.target.closest('textarea') || (e.key === ' ' && e.target.closest('button')) ||
-      e.ctrlKey || e.metaKey || e.altKey || !keys[e.key]) return;
+  const map = editor.active ? { ...editor.keys, f: flip } : keys;
+  if (e.target.closest('textarea, input:not([type=checkbox])') || ([' ', 'Enter'].includes(e.key) && e.target.closest('button')) ||
+      e.ctrlKey || e.metaKey || e.altKey || !map[e.key]) return;
   e.preventDefault();
-  keys[e.key]();
+  map[e.key]();
 });
 
 // ---- Start -------------------------------------------------------------------
-// ?game=<lichess id>&color=black, or #pgn=<pgn>&ply=<n>&color=black (the coach
-// report links a game at the moment in question; a hash never reaches a server)
+// ?game=<lichess id>&color=black, #pgn=<pgn>&ply=<n>&color=black (the coach
+// report links a game at the moment in question; a hash never reaches a server),
+// or #fen=<fen> (a position set up here)
 const params = new URLSearchParams(location.search), hash = new URLSearchParams(location.hash.slice(1));
 const colour = (params.get('color') ?? hash.get('color')) === 'black' ? 'black' : null, game = params.get('game') ?? '';
 start(START, [], {}, colour);
 if (/^[a-zA-Z0-9]{8}$/.test(game)) fetchLichess(game, colour);
 else if (hash.get('pgn') && loadPgn(hash.get('pgn'), colour)) go(state.game?.[+hash.get('ply')] ?? state.root);
+else if (hash.get('fen') && validateFen(hash.get('fen')).ok && legal(hash.get('fen'))) start(legal(hash.get('fen')), [], {}, colour);

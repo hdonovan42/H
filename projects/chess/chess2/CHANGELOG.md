@@ -1,5 +1,52 @@
 # chess2 — Changelog
 
+## v1.1 — Set up a position (2026-09-24)
+
+A way to put a position on the board without playing up to it or pasting a
+FEN. `e`, or the Set up button beside the paste box, opens an editor on the
+position on the board.
+
+- **The palette.** It takes the side panel's place, each colour's six pieces
+  on its own side of the board. The rows sit exactly level with the board's top
+  and bottom edges (measured), and the board doesn't move.
+- **Placing, three ways.**
+  - Drag a piece in from the palette.
+  - Pick one by clicking it or typing its FEN letter (`K Q R B N P` / `k q r b n p`),
+    then click or sweep across squares. Pawns on c3 and d4 are two clicks, and
+    clicking a square with the picked piece takes it off.
+  - On the board, drag pieces anywhere; drag them off, or right-click, to
+    remove them.
+- **Keys.** `s` start position, `c` empty board (all but the kings), `x`
+  eraser. `f` still flips, Enter analyses, Esc puts a picked piece down and
+  then cancels.
+- **Rules the editor keeps.** The kings are always there, one each: a king
+  placed moves that side's king, and right-click, the eraser, dragging off and
+  dropping a piece on one all leave it be. Pawns never go on the first or last
+  rank.
+- **Side to move and castling.** Each is one click. A castling right can only
+  be ticked with the king and rook at home.
+- **Legality.** Analyse waits for a legal position and says what's wrong
+  ("White is in check with Black to move.").
+- **The FEN** underneath updates live, takes a pasted one, and copies with the
+  button at its right-hand end.
+- **Analyse** starts from the position, and `#fen=<fen>` opens it again. Opening
+  and closing the editor without changes keeps the game you were in.
+- **Board hooks.** `board.js` gains two small hooks: `squareAt(x, y)` for drops
+  from the palette, and `onDropOff` for pieces dragged off the board.
+- **Tests.** Two new browser tests. One covers the palette, picking, sweeping,
+  removal, the kings staying put, castling, an illegal position, copying the
+  FEN, flipping, analysis and reopening the `#fen=` address; the other a drag
+  from the palette by touch.
+  - The address is reopened in a fresh page: puppeteer's `reload()` sometimes
+    comes back without the service worker, and without the hash.
+  - A timeout now reports the board and the address too.
+- **The key line** under the panel is shortened to fit its width: it had run
+  past the edge.
+
+Files: `js/editor.js` (new), `js/main.js`, `js/board.js`, `style.css`,
+`../analysis.html`, `tests/browser.test.js`.
+
+
 ## v1.0.2 — A board other pages can use, and links to a moment (2026-09-24)
 
 - **`#pgn=<pgn>&ply=<n>&color=black`** opens a game at a given move, from Black's

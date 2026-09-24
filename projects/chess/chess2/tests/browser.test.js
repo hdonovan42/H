@@ -53,6 +53,7 @@ async function until(page, fn, timeout = 30000, arg) {
       const seen = await page.evaluate(() => ({ isolated: self.crossOriginIsolated,
         engine: document.querySelector('.engine .info')?.textContent, status: document.querySelector('.foot .status')?.textContent,
         review: document.querySelector('.graph')?.dataset.status, moves: document.querySelectorAll('.moves .move[data-id]').length,
+        board: document.querySelector('.board')?.dataset.fen, address: location.hash.slice(0, 60),
       })).catch(e => e.message);
       throw new Error(`timed out waiting for ${fn}; page shows ${JSON.stringify(seen)}; errors ${JSON.stringify(page.errors)}`);
     }
@@ -241,6 +242,155 @@ test('without cross-origin isolation the single-threaded engine still analyses a
   assert.equal(await page.$eval('.engine .score', el => el.textContent), '0-1');
   assert.deepEqual(page.errors, []);
   await context.close();
+});
+
+// The editor: a piece dragged in from the palette, and a sweep across squares
+async function fromPalette(page, piece, square, touch = false) {
+  const a = await page.$eval(`.editor .palette [data-tool="${piece}"]`, el => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  const b = await point(page, square);
+  if (touch) {
+    await page.touchscreen.touchStart(a.x, a.y);
+    await page.touchscreen.touchMove((a.x + b.x) / 2, (a.y + b.y) / 2);
+    await page.touchscreen.touchMove(b.x, b.y);
+    await page.touchscreen.touchEnd();
+  } else {
+    await page.mouse.move(a.x, a.y);
+    await page.mouse.down();
+    await page.mouse.move(b.x, b.y, { steps: 6 });
+    await page.mouse.up();
+  }
+  await frame(page);
+}
+
+async function sweep(page, squares) {
+  const [first, ...rest] = await Promise.all(squares.map(sq => point(page, sq)));
+  await page.mouse.move(first.x, first.y);
+  await page.mouse.down();
+  for (const p of rest) await page.mouse.move(p.x, p.y, { steps: 3 });
+  await page.mouse.up();
+  await frame(page);
+}
+
+const editing = page => page.evaluate(() => document.body.classList.contains('editing'));
+const reason = page => page.$eval('.editor .reason', el => el.textContent);
+
+test('set up a position: from the board, palette, picking, sweeping, removing, then analyse', async () => {
+  const page = await open();
+  await click(page, 'e2');
+  await click(page, 'e4');
+  await page.keyboard.press('e');
+  await frame(page);
+  assert.ok(await editing(page));
+  assert.equal(await fen(page), 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR', 'opens on the position on the board');
+  await page.keyboard.press('Escape');
+  await frame(page);
+  assert.ok(!(await editing(page)));
+  assert.equal(await current(page), 'e4', 'cancelling leaves the game as it was');
+
+  await page.click('.load .setup');
+  await page.keyboard.press('c');
+  await frame(page);
+  assert.equal(await fen(page), '4k3/8/8/8/8/8/8/4K3', 'an empty board keeps the kings');
+  assert.equal(await reason(page), '');
+
+  // The kings stay whatever is tried: right-click, dragging off, the eraser, a piece dropped on one
+  const e1 = await point(page, 'e1');
+  await page.mouse.click(e1.x, e1.y, { button: 'right' });
+  await drag(page, 'e1', 'e1', 0.5, 9);
+  await page.keyboard.press('x');
+  await click(page, 'e8');
+  await page.keyboard.press('Escape');
+  await fromPalette(page, 'wQ', 'e8');
+  await drag(page, 'e1', 'e8', 0.5, 0.5);
+  assert.equal(await fen(page), '4k3/8/8/8/8/8/8/4K3');
+
+  // Placing a king moves it
+  await fromPalette(page, 'wK', 'g1');
+  await fromPalette(page, 'bK', 'g8');
+  await fromPalette(page, 'wK', 'e1');
+  assert.equal(await fen(page), '6k1/8/8/8/8/8/8/4K3');
+
+  // A pawn picked by its letter: two clicks, a sweep of three, the same square again takes it off,
+  // and the back rank refuses it
+  await page.keyboard.press('P');
+  await click(page, 'c3');
+  await click(page, 'd4');
+  await sweep(page, ['f2', 'g2', 'h2']);
+  assert.equal(await fen(page), '6k1/8/8/8/3P4/2P5/5PPP/4K3');
+  await click(page, 'c3');
+  await click(page, 'a8');
+  assert.equal(await fen(page), '6k1/8/8/8/3P4/8/5PPP/4K3');
+  await page.keyboard.press('Escape');  // put the pawn down: Esc again would cancel
+
+  // On the board: drag to move, drag off to remove, right-click to remove
+  await drag(page, 'd4', 'd5', 0.5, 0.5);
+  await drag(page, 'd5', 'd5', 0.5, 9);
+  const h2 = await point(page, 'h2');
+  await page.mouse.click(h2.x, h2.y, { button: 'right' });
+  await frame(page);
+  assert.equal(await fen(page), '6k1/8/8/8/8/8/5PP1/4K3');
+
+  // Castling needs king and rook at home
+  assert.ok(await page.$eval('[data-right="K"]', b => b.disabled));
+  await fromPalette(page, 'wR', 'h1');
+  assert.ok(await page.$eval('[data-right="K"]', b => !b.disabled && b.checked));
+
+  // A check the side to move can't be in: Analyse refuses, with the reason
+  await page.keyboard.press('q');
+  await click(page, 'e4');
+  await page.keyboard.press('Escape');
+  await page.click('[data-turn="b"]');
+  await frame(page);
+  assert.equal(await reason(page), 'White is in check with Black to move.');
+  await page.keyboard.press('Enter');
+  await frame(page);
+  assert.ok(await editing(page), 'an illegal position stays in the editor');
+  await page.click('[data-turn="w"]');
+
+  // The FEN copies with one click
+  await browser.defaultBrowserContext().overridePermissions(new URL(url).origin, ['clipboard-read', 'clipboard-write', 'clipboard-sanitized-write']);
+  await page.click('.editor .copy');
+  await until(page, () => document.querySelector('.editor .copy').textContent === 'Copied', 3000);
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), await page.$eval('.editor .fen', el => el.value));
+
+  // f still flips: each colour's palette follows its side of the board
+  await page.keyboard.press('f');
+  await frame(page);
+  assert.equal(await page.$eval('.editor .palette button', b => b.dataset.tool), 'wK');
+  await page.keyboard.press('f');
+
+  // Analyse: the engine takes the position, and the address keeps it
+  await page.keyboard.press('Enter');
+  await frame(page);
+  assert.ok(!(await editing(page)));
+  const set = '6k1/8/8/8/4q3/8/5PP1/4K2R w K - 0 1';
+  assert.equal(await page.$eval('.board', el => el.dataset.fen), set);
+  await until(page, () => /depth \d+/.test(document.querySelector('.engine .info').textContent), 30000);
+  const address = await page.evaluate(() => location.hash);
+  assert.equal(new URLSearchParams(address.slice(1)).get('fen'), set);
+  assert.deepEqual(page.errors, []);
+  await page.close();
+
+  // The address opens the position again, as a bookmark or a shared link would
+  // (a fresh page: puppeteer's reload() sometimes bypasses the service worker)
+  const again = await open(undefined, address);
+  await until(again, set => document.querySelector('.board')?.dataset.fen === set, 10000, set);
+  assert.deepEqual(again.errors, []);
+  await again.close();
+});
+
+test('set up a position by touch: a piece dragged in from the palette', async () => {
+  const page = await open({ width: 390, height: 844, isMobile: true, hasTouch: true });
+  await page.click('.load .setup');
+  await page.keyboard.press('c');
+  await frame(page);
+  await fromPalette(page, 'wQ', 'd4', true);
+  assert.equal(await fen(page), '4k3/8/8/8/3Q4/8/8/4K3');
+  assert.deepEqual(page.errors, []);
+  await page.close();
 });
 
 test('a Lichess link loads the game', { skip: !process.env.NETWORK && 'set NETWORK=1' }, async () => {

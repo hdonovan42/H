@@ -244,9 +244,11 @@ main {
   pointer-events: none;
 }
 
+.load { display: flex; gap: 8px; }
 .load textarea {
   display: block;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   height: 36px;
   padding: 8px 10px;
   overflow: hidden;
@@ -258,6 +260,17 @@ main {
   color: inherit;
   font: inherit;
 }
+.load .setup, .editor .controls button {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.load .setup { flex: none; padding: 0 12px; }
+.load .setup:hover, .editor .controls button:hover { background: #f7efe7; }
+
 /* One line under the panel: a status message when there is one, else the keys */
 .foot {
   position: absolute;
@@ -274,7 +287,93 @@ main {
 }
 .foot .status { font-size: 12px; }
 .foot .status.error { color: #b3372f; }
-.foot .status:not(:empty) + .keys { display: none; }
+.foot .status:not(:empty) ~ .keys, .foot .keys.editing, .editing .foot .keys { display: none; }
+.editing .foot .keys.editing { display: inline; }
+
+/* ---- Setting up a position: the side panel becomes the palette ---- */
+
+.editor { display: none; }
+.editing .side > :not(.editor, .foot) { display: none; }
+.editing .editor { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+.editing .evalbar, .editing .player { visibility: hidden; }
+.editing .marks .dest, .editing .marks .capture { display: none; }  /* every square is a destination */
+.board.armed { cursor: copy; }
+
+.palette {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 2px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.palette button {
+  aspect-ratio: 1;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background-color: transparent;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 88%;
+  cursor: grab;
+  touch-action: none;
+}
+.palette button:hover { background-color: #f5ebe1; }
+.palette button[aria-pressed="true"] { background-color: #e8d6c4; }  /* picked: clicks place it */
+
+.editor .controls {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.editor .controls p { margin: 0; }
+.editor .controls button { padding: 5px 10px; }
+.editor .controls button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--panel); }
+.seg { display: flex; }
+.seg button { flex: 1; }
+.seg button:first-child { border-radius: 6px 0 0 6px; }
+.seg button:last-child { border-left: 0; border-radius: 0 6px 6px 0; }
+.castling { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 13px; }
+.castling span { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+.castling label:has(:disabled) { color: var(--muted); }
+.tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.editor .fen {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: inherit;
+  font: 12px ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+.editor .fen-row { position: relative; }
+.editor .fen { padding-right: 70px; }
+.editor .controls .copy { position: absolute; top: 3px; right: 3px; bottom: 3px; width: 62px; padding: 0; font-size: 12px; }
+.editor .reason { min-height: 1.4em; color: #b3372f; font-size: 12px; }
+.editor .controls .go { display: flex; gap: 6px; margin-top: auto; }  /* Analyse at the foot, by the palette */
+.editor .go .primary { background: #629924; border-color: #629924; color: #fff; font-weight: 600; }
+.editor .go .primary:hover { background: #57881f; }
+.editor .go .primary:disabled { opacity: 0.45; cursor: default; }
+
+/* A piece on its way from the palette */
+.ghost {
+  position: fixed;
+  z-index: 10;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100%;
+}
 
 /* ---- Narrow screens: one column ---- */
 

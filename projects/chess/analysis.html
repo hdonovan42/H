@@ -34,8 +34,10 @@
       <div class="graph" hidden></div>
       <form class="load">
         <textarea rows="1" placeholder="Paste a PGN, FEN or Lichess link" aria-label="Game to load" spellcheck="false"></textarea>
+        <button type="button" class="setup" title="Set up a position (e)">Set up</button>
       </form>
-      <p class="foot"><span class="status" role="status"></span><span class="keys">← → moves · ↑ ↓ start, end · f flip · t engine · space best move · r reset</span></p>
+      <div class="editor"></div>
+      <p class="foot"><span class="status" role="status"></span><span class="keys">← → moves · ↑ ↓ ends · f flip · t engine · space best · e edit · r reset</span><span class="keys editing">K q … pick · s start · c empty · x eraser · ⏎ analyse · Esc cancel</span></p>
     </section>
   </main>
 </body>
