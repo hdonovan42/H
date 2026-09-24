@@ -36,7 +36,7 @@ export class Board {
     this.#coords();
   }
 
-  // arrows: [[from, to], …] in order of importance
+  // arrows: [[from, to, class?], …] in order of importance
   set({ fen, orientation = 'white', lastMove = null, check = null, arrows = [] }) {
     if (this.#promoting) return;  // hold the pawn on its new square until a piece is chosen
     const flipped = orientation !== this.orientation;
@@ -190,8 +190,8 @@ export class Board {
     if (key === this.#arrowKey) return;
     this.#arrowKey = key;
     const centre = sq => this.#xy(sq).map(v => v + 0.5);
-    this.arrowsEl.innerHTML = arrows.map(([from, to], i) =>
-      `<path d="${arrow(centre(from), centre(to), 0.2 - i * 0.04)}" opacity="${0.8 - i * 0.2}"/>`).join('');
+    this.arrowsEl.innerHTML = arrows.map(([from, to, cls], i) =>
+      `<path${cls ? ` class="${cls}"` : ''} d="${arrow(centre(from), centre(to), 0.2 - i * 0.04)}" opacity="${0.8 - i * 0.2}"/>`).join('');
   }
 
   // File letters along the bottom edge, rank numbers down the left

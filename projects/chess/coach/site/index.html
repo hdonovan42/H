@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chess coach</title>
+  <link rel="icon" type="image/png" href="/images/H-favicon.png">
+  <link rel="stylesheet" href="../../chess2/board.css">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Chess coach</h1>
+      <p class="sub" id="sub"></p>
+    </header>
+    <section class="kpis" id="kpis"></section>
+
+    <h2>Fix these first</h2>
+    <p class="lede">Ranked by how much of the winning chances your mistakes gave away. Every example is from your own games.</p>
+    <div id="top"></div>
+
+    <h2>Beyond tactics</h2>
+    <p class="lede" id="positional-lede"></p>
+    <div id="positional"></div>
+
+    <h2>The same mistake, more than once</h2>
+    <p class="lede">The same costly move from the same position in different games: not an accident, a habit, and usually an opening line worth fixing once.</p>
+    <div id="repeats"></div>
+
+    <h2>Practise your own positions</h2>
+    <p class="lede">Moments from your games where one move clearly stood out and you played something else. Find it. Missed ones come back sooner; solved ones space out.</p>
+    <section class="card practise" id="practise">
+      <div class="board" id="drill"></div>
+      <div class="panel">
+        <p class="count" id="drill-count"></p>
+        <p id="drill-prompt"></p>
+        <p id="drill-result" aria-live="polite"></p>
+        <p class="buttons"><button id="drill-show" type="button">Show answer</button> <button id="drill-next" type="button">Next</button></p>
+      </div>
+    </section>
+
+    <h2>Where the winning chances go</h2>
+    <div class="pair">
+      <figure class="card"><figcaption>Share of what your mistakes gave away, by cause</figcaption><div id="causes"></div></figure>
+      <figure class="card"><figcaption>By phase and by clock</figcaption><div id="phases"></div><div id="clock"></div></figure>
+    </div>
+
+    <h2>Accuracy over time</h2>
+    <figure class="card"><figcaption id="acc-cap"></figcaption><div id="accuracy" class="chart"></div></figure>
+
+    <h2>Winning positions not won</h2>
+    <div id="conversion"></div>
+
+    <h2>Openings</h2>
+    <div id="openings"></div>
+
+    <h2>All games</h2>
+    <details class="card"><summary id="games-sum"></summary><div id="games"></div></details>
+
+    <footer id="method"></footer>
+  </main>
+  <div id="tip" role="tooltip" hidden></div>
+</body>
+</html>

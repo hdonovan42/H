@@ -1,5 +1,18 @@
 # chess2 — Changelog
 
+## v1.0.2 — A board other pages can use, and links to a moment (2026-09-24)
+
+- **`#pgn=<pgn>&ply=<n>&color=black`** opens a game at a given move, from Black's
+  side if asked. The coach report links every example this way. A hash never
+  reaches a server, so the game stays in the link. `js/main.js`.
+- **`board.css`** holds the board's own styles, split out of `style.css`, so
+  another page (the coach report) can show chess2's board without the
+  analysis page's layout. `analysis.html` loads both.
+- Arrows take an optional class (`[from, to, class]`), so a page can colour
+  its own (the report draws the better move green, the game's move red).
+
+Files: `js/main.js`, `js/board.js`, `board.css`, `style.css`, `../analysis.html`.
+
 ## v1.0.1 — Eval bar, engine-off header, a board that never shifts (2026-09-23)
 
 - **Eval bar fills completely once a game is decided.** A forced mate, or

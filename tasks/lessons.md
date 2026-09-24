@@ -333,3 +333,17 @@ every engine worker was refused and the board sat on "Loading Stockfish…" with
   COEP on every sibling project).
 - Rule: after moving any page, rerun the end-to-end suite AT THE NEW ADDRESS before
   claiming it works. Unit tests and "the files are all there" prove nothing here.
+
+## 2026-09-24 — Classify with the engine's counterfactuals, not with bookkeeping (chess coach)
+Tagging WHY a chess move was bad by counting material along engine lines failed two
+independent audits (52%, then 44% of labels right): lines ending mid-exchange, sacrifices,
+later swaps blamed, gates deleting real cases. Each patch fixed its target and broke others.
+- Rule: when a label is a judgement ("you ignored their threat"), decide it from the
+  model's own counterfactual numbers (was the move no better than passing? than the
+  second-best move? did their last move hand over a gift?) and use hand-written
+  heuristics only to NAME what happened. Heuristics that decide are brittle; heuristics
+  that describe are low-stakes.
+- Rule: have an independent agent audit labels against ground truth BEFORE showing them
+  to the user, and re-audit on a fresh sample after every redesign. Two audits caught
+  what 13 green unit tests could not.
+- Rule: after two patch rounds that don't converge, stop and re-plan the approach.

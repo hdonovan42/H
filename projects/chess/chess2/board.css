@@ -1,0 +1,90 @@
+/* The chessboard: shared by the analysis board and the coach report.
+   Colours come from the page's --light/--dark, with Lichess's browns by default. */
+:root { --light: #f0d9b5; --dark: #b58863; }
+
+.board {
+  position: relative;
+  aspect-ratio: 1;
+  container-type: inline-size;  /* coordinates scale with the board, whatever page it's on */
+  border-radius: 3px;
+  background: repeating-conic-gradient(var(--dark) 0 25%, var(--light) 0 50%) 0 0 / 25% 25%;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.marks i, .piece, .promotion button {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 12.5%;
+  height: 12.5%;
+}
+
+.piece {
+  z-index: 1;
+  background: no-repeat center / 100%;
+}
+.piece.dragging { z-index: 3; cursor: grabbing; }
+
+.wK { background-image: url(pieces/wK.svg); }
+.wQ { background-image: url(pieces/wQ.svg); }
+.wR { background-image: url(pieces/wR.svg); }
+.wB { background-image: url(pieces/wB.svg); }
+.wN { background-image: url(pieces/wN.svg); }
+.wP { background-image: url(pieces/wP.svg); }
+.bK { background-image: url(pieces/bK.svg); }
+.bQ { background-image: url(pieces/bQ.svg); }
+.bR { background-image: url(pieces/bR.svg); }
+.bB { background-image: url(pieces/bB.svg); }
+.bN { background-image: url(pieces/bN.svg); }
+.bP { background-image: url(pieces/bP.svg); }
+
+.marks .last { background: rgba(155, 199, 0, 0.41); }
+.marks .selected { background: rgba(20, 85, 30, 0.5); }
+.marks .hover { background: rgba(20, 85, 30, 0.3); }
+.marks .dest { background: radial-gradient(rgba(20, 85, 30, 0.5) 19%, transparent 20%); }
+.marks .capture { background: radial-gradient(transparent 79%, rgba(20, 85, 30, 0.35) 80%); }
+.marks .check { background: radial-gradient(ellipse at center, #f00 0%, #e70000 25%, rgba(169, 0, 0, 0) 89%); }
+
+.arrows {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  pointer-events: none;
+  fill: #003088;  /* engine lines */
+}
+.arrows .best { fill: #15781b; }
+.arrows .played { fill: #c0392b; }
+
+.coords span {
+  position: absolute;
+  font-size: max(9px, 2.4cqw);
+  font-weight: 600;
+  line-height: 1;
+  pointer-events: none;
+}
+.coords .file { bottom: 3px; width: 12.5%; padding-right: 4px; text-align: right; }
+.coords .rank { left: 4px; margin-top: 3px; }
+/* the bottom-left and top-left squares are dark and light whichever way up */
+.coords :nth-child(4n + 1), .coords :nth-child(4n + 4) { color: var(--light); }
+.coords :nth-child(4n + 2), .coords :nth-child(4n + 3) { color: var(--dark); }
+
+.promotion {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background: rgba(40, 36, 32, 0.45);
+}
+.promotion button {
+  border: 0;
+  border-radius: 50%;
+  background-color: #f4efe9;
+  background-size: 85%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+.promotion button:hover { background-color: #fff; }
+

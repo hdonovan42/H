@@ -1,0 +1,5 @@
+.venv/
+bin/stockfish19
+data/
+__pycache__/
+site/insights.json

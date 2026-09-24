@@ -554,7 +554,10 @@ document.addEventListener('keydown', e => {
 });
 
 // ---- Start -------------------------------------------------------------------
-const params = new URLSearchParams(location.search);
-const colour = params.get('color') === 'black' ? 'black' : null, game = params.get('game') ?? '';
+// ?game=<lichess id>&color=black, or #pgn=<pgn>&ply=<n>&color=black (the coach
+// report links a game at the moment in question; a hash never reaches a server)
+const params = new URLSearchParams(location.search), hash = new URLSearchParams(location.hash.slice(1));
+const colour = (params.get('color') ?? hash.get('color')) === 'black' ? 'black' : null, game = params.get('game') ?? '';
 start(START, [], {}, colour);
 if (/^[a-zA-Z0-9]{8}$/.test(game)) fetchLichess(game, colour);
+else if (hash.get('pgn') && loadPgn(hash.get('pgn'), colour)) go(state.game?.[+hash.get('ply')] ?? state.root);
