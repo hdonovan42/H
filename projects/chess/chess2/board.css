@@ -13,7 +13,7 @@
   -webkit-user-select: none;
 }
 
-.marks i, .piece, .promotion button {
+.marks i, .piece {
   position: absolute;
   left: 0;
   top: 0;
@@ -76,15 +76,26 @@
   position: absolute;
   inset: 0;
   z-index: 4;
-  background: rgba(40, 36, 32, 0.45);
+  background: rgba(40, 36, 32, 0.3);
+}
+/* Two squares by two, on the board's grid; a white frame just outside them */
+.promotion .card {
+  position: absolute;
+  width: 25%;
+  height: 25%;
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 0 0 3px #fff, 0 0 0 4px rgba(51, 48, 46, 0.14), 0 10px 24px rgba(40, 36, 32, 0.38);
 }
 .promotion button {
-  border: 0;
-  border-radius: 50%;
-  background-color: #f4efe9;
-  background-size: 85%;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  position: absolute;
+  width: 50%;
+  height: 50%;
+  border: 2px solid #fff;
+  border-radius: 7px;
+  background-color: #f6efe7;
+  background-size: 88%;
   cursor: pointer;
 }
-.promotion button:hover { background-color: #fff; }
-
+.promotion button:hover { background-color: var(--light); box-shadow: inset 0 0 0 2px rgba(20, 85, 30, 0.6); }
+.promotion button:focus-visible { outline: 2px solid #15781b; outline-offset: -4px; }

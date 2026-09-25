@@ -58,14 +58,20 @@ export class Board {
   }
 
   // Ask which piece a pawn on `square` becomes: 'q' | 'r' | 'b' | 'n', or null
-  // when dismissed (a press outside the four pieces, or Esc).
+  // when dismissed (a press outside the four pieces, or Esc). The four sit on a
+  // card on the board's own grid: the queen on the promotion square, where the
+  // pointer already is, and the rest opening towards the middle of the board.
   promote(square, colour) {
     return new Promise(resolve => {
-      const [col, row] = this.#xy(square), step = row === 0 ? 1 : -1;
+      const [col, row] = this.#xy(square), dx = col < 4 ? 1 : -1, dy = row < 4 ? 1 : -1;
+      const left = Math.min(col, col + dx), top = Math.min(row, row + dy);
+      const spots = { q: [col, row], r: [col + dx, row], b: [col, row + dy], n: [col + dx, row + dy] };
       const box = document.createElement('div');
       box.className = 'promotion';
-      box.innerHTML = [...'qnrb'].map((p, i) => `<button class="piece ${colour}${p.toUpperCase()}" data-piece="${p}" ` +
-        `aria-label="${{ q: 'Queen', n: 'Knight', r: 'Rook', b: 'Bishop' }[p]}" style="${at(col, row + i * step)}"></button>`).join('');
+      box.innerHTML = `<div class="card" style="left:${left * 12.5}%;top:${top * 12.5}%">` +
+        Object.entries(spots).map(([p, [c, r]]) => `<button class="piece ${colour}${p.toUpperCase()}" data-piece="${p}" ` +
+          `aria-label="${{ q: 'Queen', n: 'Knight', r: 'Rook', b: 'Bishop' }[p]}" ` +
+          `style="left:${(c - left) * 50}%;top:${(r - top) * 50}%"></button>`).join('') + '</div>';
       const done = piece => {
         box.remove();
         removeEventListener('keydown', esc);
@@ -78,7 +84,7 @@ export class Board {
       addEventListener('keydown', esc);
       this.#promoting = true;
       this.el.append(box);
-      box.firstChild.focus();
+      box.querySelector('button').focus();  // the queen: Enter takes it
     });
   }
 

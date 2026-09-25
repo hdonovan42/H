@@ -154,11 +154,33 @@ test('click, click also moves; a click elsewhere cancels', async () => {
   await page.close();
 });
 
+// Where each promotion choice sits: its centre within a pixel and a half of a square's
+async function promotionAt(page, expected) {
+  for (const [piece, square] of Object.entries(expected)) {
+    const c = await page.$eval(`.promotion [data-piece="${piece}"]`, el => {
+      const r = el.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    });
+    const p = await point(page, square);
+    assert.ok(Math.hypot(c.x - p.x, c.y - p.y) < 1.5, `${piece} on ${square}`);
+  }
+}
+
 test('promotion asks which piece, and can be dismissed', async () => {
   const page = await open();
+  // On the h-file the card opens leftwards, the queen still on the promotion square
+  await paste(page, '8/7P/8/8/8/8/6k1/4K3 w - - 0 1');
+  await drag(page, 'h7', 'h8', 0.5, 0.5);
+  await until(page, () => document.querySelectorAll('.promotion button').length === 4, 3000);
+  await promotionAt(page, { q: 'h8', r: 'g8', b: 'h7', n: 'g7' });
+  await page.keyboard.press('Escape');
+  await frame(page);
+  assert.equal(await fen(page), '8/7P/8/8/8/8/6k1/4K3');
+
   await paste(page, '8/P7/8/8/8/8/6k1/4K3 w - - 0 1');
   await drag(page, 'a7', 'a8', 0.5, 0.5);
   await until(page, () => document.querySelectorAll('.promotion button').length === 4, 3000);
+  await promotionAt(page, { q: 'a8', r: 'b8', b: 'a7', n: 'b7' });
   await page.mouse.click(...Object.values(await point(page, 'e4')));  // outside the chooser: dismiss
   await frame(page);
   assert.equal(await fen(page), '8/P7/8/8/8/8/6k1/4K3');

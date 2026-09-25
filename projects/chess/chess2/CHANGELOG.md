@@ -1,5 +1,32 @@
 # chess2 — Changelog
 
+## v1.1.1 — The promotion picker, on the square (2026-09-25)
+
+The four pieces no longer stack down the board in round buttons. They sit on
+a 2×2 card on the board's own grid, the look of the retro board's picker, now
+placed where the pawn landed:
+- **The queen is on the promotion square,** where the pointer already is, so
+  queening is the same gesture as the drop. The rook, bishop and knight open
+  towards the middle of the board: rightwards from the a to d files, leftwards
+  from e to h, and downwards into the board whichever side is promoting.
+- **The cells are the board's squares** (checked in the browser test to within
+  a pixel and a half on both edge files), set in a white card that sits just
+  outside them.
+- **The board behind is lightly dimmed.** Hovering gives a cell the board's
+  light square and a green edge, and nothing grows.
+- **Enter takes the queen** (it has the focus), and Esc or a press outside
+  still cancels.
+
+The coach's puzzles use the same board, so they pick it up too. It was chosen
+from three alternatives drawn beside today's picker and the retro original.
+
+**The material count** (the "+3" beside a player) is now in the strip's ink
+and semibold, set like the accuracy beside it. Before, it was the muted grey
+at normal weight: 5.1:1 contrast, and easy to miss. Now it's 11.8:1.
+
+Files: `js/board.js` (`promote`), `board.css`, `style.css`, `tests/browser.test.js`.
+
+
 ## v1.1 — Set up a position (2026-09-24)
 
 A way to put a position on the board without playing up to it or pasting a

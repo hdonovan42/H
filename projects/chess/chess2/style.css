@@ -67,7 +67,7 @@ main {
 .player .inaccuracy { color: var(--inaccuracy); font-weight: 600; }
 .player .mistake { color: var(--mistake); font-weight: 600; }
 .player .blunder { color: var(--blunder); font-weight: 600; }
-.player .material { color: var(--muted); }
+.player .material { font-weight: 600; }  /* the ink of the strip, set like the accuracy: a figure to read at a glance */
 
 .evalbar {
   grid-row: 2;
