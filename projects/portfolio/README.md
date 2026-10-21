@@ -9,6 +9,26 @@ so your ledger stays in sync (and backed up) across every machine you use.
 
 ## How it works
 
+```mermaid
+flowchart LR
+    you(["You<br/>portfolio buy TSLA 5"])
+    subgraph public["PUBLIC · anyone can read"]
+        tool["<b>The tool</b><br/>PORTFOLIO.py<br/>code only, no trades or keys<br/>github.com/hdonovan42/H"]
+    end
+    subgraph private["PRIVATE · only you"]
+        laptop["<b>Your trades</b><br/>portfolio.json on your laptop<br/>~/.portfolio-vault"]
+        backup["<b>Private backup</b><br/>github.com/hdonovan42/PORTFOLIO"]
+        laptop -- "copied up after every trade" --> backup
+    end
+    you -- runs --> tool
+    tool -- "reads and saves your trades" --> laptop
+    style public stroke-dasharray: 6 4
+    style private stroke:#2e7556,stroke-width:2px
+```
+
+Prices come from Yahoo and Finnhub, asked for by ticker name only (e.g. `TSLA`).
+How many shares you hold is never sent anywhere except your private backup.
+
 - **Transactions are the source of truth.** Each `buy`/`sell` appends an immutable
   record (action, ticker, quantity, price) to `portfolio.json`. Current positions
   are *recomputed* from the full transaction list on every read — never stored as
@@ -70,7 +90,7 @@ portfolio sell AAPL 4 @ 415.50   # sell 4 (refuses if you hold fewer than 4)
 portfolio buy AAPL 10            # no price → asks: current price or enter your own
 portfolio value                  # holdings with live prices, weights + total (heaviest first)
 portfolio history                # full transaction ledger (with recorded prices)
-portfolio riskfree 1994-03-15    # US T-bill return from a date → today
+portfolio sp500 2021-11          # what the S&P 500 returned from a date → today
 portfolio                        # no subcommand → interactive prompt
 ```
 
@@ -87,36 +107,85 @@ Tickers are upper-cased automatically. Quantities must be integers ≥ 1 and pri
 must be > 0. `buy` and `sell` print a before/after positions table and the committed
 message. Run `portfolio --help` for the full command reference.
 
-## Risk-free comparison (`riskfree`)
+## S&P 500 comparison (`sp500`)
 
-What would continuously reinvested short-term US Treasury bills — the standard
-risk-free benchmark — have returned between any two dates since **July 1926**?
-Use it to gauge an investment's *excess* return over the risk-free alternative.
+**The question it answers:** if I had put my money in an S&P 500 index fund on
+one date instead, what would it be worth on another? That is the bar any stock
+pick has to clear — if it didn't beat this, a tracker fund would have done better.
 
 ```bash
-portfolio riskfree 1994-03-15                  # from a date → today
-portfolio riskfree 1990 2000                   # between two dates (YYYY / YYYY-MM / YYYY-MM-DD)
-portfolio riskfree 2015 --amount 10000         # growth of $10k instead of $1
-portfolio riskfree 2015 --vs AAPL              # vs a ticker (Yahoo adjusted closes)
-portfolio riskfree 2015 --vs 412%              # vs a return you supply
+portfolio sp500 2021-11                    # from November 2021 → today
+portfolio sp500 2000 2010                  # between two dates
+portfolio sp500 2015 --amount 10000        # growth of $10,000 instead of $1
+portfolio sp500 2015 --vs AAPL             # AAPL against the S&P 500, same dates
+portfolio sp500 2021-11 --vs 30%           # a return you made against the S&P 500
 ```
 
-Output: growth of $1 (or `--amount`), total return, annualised %/yr — and with
-`--vs`, the comparison's same numbers plus **excess vs risk-free in pp/yr**.
+```
+   S&P 500 total return  2021-11-01 → 2026-10-21  (5.0y)
+┌───────────────────────────────┬──────────────────────────┐
+│ Growth of $1                  │                  $1.8042 │
+│ Total return                  │                   +80.4% │
+│ Annualised                    │               +12.61%/yr │
+└───────────────────────────────┴──────────────────────────┘
+```
 
-- **Data**: Ken French's monthly 1-month T-bill return series (July 1926 →
-  ~2-month publication lag), extended to today with FRED's daily 3-month bill
-  yields (`DTB3`). Whole months compound exactly; partial months are pro-rated
-  by day; any days past the last published yield are carried forward at the
-  latest rate (flagged in the caption).
-- **Cache**: parsed series lives in `~/.cache/portfolio/riskfree.json`,
-  refreshed after 7 days (`--refresh` forces it); if a download fails, the
-  stale cache is used with a warning. No API keys required.
-- **`--vs TICKER`** uses Yahoo adjusted closes via the same Cloudflare Worker
-  as live prices — split- and dividend-adjusted, so it approximates total
-  return. The exact trade dates used are shown in the output.
-- Sanity anchor: `riskfree 1926-07-01` → $1 grows to ~$25 (matches the
-  published Ibbotson/SBBI T-bill figure).
+### Reading the output
+
+| Row | Meaning |
+|-----|---------|
+| **Growth of $1** | What $1 (or `--amount`) at the start was worth at the end. |
+| **Total return** | The gain over the whole period: +80.4% means $1 → $1.80. |
+| **Annualised** | The steady yearly rate that compounds to the same total — the fair way to compare periods of different lengths. |
+| **Ahead of / Behind the S&P 500** | With `--vs`: the gap between its annualised return and the S&P 500's, in percentage points a year. |
+
+The title shows the dates actually used — see *Dates* below.
+
+### What is measured
+
+- **The S&P 500 Total Return index** (`^SP500TR`), which assumes every dividend
+  is reinvested. That is what an index fund holder actually gets. The plain
+  S&P 500 figure quoted in the news leaves dividends out and understates the
+  return by roughly 1.5–2 points a year: from November 2021 it shows +68%
+  against the true +80%.
+- **Not included:** fund fees (0.03–0.10% a year for a typical tracker), tax,
+  and the dollar/pound exchange rate. Everything is in US dollars.
+- **`--vs TICKER`** uses that stock's adjusted closes, which also count its
+  dividends and splits, so the two are compared on the same terms.
+- **`--vs 30%`** takes a total return you made yourself over the same period.
+
+### Dates
+
+- Write a date as `2021`, `2021-11` or `2021-11-15`. A year means 1 January
+  and a month means the 1st.
+- Markets close at weekends and on holidays, so each date uses the closing level
+  on the nearest trading day. `2010` therefore starts at the 31 December 2009
+  close, the usual convention for calendar-year returns.
+- Leave END off for today. While the US market is open, that uses the latest
+  price.
+- History starts on **4 January 1988**.
+
+### Where the numbers come from
+
+Yahoo Finance, through the same Cloudflare Worker that supplies live prices.
+No API key is needed.
+
+- **Index history:** the first run downloads the full daily history in one
+  call (about 9,800 days, 250 KB) and saves it in
+  `~/.cache/portfolio/sp500tr.json`. A day's close never changes once the day
+  is over, so later runs only fetch days added since the last run. A window
+  that ends in the past needs no download at all. A window that ends today
+  makes one small call for the latest price.
+- **Stock prices:** each `--vs TICKER` run fetches two prices fresh, one for
+  each date. They aren't saved because Yahoo rescales a stock's whole
+  adjusted-price history after every dividend, so stored prices would stop
+  lining up with new ones.
+- **Offline:** if the download fails, the command uses the saved history and
+  says how far it reaches.
+
+**Checked against S&P's published figures.** Calendar-year total returns match
+to the decimal: 2020 +18.4%, 2021 +28.7%, 2022 −18.1%, 2023 +26.3% and
+2024 +25.0%. The 2010–2019 annualised return matches too, at +13.56% a year.
 
 ## Files
 

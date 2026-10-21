@@ -347,3 +347,14 @@ later swaps blamed, gates deleting real cases. Each patch fixed its target and b
   to the user, and re-audit on a fresh sample after every redesign. Two audits caught
   what 13 green unit tests could not.
 - Rule: after two patch rounds that don't converge, stop and re-plan the approach.
+
+## 2026-10-21 — Benchmark against the yardstick the user means; keep provenance out of output (portfolio riskfree → sp500)
+`riskfree` compounded T-bills correctly (+20% since Nov 2021), but the user wanted
+to know what the market did (+80%) and read the number as broken. Its caption
+("Ken French 1-mo T-bill returns + FRED 3-mo bill yields · last 62d estimated…")
+was noise on every run.
+- Rule: before building a comparison figure, say in plain words what money it
+  represents ("cash in Treasury bills", "an S&P 500 index fund") and confirm that
+  is the yardstick meant. Jargon like "risk-free" hides the answer.
+- Rule: data sources, estimation notes and method belong in the README and
+  `--help`, not in every run's output. Output is the answer.
