@@ -363,7 +363,7 @@ def execute(action: str, ticker: str, quantity: int, price: Optional[float]) -> 
     console.print(render_positions(state["positions"], "Before"))
     resolved = resolve_price(ticker, price)
     state = apply_transaction(state, action, ticker, quantity, resolved)
-    message = f"portfolio: {action} {ticker} {quantity} @ {resolved:,.2f}"
+    message = f"portfolio: {action} {quantity} {ticker} @ {resolved:,.2f}"
     persist(state, message)
     console.print(render_positions(state["positions"], "After"))
     console.print(f"[green]✓[/green] {message}")
@@ -385,12 +385,12 @@ def cli(ctx: click.Context) -> None:
 
     \b
     Every buy and sell records a price. Give it explicitly with `@`:
-        portfolio buy AAPL 10 @ 401.00
-        portfolio sell AAPL 4 @ 415.50
+        portfolio buy 10 AAPL @ 401.00
+        portfolio sell 4 AAPL @ 415.50
 
     \b
     If price is left empty, enter interactively (current market price or manual):
-        portfolio buy AAPL 10
+        portfolio buy 10 AAPL
         -> No price given. [1] at current price ($401.23)  [2] enter price
 
     \b
@@ -398,7 +398,7 @@ def cli(ctx: click.Context) -> None:
         portfolio value      current holdings, live prices, weights + total value
         portfolio history    full transaction ledger (with recorded prices)
         portfolio sp500      S&P 500 return since any date (vs a ticker or a %)
-        portfolio            interactive prompt (action / ticker / qty / price)
+        portfolio            interactive prompt (action / qty / ticker / price)
     """
     if ctx.invoked_subcommand is None:
         interactive()
@@ -432,28 +432,38 @@ def _parse_price_tokens(tokens: tuple[str, ...]) -> Optional[float]:
     return _validate_price(joined)
 
 
-@cli.command(context_settings={"ignore_unknown_options": True})
-@click.argument("ticker")
-@click.argument("quantity")
-@click.argument("price", nargs=-1)
-def buy(ticker: str, quantity: str, price: tuple[str, ...]) -> None:
-    """Buy QUANTITY shares of TICKER, e.g. `buy AAPL 10 @ 401.00`.
-
-    Omit the price to be asked for the current market price or your own.
-    """
-    execute("BUY", ticker.upper(), _validate_quantity(quantity), _parse_price_tokens(price))
+def _parse_order(action: str, quantity: str, ticker: str, price: tuple[str, ...]) -> tuple[int, str]:
+    """Validate `QUANTITY TICKER`, catching the old `TICKER QUANTITY` order."""
+    if ticker.isdigit() and not quantity.isdigit():
+        retry = " ".join([action, ticker, quantity.upper(), *price])
+        raise click.ClickException(f"quantity comes before the ticker — did you mean `{retry}`?")
+    return _validate_quantity(quantity), ticker.upper()
 
 
 @cli.command(context_settings={"ignore_unknown_options": True})
-@click.argument("ticker")
 @click.argument("quantity")
+@click.argument("ticker")
 @click.argument("price", nargs=-1)
-def sell(ticker: str, quantity: str, price: tuple[str, ...]) -> None:
-    """Sell QUANTITY shares of TICKER, e.g. `sell AAPL 4 @ 415.50`.
+def buy(quantity: str, ticker: str, price: tuple[str, ...]) -> None:
+    """Buy QUANTITY shares of TICKER, e.g. `buy 10 AAPL @ 401.00`.
 
     Omit the price to be asked for the current market price or your own.
     """
-    execute("SELL", ticker.upper(), _validate_quantity(quantity), _parse_price_tokens(price))
+    qty, symbol = _parse_order("buy", quantity, ticker, price)
+    execute("BUY", symbol, qty, _parse_price_tokens(price))
+
+
+@cli.command(context_settings={"ignore_unknown_options": True})
+@click.argument("quantity")
+@click.argument("ticker")
+@click.argument("price", nargs=-1)
+def sell(quantity: str, ticker: str, price: tuple[str, ...]) -> None:
+    """Sell QUANTITY shares of TICKER, e.g. `sell 4 AAPL @ 415.50`.
+
+    Omit the price to be asked for the current market price or your own.
+    """
+    qty, symbol = _parse_order("sell", quantity, ticker, price)
+    execute("SELL", symbol, qty, _parse_price_tokens(price))
 
 
 @cli.command()
@@ -583,12 +593,12 @@ def sp500(start: str, end: Optional[str], amount: Optional[float], vs: Optional[
 
 
 def interactive() -> None:
-    """Prompt for action/ticker/quantity/price."""
+    """Prompt for action/quantity/ticker/price."""
     action = Prompt.ask("Action", choices=["buy", "sell"], default="buy").upper()
+    qty = _validate_quantity(Prompt.ask("Quantity"))
     ticker = Prompt.ask("Ticker").strip().upper()
     if not ticker:
         raise click.ClickException("ticker required")
-    qty = _validate_quantity(Prompt.ask("Quantity"))
     execute(action, ticker, qty, None)
 
 

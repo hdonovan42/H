@@ -11,7 +11,7 @@ so your ledger stays in sync (and backed up) across every machine you use.
 
 ```mermaid
 flowchart LR
-    you(["You<br/>portfolio buy TSLA 5"])
+    you(["You<br/>portfolio buy 5 TSLA"])
     subgraph public["PUBLIC · anyone can read"]
         tool["<b>The tool</b><br/>PORTFOLIO.py<br/>code only, no trades or keys<br/>github.com/hdonovan42/H"]
     end
@@ -85,21 +85,21 @@ The CLI refuses to run until the data vault exists locally. Bootstrapping is two
 ## Usage
 
 ```bash
-portfolio buy AAPL 10 @ 401.00   # buy 10 AAPL at $401.00
-portfolio sell AAPL 4 @ 415.50   # sell 4 (refuses if you hold fewer than 4)
-portfolio buy AAPL 10            # no price → asks: current price or enter your own
+portfolio buy 10 AAPL @ 401.00   # buy 10 AAPL at $401.00
+portfolio sell 4 AAPL @ 415.50   # sell 4 (refuses if you hold fewer than 4)
+portfolio buy 10 AAPL            # no price → asks: current price or enter your own
 portfolio value                  # holdings with live prices, weights + total (heaviest first)
 portfolio history                # full transaction ledger (with recorded prices)
 portfolio sp500 2021-11          # what the S&P 500 returned from a date → today
 portfolio                        # no subcommand → interactive prompt
 ```
 
-Every `buy`/`sell` records a **price**. Supply it with `@` (e.g. `buy AAPL 10 @ 401.00`).
+Every `buy`/`sell` records a **price**. Supply it with `@` (e.g. `buy 10 AAPL @ 401.00`).
 Leave it off and the CLI follows up with a choice — use the current market price
 (shown as a preview) or type your own:
 
 ```
-portfolio buy AAPL 10
+portfolio buy 10 AAPL
 → No price given. [1] at current price ($401.23)  [2] enter price
 ```
 
