@@ -317,12 +317,12 @@ def render_positions(positions: dict[str, int], title: str) -> Table:
 
 def render_value_table(positions: dict[str, int], costs: dict[str, Optional[float]]) -> Table:
     now_local = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
-    table = Table(title=f"Portfolio (live) — {now_local}", header_style="bold cyan", title_style="bold")
+    table = Table(title=f"Portfolio (live, USD) — {now_local}", header_style="bold cyan", title_style="bold")
     table.add_column("Ticker", style="white")
     table.add_column("Quantity", justify="right", style="green")
-    table.add_column("Price (USD)", justify="right")
-    table.add_column("Avg cost (USD)", justify="right")
-    table.add_column("Value (USD)", justify="right", style="bold")
+    table.add_column("Price", justify="right")
+    table.add_column("Avg cost / share", justify="right")
+    table.add_column("Value", justify="right", style="bold")
     table.add_column("Weight", justify="right")
     if not positions:
         table.add_row("—", "—", "—", "—", "—", "—")
