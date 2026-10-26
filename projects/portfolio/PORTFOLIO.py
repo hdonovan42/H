@@ -80,6 +80,34 @@ def recompute_positions(transactions: list[dict]) -> dict[str, int]:
     return {t: q for t, q in positions.items() if q != 0}
 
 
+def average_costs(transactions: list[dict]) -> dict[str, Optional[float]]:
+    """Average cost per share of each holding, replaying the ledger in order.
+
+    Buys add to the ticker's cost pool; a sell removes shares at the current
+    average, leaving it unchanged; selling out resets the pool. A holding
+    with an unpriced buy since it was last empty has no known cost (None).
+    """
+    shares: dict[str, int] = {}
+    cost: dict[str, Optional[float]] = {}
+    for tx in transactions:
+        ticker, qty = tx["ticker"], tx["quantity"]
+        held = shares.get(ticker, 0)
+        if tx["action"] == "BUY":
+            pool = cost.get(ticker) if held else 0.0
+            price = tx.get("price")
+            cost[ticker] = None if pool is None or price is None else pool + qty * price
+            shares[ticker] = held + qty
+        else:
+            if held and cost.get(ticker) is not None:
+                cost[ticker] *= (held - qty) / held
+            shares[ticker] = held - qty
+    return {
+        t: (cost[t] / q if cost.get(t) is not None else None)
+        for t, q in shares.items()
+        if q != 0
+    }
+
+
 def save_state(state: dict) -> None:
     tmp = DATA_FILE.with_suffix(".json.tmp")
     with tmp.open("w") as f:
@@ -287,30 +315,37 @@ def render_positions(positions: dict[str, int], title: str) -> Table:
     return table
 
 
-def render_value_table(positions: dict[str, int]) -> Table:
+def render_value_table(positions: dict[str, int], costs: dict[str, Optional[float]]) -> Table:
     now_local = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
     table = Table(title=f"Portfolio (live) — {now_local}", header_style="bold cyan", title_style="bold")
     table.add_column("Ticker", style="white")
     table.add_column("Quantity", justify="right", style="green")
     table.add_column("Price (USD)", justify="right")
+    table.add_column("Avg cost (USD)", justify="right")
     table.add_column("Value (USD)", justify="right", style="bold")
     table.add_column("Weight", justify="right")
     if not positions:
-        table.add_row("—", "—", "—", "—", "—")
+        table.add_row("—", "—", "—", "—", "—", "—")
         return table
     rows = [(ticker, positions[ticker], fetch_price(ticker)) for ticker in sorted(positions)]
     total = sum(price * qty for _, qty, price in rows if price is not None)
     # heaviest first; unpriced rows sink to the bottom (alphabetical among themselves)
     rows.sort(key=lambda r: -(r[2] * r[1]) if r[2] is not None else float("inf"))
     for ticker, qty, price in rows:
+        avg = costs.get(ticker)
+        avg_cost = f"{avg:,.2f}" if avg is not None else "—"
+        if avg is not None and price is not None:
+            gain = round((price / avg - 1) * 100, 1) or 0.0  # no "-0.0%"
+            colour = "red" if gain < 0 else "bright_blue"
+            avg_cost += f" [{colour}]{f'({gain:+.1f}%)':>8}[/{colour}]"
         if price is None:
-            table.add_row(ticker, str(qty), "—", "—", "—")
+            table.add_row(ticker, str(qty), "—", avg_cost, "—", "—")
         else:
             value = price * qty
             weight = f"{value / total * 100:.1f}%" if total else "—"
-            table.add_row(ticker, str(qty), f"{price:,.2f}", f"{value:,.2f}", weight)
+            table.add_row(ticker, str(qty), f"{price:,.2f}", avg_cost, f"{value:,.2f}", weight)
     table.add_section()
-    table.add_row("TOTAL", "", "", f"{total:,.2f}", "100.0%" if total else "—")
+    table.add_row("TOTAL", "", "", "", f"{total:,.2f}", "100.0%" if total else "—")
     if any(price is None for _, _, price in rows):
         table.caption = "[yellow]some prices unavailable — total & weights exclude them[/yellow]"
     return table
@@ -395,7 +430,7 @@ def cli(ctx: click.Context) -> None:
 
     \b
     Other commands:
-        portfolio value      current holdings, live prices, weights + total value
+        portfolio value      current holdings, live prices, avg cost, weights + total value
         portfolio history    full transaction ledger (with recorded prices)
         portfolio sp500      S&P 500 return since any date (vs a ticker or a %)
         portfolio            interactive prompt (action / qty / ticker / price)
@@ -468,9 +503,9 @@ def sell(quantity: str, ticker: str, price: tuple[str, ...]) -> None:
 
 @cli.command()
 def value() -> None:
-    """Show current portfolio with live prices, weights and total value."""
+    """Show current portfolio with live prices, average cost, weights and total value."""
     state = load_state()
-    console.print(render_value_table(state["positions"]))
+    console.print(render_value_table(state["positions"], average_costs(state["transactions"])))
 
 
 @cli.command()

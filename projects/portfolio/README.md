@@ -88,7 +88,7 @@ The CLI refuses to run until the data vault exists locally. Bootstrapping is two
 portfolio buy 10 AAPL @ 401.00   # buy 10 AAPL at $401.00
 portfolio sell 4 AAPL @ 415.50   # sell 4 (refuses if you hold fewer than 4)
 portfolio buy 10 AAPL            # no price → asks: current price or enter your own
-portfolio value                  # holdings with live prices, weights + total (heaviest first)
+portfolio value                  # holdings with live prices, avg cost, weights + total (heaviest first)
 portfolio history                # full transaction ledger (with recorded prices)
 portfolio sp500 2021-11          # what the S&P 500 returned from a date → today
 portfolio                        # no subcommand → interactive prompt
@@ -106,6 +106,15 @@ portfolio buy 10 AAPL
 Tickers are upper-cased automatically. Quantities must be integers ≥ 1 and prices
 must be > 0. `buy` and `sell` print a before/after positions table and the committed
 message. Run `portfolio --help` for the full command reference.
+
+**Avg cost** in `portfolio value` is what you paid per share, averaged across every
+share you bought. Buys add to the total cost, and the average is total cost ÷ shares
+held. A sell removes shares at the current average, so it doesn't change it. Selling
+out completely starts the ticker afresh. A holding that includes a buy logged
+without a price (one recorded before prices were required) shows `—`.
+
+Beside it, in brackets, is the unrealised gain: today's price against that average,
+e.g. `120.00 (+4.2%)`. Red means down; blue means flat or up.
 
 ## S&P 500 comparison (`sp500`)
 
