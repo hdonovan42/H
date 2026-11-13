@@ -1,5 +1,19 @@
 # Chess Analysis — Changelog
 
+## Lichess extension v1.1.1 — only on a finished game (2026-11-13)
+
+The floating button showed while a game was being played. It now appears only
+on Lichess's replay of a finished game (the page you reach with "Analysis
+board"), which Lichess serves as `<main class="analyse">`; the playing and
+live-watching page is `<main class="round">` and gets no button. A game that
+has just ended still shows the playing page, so the button arrives when you
+go on to analyse it.
+
+Files: `extension/content.js` (`replaying`), `extension/manifest.json`.
+Verified against stand-in pages (the two class names are from Lichess's source,
+`ReplayUi.scala` and `RoundUi.scala`), and confirmed on the real site by the
+owner.
+
 ## Lichess extension v1.1.0 — the button floats (2026-11-13)
 
 User-reported: the "hjd" button had stopped appearing on Lichess. Cause:
@@ -24,7 +38,7 @@ Files: `extension/content.js` (rewritten, 111 → 64 lines), `extension/styles.c
 Verified against stand-in pages served as lichess.org in headless Chrome (the
 real pages sit behind a Cloudflare challenge): game, `/black`, own game as
 either colour and in both address forms, non-game pages, a late flip, page
-swaps. **Not yet seen on the real site.**
+swaps. Confirmed on the real site by the owner.
 
 ## Retired to analysisRetro.html (2026-09-23)
 

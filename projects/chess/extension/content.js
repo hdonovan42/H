@@ -1,6 +1,7 @@
 // HJD Chess Analysis: Lichess content script.
-// Puts an "hjd" button on Lichess game pages that opens the game on the HJD
-// analysis board.
+// Puts an "hjd" button on the page where Lichess replays a finished game (its
+// analysis view), opening that game on the HJD analysis board. A game being
+// played or watched live gets no button.
 //
 // The button floats in the corner of the window, attached to <body>. It used
 // to sit inside Lichess's own control bars; nothing here depends on Lichess's
@@ -24,6 +25,10 @@ function gameId() {
   return name.slice(0, 8);
 }
 
+// Lichess serves a finished game as <main class="analyse">, and a game in
+// progress (or just ended, before you leave it) as <main class="round">
+const replaying = () => !!document.querySelector('main.analyse, .analyse__board');
+
 // The side to view the game from: the address says (/black), else the way up
 // the board is, which on your own games is your side
 function colour() {
@@ -37,7 +42,7 @@ const href = id => `${ANALYSIS_URL}?game=${id}${colour() === 'black' ? '&color=b
 
 // Adds, updates or removes the button to match the page being shown
 function sync() {
-  const id = gameId();
+  const id = replaying() ? gameId() : null;
   let btn = document.querySelector('.hjd-analyse-btn');
   if (!id) return btn?.remove();
   if (!btn) {
