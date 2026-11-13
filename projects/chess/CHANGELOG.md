@@ -1,5 +1,31 @@
 # Chess Analysis — Changelog
 
+## Lichess extension v1.1.0 — the button floats (2026-11-13)
+
+User-reported: the "hjd" button had stopped appearing on Lichess. Cause:
+**Lichess moved its game pages from `lichess.org/<id>` to
+`lichess.org/game/<id>`.** The script looked for the id in the first part of
+the address, found the word "game", and decided the page wasn't a game. (The
+PGN export showed it all along: `[Site "https://lichess.org/game/…"]`.)
+
+- **Both addresses are games:** `/game/<id>` and the older `/<id>`.
+- **The button is always the floating one,** bottom-right, attached to
+  `<body>`. Nothing depends on Lichess's layout any more.
+- **Your own games get it too:** 12-character addresses
+  (`lichess.org/abcdefgh1234`) were skipped; the first 8 characters are the
+  game id.
+- **Colour:** `/black` or `/white` in the address, else the way up the board
+  is, settled as the click begins (so a flip after loading counts).
+- **Page swaps without a reload** add, update or remove the button; never two.
+
+Files: `extension/content.js` (rewritten, 111 → 64 lines), `extension/styles.css`,
+`extension/manifest.json`.
+
+Verified against stand-in pages served as lichess.org in headless Chrome (the
+real pages sit behind a Cloudflare challenge): game, `/black`, own game as
+either colour and in both address forms, non-game pages, a late flip, page
+swaps. **Not yet seen on the real site.**
+
 ## Retired to analysisRetro.html (2026-09-23)
 
 This version now lives at https://hjd.ai/projects/chess/analysisRetro.html,

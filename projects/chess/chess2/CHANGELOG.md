@@ -1,5 +1,14 @@
 # chess2 — Changelog
 
+## v1.2.1 — Lichess's new game links (2026-11-13)
+
+Lichess moved its game pages from `lichess.org/<id>` to `lichess.org/game/<id>`.
+Pasting a new-style link was refused ("That isn't a PGN, a FEN or a Lichess
+game link"). Both forms load now, with or without `/black` and the 12-character
+player suffix. `?game=<id>` was never affected.
+
+Files: `js/main.js` (`load`), `tests/browser.test.js`.
+
 ## v1.2 — Pick the engine (2026-11-13)
 
 Left alone, the board behaves as before: it opens on the lite engine and hands

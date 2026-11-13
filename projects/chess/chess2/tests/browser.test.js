@@ -490,5 +490,12 @@ test('a Lichess link loads the game', { skip: !process.env.NETWORK && 'set NETWO
   const page = await open(undefined, '?game=pb4aOR73&color=black');
   await until(page, () => document.querySelectorAll('.moves .move[data-id]').length === 41, 15000);
   assert.equal(await page.$eval('.player.bottom .name', n => n.textContent), 'kyrgyznur');
+  // pasted, in the address Lichess uses now (/game/<id>) and the one it used before
+  for (const link of ['https://lichess.org/game/q7ZvsdUF', 'lichess.org/q7ZvsdUF/black', 'https://lichess.org/game/pb4aOR73abcd#3']) {
+    await page.keyboard.press('r');
+    await until(page, () => document.querySelectorAll('.moves .move[data-id]').length === 0);
+    await paste(page, link);
+    await until(page, () => document.querySelectorAll('.moves .move[data-id]').length > 20, 15000);
+  }
   await page.close();
 });

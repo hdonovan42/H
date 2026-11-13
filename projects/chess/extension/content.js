@@ -1,111 +1,66 @@
-// HJD Chess Analysis — Lichess content script
-// Adds an "Analyse on HJD" button to Lichess game pages
+// HJD Chess Analysis: Lichess content script.
+// Puts an "hjd" button on Lichess game pages that opens the game on the HJD
+// analysis board.
+//
+// The button floats in the corner of the window, attached to <body>. It used
+// to sit inside Lichess's own control bars; nothing here depends on Lichess's
+// page layout any more.
 
 const ANALYSIS_URL = 'https://hjd.ai/projects/chess/analysis.html';
 
-// Lichess game IDs are 8 alphanumeric characters
-function extractGameId() {
-  const match = window.location.pathname.match(/^\/([a-zA-Z0-9]{8})/);
-  return match ? match[1] : null;
+// Pages whose first path segment is 8 or 12 letters long but isn't a game
+const NOT_GAMES = new Set([
+  'training', 'practice', 'analysis', 'streamer', 'features', 'calendar',
+  'insights', 'timeline', 'notification',
+]);
+
+// A game lives at lichess.org/game/<id> (since 2026; before that, and still in
+// old links, at lichess.org/<id>). The id is 8 characters; your own games carry
+// four more (your seat in the game): lichess.org/game/abcdefgh1234.
+function gameId() {
+  const [, first = '', second = ''] = location.pathname.split('/');
+  const name = first === 'game' ? second : first;
+  if (NOT_GAMES.has(name) || !/^[a-zA-Z0-9]{8}([a-zA-Z0-9]{4})?$/.test(name)) return null;
+  return name.slice(0, 8);
 }
 
-function isGamePage() {
-  // Game pages have an 8-char ID as the first path segment
-  // Exclude known non-game paths
-  const nonGamePaths = [
-    'training', 'learn', 'practice', 'study', 'tournament',
-    'swiss', 'simul', 'team', 'forum', 'blog', 'api', 'editor',
-    'analysis', 'inbox', 'coach', 'broadcast', 'streamer', 'tv',
-    'variant', 'about', 'faq', 'contact', 'tos', 'privacy',
-    'source', 'patron', 'thanks', 'developers', 'mobile'
-  ];
-  const firstSegment = window.location.pathname.split('/')[1];
-  if (!firstSegment || nonGamePaths.includes(firstSegment)) return false;
-  if (firstSegment === '@') return false;
-
-  return /^[a-zA-Z0-9]{8}$/.test(firstSegment);
+// The side to view the game from: the address says (/black), else the way up
+// the board is, which on your own games is your side
+function colour() {
+  if (/\/black\b/.test(location.pathname)) return 'black';
+  if (/\/white\b/.test(location.pathname)) return 'white';
+  if (document.querySelector('.orientation-black')) return 'black';
+  return 'white';
 }
 
-function detectUserColor() {
-  // Check URL suffix: /black means user played black
-  const path = window.location.pathname;
-  if (path.endsWith('/black')) return 'black';
-  if (path.endsWith('/white')) return 'white';
+const href = id => `${ANALYSIS_URL}?game=${id}${colour() === 'black' ? '&color=black' : ''}`;
 
-  // Search for orientation class on ANY element — covers both
-  // <cg-wrap> custom elements and <div class="cg-wrap"> variants
-  const blackOriented = document.querySelector('.orientation-black');
-  if (blackOriented) return 'black';
-  const whiteOriented = document.querySelector('.orientation-white');
-  if (whiteOriented) return 'white';
-
-  // Fallback: check the .ruser-bottom element for colour
-  const bottomUser = document.querySelector('.ruser-bottom');
-  if (bottomUser) {
-    const isBlack = bottomUser.querySelector('.color-icon.black')
-      || bottomUser.classList.contains('black');
-    if (isBlack) return 'black';
+// Adds, updates or removes the button to match the page being shown
+function sync() {
+  const id = gameId();
+  let btn = document.querySelector('.hjd-analyse-btn');
+  if (!id) return btn?.remove();
+  if (!btn) {
+    btn = document.createElement('a');
+    btn.className = 'hjd-analyse-btn';
+    btn.target = '_blank';
+    btn.rel = 'noopener';
+    btn.textContent = 'hjd';
+    btn.title = 'Open in HJD Chess Analysis';
+    // The board may have been flipped since: settle the colour as the click begins
+    for (const type of ['pointerdown', 'keydown', 'focus']) btn.addEventListener(type, () => { btn.href = href(btn.dataset.game); });
   }
-
-  return null;
-}
-
-function createButton(gameId) {
-  const btn = document.createElement('a');
-  btn.className = 'hjd-analyse-btn';
-
-  btn.href = `${ANALYSIS_URL}?game=${gameId}`;
-  btn.target = '_blank';
-  btn.rel = 'noopener';
-  btn.textContent = 'hjd';
-  btn.title = 'Open in HJD Chess Analysis';
-
-  // Update href at click time with colour param
-  btn.addEventListener('mousedown', () => {
-    const color = detectUserColor();
-    let href = `${ANALYSIS_URL}?game=${gameId}`;
-    if (color === 'black') href += '&color=black';
-    btn.href = href;
-  });
-
-  return btn;
-}
-
-function injectButton() {
-  if (!isGamePage()) return;
-
-  const gameId = extractGameId();
-  if (!gameId) return;
-
-  // Don't inject twice
-  if (document.querySelector('.hjd-analyse-btn')) return;
-
-  const btn = createButton(gameId);
-
-  // Try to place near Lichess's own analysis/rematch buttons
-  const controlsBar = document.querySelector('.game__control .rcontrols')
-    || document.querySelector('.game__control')
-    || document.querySelector('.analyse__controls .features')
-    || document.querySelector('.analyse__controls');
-
-  if (controlsBar) {
-    controlsBar.appendChild(btn);
-  } else {
-    // Fallback: float in bottom-right corner
-    btn.classList.add('hjd-analyse-btn--floating');
-    document.body.appendChild(btn);
+  if (btn.dataset.game !== id) {
+    btn.dataset.game = id;
+    btn.href = href(id);
   }
+  if (btn.parentElement !== document.body) document.body.appendChild(btn);
 }
 
-// Inject on load
-injectButton();
+sync();
 
-// Re-inject on Lichess SPA navigation (Lichess uses turbo/barba.js-style page transitions)
-const observer = new MutationObserver(() => {
-  // Debounce: only check when URL has likely changed
-  if (!document.querySelector('.hjd-analyse-btn')) {
-    injectButton();
-  }
-});
-
-observer.observe(document.body, { childList: true, subtree: true });
+// Lichess swaps pages and redraws without reloading: keep the button in step.
+// Only <body>'s own children are watched, plus the address.
+new MutationObserver(sync).observe(document.body, { childList: true });
+let path = location.pathname;
+setInterval(() => { if (path !== location.pathname) { path = location.pathname; sync(); } }, 1000);

@@ -298,13 +298,14 @@ function loadPgn(text, colour) {
   return !!root;
 }
 
-// True if the text was taken: a Lichess game link (8-character id, or 12 with
-// the player's suffix; a bare word like "nonsense" is never sent), FEN or PGN
+// True if the text was taken: a Lichess game link (lichess.org/game/<id>, or the
+// older lichess.org/<id>; the id is 8 characters, or 12 with the player's
+// suffix; a bare word like "nonsense" is never sent), FEN or PGN
 function load(text) {
   text = text.trim();
   const fail = message => (notice(message, true), false);
   if (!text) return false;
-  const lichess = text.match(/^(?:https?:\/\/)?(?:www\.)?lichess\.org\/([a-zA-Z0-9]{8})(?:[a-zA-Z0-9]{4})?(?:[/?#]|$)/);
+  const lichess = text.match(/^(?:https?:\/\/)?(?:www\.)?lichess\.org\/(?:game\/)?([a-zA-Z0-9]{8})(?:[a-zA-Z0-9]{4})?(?:[/?#]|$)/);
   if (lichess) return fetchLichess(lichess[1], /\/black\b/.test(text) ? 'black' : null), true;
   if (validateFen(text).ok) {
     const fen = legal(text);
