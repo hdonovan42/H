@@ -98,7 +98,7 @@ export class Engine {
 }
 
 // "info depth 20 … multipv 1 score cp 21 … nps 2706152 … pv d2d3 f8c5 …"
-// → { depth, multipv, eval, nps, pv }, eval from White's point of view.
+// → { depth, multipv, eval, pv }, eval from White's point of view.
 // Skipped: aspiration-window bounds (guesses, not results) and the empty
 // "pv " Stockfish prints when stopped before finishing depth 1.
 function parseInfo(line, fen) {
@@ -111,7 +111,6 @@ function parseInfo(line, fen) {
     depth: +t[at('depth') + 1],
     multipv: at('multipv') < 0 ? 1 : +t[at('multipv') + 1],
     eval: t[score + 1] === 'mate' ? { mate: n } : { cp: n },
-    nps: at('nps') < 0 ? 0 : +t[at('nps') + 1],
     pv: t.slice(pv + 1),
   };
 }

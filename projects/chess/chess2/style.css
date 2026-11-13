@@ -136,6 +136,55 @@ main {
 .engine .score:empty { display: none; }  /* engine off or loading: the message starts at the edge */
 .engine .info { flex: 1; color: var(--muted); font-size: 12px; line-height: 28px; }  /* the score's height: no jump on toggle */
 
+.engine header { position: relative; }
+.engine .settings {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.engine .settings:hover, .engine .settings[aria-expanded="true"] { background: var(--bg); color: var(--ink); }
+.engine .settings svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.engine .settings[hidden], .engine .menu[hidden] { display: none; }
+
+.engine .menu {
+  position: absolute;
+  top: calc(100% - 4px);
+  right: 10px;
+  z-index: 5;
+  display: grid;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(51, 48, 46, 0.16);
+}
+.engine .menu button {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.engine .menu button:hover, .engine .menu button:focus-visible { background: var(--bg); outline: none; }
+.engine .menu button::before { content: ""; grid-row: span 2; }
+.engine .menu button[aria-checked="true"]::before { content: "✓"; color: #629924; font-weight: 700; }
+.engine .menu b { font-weight: 600; }
+.engine .menu small { grid-column: 2; color: var(--muted); font-size: 12px; }
+
 .toggle {
   position: relative;
   width: 34px;

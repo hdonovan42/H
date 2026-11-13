@@ -130,18 +130,50 @@ function setUp() {
 }
 
 // ---- Board analysis ------------------------------------------------------------
-// Lite first so arrows arrive at once, then the full engine takes over.
-let live = spawn(LITE, 3), liveUrl = LITE;
-const reviewUrl = FULL === LITE ? Promise.resolve(LITE) : (() => {
-  const full = spawn(FULL, 3);
-  return full.ready.then(() => {
-    live.terminate();
-    [live, liveUrl] = [full, FULL];
+// Automatic until told otherwise: lite first so arrows arrive at once, then the
+// full engine takes over. Picking an engine in the settings menu ends that: the
+// board uses the picked one and nothing else, so Lite stays Lite when the full
+// engine arrives, and Full shows nothing until it has loaded. Both engines stay
+// in memory, the one not in use idle (not searching), so switching either way
+// is instant: starting the lite one afresh took three seconds. The game review
+// always uses the full engine.
+let live = spawn(LITE, 3), liveUrl = LITE, picked = false;
+let lite = live, full = FULL === LITE ? null : spawn(FULL, 3);
+const reviewUrl = !full ? Promise.resolve(LITE) : full.ready.then(() => {
+  if (!picked) use(FULL);
+  return FULL;
+}, () => {  // no full engine: the lite one does everything, and there is nothing to pick
+  $('.engine .settings').hidden = true;
+  closeMenu();
+  use(LITE);
+  return LITE;
+});
+
+function use(url) {
+  if (url !== liveUrl) {
+    live.stop();
+    if (liveUrl === LITE) lite = live; else full = live;  // `live` may be a respawn after a crash
+    live = url === LITE ? lite : full;
+    liveUrl = url;
     seen.clear();
-    analyse();
-    return FULL;
-  }, () => LITE);  // no full engine: the lite one reviews too
-})();
+    if (!editor.active) analyse();
+  }
+  for (const item of document.querySelectorAll('.engine .menu button')) item.setAttribute('aria-checked', (item.value === 'lite') === (liveUrl === LITE));
+  requestRender();
+}
+
+function pick(url) {
+  picked = true;
+  use(url);
+}
+
+// The settings menu: which engine the board uses
+function openMenu(open = $('.engine .menu').hidden) {
+  $('.engine .menu').hidden = !open;
+  $('.engine .settings').setAttribute('aria-expanded', open);
+  if (open) $('.engine .menu [aria-checked="true"]').focus();
+}
+const closeMenu = () => openMenu(false);
 
 function analyse() {
   const n = state.node;
@@ -149,6 +181,7 @@ function analyse() {
   if (!state.engineOn || facts(n).over || seen.get(n.fen)?.done) return live.stop();
   const engine = live;
   const keep = r => {
+    if (engine !== live) return;  // the last word of an engine just switched away from
     const old = seen.get(r.fen);
     if (old && old !== r && old.lines[0]?.depth > (r.lines[0]?.depth ?? 0)) return;
     r.engine = engine.name;
@@ -172,7 +205,7 @@ function pathTo(n) {
 // What to show for a position: live lines, or failing that the review's line
 function analysisOf(n) {
   const r = seen.get(n.fen);
-  if (r?.lines[0]) return { engine: r.engine, depth: r.lines[0].depth, nps: r.lines[0].nps, lines: r.lines.filter(Boolean) };
+  if (r?.lines[0]) return { engine: r.engine, depth: r.lines[0].depth, lines: r.lines.filter(Boolean) };
   if (n.pv) return { engine: 'review', lines: [{ eval: n.eval, pv: n.pv }] };
   return null;
 }
@@ -372,8 +405,8 @@ function renderEngine(n, a) {
   $('.engine .score').textContent = over === 'checkmate' ? (whiteMoved(n) ? '1-0' : '0-1') : over ? '½-½' : fmt(e);
   $('.engine .info').textContent = !state.engineOn ? 'Engine off'
     : over ? (over === 'checkmate' ? 'Checkmate' : 'Stalemate')
-    : a?.depth ? `${a.engine} · depth ${a.depth}${a.nps ? ` · ${(a.nps / 1e6).toFixed(1)} M/s` : ''}`
-    : a ? 'From the game review' : 'Loading Stockfish…';
+    : a?.depth ? `${a.engine} · depth ${a.depth}`
+    : a ? 'From the game review' : liveUrl === LITE ? 'Loading Stockfish…' : 'Loading Stockfish 19 (94 MB)…';
   $('.engine .toggle').setAttribute('aria-pressed', state.engineOn);
   html($('.engine .lines'), a ? a.lines.map(l =>
     `<li data-uci="${l.pv[0]}"><b>${fmt(l.eval)}</b>${sanLine(n.fen, l.pv)}</li>`).join('') : '');
@@ -556,6 +589,17 @@ function tap(el, pick, act) {
 tap($('.moves'), e => e.target.closest('.move[data-id]')?.dataset.id, id => go(nodes.get(+id)));
 tap($('.engine .lines'), e => e.target.closest('[data-uci]')?.dataset.uci, play);
 $('.engine .toggle').addEventListener('click', toggleEngine);
+$('.engine .settings').hidden = FULL === LITE;  // no threads: the lite build is all there is
+$('.engine .settings').addEventListener('click', () => openMenu());
+$('.engine .menu').addEventListener('click', e => {
+  const item = e.target.closest('button');
+  if (!item) return;
+  pick(item.value === 'lite' ? LITE : FULL);
+  closeMenu();
+  $('.engine .settings').focus();
+});
+document.addEventListener('pointerdown', e => e.target.closest('.engine .menu, .engine .settings') || closeMenu());
+use(liveUrl);  // ticks the engine in use
 $('.load .setup').addEventListener('click', setUp);
 
 const keys = {
@@ -569,10 +613,17 @@ const keys = {
   ' ': () => { const best = analysisOf(state.node)?.lines[0]?.pv[0]; if (best) play(best); },
   f: flip,
   t: toggleEngine,
+  l: () => $('.engine .settings').hidden || pick(liveUrl === LITE ? FULL : LITE),
   e: setUp,
   r: () => { history.replaceState(null, '', location.pathname); start(START); },
 };
 document.addEventListener('keydown', e => {
+  if (!$('.engine .menu').hidden) {  // the open menu has the keys: Esc closes, arrows move between the two
+    if (e.key === 'Escape') closeMenu(), $('.engine .settings').focus();
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') $('.engine .menu button:not(:focus)').focus();
+    else return;
+    return e.preventDefault();
+  }
   const map = editor.active ? { ...editor.keys, f: flip } : keys;
   if (e.target.closest('textarea, input:not([type=checkbox])') || ([' ', 'Enter'].includes(e.key) && e.target.closest('button')) ||
       e.ctrlKey || e.metaKey || e.altKey || !map[e.key]) return;

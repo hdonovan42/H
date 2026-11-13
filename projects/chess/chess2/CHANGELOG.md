@@ -1,5 +1,37 @@
 # chess2 — Changelog
 
+## v1.2 — Pick the engine (2026-11-13)
+
+Left alone, the board behaves as before: it opens on the lite engine and hands
+over to the full one once that has loaded. New is a **settings cog** in the
+engine header, beside the on/off switch, which opens a menu of the two engines:
+Stockfish 19 (full strength, 94 MB) and Stockfish 19 Lite (fast and light, 1.6 MB).
+- **A pick is final.** It ends the automatic hand-over: the board uses the
+  picked engine and nothing else until you pick again.
+- **Lite** stays Lite when the full engine arrives.
+- **Switching is instant either way.** Both engines stay loaded, the one not
+  in use idle (no searching; its memory stays held). Starting the lite engine
+  afresh on each switch took about three seconds, during which the header
+  went on showing the full engine's last line; that line is now discarded.
+- **Full**, picked while it is still downloading, drops the lite engine's
+  lines and says "Loading Stockfish 19 (94 MB)…" until it is ready.
+- **The menu ticks the engine in use,** automatic or picked. `l` switches to
+  the other one; in the menu, the arrows move, Enter picks, Esc closes.
+- **The game review is unchanged.** It always runs on the full engine, so
+  accuracy, judgements and kept reviews are the same whichever is picked.
+- **The pick lasts for the visit;** every load starts automatic, as before.
+- Without threads (no cross-origin isolation) the lite build is all there is,
+  and the cog isn't shown.
+
+**The engine line** now reads "Stockfish 19 · depth 24": the search speed
+("1.3 M/s") is gone, as it told a player nothing.
+
+Files: `js/main.js` (`use`, `pick`, `openMenu`), `../analysis.html`,
+`style.css`, `tests/browser.test.js` (two new tests), `README.md`.
+
+Verified: `npm test` 3/3; `npm run test:browser` 10 pass, 1 skipped (network).
+
+
 ## v1.1.1 — The promotion picker, on the square (2026-09-25)
 
 The four pieces no longer stack down the board in round buttons. They sit on

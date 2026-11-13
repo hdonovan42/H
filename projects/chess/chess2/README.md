@@ -21,7 +21,7 @@ Paste a PGN, a FEN or a Lichess game link into the box. `?game=<lichess id>`
 `chess/extension/` adds a button that does exactly that.
 
 Drag pieces or click, click; pieces move instantly, with no animation. Keys:
-← → through the moves, ↑ ↓ to the start or end, `f` flip, `t` engine on/off,
+← → through the moves, ↑ ↓ to the start or end, `f` flip, `t` engine on/off, `l` full or lite engine,
 space plays the engine's move, Esc returns to the game from a side line, `e`
 sets up a position, `r` resets. Press or drag on the graph to seek. Flip the
 board to your side once and your games open that way up from then on.
@@ -58,9 +58,12 @@ and leaves the game as it was.
 | `js/graph.js` | The evaluation graph, in winning chances as Lichess draws it |
 
 - **Engines.** A 1.6 MB lite build answers within a second; the full 94 MB
-  build takes over once loaded. Without cross-origin isolation (Firefox private
-  windows have no service workers) the single-threaded lite build does
-  everything. Every search is sent the moves that led to its position, as
+  build takes over once loaded. The cog in the engine header opens a menu of
+  the two; picking one (or `l`, which switches) ends the automatic hand-over
+  and the board uses that engine only. Both stay loaded, the one not in use
+  idle, so switching is instant; the game review always uses the full one. Without
+  cross-origin isolation (Firefox private windows have no service workers) the
+  single-threaded lite build does everything. Every search is sent the moves that led to its position, as
   Lichess does, so repetitions count.
 - **Review.** A second full engine runs a quick pass over the game (the whole
   curve appears in about a second), then a deep pass of 600k nodes per position

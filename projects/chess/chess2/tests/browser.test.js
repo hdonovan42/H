@@ -114,6 +114,77 @@ test('boots cleanly: lite arrows, then full Stockfish 19 takes over', async () =
   await page.close();
 });
 
+// The cog opens a menu of the two engines; picking one ends the automatic lite-then-full
+const pickEngine = async (page, value) => {
+  await page.click('.engine .settings');
+  await page.click(`.engine .menu button[value=${value}]`);
+};
+const ticked = page => page.$eval('.engine .menu [aria-checked="true"]', el => el.value);
+
+test('the settings menu picks the engine: Lite, back to Full, and by key', async () => {
+  const page = await open();
+  const shows = re => until(page, s => new RegExp(s).test(document.querySelector('.engine .info').textContent), 60000, re.source);
+  await shows(/^Stockfish 19 · depth/);
+  assert.equal(await page.$eval('.engine .menu', el => el.hidden), true);
+  await page.click('.engine .settings');
+  assert.equal(await ticked(page), 'full');
+  // the menu sits inside the window, and Esc closes it without leaving the position
+  const box = await page.$eval('.engine .menu', el => { const r = el.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.height > 40; });
+  assert.equal(box, true);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.$eval('.engine .menu', el => el.hidden), true);
+  const began = Date.now();
+  await pickEngine(page, 'lite');
+  assert.equal(await page.$eval('.engine .menu', el => el.hidden), true);
+  await shows(/^Stockfish 19 Lite · depth/);
+  assert.ok(Date.now() - began < 1500, `Lite answers at once, not after a restart (${Date.now() - began} ms)`);
+  assert.equal(await ticked(page), 'lite');
+  await pickEngine(page, 'full');
+  await shows(/^Stockfish 19 · depth/);
+  await page.click('.board');  // focus off the cog
+  await page.keyboard.press('l');
+  await shows(/^Stockfish 19 Lite · depth/);
+  // by keyboard: open, arrow to the other engine, Enter
+  await page.focus('.engine .settings');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await shows(/^Stockfish 19 · depth/);
+  assert.equal(await ticked(page), 'full');
+  assert.deepEqual(page.errors, []);
+  await page.close();
+});
+
+// A pick is final. The full engine's arrival is held back here so both picks
+// are made while it is still loading.
+test('an engine picked while the full one is loading is the only one used', async () => {
+  for (const [value, during, after] of [['lite', /^Stockfish 19 Lite · depth/, /^Stockfish 19 Lite/], ['full', /^Loading Stockfish 19 \(94 MB\)/, /^Stockfish 19 · depth/]]) {
+    const page = await open();
+    await page.close();  // the service worker is in place; now a page whose full engine is slow
+    const slow = await browser.newPage();
+    slow.errors = [];
+    slow.on('pageerror', e => slow.errors.push(e.message));
+    let release;
+    const held = new Promise(r => { release = r; });
+    await slow.setRequestInterception(true);
+    slow.on('request', async r => { if (/stockfish-19\.js/.test(r.url())) await held; r.continue().catch(() => {}); });
+    await slow.goto(url);
+    await until(slow, () => /^Stockfish 19 Lite · depth/.test(document.querySelector('.engine .info').textContent), 60000);
+    await pickEngine(slow, value);
+    await until(slow, s => new RegExp(s).test(document.querySelector('.engine .info').textContent), 20000, during.source);
+    if (value === 'full') assert.equal(await slow.$$eval('.arrows path', a => a.length), 0, 'no lite arrows once Full is picked');
+    release();
+    await until(slow, s => new RegExp(s).test(document.querySelector('.engine .info').textContent), 60000, after.source);
+    if (value === 'lite') {
+      await new Promise(r => setTimeout(r, 6000));  // the full engine has arrived by now, and must not take over
+      await click(slow, 'e2'); await click(slow, 'e4');
+      await until(slow, () => /^Stockfish 19 Lite · depth/.test(document.querySelector('.engine .info').textContent), 20000);
+    }
+    assert.deepEqual(slow.errors, []);
+    await slow.close();
+  }
+});
+
 test('a drop lands on the square under the pointer: any size, zoom, transform or touch', async () => {
   const setups = [
     { name: 'desktop', viewport: { width: 1440, height: 900 } },
